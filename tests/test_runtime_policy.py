@@ -16,7 +16,7 @@ from story_automator.core.runtime_policy import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class RuntimePolicyTests(unittest.TestCase):
@@ -264,8 +264,8 @@ class RuntimePolicyTests(unittest.TestCase):
             load_runtime_policy(str(self.project_root), state_file=str(self.project_root))
 
     def _install_bundle(self) -> None:
-        source_skill = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator"
-        source_review = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator-review"
+        source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
+        source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"
         target_root = self.project_root / ".claude" / "skills"
         target_root.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_skill, target_root / "bmad-story-automator")

@@ -213,9 +213,13 @@ def bundled_skill_root(project_root: str | Path | None = None) -> Path:
     if (installed / "data" / "orchestration-policy.json").is_file():
         return installed
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "payload" / ".claude" / "skills" / "bmad-story-automator"
-        if (candidate / "data" / "orchestration-policy.json").is_file():
-            return candidate
+        candidates = (
+            parent / "skills" / "bmad-story-automator",
+            parent / "payload" / ".claude" / "skills" / "bmad-story-automator",
+        )
+        for candidate in candidates:
+            if (candidate / "data" / "orchestration-policy.json").is_file():
+                return candidate
     raise PolicyError("bundled policy not found")
 
 

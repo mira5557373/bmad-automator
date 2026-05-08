@@ -17,13 +17,13 @@ Only the snapshot is allowed to drive an in-flight run.
 ### Bundled default policy
 
 ```text
-payload/.claude/skills/bmad-story-automator/data/orchestration-policy.json
+skills/bmad-story-automator/data/orchestration-policy.json
 ```
 
 ### Bundled prompt templates
 
 ```text
-payload/.claude/skills/bmad-story-automator/data/prompts/
+skills/bmad-story-automator/data/prompts/
   create.md
   dev.md
   auto.md
@@ -34,7 +34,7 @@ payload/.claude/skills/bmad-story-automator/data/prompts/
 ### Bundled parse contracts
 
 ```text
-payload/.claude/skills/bmad-story-automator/data/parse/
+skills/bmad-story-automator/data/parse/
   create.json
   dev.json
   auto.json
@@ -57,7 +57,7 @@ _bmad-output/story-automator/policy-snapshots/<stamp>-<hash>.json
 ### Review machine contract
 
 ```text
-payload/.claude/skills/bmad-story-automator-review/contract.json
+skills/bmad-story-automator-review/contract.json
 ```
 
 ## Data Flow
@@ -250,7 +250,7 @@ The state file should not store the full merged policy blob.
 
 Without a pinned snapshot, these changes become unsafe:
 
-- payload update
+- skill update
 - project override edit
 - prompt tweak during an in-flight run
 - verifier threshold change after preflight

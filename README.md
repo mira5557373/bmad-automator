@@ -2,13 +2,15 @@
 
 ![Story Automator](./ref.png)
 
-Portable npm bundle for the BMAD `bmad-story-automator` pure skill. This repo packages:
+Portable BMAD `bmad-story-automator` skill/plugin bundle. This repo packages:
 
-- the main orchestration skill
-- the bundled review skill
-- the Python helper runtime that parses stories, builds state docs, spawns tmux sessions, monitors child agents, and verifies review completion
+- `skills/bmad-story-automator`
+- `skills/bmad-story-automator-review`
+- the Python helper runtime inside `skills/bmad-story-automator`
 
 This is the Python port of [`bma-d/bmad-story-automator-go`](https://github.com/bma-d/bmad-story-automator-go). The Go README is the stylistic and operator-facing reference; this repo now documents the Python implementation in the same spirit, but with Python-specific behavior and Codex child-session support.
+
+The root `skills/` folder follows the Claude skill convention: each skill is a directory with its own `SKILL.md`. You can copy either skill folder directly into `.claude/skills/`. The repo also includes `.claude-plugin/plugin.json`, so the same root layout can be loaded as a Claude Code plugin with `claude --plugin-dir .`.
 
 ## Quickstart
 
@@ -29,6 +31,13 @@ Then run the installed skill from Claude:
 
 ```text
 Use the bmad-story-automator skill.
+```
+
+Manual skill copy:
+
+```bash
+cp -a skills/bmad-story-automator /absolute/path/to/project/.claude/skills/
+cp -a skills/bmad-story-automator-review /absolute/path/to/project/.claude/skills/
 ```
 
 ## Expectations
@@ -154,7 +163,7 @@ Expected:
 
 ```bash
 npm run verify
-PYTHONPATH=source/src python3 -m story_automator --help
+PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator --help
 ```
 
 More: [Development](./docs/development.md)

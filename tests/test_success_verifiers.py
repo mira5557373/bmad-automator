@@ -18,7 +18,7 @@ from story_automator.core.runtime_policy import PolicyError
 from story_automator.core.success_verifiers import create_story_artifact, epic_complete, review_completion
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class SuccessVerifierTests(unittest.TestCase):
@@ -652,8 +652,8 @@ class SuccessVerifierTests(unittest.TestCase):
         return Path(json.loads(stdout.getvalue())["path"])
 
     def _install_bundle(self) -> None:
-        source_skill = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator"
-        source_review = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator-review"
+        source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
+        source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"
         target_root = self.project_root / ".claude" / "skills"
         target_root.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_skill, target_root / "bmad-story-automator")

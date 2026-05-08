@@ -8,7 +8,7 @@ Primary checks:
 
 ```bash
 npm run verify
-PYTHONPATH=source/src python3 -m story_automator --help
+PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator --help
 ```
 
 `npm run verify` expands to:
@@ -33,7 +33,7 @@ The smoke suite validates:
 
 ```mermaid
 flowchart TD
-    A["Edit installer, payload, or runtime"] --> B["Run npm run test:python"]
+    A["Edit installer, skills, or runtime"] --> B["Run npm run test:python"]
     B --> C["Run npm run pack:dry-run"]
     C --> D["Run npm run test:smoke"]
     D --> E["Run npm run verify"]
@@ -45,19 +45,19 @@ Important package parts:
 
 - `bin/bmad-story-automator`
 - `install.sh`
-- `payload/`
-- `source/`
+- `skills/`
+- `skills/bmad-story-automator/`
 - `README.md`
 - `ref.png`
 
-The published package bundles both the install payload and the Python runtime source.
+The published package bundles the root `skills/` tree. The main skill contains the Python runtime source, so copied skills and npm installs use the same files.
 
 ## Runtime Entry During Development
 
 The shell wrapper used in installed projects is mirrored in this repo:
 
 ```text
-source/scripts/story-automator
+skills/bmad-story-automator/scripts/story-automator
 ```
 
 It runs:
@@ -66,7 +66,7 @@ It runs:
 python3 -m story_automator
 ```
 
-with `PYTHONPATH` pointed at `source/src`.
+with `PYTHONPATH` pointed at `skills/bmad-story-automator/src`.
 
 ## Legacy Env Compatibility
 
@@ -84,7 +84,7 @@ If you change:
 - `commands/tmux.py`: re-check spawn, command building, monitor behavior, Codex vs Claude handling
 - `commands/orchestrator.py`: re-check state summary, marker behavior, sprint-status verification
 - `install.sh`: re-check dependency validation, copy layout, backups, shim cleanup
-- payload step files: re-check docs, prompts, and smoke expectations
+- skill step files: re-check docs, prompts, and smoke expectations
 
 ## Release
 

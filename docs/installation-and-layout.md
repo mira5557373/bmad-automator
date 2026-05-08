@@ -7,14 +7,13 @@ This doc explains what `npx bmad-story-automator` installs, what it requires, an
 ```mermaid
 flowchart TD
     A["Run install.sh <project>"] --> B["Verify target is a BMAD project"]
-    B --> C["Verify payload and Python runtime exist in this repo"]
+    B --> C["Verify root skills exist in this repo"]
     C --> D["Verify required sibling skills exist in target project"]
     D --> E["Resolve optional QA skill if present"]
     E --> F["Backup current installs and legacy story-automator paths"]
-    F --> G["Copy payload into .claude/skills"]
-    G --> H["Copy Python runtime into installed skill"]
-    H --> I["Remove obsolete legacy command shims"]
-    I --> J["Print installed paths and verified sibling entrypoints"]
+    F --> G["Copy skills into .claude/skills"]
+    G --> H["Remove obsolete legacy command shims"]
+    H --> I["Print installed paths and verified sibling entrypoints"]
 ```
 
 ## Target Paths
@@ -96,15 +95,19 @@ That wrapper:
 - sets `PYTHONPATH` to the bundled `src`
 - runs `python3 -m story_automator`
 
-## Package Layout In This Repo
+## Repo Layout
 
 Repo layout:
 
-- `payload/` for installed skill content
-- `source/` for bundled Python runtime
+- `skills/` for directly copyable skill folders
+- `skills/bmad-story-automator/` for the main skill and bundled Python runtime
+- `skills/bmad-story-automator-review/` for the bundled review skill
+- `.claude-plugin/plugin.json` for Claude Code plugin loading
 - `install.sh` for installation logic
 - `bin/bmad-story-automator` for npm entrypoint
 - `scripts/` for repo-level smoke verification
+
+No installer-only payload tree exists. The installer copies the same skill folders that can be manually copied into `.claude/skills/`.
 
 ## Operator Notes
 

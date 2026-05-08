@@ -1,7 +1,7 @@
 {
   "name": "bmad-story-automator",
   "version": "1.14.1",
-  "description": "Install the BMAD story-automator pure skill bundle into a BMAD project.",
+  "description": "Install the BMAD story-automator self-contained skills into a BMAD project.",
   "license": "MIT",
   "bin": {
     "bmad-story-automator": "bin/bmad-story-automator"
@@ -10,14 +10,17 @@
     "bin/",
     "docs/",
     "install.sh",
-    "payload/",
+    "skills/",
+    "!skills/**/__pycache__/",
+    "!skills/**/*.pyc",
+    "!skills/**/*.pyo",
     "README.md",
     "ref.png",
-    "source/"
+    ".claude-plugin/"
   ],
   "scripts": {
     "pack:dry-run": "npm pack --dry-run",
-    "test:python": "PYTHONPATH=source/src python3 -m unittest discover -s source/tests",
+    "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",
     "verify": "npm run test:python && npm run pack:dry-run && npm run test:smoke"
   },

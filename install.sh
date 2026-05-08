@@ -8,11 +8,11 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh <bmad-project-root>
 
-Installs the portable payload bundle into:
+Installs the portable skill bundle into:
   .claude/skills/bmad-story-automator
   .claude/skills/bmad-story-automator-review
 
-The Python helper runtime is installed inside:
+The Python helper runtime is already self-contained inside:
   .claude/skills/bmad-story-automator/scripts/story-automator
 EOF
 }
@@ -156,24 +156,19 @@ CREATE_STORY_SKILL="$(skill_file "bmad-create-story")"
 DEV_STORY_SKILL="$(skill_file "bmad-dev-story")"
 RETROSPECTIVE_SKILL="$(skill_file "bmad-retrospective")"
 OPTIONAL_AUTOMATE_SKILL="$(skill_file "bmad-qa-generate-e2e-tests")"
-PAYLOAD_ROOT="$SCRIPT_DIR/payload"
-STORY_PAYLOAD="$PAYLOAD_ROOT/.claude/skills/bmad-story-automator"
-STORY_REVIEW_PAYLOAD="$PAYLOAD_ROOT/.claude/skills/bmad-story-automator-review"
-SOURCE_ROOT="$SCRIPT_DIR/source"
-SOURCE_WRAPPER="$SOURCE_ROOT/scripts/story-automator"
-SOURCE_PACKAGE_DIR="$SOURCE_ROOT/src/story_automator"
-SOURCE_PYPROJECT="$SOURCE_ROOT/pyproject.toml"
-SOURCE_README="$SOURCE_ROOT/README.md"
-SOURCE_LICENSE="$SOURCE_ROOT/LICENSE"
+SKILL_SOURCE_ROOT="$SCRIPT_DIR/skills"
+STORY_SOURCE="$SKILL_SOURCE_ROOT/bmad-story-automator"
+STORY_REVIEW_SOURCE="$SKILL_SOURCE_ROOT/bmad-story-automator-review"
 
 [ -d "$TARGET_BMAD" ] || err "Target is not a BMAD project: missing $TARGET_BMAD"
-[ -d "$STORY_PAYLOAD" ] || err "Missing story-automator payload: $STORY_PAYLOAD"
-[ -d "$STORY_REVIEW_PAYLOAD" ] || err "Missing story-automator-review payload: $STORY_REVIEW_PAYLOAD"
-[ -f "$SOURCE_WRAPPER" ] || err "Missing runtime wrapper: $SOURCE_WRAPPER"
-[ -d "$SOURCE_PACKAGE_DIR" ] || err "Missing runtime package dir: $SOURCE_PACKAGE_DIR"
-[ -f "$SOURCE_PYPROJECT" ] || err "Missing runtime pyproject: $SOURCE_PYPROJECT"
-[ -f "$SOURCE_README" ] || err "Missing runtime README: $SOURCE_README"
-[ -f "$SOURCE_LICENSE" ] || err "Missing runtime license: $SOURCE_LICENSE"
+[ -d "$SKILL_SOURCE_ROOT" ] || err "Missing skills root: $SKILL_SOURCE_ROOT"
+[ -d "$STORY_SOURCE" ] || err "Missing story-automator skill: $STORY_SOURCE"
+[ -d "$STORY_REVIEW_SOURCE" ] || err "Missing story-automator-review skill: $STORY_REVIEW_SOURCE"
+[ -f "$STORY_SOURCE/SKILL.md" ] || err "Missing story-automator SKILL.md: $STORY_SOURCE/SKILL.md"
+[ -f "$STORY_SOURCE/scripts/story-automator" ] || err "Missing runtime helper: $STORY_SOURCE/scripts/story-automator"
+[ -d "$STORY_SOURCE/src/story_automator" ] || err "Missing runtime package dir: $STORY_SOURCE/src/story_automator"
+[ -f "$STORY_SOURCE/pyproject.toml" ] || err "Missing runtime pyproject: $STORY_SOURCE/pyproject.toml"
+[ -f "$STORY_REVIEW_SOURCE/SKILL.md" ] || err "Missing review SKILL.md: $STORY_REVIEW_SOURCE/SKILL.md"
 
 CREATE_STORY_PATH="$(resolve_required_skill "bmad-create-story")"
 DEV_STORY_PATH="$(resolve_required_skill "bmad-dev-story")"
@@ -191,15 +186,8 @@ backup_if_exists "$TARGET_STORY_REVIEW"
 backup_legacy_story_automator_installs
 
 mkdir -p "$TARGET_STORY" "$TARGET_STORY_REVIEW"
-cp -a "$STORY_PAYLOAD"/. "$TARGET_STORY"/
-cp -a "$STORY_REVIEW_PAYLOAD"/. "$TARGET_STORY_REVIEW"/
-
-cp -a "$SOURCE_PYPROJECT" "$TARGET_STORY/pyproject.toml"
-cp -a "$SOURCE_README" "$TARGET_STORY/README.md"
-cp -a "$SOURCE_LICENSE" "$TARGET_STORY/LICENSE"
-mkdir -p "$TARGET_STORY/scripts" "$TARGET_STORY/src"
-cp -a "$SOURCE_ROOT/scripts"/. "$TARGET_STORY/scripts"/
-cp -a "$SOURCE_ROOT/src"/. "$TARGET_STORY/src"/
+cp -a "$STORY_SOURCE"/. "$TARGET_STORY"/
+cp -a "$STORY_REVIEW_SOURCE"/. "$TARGET_STORY_REVIEW"/
 chmod +x "$TARGET_STORY/scripts/story-automator"
 
 cleanup_obsolete_command_shims

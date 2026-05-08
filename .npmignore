@@ -1,4 +1,9 @@
-source/build/
-source/dist/
-source/*.egg-info/
-source/src/**/__pycache__/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+dist/
+*.egg-info/
+skills/bmad-story-automator/build/
+skills/bmad-story-automator/dist/
+skills/bmad-story-automator/*.egg-info/

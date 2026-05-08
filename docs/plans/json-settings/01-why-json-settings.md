@@ -6,12 +6,12 @@ The current system already behaves like it has a policy layer, but that policy i
 
 Examples:
 
-- step prompts are assembled inline in `source/src/story_automator/commands/tmux.py`
-- parse contracts are hard-coded in `source/src/story_automator/commands/orchestrator_parse.py`
-- retry limits and escalation budgets are hard-coded in `source/src/story_automator/commands/orchestrator.py`
-- review completion logic is fixed in `source/src/story_automator/core/review_verify.py`
-- step asset discovery is encoded in `source/src/story_automator/core/workflow_paths.py`
-- human-facing loop rules live in payload docs under `payload/.claude/skills/bmad-story-automator/`
+- step prompts are assembled inline in `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
+- parse contracts are hard-coded in `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
+- retry limits and escalation budgets are hard-coded in `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
+- review completion logic is fixed in `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
+- step asset discovery is encoded in `skills/bmad-story-automator/src/story_automator/core/workflow_paths.py`
+- human-facing loop rules live in skill docs under `skills/bmad-story-automator/`
 
 That creates four problems:
 
@@ -81,7 +81,7 @@ If operator ergonomics later require comments, the safer follow-up is JSONC or a
 
 The repo already has a natural home for settings files:
 
-- `payload/.claude/skills/bmad-story-automator/data/`
+- `skills/bmad-story-automator/data/`
 
 That directory already holds:
 
@@ -125,7 +125,7 @@ This refactor is worth doing only if it makes behavior easier to change without 
 
 Practical success means:
 
-- changing prompt text means editing a payload file or override, not Python
+- changing prompt text means editing a skill file or override, not Python
 - changing review completion thresholds means editing JSON settings, not Python
 - changing retry budgets means editing JSON settings, not env-only knobs
 - resume always uses the same effective contract as the run start

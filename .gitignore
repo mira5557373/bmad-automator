@@ -5,6 +5,6 @@ __pycache__/
 .DS_Store
 dist/
 *.tgz
-source/build/
-source/dist/
-source/*.egg-info/
+skills/bmad-story-automator/build/
+skills/bmad-story-automator/dist/
+skills/bmad-story-automator/*.egg-info/

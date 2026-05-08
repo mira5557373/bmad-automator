@@ -18,14 +18,14 @@ That gives most of the configurability value with moderate risk.
 
 Today the behavior is split across:
 
-- `source/src/story_automator/commands/tmux.py`
-- `source/src/story_automator/commands/orchestrator_parse.py`
-- `source/src/story_automator/commands/orchestrator.py`
-- `source/src/story_automator/core/review_verify.py`
-- `source/src/story_automator/core/workflow_paths.py`
-- `payload/.claude/skills/bmad-story-automator/workflow.md`
-- `payload/.claude/skills/bmad-story-automator-review/workflow.yaml`
-- `payload/.claude/skills/bmad-story-automator-review/instructions.xml`
+- `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
+- `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
+- `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
+- `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
+- `skills/bmad-story-automator/src/story_automator/core/workflow_paths.py`
+- `skills/bmad-story-automator/workflow.md`
+- `skills/bmad-story-automator-review/workflow.yaml`
+- `skills/bmad-story-automator-review/instructions.xml`
 
 That split is the main source of drift risk. This packet defines one implementation path to pull the machine contract into JSON settings while keeping the current engine intact.
 
@@ -36,7 +36,7 @@ That split is the main source of drift risk. This packet defines one implementat
 - [02-policy-model.md](./02-policy-model.md)  
   Target architecture, file locations, merge rules, schema shape, and data/runtime boundaries.
 - [03-code-and-payload-changes.md](./03-code-and-payload-changes.md)  
-  Exact source and payload touchpoints, including new modules and file-by-file changes.
+  Exact source and skill touchpoints, including new modules and file-by-file changes.
 - [04-migration-testing-and-risks.md](./04-migration-testing-and-risks.md)  
   Compatibility plan, resume semantics, test strategy, and risk controls.
 - [TODO.md](./TODO.md)  
@@ -75,7 +75,7 @@ This plan is complete when the implementation can:
 - customize parse schemas without editing Python
 - customize verifier thresholds and retry budgets without editing Python
 - keep zero-config behavior identical to today
-- resume from a pinned snapshot even if payload or override files later change
+- resume from a pinned snapshot even if skill or override files later change
 - reject invalid settings safely
 
 ## Out Of Scope

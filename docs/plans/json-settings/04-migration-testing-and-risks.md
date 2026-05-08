@@ -126,7 +126,7 @@ Extend `scripts/smoke-test.sh` to verify:
 Recommended future command shape:
 
 ```bash
-python3 -m unittest discover -s source/tests
+python3 -m unittest discover -s tests
 npm run test:smoke
 npm run pack:dry-run
 ```
@@ -138,8 +138,8 @@ Then fold that into `npm run verify`.
 | Risk | Why it matters | Mitigation |
 |------|----------------|------------|
 | Prompt drift changes agent behavior | Equivalent wording is not actually equivalent for model behavior | Golden prompt tests against current defaults |
-| Snapshot ignored on resume | Live payload changes mutate in-flight run behavior | Resume path must require snapshot for new-format states |
-| Review still asks the user in autonomous mode | Current review workflow prose still has a menu branch | Add explicit interaction-mode contract and payload alignment |
+| Snapshot ignored on resume | Live skill changes mutate in-flight run behavior | Resume path must require snapshot for new-format states |
+| Review still asks the user in autonomous mode | Current review workflow prose still has a menu branch | Add explicit interaction-mode contract and skill alignment |
 | Required asset silent fallback | Missing workflow may look valid until runtime | Resolver must fail closed for required assets |
 | Custom statuses cause false positives | Review completion may pass with wrong values | Contract validation + verifier tests |
 | Optional auto skill incomplete | Step contract may claim assets that do not exist | Required/optional separation in resolver |
@@ -171,7 +171,7 @@ Land:
 - verifier registry
 - policy-backed `monitor-session` verifier dispatch
 - `contract.json` for review
-- review payload alignment for autonomous mode
+- review skill alignment for autonomous mode
 
 ### Phase 3
 

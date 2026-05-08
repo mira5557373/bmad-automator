@@ -1,4 +1,4 @@
-# Code And Payload Changes
+# Code And Skill Changes
 
 ## Implementation Principle
 
@@ -6,14 +6,14 @@ Keep files under control. Avoid one giant refactor file.
 
 Recommended new source modules:
 
-- `source/src/story_automator/core/runtime_policy.py`
-- `source/src/story_automator/core/success_verifiers.py`
+- `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
+- `skills/bmad-story-automator/src/story_automator/core/success_verifiers.py`
 
 Keep prompt rendering small enough to live in existing command modules unless it grows past a reasonable size.
 
 ## Source Changes
 
-### New: `source/src/story_automator/core/runtime_policy.py`
+### New: `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
 
 Responsibilities:
 
@@ -32,7 +32,7 @@ Notes:
 - it should normalize relative paths against project root or installed skill root
 - it should reject unknown verifier names and invalid step references early
 
-### New: `source/src/story_automator/core/success_verifiers.py`
+### New: `skills/bmad-story-automator/src/story_automator/core/success_verifiers.py`
 
 Responsibilities:
 
@@ -47,7 +47,7 @@ Notes:
 - keep `verify_code_review_completion()` as a backward-compatible wrapper
 - verifier config comes from policy, verifier execution stays in Python
 
-### `source/src/story_automator/commands/tmux.py`
+### `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
 
 Replace hard-coded prompt assembly with policy-driven prompt rendering.
 
@@ -67,7 +67,7 @@ Keep in Python:
 - `tmux` session lifecycle
 - heartbeat/status logic
 
-### `source/src/story_automator/commands/orchestrator_parse.py`
+### `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
 
 Replace the `if step == ...` schema tree.
 
@@ -78,7 +78,7 @@ Changes:
 - validate returned JSON against required keys from schema
 - preserve current command output shape
 
-### `source/src/story_automator/core/review_verify.py`
+### `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
 
 Reduce it to a compatibility wrapper.
 
@@ -88,7 +88,7 @@ Changes:
 - delegate to `success_verifiers.review_completion`
 - allow contract-driven status values and source order
 
-### `source/src/story_automator/commands/orchestrator.py`
+### `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
 
 Move hard-coded budgets into policy.
 
@@ -99,7 +99,7 @@ Changes:
 - story creation validation becomes part of `create_story_artifact`
 - escalation actions stay in Python
 
-### `source/src/story_automator/commands/state.py`
+### `skills/bmad-story-automator/src/story_automator/commands/state.py`
 
 Add policy metadata at state document creation.
 
@@ -115,7 +115,7 @@ Do not:
 
 - embed full policy JSON in frontmatter
 
-### `source/src/story_automator/core/frontmatter.py`
+### `skills/bmad-story-automator/src/story_automator/core/frontmatter.py`
 
 Keep changes minimal.
 
@@ -124,7 +124,7 @@ Possible work:
 - teach state readers to return new scalar metadata
 - no nested policy parser
 
-### `source/src/story_automator/core/workflow_paths.py`
+### `skills/bmad-story-automator/src/story_automator/core/workflow_paths.py`
 
 Refactor into policy-backed asset resolution.
 
@@ -139,13 +139,13 @@ Important fix:
 
 - required assets must no longer silently return the first candidate string when nothing exists
 
-## Payload Changes
+## Skill Changes
 
-### New: `payload/.claude/skills/bmad-story-automator/data/orchestration-policy.json`
+### New: `skills/bmad-story-automator/data/orchestration-policy.json`
 
 This is the default machine contract for the installed skill.
 
-### New: `payload/.claude/skills/bmad-story-automator/data/prompts/*.md`
+### New: `skills/bmad-story-automator/data/prompts/*.md`
 
 Add prompt templates for:
 
@@ -155,7 +155,7 @@ Add prompt templates for:
 - review
 - retro
 
-### New: `payload/.claude/skills/bmad-story-automator/data/parse/*.json`
+### New: `skills/bmad-story-automator/data/parse/*.json`
 
 Add step parse contracts for:
 
@@ -165,7 +165,7 @@ Add step parse contracts for:
 - review
 - retro
 
-### `payload/.claude/skills/bmad-story-automator/workflow.md`
+### `skills/bmad-story-automator/workflow.md`
 
 Keep this human-facing and orchestration-facing.
 
@@ -175,7 +175,7 @@ Changes:
 - describe the current sequence as the default policy, not the only possible future shape
 - align wording with policy terms: prompt contract, parse contract, success verifier, snapshot
 
-### `payload/.claude/skills/bmad-story-automator-review/workflow.yaml`
+### `skills/bmad-story-automator-review/workflow.yaml`
 
 Keep this file human-facing only.
 
@@ -183,7 +183,7 @@ The machine contract should stay in step policy:
 
 - `steps.review.success.contractFile = ".claude/skills/bmad-story-automator-review/contract.json"`
 
-### New: `payload/.claude/skills/bmad-story-automator-review/contract.json`
+### New: `skills/bmad-story-automator-review/contract.json`
 
 Store structured review completion semantics:
 
@@ -193,7 +193,7 @@ Store structured review completion semantics:
 - source order
 - sprint sync expectations
 
-### `payload/.claude/skills/bmad-story-automator-review/instructions.xml`
+### `skills/bmad-story-automator-review/instructions.xml`
 
 Keep the adversarial review behavior, but align it with autonomous mode.
 
@@ -207,16 +207,16 @@ Changes:
 
 ### `install.sh`
 
-Likely no logic change needed because the installer already copies the whole payload tree.
+Likely no logic change needed because the installer already copies the whole skill tree.
 
 Needed checks:
 
-- verify new payload files exist after install
+- verify new skill files exist after install
 - update smoke tests to assert new data files are present
 
 ### `package.json`
 
-Likely no change needed because `payload/` and `source/` are already in `files`.
+Likely no change needed because `skills/` and `skills/bmad-story-automator/` are already in `files`.
 
 ## Verification Surface Changes
 
@@ -230,7 +230,7 @@ Must update smoke coverage for:
 - prompt-building behavior still matching default policy
 - policy-backed build-cmd output for create/auto/review/retro
 
-### Suggested new tests under `source/tests/`
+### Suggested new tests under `tests/`
 
 - `test_runtime_policy.py`
 - `test_success_verifiers.py`

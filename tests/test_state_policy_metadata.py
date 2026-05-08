@@ -13,7 +13,7 @@ from story_automator.commands.state import cmd_build_state_doc, cmd_validate_sta
 from story_automator.commands.tmux import _build_cmd, cmd_tmux_wrapper
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StatePolicyMetadataTests(unittest.TestCase):
@@ -369,8 +369,8 @@ class StatePolicyMetadataTests(unittest.TestCase):
         }
 
     def _install_bundle(self) -> None:
-        source_skill = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator"
-        source_review = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator-review"
+        source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
+        source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"
         target_root = self.project_root / ".claude" / "skills"
         target_root.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_skill, target_root / "bmad-story-automator")

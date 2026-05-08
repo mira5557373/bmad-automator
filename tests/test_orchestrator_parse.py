@@ -14,7 +14,7 @@ from story_automator.commands.orchestrator_parse import parse_output_action
 from story_automator.core.utils import CommandResult
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class OrchestratorParseTests(unittest.TestCase):
@@ -146,8 +146,8 @@ class OrchestratorParseTests(unittest.TestCase):
         self.assertEqual(mock_run.call_args.kwargs["timeout"], 33)
 
     def _install_bundle(self) -> None:
-        source_skill = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator"
-        source_review = REPO_ROOT / "payload" / ".claude" / "skills" / "bmad-story-automator-review"
+        source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
+        source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"
         target_root = self.project_root / ".claude" / "skills"
         target_root.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_skill, target_root / "bmad-story-automator")

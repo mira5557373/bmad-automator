@@ -6,12 +6,12 @@ Status backfill: checked against shipped code and `npm run verify` on 2026-04-13
 
 Notes:
 - Item 1 remains open because the original pre-edit baseline notes were not preserved in-repo.
-- Item 14 remains open because the review payload still relies on the extra instruction `auto-fix all issues without prompting` instead of encoding autonomous fix behavior directly in `instructions.xml`.
+- Item 14 remains open because the review skill still relies on the extra instruction `auto-fix all issues without prompting` instead of encoding autonomous fix behavior directly in `instructions.xml`.
 
 ## Phase 0: Baseline
 
 1. [ ] Capture current behavior baselines.
-   Files: `source/src/story_automator/commands/tmux.py`, `source/src/story_automator/commands/orchestrator_parse.py`, `source/src/story_automator/commands/orchestrator.py`, `source/src/story_automator/core/review_verify.py`
+   Files: `skills/bmad-story-automator/src/story_automator/commands/tmux.py`, `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`, `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`, `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
    Actions:
    - run `npm run verify`
    - capture `tmux-wrapper build-cmd` output for `create`, `auto`, `review`, `retro`
@@ -35,19 +35,19 @@ Notes:
 3. [x] Add bundled default policy JSON and data directories.
    Depends on: 2
    Files:
-   - `payload/.claude/skills/bmad-story-automator/data/orchestration-policy.json`
-   - `payload/.claude/skills/bmad-story-automator/data/prompts/*.md`
-   - `payload/.claude/skills/bmad-story-automator/data/parse/*.json`
+   - `skills/bmad-story-automator/data/orchestration-policy.json`
+   - `skills/bmad-story-automator/data/prompts/*.md`
+   - `skills/bmad-story-automator/data/parse/*.json`
    Actions:
    - encode current behavior exactly
    - keep prompt wording as close to current strings as possible
    Done when:
-   - payload contains complete default machine contract
+   - skill contains complete default machine contract
 
 4. [x] Implement `runtime_policy.py`.
    Depends on: 3
    Files:
-   - `source/src/story_automator/core/runtime_policy.py`
+   - `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
    Actions:
    - load bundled policy
    - load optional `_bmad/bmm/story-automator.policy.json`
@@ -61,8 +61,8 @@ Notes:
 5. [x] Refactor required/optional asset resolution behind policy.
    Depends on: 4
    Files:
-   - `source/src/story_automator/core/workflow_paths.py`
-   - `source/src/story_automator/core/runtime_policy.py`
+   - `skills/bmad-story-automator/src/story_automator/core/workflow_paths.py`
+   - `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
    Actions:
    - move candidate-list resolution behind policy
    - fail closed on missing required assets
@@ -73,8 +73,8 @@ Notes:
 6. [x] Add state metadata for policy snapshots.
    Depends on: 4
    Files:
-   - `source/src/story_automator/commands/state.py`
-   - `source/src/story_automator/core/frontmatter.py`
+   - `skills/bmad-story-automator/src/story_automator/commands/state.py`
+   - `skills/bmad-story-automator/src/story_automator/core/frontmatter.py`
    Actions:
    - write `policyVersion`
    - write `policySnapshotFile`
@@ -88,7 +88,7 @@ Notes:
 7. [x] Replace hard-coded tmux prompts with template rendering.
    Depends on: 4, 5, 6
    Files:
-   - `source/src/story_automator/commands/tmux.py`
+   - `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
    Actions:
    - load step contract from effective policy
    - render prompt from template file
@@ -100,7 +100,7 @@ Notes:
 8. [x] Replace hard-coded parse schema switch with policy-backed contracts.
    Depends on: 4
    Files:
-   - `source/src/story_automator/commands/orchestrator_parse.py`
+   - `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
    Actions:
    - load step parse schema JSON
    - render parser prompt from label + schema
@@ -111,7 +111,7 @@ Notes:
 9. [x] Move retry budgets into policy-backed reads.
    Depends on: 4
    Files:
-   - `source/src/story_automator/commands/orchestrator.py`
+   - `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
    Actions:
    - source review max cycles from policy
    - source crash retry limit from policy
@@ -124,8 +124,8 @@ Notes:
 10. [x] Add verifier registry and concrete implementations.
     Depends on: 4
     Files:
-    - `source/src/story_automator/core/success_verifiers.py`
-    - `source/src/story_automator/core/review_verify.py`
+    - `skills/bmad-story-automator/src/story_automator/core/success_verifiers.py`
+    - `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
     Actions:
     - implement `session_exit`
     - implement `create_story_artifact`
@@ -138,7 +138,7 @@ Notes:
 11. [x] Wire `monitor-session` to policy-backed verifier dispatch.
     Depends on: 7, 10
     Files:
-    - `source/src/story_automator/commands/tmux.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
     Actions:
     - remove permanent review special case
     - use step contract `success.verifier`
@@ -149,21 +149,21 @@ Notes:
 12. [x] Fold create story validation into `create_story_artifact`.
     Depends on: 10, 11
     Files:
-    - `source/src/story_automator/commands/orchestrator.py`
-    - `source/src/story_automator/core/success_verifiers.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
+    - `skills/bmad-story-automator/src/story_automator/core/success_verifiers.py`
     Actions:
     - remove duplicated create validation trigger logic
     - route create pass/fail through verifier
     Done when:
     - create success semantics exist in one place only
 
-## Phase 4: Review Payload Alignment
+## Phase 4: Review Skill Alignment
 
 13. [x] Add structured review contract file.
     Depends on: 3
     Files:
-    - `payload/.claude/skills/bmad-story-automator-review/contract.json`
-    - `payload/.claude/skills/bmad-story-automator-review/workflow.yaml`
+    - `skills/bmad-story-automator-review/contract.json`
+    - `skills/bmad-story-automator-review/workflow.yaml`
     Actions:
     - move machine completion semantics into JSON
     - make workflow point to the contract
@@ -173,33 +173,33 @@ Notes:
 14. [ ] Align review instructions with autonomous mode.
     Depends on: 13
     Files:
-    - `payload/.claude/skills/bmad-story-automator-review/instructions.xml`
+    - `skills/bmad-story-automator-review/instructions.xml`
     Actions:
     - remove reliance on prompt folklore for auto-fix behavior
     - make automatic fix path explicit for autonomous mode
     Done when:
-    - review payload no longer contradicts runtime prompt defaults
+    - review skill no longer contradicts runtime prompt defaults
 
 15. [x] Update main workflow prose to reference runtime policy.
     Depends on: 3
     Files:
-    - `payload/.claude/skills/bmad-story-automator/workflow.md`
+    - `skills/bmad-story-automator/workflow.md`
     Actions:
     - reference `orchestration-policy.json`
     - describe fixed loop as default policy
     - align terms with runtime policy language
     Done when:
-    - payload docs and runtime use the same contract vocabulary
+    - skill docs and runtime use the same contract vocabulary
 
 ## Phase 5: Testing
 
 16. [x] Add Python unit tests for policy and verifiers.
     Depends on: 4, 8, 10
     Files:
-    - `source/tests/test_runtime_policy.py`
-    - `source/tests/test_success_verifiers.py`
-    - `source/tests/test_orchestrator_parse.py`
-    - `source/tests/test_state_policy_metadata.py`
+    - `tests/test_runtime_policy.py`
+    - `tests/test_success_verifiers.py`
+    - `tests/test_orchestrator_parse.py`
+    - `tests/test_state_policy_metadata.py`
     Actions:
     - use stdlib `unittest`
     - cover merge, validation, snapshot, verifier behavior, parser loading
@@ -234,8 +234,8 @@ Notes:
 19. [x] Implement legacy resume behavior and strict new-state validation.
     Depends on: 6, 10, 11
     Files:
-    - `source/src/story_automator/commands/state.py`
-    - `source/src/story_automator/core/runtime_policy.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/state.py`
+    - `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
     - any resume path using state metadata
     Actions:
     - old state without snapshot -> legacy defaults + `legacyPolicy: true`
@@ -246,7 +246,7 @@ Notes:
 20. [x] Preserve env compatibility for one release cycle.
     Depends on: 9
     Files:
-    - `source/src/story_automator/core/runtime_policy.py`
+    - `skills/bmad-story-automator/src/story_automator/core/runtime_policy.py`
     - docs as needed
     Actions:
     - read legacy env vars once at orchestration start
@@ -258,9 +258,9 @@ Notes:
 21. [x] Remove or shrink obsolete hard-coded helpers.
     Depends on: 7, 8, 9, 10, 11
     Files:
-    - `source/src/story_automator/commands/tmux.py`
-    - `source/src/story_automator/commands/orchestrator_parse.py`
-    - `source/src/story_automator/commands/orchestrator.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/tmux.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
+    - `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
     Actions:
     - delete dead prompt-schema branches
     - remove stale helpers after tests pass
@@ -275,7 +275,7 @@ Notes:
     - run Python unit tests
     - run `npm run verify`
     - compare prompt baselines against phase 0 captures
-    - review installed payload tree manually once
+    - review installed skill tree manually once
     Done when:
     - zero-config behavior matches baseline
     - customization surfaces work
