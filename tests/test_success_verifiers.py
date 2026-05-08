@@ -242,6 +242,23 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["exit_reason"], "max_polls_exceeded")
         self.assertFalse(payload["output_verified"])
 
+    def test_monitor_session_runtime_agent_uses_resolved_provider_flags(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_session_status(*args: object, **kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"active_task": "/tmp/session.txt"}
+
+        stdout = io.StringIO()
+        with patch_env(self.project_root), patch("story_automator.commands.tmux.runtime_provider", return_value="codex"), patch(
+            "story_automator.commands.tmux.session_status", side_effect=fake_session_status
+        ), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "0", "--agent", "runtime"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(calls)
+        self.assertTrue(calls[0]["codex"])
+
     def test_monitor_dispatch_allows_session_exit_without_story_key(self) -> None:
         result = _verify_monitor_completion(
             "dev",

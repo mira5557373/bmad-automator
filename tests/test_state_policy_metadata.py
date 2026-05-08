@@ -69,6 +69,51 @@ class StatePolicyMetadataTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["structure"], "ok")
 
+    def test_validate_state_accepts_agent_config_without_legacy_ai_command(self) -> None:
+        stdout = io.StringIO()
+        template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        config = self._config()
+        config.pop("aiCommand", None)
+        config["agentConfig"] = {"defaultPrimary": "auto", "defaultFallback": False}
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(config),
+                ]
+            )
+        self.assertEqual(code, 0)
+        state_file = Path(json.loads(stdout.getvalue())["path"])
+        text = state_file.read_text(encoding="utf-8")
+        self.assertIn('aiCommand: ""', text)
+        self.assertIn('agentConfig:\n  defaultPrimary: "auto"\n  defaultFallback: false\n', text)
+
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_state(["--state", str(state_file)])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["structure"], "ok")
+        self.assertFalse(any("aiCommand" in issue for issue in payload["issues"]))
+
+    def test_validate_state_rejects_state_without_runtime_command_config(self) -> None:
+        state_file = self.project_root / "missing-runtime-config.md"
+        state_file.write_text(
+            "---\nepic: \"1\"\nepicName: \"Epic 1\"\nstoryRange: [\"1.1\"]\nstatus: \"READY\"\nlastUpdated: \"2026-04-13T00:00:00Z\"\naiCommand: \"\"\n---\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_state(["--state", str(state_file)])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["structure"], "issues")
+        self.assertIn("Missing or empty aiCommand", payload["issues"])
+
     def test_summary_infers_legacy_policy_for_old_state(self) -> None:
         legacy = self.project_root / "legacy.md"
         legacy.write_text(
@@ -278,6 +323,16 @@ class StatePolicyMetadataTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("review.md", stderr.getvalue())
 
+    def test_build_state_doc_coerces_null_default_fallback_to_false(self) -> None:
+        state_file = self._build_state({"agentConfig": {"defaultPrimary": "codex", "defaultFallback": None}})
+
+        self.assertIn("defaultFallback: false", state_file.read_text(encoding="utf-8"))
+
+    def test_build_state_doc_coerces_null_default_primary_to_auto(self) -> None:
+        state_file = self._build_state({"agentConfig": {"defaultPrimary": None, "defaultFallback": False}})
+
+        self.assertIn('defaultPrimary: "auto"', state_file.read_text(encoding="utf-8"))
+
     def test_build_cmd_returns_exit_code_one_when_prompt_template_becomes_directory(self) -> None:
         state_file = self._build_state()
         template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "prompts" / "review.md"
@@ -343,9 +398,12 @@ class StatePolicyMetadataTests(unittest.TestCase):
         self.assertTrue(payload["escalate"])
         self.assertEqual(payload["reason"], "--state-file requires a value")
 
-    def _build_state(self) -> Path:
+    def _build_state(self, overrides: dict[str, object] | None = None) -> Path:
         stdout = io.StringIO()
         template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        config = self._config()
+        if overrides:
+            config.update(overrides)
         with patch_env(self.project_root), redirect_stdout(stdout):
             cmd_build_state_doc(
                 [
@@ -354,7 +412,7 @@ class StatePolicyMetadataTests(unittest.TestCase):
                     "--output-folder",
                     str(self.output_dir),
                     "--config-json",
-                    json.dumps(self._config()),
+                    json.dumps(config),
                 ]
             )
         return Path(json.loads(stdout.getvalue())["path"])

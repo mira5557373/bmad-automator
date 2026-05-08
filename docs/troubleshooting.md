@@ -27,15 +27,15 @@ flowchart TD
 
 ## Stop Hook Blocks A Normal Session
 
-If a normal top-level Claude session complains that Story Automator is active:
+If a normal top-level session complains that Story Automator is active:
 
-- check `.claude/.story-automator-active`
+- check the active runtime marker path
 - confirm whether orchestration is really still running
 - if the run finished but cleanup did not happen, remove or reconcile the marker carefully
 
 ```mermaid
 flowchart TD
-    A["Stop hook blocks session"] --> B["Check .claude/.story-automator-active"]
+    A["Stop hook blocks session"] --> B["Check the active runtime marker file"]
     B --> C{"Run still active?"}
     C -->|Yes| D["Resume or let it finish"]
     C -->|No| E["Check state doc and tmux sessions"]
@@ -104,9 +104,15 @@ If a long command path fails:
 ## Useful Checks
 
 ```bash
-.claude/skills/bmad-story-automator/scripts/story-automator tmux-wrapper list --project-only
-.claude/skills/bmad-story-automator/scripts/story-automator orchestrator-helper state-list _bmad-output/story-automator
-.claude/skills/bmad-story-automator/scripts/story-automator orchestrator-helper verify-code-review 1.2
+<installed-skill-root>/bmad-story-automator/scripts/story-automator tmux-wrapper list --project-only
+```
+
+```bash
+<installed-skill-root>/bmad-story-automator/scripts/story-automator orchestrator-helper state-list _bmad-output/story-automator
+```
+
+```bash
+<installed-skill-root>/bmad-story-automator/scripts/story-automator orchestrator-helper verify-code-review 1.2
 ```
 
 ## Read Next

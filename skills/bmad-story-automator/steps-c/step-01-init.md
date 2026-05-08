@@ -6,7 +6,6 @@ continueStep: './step-01b-continue.md'
 outputFolder: '{output_folder}/story-automator'
 outputFile: '{outputFolder}/init-log-{timestamp}.md'
 rules: '../data/orchestrator-rules.md'
-markerFile: '{project-root}/.claude/.story-automator-active'
 scripts: '../scripts/story-automator'
 ensureStopHook: '../scripts/story-automator'
 stateHelper: '../scripts/story-automator'
@@ -31,7 +30,9 @@ result=$("{ensureStopHook}" ensure-stop-hook --settings "{settingsFile}" \
   --command "{scripts} stop-hook" --timeout 10)
 ok=$(echo "$result" | jq -r '.ok')
 changed=$(echo "$result" | jq -r '.changed')
+message=$(echo "$result" | jq -r '.message // ""') # Helper returns provider-specific restart/setup guidance for Claude or Codex.
 ```
+The settings path is used for Claude; Codex resolves `.codex/hooks.json` and `.codex/config.toml` from the project root.
 
 **IF ok == false:** Report error and STOP.
 
@@ -40,10 +41,11 @@ Display:
 ```
 **Stop Hook Installed**
 
-I've added the story-automator Stop hook to .claude/settings.json.
+<message from helper>
+
 This prevents the orchestrator from randomly stopping mid-workflow.
 
-⚠️ **Please restart this Claude session** for the hook to take effect.
+⚠️ **Please restart this active agent session** for the hook to take effect.
 
 After restarting, run the story-automator workflow again.
 ```
@@ -117,7 +119,7 @@ printf \"[%s] init: stop-hook=%s existing_state=%s\\n\" \
   \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"${changed}\" \"${latest_incomplete}\" >> \"{outputFile}\"
 ```
 
-**Note:** Marker file (`{markerFile}`) is created in step-02b-preflight-finalize after epic/story context is established.
+**Note:** Marker file path is resolved by `orchestrator-helper marker path` in step-02b-preflight-finalize after epic/story context is established.
 
 ---
 

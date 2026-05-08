@@ -11,25 +11,39 @@ flowchart TD
     C --> D["Verify required sibling skills exist in target project"]
     D --> E["Resolve optional QA skill if present"]
     E --> F["Backup current installs and legacy story-automator paths"]
-    F --> G["Copy skills into .claude/skills"]
+    F --> G["Copy skills into each qualifying skill root"]
     G --> H["Remove obsolete legacy command shims"]
     H --> I["Print installed paths and verified sibling entrypoints"]
 ```
 
 ## Target Paths
 
-The installer writes into the target project:
+The npm installer writes into every qualifying skill root.
 
-- `.claude/skills/bmad-story-automator`
-- `.claude/skills/bmad-story-automator-review`
+Terminology:
+
+- Supported roots are `.agents/skills`, `.claude/skills`, and `.codex/skills`.
+- Qualifying roots are supported roots that contain the required dependency skill entrypoints (`SKILL.md`).
+- Installed skill roots are the qualifying roots where `bmad-story-automator` and `bmad-story-automator-review` are copied.
+
+Supported roots:
+
+- `.agents/skills`
+- `.claude/skills`
+- `.codex/skills`
 
 Unlike the older workflow-root layout, this Python port installs into the pure skill tree.
+Use `.agents/skills` for provider-agnostic or multi-provider projects. Use `.claude/skills` or `.codex/skills` when provider-specific isolation is useful. For Codex, installed skill assets live under a supported root such as `.agents/skills` or `.codex/skills`, while stop-hook and runtime config files are managed under `.codex/`.
+
+There is no runtime precedence among these roots. Claude-only, Codex-only, and mixed projects are supported. If more than one root contains all required dependency `SKILL.md` files, the installer updates each qualifying root. If a root is present but missing required skill entrypoints while another root qualifies, the incomplete root is left unchanged.
+
+The repo-local source skills live under `skills/`. The installer copies those same directly usable skill folders into each qualifying root.
 
 ## Installed Tree
 
 ```mermaid
 flowchart TD
-    A[".claude/skills/"] --> B["bmad-story-automator/"]
+    A["<installed-skill-root>/"] --> B["bmad-story-automator/"]
     A --> C["bmad-story-automator-review/"]
     B --> D["SKILL.md"]
     B --> E["workflow.md"]
@@ -43,17 +57,19 @@ flowchart TD
 
 ## Required Inputs
 
-The target project must already contain these BMAD skills:
+The target project must already contain these BMAD skills under at least one supported skill root:
 
-- `.claude/skills/bmad-create-story/SKILL.md`
-- `.claude/skills/bmad-dev-story/SKILL.md`
-- `.claude/skills/bmad-retrospective/SKILL.md`
+- `bmad-create-story`
+- `bmad-dev-story`
+- `bmad-retrospective`
 
 Only the `SKILL.md` entrypoint is required for sibling BMAD skills. Extra files such as `workflow.md`, `workflow.yaml`, checklists, and templates are resolved when present, but install must not depend on those internal layouts.
 
+If the required dependency skills are missing from all supported roots, the installer exits before copying anything and reports the supported roots that can satisfy the dependency requirement.
+
 Optional:
 
-- `.claude/skills/bmad-qa-generate-e2e-tests/SKILL.md`
+- `bmad-qa-generate-e2e-tests`
 
 If the optional QA skill is missing:
 
@@ -63,10 +79,10 @@ If the optional QA skill is missing:
 
 ## Migration And Backups
 
-Before copying new content, the installer backs up:
+Before copying new content, the installer backs up the existing install targets under each qualifying skill root:
 
-- existing `.claude/skills/bmad-story-automator`
-- existing `.claude/skills/bmad-story-automator-review`
+- existing `bmad-story-automator`
+- existing `bmad-story-automator-review`
 - legacy installs under `_bmad/bmm/4-implementation/...`
 - legacy installs under `_bmad/bmm/workflows/4-implementation/...`
 
@@ -87,8 +103,10 @@ Important nuance:
 The installed helper entrypoint is:
 
 ```text
-.claude/skills/bmad-story-automator/scripts/story-automator
+<installed-skill-root>/bmad-story-automator/scripts/story-automator
 ```
+
+Codex uses the active installed skill root for this helper, but writes hook/config state to `.codex/hooks.json` and `.codex/config.toml`.
 
 That wrapper:
 
@@ -112,8 +130,9 @@ No installer-only payload tree exists. The installer copies the same skill folde
 ## Operator Notes
 
 - install target must be a BMAD project with `_bmad/`
-- required sibling skill `SKILL.md` files must already exist
+- required sibling skill `SKILL.md` files must already exist under `.agents/skills`, `.claude/skills`, or `.codex/skills`
 - the review workflow is installed alongside the main orchestrator because review gating is part of completion semantics
+- Windows support currently means Windows via WSL, not native Windows shells
 
 ## Read Next
 

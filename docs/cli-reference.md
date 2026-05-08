@@ -1,9 +1,9 @@
 # CLI Reference
 
-The installed helper command is usually:
+The installed helper command is under each installed skill root:
 
 ```text
-.claude/skills/bmad-story-automator/scripts/story-automator
+<installed-skill-root>/bmad-story-automator/scripts/story-automator
 ```
 
 It exposes one flat command surface with grouped responsibilities.
@@ -94,7 +94,7 @@ These support saved presets and generated agent plans.
 ### Build And Spawn
 
 ```bash
-scripts=".claude/skills/bmad-story-automator/scripts/story-automator"
+scripts="<installed-skill-root>/bmad-story-automator/scripts/story-automator"
 cmd="$("$scripts" tmux-wrapper build-cmd review 1.2 --agent claude)"
 session="$("$scripts" tmux-wrapper spawn review 1 1.2 --agent claude --command "$cmd")"
 ```
