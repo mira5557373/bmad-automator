@@ -37,6 +37,25 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
         key = value
         prefix = "-".join(value.split("-", 2)[:2])
         story_id = prefix.replace("-", ".")
+    elif re.fullmatch(r"[A-Za-z][\w-]*\.\d+", value):
+        story_id = value
+        epic_part, _, story_num = value.partition(".")
+        prefix = f"{epic_part}-{story_num}"
+        key = ""
+    elif re.fullmatch(r"[A-Za-z][\w-]*-\d+", value):
+        prefix = value
+        epic_part, _, story_num = value.rpartition("-")
+        story_id = f"{epic_part}.{story_num}"
+        key = ""
+    elif re.fullmatch(r"[A-Za-z][\w-]*-\d+-.+", value):
+        head = value
+        match = re.match(r"^([A-Za-z][\w-]*?)-(\d+)-", head)
+        if match is None:
+            return None
+        epic_part, story_num = match.group(1), match.group(2)
+        prefix = f"{epic_part}-{story_num}"
+        story_id = f"{epic_part}.{story_num}"
+        key = value
     else:
         return None
 
