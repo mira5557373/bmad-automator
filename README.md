@@ -87,25 +87,25 @@ Stable install, using the latest pure-semver tag:
 npx bmad-method install --modules baut --all-stable --tools claude-code --yes
 ```
 
-Stable pin or rollback to the current stable tag for this preview cycle:
+Stable pin to the first Codex-capable stable tag:
+
+```bash
+npx bmad-method install --modules baut --pin baut=v1.15.0 --tools codex --yes
+```
+
+Rollback to the pre-Codex stable tag if needed:
 
 ```bash
 npx bmad-method install --modules baut --pin baut=v1.14.2 --tools claude-code --yes
 ```
 
-Codex preview. Do not run this until the remote preview tag is published:
-
-```bash
-npx bmad-method install --modules baut --pin baut=v1.15.0-next.1 --tools codex --yes
-```
-
-Branch preview. Do not run this until the remote preview branch is published:
+Codex preview branch, only for testing unpublished follow-up fixes:
 
 ```bash
 npx bmad-method install --custom-source https://github.com/bmad-code-org/bmad-automator@next/codex-runtime-support --tools codex --yes
 ```
 
-Current caveat: the official registry sets `baut` to `default_channel: next`, so unqualified `--modules baut` and `--next baut` resolve to `main` HEAD. They are not stable installs and, before the preview work merges to `main`, they are not the pre-merge Codex preview. Treat the preview pin and branch commands as post-publication commands only.
+Current caveat: the official registry sets `baut` to `default_channel: next`, so unqualified `--modules baut` and `--next baut` resolve to `main` HEAD. After this stable release lands on `main`, those commands include Codex support, but use `--all-stable` or `--pin` when you need reproducible stable behavior.
 
 ## Expectations
 

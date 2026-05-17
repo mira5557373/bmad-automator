@@ -148,8 +148,8 @@ class RuntimeLayoutTests(unittest.TestCase):
             self.assertEqual(agent_type(), "codex")
             self.assertEqual((primary, fallback), ("codex", "false"))
 
-    def test_runtime_version_tracks_python_preview_version(self) -> None:
-        self.assertEqual(runtime_version, "1.15.0.dev1")
+    def test_runtime_version_tracks_python_release_version(self) -> None:
+        self.assertEqual(runtime_version, "1.15.0")
 
     def test_explicit_agent_values_are_normalized(self) -> None:
         config = parse_agent_config_json('{"defaultPrimary":" Codex ","defaultFallback":" Claude "}')
