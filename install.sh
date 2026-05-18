@@ -113,6 +113,93 @@ cleanup_obsolete_command_shims() {
   done
 }
 
+migrate_legacy_baut_manifest() {
+  node - "$TARGET_BMAD" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const bmadDir = process.argv[2];
+const yamlNames = new Set([".yaml", ".yml"]);
+const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+
+function walk(dir, files = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walk(full, files);
+    } else if (entry.isFile() && yamlNames.has(path.extname(entry.name))) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+function nextBackupPath(file) {
+  const backup = `${file}.bak`;
+  return fs.existsSync(backup) ? `${backup}-${timestamp}` : backup;
+}
+
+function shouldEndBlock(line, itemIndent, moduleIndent) {
+  if (/^\s*$/.test(line) || /^\s*#/.test(line)) return false;
+  const indent = line.match(/^\s*/)[0].length;
+  return (
+    (indent === itemIndent && line.trimStart().startsWith("- ")) ||
+    (indent <= moduleIndent && !line.trimStart().startsWith("- "))
+  );
+}
+
+function removeBautBlocks(content) {
+  const lines = content.split("\n");
+  const output = [];
+  let changed = false;
+  let moduleIndent = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const modulesMatch = line.match(/^(\s*)modules:\s*$/);
+    if (modulesMatch) {
+      moduleIndent = modulesMatch[1].length;
+      output.push(line);
+      continue;
+    }
+
+    const bautMatch = moduleIndent === null ? null : line.match(/^(\s*)-\s+name:\s+['"]?baut['"]?\s*$/);
+    if (!bautMatch) {
+      output.push(line);
+      continue;
+    }
+
+    changed = true;
+    const itemIndent = bautMatch[1].length;
+    index += 1;
+    while (index < lines.length && !shouldEndBlock(lines[index], itemIndent, moduleIndent)) {
+      index += 1;
+    }
+    index -= 1;
+  }
+
+  return changed ? output.join("\n").replace(/\n*$/, "\n") : null;
+}
+
+for (const file of walk(bmadDir)) {
+  const content = fs.readFileSync(file, "utf8");
+  if (!content.includes("modules:") || !/^\s*-\s+name:\s+['"]?baut['"]?\s*$/m.test(content)) {
+    continue;
+  }
+
+  const migrated = removeBautBlocks(content);
+  if (migrated === null) continue;
+
+  const backup = nextBackupPath(file);
+  fs.copyFileSync(file, backup);
+  fs.writeFileSync(file, migrated, "utf8");
+  const relFile = path.relative(path.dirname(bmadDir), file);
+  const relBackup = path.relative(path.dirname(bmadDir), backup);
+  console.log(`Migrated legacy baut manifest entry: ${relFile} (backup: ${relBackup})`);
+}
+NODE
+}
+
 resolve_workflow_path() {
   local candidate
   for candidate in "$@"; do
@@ -274,6 +361,7 @@ STORY_REVIEW_SOURCE="$SKILL_SOURCE_ROOT/bmad-story-automator-review"
 [ -f "$STORY_SOURCE/pyproject.toml" ] || err "Missing runtime pyproject: $STORY_SOURCE/pyproject.toml"
 [ -f "$STORY_REVIEW_SOURCE/SKILL.md" ] || err "Missing review SKILL.md: $STORY_REVIEW_SOURCE/SKILL.md"
 
+migrate_legacy_baut_manifest
 collect_target_skills_roots
 
 if [ "${#TARGET_SKILLS_RELS[@]}" -eq 0 ]; then

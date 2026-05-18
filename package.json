@@ -22,8 +22,9 @@
   "scripts": {
     "pack:dry-run": "npm pack --dry-run",
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
+    "test:compat": "bash scripts/compat-test.sh",
     "test:smoke": "bash scripts/smoke-test.sh",
-    "verify": "npm run test:python && npm run pack:dry-run && npm run test:smoke"
+    "verify": "npm run test:python && npm run pack:dry-run && npm run test:smoke && npm run test:compat"
   },
   "engines": {
     "node": ">=18"

@@ -52,6 +52,15 @@ npx bmad-method install --modules automator --all-stable --tools claude-code --y
 
 If custom-source discovery asks which plugin to install after reading the branch, choose `bmad-automator`. For custom-source branch testing, confirm the custom-source cache HEAD and installed runtime files; installer metadata can still report the registry `next` ref when the custom source uses official module code `automator`.
 
+## Legacy `baut` Compatibility
+
+Automator releases before `v1.15.0` used BMAD module code `baut`. Current releases use `automator`.
+
+This repo keeps two compatibility paths:
+
+- `.claude-plugin/marketplace.json` includes a `baut` alias that points at the same story-automator skills for custom-source/cache based installs.
+- `npx bmad-story-automator` scans `_bmad/` for YAML manifests containing a `modules:` list and removes stale `- name: baut` entries. It first writes `<manifest>.bak`, keeps the rest of the YAML intact, and does not touch `_bmad/config.toml` or `_bmad/config.user.toml`.
+
 The BMAD Method commands above install through `bmad-method` for the requested `--tools` target. The sections below describe the standalone `npx bmad-story-automator` installer and its layout behavior.
 
 ## Installer Flow
@@ -60,12 +69,13 @@ The BMAD Method commands above install through `bmad-method` for the requested `
 flowchart TD
     A["Run install.sh <project>"] --> B["Verify target is a BMAD project"]
     B --> C["Verify root skills exist in this repo"]
-    C --> D["Verify required sibling skills exist in target project"]
-    D --> E["Resolve optional QA skill if present"]
-    E --> F["Backup current installs and legacy story-automator paths"]
-    F --> G["Copy skills into each qualifying skill root"]
-    G --> H["Remove obsolete legacy command shims"]
-    H --> I["Print installed paths and verified sibling entrypoints"]
+    C --> D["Remove stale baut manifest entry if present"]
+    D --> E["Verify required sibling skills exist in target project"]
+    E --> F["Resolve optional QA skill if present"]
+    F --> G["Backup current installs and legacy story-automator paths"]
+    G --> H["Copy skills into each qualifying skill root"]
+    H --> I["Remove obsolete legacy command shims"]
+    I --> J["Print installed paths and verified sibling entrypoints"]
 ```
 
 ## Target Paths

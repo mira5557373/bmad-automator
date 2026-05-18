@@ -35,6 +35,34 @@
         "./skills/bmad-story-automator",
         "./skills/bmad-story-automator-review"
       ]
+    },
+    {
+      "name": "baut",
+      "source": "./skills",
+      "description": "Legacy compatibility alias for pre-rename BMAD Automator installs.",
+      "version": "1.15.0",
+      "author": {
+        "name": "bma-d",
+        "email": "support@bmadcode.com"
+      },
+      "homepage": "https://github.com/bmad-code-org/bmad-automator#readme",
+      "repository": "https://github.com/bmad-code-org/bmad-automator",
+      "license": "MIT",
+      "keywords": [
+        "bmad",
+        "story-automation",
+        "claude-code",
+        "skills",
+        "workflow",
+        "legacy"
+      ],
+      "category": "Workflow Automation",
+      "tags": [
+        "bmad",
+        "automation",
+        "story-workflow",
+        "legacy"
+      ]
     }
   ]
 }

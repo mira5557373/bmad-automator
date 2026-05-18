@@ -105,6 +105,8 @@ Codex preview branch, only for testing unpublished follow-up fixes:
 npx bmad-method install --custom-source https://github.com/bmad-code-org/bmad-automator@next/codex-runtime-support --tools codex --yes
 ```
 
+Legacy compatibility: releases before `v1.15.0` used BMAD module code `baut`. The package still advertises a `baut` custom-source alias so cached/custom installs can update instead of failing source discovery. The standalone `npx bmad-story-automator` installer also removes stale `name: baut` entries from `_bmad/**/manifest.y*ml`, writes a `.bak`, and leaves `config.toml` / `config.user.toml` untouched before installing skills.
+
 Current caveat: the official registry sets `automator` to `default_channel: next`, so unqualified `--modules automator` and `--next automator` resolve to `main` HEAD. After this stable release lands on `main`, those commands include Codex support, but use `--all-stable` or `--pin` when you need reproducible stable behavior. For custom-source branch testing, verify the custom-source cache HEAD and installed runtime files instead of trusting installer exit status, summary text, or manifest channel fields alone.
 
 ## Expectations

@@ -112,6 +112,29 @@ module code `automator`, BMAD-METHOD 6.6.0 can still record official registry
 `next`/`main` metadata in `_bmad/_config/manifest.yaml`; do not treat that
 manifest field as proof that the branch content failed to install.
 
+## Stale `baut` Manifest Entry
+
+Symptom:
+
+```text
+Installation failed: Source for module 'baut' is not available.
+It will be retained but cannot be updated without its source files.
+```
+
+Cause: older Automator installs recorded module code `baut`; current BMAD registry installs Automator as `automator`.
+
+Fix from this package:
+
+```bash
+npx bmad-story-automator /absolute/path/to/your-bmad-project
+```
+
+That installer backs up the matching manifest as `.bak`, removes only the stale `- name: baut` module entry, and leaves `_bmad/config.toml` plus `_bmad/config.user.toml` unchanged. Then rerun the BMAD Method install with current code:
+
+```bash
+npx bmad-method@next install --action update --modules automator --tools codex --yes
+```
+
 ## Sprint Status Drift
 
 If the state doc and `sprint-status.yaml` disagree:
