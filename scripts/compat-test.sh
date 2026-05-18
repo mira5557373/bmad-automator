@@ -74,11 +74,22 @@ modules:
     repoUrl: https://github.com/bmad-code-org/bmad-automator
     channel: stable
     sha: 593f338532ea730b5c1a2dd86681e87b5b4f04dd
+
+  # Keep separator comment attached to the next module.
   - name: bmm
     version: 6.6.0
     source: built-in
 ides:
   - claude-code
+metadata:
+  examples:
+    - name: baut
+      note: keep unrelated baut list entry
+EOF
+  cat >"$root/_bmad/other.yaml" <<'EOF'
+modules:
+  - name: baut
+    note: keep non-manifest yaml untouched
 EOF
   printf 'team config untouched\n' >"$root/_bmad/config.toml"
   printf 'user config untouched\n' >"$root/_bmad/config.user.toml"
@@ -102,7 +113,10 @@ run_legacy_baut_manifest_migration_case() {
   assert_contains "name: baut" "$manifest.bak"
   assert_contains "name: core" "$manifest"
   assert_contains "name: bmm" "$manifest"
-  assert_not_contains "name: baut" "$manifest"
+  assert_contains "Keep separator comment attached to the next module." "$manifest"
+  assert_contains "note: keep unrelated baut list entry" "$manifest"
+  assert_not_contains "npmPackage: bmad-story-automator" "$manifest"
+  assert_contains "note: keep non-manifest yaml untouched" "$root/_bmad/other.yaml"
   assert_contains "team config untouched" "$root/_bmad/config.toml"
   assert_contains "user config untouched" "$root/_bmad/config.user.toml"
   assert_contains "Migrated legacy baut manifest entry: _bmad/_config/manifest.yaml" "$install_log"

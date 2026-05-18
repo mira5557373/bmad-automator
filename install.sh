@@ -119,15 +119,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const bmadDir = process.argv[2];
-const yamlNames = new Set([".yaml", ".yml"]);
 const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+
+function isManifestFile(file) {
+  return /^manifest\.ya?ml$/i.test(path.basename(file));
+}
 
 function walk(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       walk(full, files);
-    } else if (entry.isFile() && yamlNames.has(path.extname(entry.name))) {
+    } else if (entry.isFile() && isManifestFile(full)) {
       files.push(full);
     }
   }
@@ -142,10 +145,7 @@ function nextBackupPath(file) {
 function shouldEndBlock(line, itemIndent, moduleIndent) {
   if (/^\s*$/.test(line) || /^\s*#/.test(line)) return false;
   const indent = line.match(/^\s*/)[0].length;
-  return (
-    (indent === itemIndent && line.trimStart().startsWith("- ")) ||
-    (indent <= moduleIndent && !line.trimStart().startsWith("- "))
-  );
+  return indent <= moduleIndent || (indent === itemIndent && line.trimStart().startsWith("- "));
 }
 
 function removeBautBlocks(content) {
@@ -163,18 +163,37 @@ function removeBautBlocks(content) {
       continue;
     }
 
+    if (moduleIndent !== null && !/^\s*$/.test(line) && !/^\s*#/.test(line)) {
+      const indent = line.match(/^\s*/)[0].length;
+      if (indent <= moduleIndent) {
+        moduleIndent = null;
+      }
+    }
+
     const bautMatch = moduleIndent === null ? null : line.match(/^(\s*)-\s+name:\s+['"]?baut['"]?\s*$/);
     if (!bautMatch) {
       output.push(line);
       continue;
     }
 
-    changed = true;
     const itemIndent = bautMatch[1].length;
+    if (itemIndent <= moduleIndent) {
+      output.push(line);
+      continue;
+    }
+
+    changed = true;
     index += 1;
+    const trailingTrivia = [];
     while (index < lines.length && !shouldEndBlock(lines[index], itemIndent, moduleIndent)) {
+      if (/^\s*$/.test(lines[index]) || /^\s*#/.test(lines[index])) {
+        trailingTrivia.push(lines[index]);
+      } else {
+        trailingTrivia.length = 0;
+      }
       index += 1;
     }
+    output.push(...trailingTrivia);
     index -= 1;
   }
 
