@@ -53,6 +53,7 @@ To resolve agents for a specific story/task:
 selection=$("$scripts" orchestrator-helper agents-resolve --state-file "$state_file" --story "{story_id}" --task "{task}")
 primary=$(echo "$selection" | jq -r '.primary')
 fallback=$(echo "$selection" | jq -r '.fallback')
+model=$(echo "$selection" | jq -r '.model // ""')   # "" when no override; pass to build-cmd as `--model <id>` when non-empty
 ```
 
 Direct agents-file resolution is also supported when you already know the generated agents plan path:
@@ -60,6 +61,7 @@ Direct agents-file resolution is also supported when you already know the genera
 selection=$("$scripts" orchestrator-helper agents-resolve --agents-file "$agents_file" --story "{story_id}" --task "{task}")
 primary=$(echo "$selection" | jq -r '.primary')
 fallback=$(echo "$selection" | jq -r '.fallback')
+model=$(echo "$selection" | jq -r '.model // ""')
 ```
 
 ## Step Types
@@ -81,8 +83,11 @@ fallback=$(echo "$selection" | jq -r '.fallback')
 
 ```bash
 # For retro, "story_id" parameter is actually the epic_number
-retro_agent=$("$scripts" orchestrator-helper retro-agent --state-file "{state_file}" | jq -r '.primary')
-cmd=$("$scripts" tmux-wrapper build-cmd retro {epic_number} --agent "$retro_agent")
+retro_selection=$("$scripts" orchestrator-helper retro-agent --state-file "{state_file}")
+retro_agent=$(echo "$retro_selection" | jq -r '.primary')
+retro_model=$(echo "$retro_selection" | jq -r '.model // ""')
+[ -n "$retro_model" ] && retro_model_arg="--model $retro_model" || retro_model_arg=""
+cmd=$("$scripts" tmux-wrapper build-cmd retro {epic_number} --agent "$retro_agent" $retro_model_arg)
 session=$("$scripts" tmux-wrapper spawn retro "" {epic_number} --agent "$retro_agent" --command "$cmd")
 
 # Monitor (retrospectives never block, failures just logged)

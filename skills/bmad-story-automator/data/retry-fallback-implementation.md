@@ -34,10 +34,12 @@ while [ $attempt -lt $max_attempts ] && [ "$success" = "false" ]; do
         fi
     fi
 
-    # Execute workflow step
+    # Execute workflow step. `$primary_model_arg` is set by
+    # `resolve_agent_for_task` above — empty when no model is configured,
+    # `--model <id>` otherwise. Word-splitting on an empty var emits nothing.
     session=$("$scripts" tmux-wrapper spawn {step} {epic} {story_id} \
         --agent "$current_agent" \
-        --command "$("$scripts" tmux-wrapper build-cmd {step} {story_id} --agent "$current_agent" --state-file "$state_file")")
+        --command "$("$scripts" tmux-wrapper build-cmd {step} {story_id} --agent "$current_agent" $primary_model_arg --state-file "$state_file")")
     result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
 
     # Cleanup session

@@ -35,14 +35,24 @@ resolve_agent_for_task() {
 
     primary_agent=$(echo "$result" | jq -r '.primary')
     fallback_agent=$(echo "$result" | jq -r '.fallback')
+    primary_model=$(echo "$result" | jq -r '.model // ""')
 
     # Handle "false"/null meaning disabled
     [ "$fallback_agent" = "false" ] && fallback_agent=""
+
+    # Build `--model <id>` shell fragment (empty when no model is configured).
+    # Sentinel values (auto/default/false/none/null) are already filtered upstream
+    # by `orchestrator-helper agents-resolve`, so a non-empty value is real.
+    if [ -n "$primary_model" ]; then
+        primary_model_arg="--model $primary_model"
+    else
+        primary_model_arg=""
+    fi
 }
 
 # Usage:
 resolve_agent_for_task "review" "$state_file" "{story_id}"
-echo "Review task: primary=$primary_agent, fallback=$fallback_agent"
+echo "Review task: primary=$primary_agent, fallback=$fallback_agent, model=${primary_model:-<cli default>}"
 ```
 
 **Fallback behavior:**

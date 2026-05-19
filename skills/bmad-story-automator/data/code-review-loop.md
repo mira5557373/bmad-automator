@@ -22,8 +22,9 @@ Code-review uses **deterministic agent selection** from the agents file, same as
 resolve_agent_for_task "review" "$state_file" "{story_id}"
 review_agent="$primary_agent"
 review_fallback="$fallback_agent"
+review_model_arg="$primary_model_arg"   # already "--model <id>" or empty
 
-echo "Code review using: primary=$review_agent, fallback=$review_fallback"
+echo "Code review using: primary=$review_agent, fallback=$review_fallback, model=${primary_model:-<cli default>}"
 ```
 
 **Per-task override example in state document:**
@@ -56,7 +57,7 @@ scripts="$(printf "%s" "{project_root}/<installed-skill-root>/bmad-story-automat
 session_name=$("$scripts" tmux-wrapper spawn review {epic} {story_id} \
   --agent "$review_agent" \
   --cycle $reviewCycle \
-  --command "$("$scripts" tmux-wrapper build-cmd review {story_id} --agent "$review_agent" --state-file "$state_file")")
+  --command "$("$scripts" tmux-wrapper build-cmd review {story_id} --agent "$review_agent" $review_model_arg --state-file "$state_file")")
 ```
 
 ### 2. Monitor Session with Verification (v2.2)

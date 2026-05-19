@@ -262,6 +262,117 @@ class StateDocModelSerializationTests(unittest.TestCase):
         (target_root / "bmad-qa-generate-e2e-tests" / "checklist.md").write_text("# c\n", encoding="utf-8")
 
 
+class StateDocSentinelOmissionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project_root = Path(self.tmp.name)
+        self._install_bundle()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_sentinel_models_are_omitted_from_state(self) -> None:
+        template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        output_dir = self.project_root / "_bmad-output" / "story-automator"
+        config = {
+            "epic": "9",
+            "epicName": "Trust & Safety",
+            "storyRange": ["9.1"],
+            "status": "READY",
+            "aiCommand": "claude --dangerously-skip-permissions",
+            "agentConfig": {
+                "defaultPrimary": "claude",
+                "defaultFallback": False,
+                # sentinel — should NOT appear in serialized YAML
+                "defaultModel": "auto",
+                "perTask": {
+                    "review": {"primary": "claude", "fallback": False, "model": "none"},
+                    "dev": {"primary": "claude", "fallback": False, "model": "claude-opus-4-7[1m]"},
+                },
+                "complexityOverrides": {
+                    "high": {"review": {"primary": "claude", "model": "false"}},
+                },
+            },
+        }
+        stdout = io.StringIO()
+        with patch.dict(os.environ, {"PROJECT_ROOT": str(self.project_root)}, clear=False), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(template),
+                    "--output-folder",
+                    str(output_dir),
+                    "--config-json",
+                    json.dumps(config),
+                ]
+            )
+        self.assertEqual(code, 0)
+        state_path = Path(json.loads(stdout.getvalue())["path"])
+        text = state_path.read_text(encoding="utf-8")
+        # Sentinels never serialized
+        self.assertNotIn('defaultModel:', text)
+        self.assertNotIn('model: "auto"', text)
+        self.assertNotIn('model: "none"', text)
+        self.assertNotIn('model: "false"', text)
+        # Real value still survives
+        self.assertIn('model: "claude-opus-4-7[1m]"', text)
+
+    def _install_bundle(self) -> None:
+        source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
+        source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"
+        target_root = self.project_root / ".claude" / "skills"
+        target_root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_skill, target_root / "bmad-story-automator")
+        shutil.copytree(source_review, target_root / "bmad-story-automator-review")
+        for name in ("bmad-create-story", "bmad-dev-story", "bmad-retrospective", "bmad-qa-generate-e2e-tests"):
+            skill_dir = target_root / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+            (skill_dir / "workflow.md").write_text(f"# {name}\n", encoding="utf-8")
+        (target_root / "bmad-create-story" / "discover-inputs.md").write_text("# d\n", encoding="utf-8")
+        (target_root / "bmad-create-story" / "checklist.md").write_text("# c\n", encoding="utf-8")
+        (target_root / "bmad-create-story" / "template.md").write_text("# t\n", encoding="utf-8")
+        (target_root / "bmad-dev-story" / "checklist.md").write_text("# c\n", encoding="utf-8")
+        (target_root / "bmad-qa-generate-e2e-tests" / "checklist.md").write_text("# c\n", encoding="utf-8")
+
+
+class AgentCliMissingModelFailFastTests(unittest.TestCase):
+    def test_tmux_wrapper_agent_cli_missing_model_value_fails(self) -> None:
+        from story_automator.commands.tmux import cmd_tmux_wrapper
+        err = io.StringIO()
+        with patch.dict(os.environ, {"AI_AGENT": "claude"}, clear=False), \
+             __import__("contextlib").redirect_stderr(err):
+            code = cmd_tmux_wrapper(["agent-cli", "--model"])
+        self.assertEqual(code, 1)
+        self.assertIn("--model requires a value", err.getvalue())
+
+    def test_build_cmd_missing_model_value_fails(self) -> None:
+        # _build_cmd uses _flag_value which already raises PolicyError for empty
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            target_root = project_root / ".claude" / "skills"
+            target_root.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(REPO_ROOT / "skills" / "bmad-story-automator", target_root / "bmad-story-automator")
+            shutil.copytree(REPO_ROOT / "skills" / "bmad-story-automator-review", target_root / "bmad-story-automator-review")
+            for name in ("bmad-create-story", "bmad-dev-story", "bmad-retrospective", "bmad-qa-generate-e2e-tests"):
+                skill_dir = target_root / name
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text("# x\n", encoding="utf-8")
+                (skill_dir / "workflow.md").write_text("# x\n", encoding="utf-8")
+            (target_root / "bmad-create-story" / "discover-inputs.md").write_text("# d\n", encoding="utf-8")
+            (target_root / "bmad-create-story" / "checklist.md").write_text("# c\n", encoding="utf-8")
+            (target_root / "bmad-create-story" / "template.md").write_text("# t\n", encoding="utf-8")
+            (target_root / "bmad-dev-story" / "checklist.md").write_text("# c\n", encoding="utf-8")
+            (target_root / "bmad-qa-generate-e2e-tests" / "checklist.md").write_text("# c\n", encoding="utf-8")
+
+            err = io.StringIO()
+            with patch.dict(os.environ, {"PROJECT_ROOT": str(project_root), "AI_AGENT": "claude"}, clear=False), \
+                 __import__("contextlib").redirect_stderr(err):
+                code = _build_cmd(["review", "9.1", "--agent", "claude", "--model"])
+            self.assertEqual(code, 1)
+            self.assertIn("--model requires a value", err.getvalue())
+
+
 class BuildCmdModelFlagTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

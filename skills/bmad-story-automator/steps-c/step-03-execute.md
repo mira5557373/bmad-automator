@@ -128,9 +128,11 @@ If multiple logs exist, run one grep/regex pass across all log files and forward
 
 ```bash
 # Retry loop: see {retryStrategy}
+# Resolve model for this (story, task) — sets $primary_model_arg.
+resolve_agent_for_task "create" "$state_file" "{story_id}"
 session=$("$scripts" tmux-wrapper spawn create {epic} {story_id} \
   --agent "$current_agent" \
-  --command "$("$scripts" tmux-wrapper build-cmd create {story_id} --agent "$current_agent" --state-file "$state_file")")
+  --command "$("$scripts" tmux-wrapper build-cmd create {story_id} --agent "$current_agent" $primary_model_arg --state-file "$state_file")")
 result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
 "$scripts" tmux-wrapper kill "$session"
 validation=$("$scripts" orchestrator-helper verify-step create {story_id} --state-file "$state_file")
@@ -152,9 +154,10 @@ validation=$("$scripts" orchestrator-helper verify-step create {story_id} --stat
 
 ```bash
 # Retry loop with agent alternation: see {retryStrategy}
+resolve_agent_for_task "dev" "$state_file" "{story_id}"
 session=$("$scripts" tmux-wrapper spawn dev {epic} {story_id} \
   --agent "$current_agent" \
-  --command "$("$scripts" tmux-wrapper build-cmd dev {story_id} --agent "$current_agent" --state-file "$state_file")")
+  --command "$("$scripts" tmux-wrapper build-cmd dev {story_id} --agent "$current_agent" $primary_model_arg --state-file "$state_file")")
 result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
 "$scripts" tmux-wrapper kill "$session"
 ```

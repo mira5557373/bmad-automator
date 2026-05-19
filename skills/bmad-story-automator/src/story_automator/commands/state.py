@@ -10,6 +10,21 @@ from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_e
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
 
 
+_MODEL_SENTINELS = {"", "auto", "default", "false", "none", "null"}
+
+
+def _model_or_none(raw: Any) -> str:
+    """Return a normalized model ID, or '' for any sentinel / non-string value."""
+    if raw is None or raw is False:
+        return ""
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    if value.lower() in _MODEL_SENTINELS:
+        return ""
+    return value
+
+
 def cmd_build_state_doc(args: list[str]) -> int:
     template = ""
     output_folder = ""
@@ -99,9 +114,9 @@ def cmd_build_state_doc(args: list[str]) -> int:
             f"  defaultPrimary: {json.dumps(default_primary)}",
             f"  defaultFallback: {json.dumps(default_fallback)}",
         ]
-        default_model = agent_config.get("defaultModel")
-        if isinstance(default_model, str) and default_model.strip():
-            lines.append(f"  defaultModel: {json.dumps(default_model.strip())}")
+        default_model = _model_or_none(agent_config.get("defaultModel"))
+        if default_model:
+            lines.append(f"  defaultModel: {json.dumps(default_model)}")
         if isinstance(per_task, dict) and per_task:
             lines.append("  perTask:")
             for task in sorted(per_task):
@@ -114,10 +129,9 @@ def cmd_build_state_doc(args: list[str]) -> int:
                 if "fallback" in entry:
                     value = entry["fallback"]
                     lines.append(f"      fallback: {'false' if value is False else json.dumps(value)}")
-                if "model" in entry:
-                    model_value = entry["model"]
-                    if isinstance(model_value, str) and model_value.strip():
-                        lines.append(f"      model: {json.dumps(model_value.strip())}")
+                normalized_model = _model_or_none(entry.get("model"))
+                if normalized_model:
+                    lines.append(f"      model: {json.dumps(normalized_model)}")
         complexity_overrides = agent_config.get("complexityOverrides", {})
         if isinstance(complexity_overrides, dict) and complexity_overrides:
             lines.append("  complexityOverrides:")
@@ -136,10 +150,9 @@ def cmd_build_state_doc(args: list[str]) -> int:
                     if "fallback" in entry:
                         value = entry["fallback"]
                         lines.append(f"        fallback: {'false' if value is False else json.dumps(value)}")
-                    if "model" in entry:
-                        model_value = entry["model"]
-                        if isinstance(model_value, str) and model_value.strip():
-                            lines.append(f"        model: {json.dumps(model_value.strip())}")
+                    normalized_model = _model_or_none(entry.get("model"))
+                    if normalized_model:
+                        lines.append(f"        model: {json.dumps(normalized_model)}")
         block = "\n".join(lines) + "\n"
         text = re.sub(r"(?m)^agentConfig:\n(?:(?:\s{2}.*\n)*)", block, text)
     for key, value in replacements.items():

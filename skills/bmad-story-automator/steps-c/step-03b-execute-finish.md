@@ -129,8 +129,15 @@ fi
 
 ```bash
 # CRITICAL: Use build-cmd to get full YOLO prompt with doc verification
-retro_agent=$("{scriptsDir}" orchestrator-helper retro-agent --state-file "{outputFile}" | jq -r '.primary')
-cmd=$("{scriptsDir}" tmux-wrapper build-cmd retro {epic_number} --agent "$retro_agent")
+retro_selection=$("{scriptsDir}" orchestrator-helper retro-agent --state-file "{outputFile}")
+retro_agent=$(echo "$retro_selection" | jq -r '.primary')
+retro_model=$(echo "$retro_selection" | jq -r '.model // ""')
+if [ -n "$retro_model" ]; then
+    retro_model_arg="--model $retro_model"
+else
+    retro_model_arg=""
+fi
+cmd=$("{scriptsDir}" tmux-wrapper build-cmd retro {epic_number} --agent "$retro_agent" $retro_model_arg)
 session=$("{scriptsDir}" tmux-wrapper spawn retro "" {epic_number} --agent "$retro_agent" --command "$cmd")
 
 # Monitor with safe failure (never escalate on retro failure)

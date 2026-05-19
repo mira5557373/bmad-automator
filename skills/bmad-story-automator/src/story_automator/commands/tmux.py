@@ -88,8 +88,12 @@ def cmd_tmux_wrapper(args: list[str]) -> int:
         model = ""
         idx = 0
         while idx < len(rest):
-            if rest[idx] == "--model" and idx + 1 < len(rest):
-                model = rest[idx + 1]
+            if rest[idx] == "--model":
+                try:
+                    model = _flag_value(rest, idx, "--model")
+                except PolicyError as exc:
+                    print(str(exc), file=__import__("sys").stderr)
+                    return 1
                 idx += 2
                 continue
             idx += 1

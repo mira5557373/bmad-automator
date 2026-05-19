@@ -201,7 +201,7 @@ selects a specific model ID for that task (passed via `--model` to the CLI).
 **Tasks:** create, dev, auto, review
 **Model IDs:** alias (`opus`, `sonnet`, `gpt-5.5`) or full ID
 (`claude-sonnet-4-6`, `claude-opus-4-7`, `claude-opus-4-7[1m]`, `gpt-5.3-codex`).
-Leave model empty (or pass `auto` / `default`) to use the CLI's built-in default.
+Leave model empty (or pass `auto` / `default` / `false` / `none` / `null`) to use the CLI's built-in default. All of these sentinels are treated as unset and omitted from the persisted state.
 
 Enter overrides (comma-separated):
 ```

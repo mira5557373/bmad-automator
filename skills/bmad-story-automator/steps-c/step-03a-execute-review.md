@@ -33,9 +33,10 @@ Set: `scripts="{scriptsDir}"`
 
 ```bash
 # --command required (see Spawn Pattern in step-03)
+resolve_agent_for_task "auto" "$state_file" "{story_id}"
 session=$("$scripts" tmux-wrapper spawn auto {epic} {story_id} \
   --agent "$current_agent" \
-  --command "$("$scripts" tmux-wrapper build-cmd auto {story_id} --agent "$current_agent" --state-file "$state_file")")
+  --command "$("$scripts" tmux-wrapper build-cmd auto {story_id} --agent "$current_agent" $primary_model_arg --state-file "$state_file")")
 result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
 "$scripts" tmux-wrapper kill "$session"
 ```
