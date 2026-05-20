@@ -5,13 +5,13 @@ import json
 import shutil
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_build_state_doc
-from story_automator.commands.tmux import _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
+from story_automator.commands.tmux import _build_cmd, _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
 from story_automator.commands.validate_story_creation import cmd_validate_story_creation
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_policy import PolicyError
@@ -139,6 +139,16 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["file"], str(story))
         self.assertEqual(payload["status"], "ready")
 
+    def test_story_file_status_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["story-file-status", "1.2"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
+
     def test_validate_story_creation_count_uses_resolved_artifacts_dir(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
         self._write_docs_story("1-2-docs", status="draft")
@@ -148,6 +158,32 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout.getvalue().strip(), "1")
 
+    def test_validate_story_creation_prefix_skips_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["prefix", "1.2"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "1-2")
+
+    def test_validate_story_creation_check_returns_compat_schema_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["check", "1.2"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["valid"])
+        self.assertIn("BMAD config implementation_artifacts", payload["reason"])
+
+    def test_validate_story_creation_count_returns_controlled_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_validate_story_creation(["count", "1.2"])
+        self.assertEqual(code, 1)
+        self.assertIn("BMAD config implementation_artifacts", stderr.getvalue())
+
     def test_step_prompt_uses_resolved_artifacts_dir(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
         template = self.project_root / "prompt.md"
@@ -156,6 +192,14 @@ class SuccessVerifierTests(unittest.TestCase):
             prompt = _render_step_prompt({"prompt": {"templatePath": str(template)}, "assets": {"files": {}}}, "1.2", "1-2", "")
         self.assertIn("docs/bmad/implementation-artifacts/1-2-*.md", prompt)
         self.assertNotIn("_bmad-output/implementation-artifacts", prompt)
+
+    def test_build_cmd_returns_controlled_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = _build_cmd(["review", "1.2"])
+        self.assertEqual(code, 1)
+        self.assertIn("BMAD config implementation_artifacts", stderr.getvalue())
 
     def test_review_completion_uses_contract_done_values(self) -> None:
         self._write_story("1-2-example", status="approved")

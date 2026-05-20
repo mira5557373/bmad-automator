@@ -401,11 +401,15 @@ def _story_file_status(args: list[str]) -> int:
     if not args:
         print_json({"ok": False, "error": "story input required"})
         return 1
-    norm = normalize_story_key(get_project_root(), args[0])
-    if norm is None:
-        print_json({"ok": False, "error": "could not normalize story key", "input": args[0]})
+    try:
+        norm = normalize_story_key(get_project_root(), args[0])
+        if norm is None:
+            print_json({"ok": False, "error": "could not normalize story key", "input": args[0]})
+            return 1
+        matches = sorted(implementation_artifacts_dir(get_project_root()).glob(f"{norm.prefix}-*.md"))
+    except ValueError as exc:
+        print_json({"ok": False, "error": str(exc), "input": args[0]})
         return 1
-    matches = sorted(implementation_artifacts_dir(get_project_root()).glob(f"{norm.prefix}-*.md"))
     if not matches:
         print_json({"ok": False, "error": "story file not found", "prefix": norm.prefix})
         return 1

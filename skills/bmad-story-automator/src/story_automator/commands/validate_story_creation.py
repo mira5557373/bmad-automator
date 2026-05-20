@@ -13,8 +13,13 @@ def cmd_validate_story_creation(args: list[str]) -> int:
     action = args[0] if args else ""
     rest = args[1:] if args else []
     project_root = os.environ.get("PROJECT_ROOT", os.getcwd())
-    default_artifacts_dir = implementation_artifacts_dir(project_root)
-    artifacts_dir = default_artifacts_dir
+    default_artifacts_dir: Path | None = None
+
+    def resolve_default_artifacts_dir() -> Path:
+        nonlocal default_artifacts_dir
+        if default_artifacts_dir is None:
+            default_artifacts_dir = implementation_artifacts_dir(project_root)
+        return default_artifacts_dir
 
     def story_prefix(story_id: str) -> str:
         return story_id.replace(".", "-")
@@ -115,17 +120,23 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             print("Usage: validate-story-creation count <story_id>", file=os.sys.stderr)
             return 1
         story_id = rest[0]
-        for idx, arg in enumerate(rest[1:]):
-            if arg == "--artifacts-dir" and idx + 2 < len(rest):
-                artifacts_dir = Path(rest[idx + 2])
-        print(count_files(story_id, artifacts_dir))
-        return 0
+        try:
+            artifacts_dir = resolve_default_artifacts_dir()
+            for idx, arg in enumerate(rest[1:]):
+                if arg == "--artifacts-dir" and idx + 2 < len(rest):
+                    artifacts_dir = Path(rest[idx + 2])
+            print(count_files(story_id, artifacts_dir))
+            return 0
+        except ValueError as exc:
+            print(str(exc), file=os.sys.stderr)
+            return 1
 
     if action == "check":
         if not rest:
             return print_check_error("", reason="story_id required")
         story_id = rest[0]
         state_file = ""
+        artifacts_dir: Path | None = None
         before_value = after_value = None
         before_seen = after_seen = False
         idx = 1
@@ -173,7 +184,11 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                 after_count = int(after_value or "")
             except ValueError:
                 return print_check_error(story_id, reason="before/after must be integers")
-        if artifacts_dir != default_artifacts_dir:
+        try:
+            default_artifacts_dir = resolve_default_artifacts_dir()
+        except ValueError as exc:
+            return print_check_error(story_id, reason=str(exc), before_count=before_count, after_count=after_count)
+        if artifacts_dir is not None and artifacts_dir != default_artifacts_dir:
             return print_check_error(
                 story_id,
                 reason="validate-story-creation check no longer supports --artifacts-dir overrides; use count/list for custom folders",
@@ -193,6 +208,11 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             print("Usage: validate-story-creation list <story_id>", file=os.sys.stderr)
             return 1
         story_id = rest[0]
+        try:
+            artifacts_dir = resolve_default_artifacts_dir()
+        except ValueError as exc:
+            print(str(exc), file=os.sys.stderr)
+            return 1
         print(f"Story files matching {story_prefix(story_id)}-*.md:")
         matches = list(artifacts_dir.glob(f"{story_prefix(story_id)}-*.md"))
         if not matches:

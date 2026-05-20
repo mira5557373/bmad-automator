@@ -213,11 +213,15 @@ def _render_step_prompt(contract: dict[str, object], story_id: str, story_prefix
     files_obj = assets_cfg.get("files")
     assets: dict[str, object] = files_obj if isinstance(files_obj, dict) else {}
     template = read_text(str(prompt_cfg.get("templatePath") or ""))
+    try:
+        artifacts_relpath = implementation_artifacts_relpath(get_project_root())
+    except (OSError, ValueError) as exc:
+        raise PolicyError(str(exc)) from exc
     replacements = {
         "{{story_id}}": story_id,
         "{{story_prefix}}": story_prefix,
         "{{label}}": str(contract.get("label") or ""),
-        "{{implementation_artifacts}}": implementation_artifacts_relpath(get_project_root()),
+        "{{implementation_artifacts}}": artifacts_relpath,
         "{{skill_line}}": _prompt_line("READ this skill first", str(assets.get("skill") or "")),
         "{{workflow_line}}": _prompt_line("READ this workflow file next", str(assets.get("workflow") or "")),
         "{{instructions_line}}": _prompt_line("Then read", str(assets.get("instructions") or "")),
