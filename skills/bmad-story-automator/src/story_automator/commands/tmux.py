@@ -5,6 +5,7 @@ import shlex
 import time
 from pathlib import Path
 
+from story_automator.core.artifact_paths import implementation_artifacts_relpath
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
@@ -205,13 +206,18 @@ def _build_cmd(args: list[str]) -> int:
 
 
 def _render_step_prompt(contract: dict[str, object], story_id: str, story_prefix: str, extra_instruction: str) -> str:
-    prompt_cfg = contract.get("prompt") or {}
-    assets = (contract.get("assets") or {}).get("files") or {}
+    prompt_obj = contract.get("prompt")
+    prompt_cfg: dict[str, object] = prompt_obj if isinstance(prompt_obj, dict) else {}
+    assets_obj = contract.get("assets")
+    assets_cfg: dict[str, object] = assets_obj if isinstance(assets_obj, dict) else {}
+    files_obj = assets_cfg.get("files")
+    assets: dict[str, object] = files_obj if isinstance(files_obj, dict) else {}
     template = read_text(str(prompt_cfg.get("templatePath") or ""))
     replacements = {
         "{{story_id}}": story_id,
         "{{story_prefix}}": story_prefix,
         "{{label}}": str(contract.get("label") or ""),
+        "{{implementation_artifacts}}": implementation_artifacts_relpath(get_project_root()),
         "{{skill_line}}": _prompt_line("READ this skill first", str(assets.get("skill") or "")),
         "{{workflow_line}}": _prompt_line("READ this workflow file next", str(assets.get("workflow") or "")),
         "{{instructions_line}}": _prompt_line("Then read", str(assets.get("instructions") or "")),
@@ -267,7 +273,7 @@ def _status_check(args: list[str], codex: bool) -> int:
             continue
         idx += 1
     status = session_status(session, full=full, codex=codex, project_root=project_root, mode=runtime_mode())
-    print(",".join([status["status"], str(status["todos_done"]), str(status["todos_total"]), status["active_task"], str(status["wait_estimate"]), status["session_state"]]))
+    print(",".join(str(status[key]) for key in ["status", "todos_done", "todos_total", "active_task", "wait_estimate", "session_state"]))
     return 0 if codex else (0 if status["status"] != "error" else 1)
 
 
@@ -338,7 +344,7 @@ def cmd_monitor_session(args: list[str]) -> int:
     start = time.time()
     last_done = 0
     last_total = 0
-    for _poll in range(1, max_polls + 1):
+    for _ in range(1, max_polls + 1):
         if time.time() - start >= timeout_minutes * 60:
             return _emit_monitor(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
         status = session_status(session, full=False, codex=agent == "codex", project_root=project_root, mode=runtime_mode())

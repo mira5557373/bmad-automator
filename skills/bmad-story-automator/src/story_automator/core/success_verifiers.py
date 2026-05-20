@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .artifact_paths import DEFAULT_OUTPUT_FOLDER, IMPLEMENTATION_ARTIFACTS, implementation_artifacts_dir, implementation_artifacts_glob
 from .frontmatter import find_frontmatter_value_case
 from .runtime_policy import PolicyError, load_runtime_policy, step_contract
 from .sprint import sprint_status_epic, sprint_status_get
@@ -70,7 +71,7 @@ def create_story_artifact(
     if norm is None:
         return {"verified": False, "reason": "could_not_normalize_key", "input": story_key}
     config = _success_config(contract)
-    raw_glob = str(config.get("glob") or "_bmad-output/implementation-artifacts/{story_prefix}-*.md")
+    raw_glob = str(config.get("glob") or implementation_artifacts_glob(project_root, "{story_prefix}-*.md"))
     expected = _parse_int(config.get("expectedMatches", 1), "success.config.expectedMatches", minimum=0)
     pattern = _format_story_pattern(raw_glob, norm)
     root, safe_pattern = _resolve_artifact_glob(project_root, pattern)
@@ -173,26 +174,29 @@ def _format_story_pattern(pattern: str, story) -> str:
 
 
 def _story_artifact_path(project_root: str, story_prefix: str) -> Path | None:
-    matches = sorted((Path(project_root) / "_bmad-output" / "implementation-artifacts").glob(f"{story_prefix}-*.md"))
+    matches = sorted(implementation_artifacts_dir(project_root).glob(f"{story_prefix}-*.md"))
     return matches[0] if matches else None
 
 
 def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:
     root = Path(project_root).resolve()
-    artifacts_root = (root / "_bmad-output" / "implementation-artifacts").resolve()
+    artifacts_root = implementation_artifacts_dir(project_root).resolve()
+    legacy_artifacts_root = (root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS).resolve()
     raw = Path(pattern)
     if raw.is_absolute():
-        raise PolicyError("success.config.glob must be relative to _bmad-output/implementation-artifacts")
+        raise PolicyError("success.config.glob must be relative to implementation artifacts")
     resolved = (root / raw).resolve()
     try:
-        relative = resolved.relative_to(root)
+        resolved.relative_to(root)
     except ValueError as exc:
         raise PolicyError("success.config.glob escapes project root") from exc
-    try:
-        resolved.relative_to(artifacts_root)
-    except ValueError as exc:
-        raise PolicyError("success.config.glob must stay within _bmad-output/implementation-artifacts") from exc
-    return root, str(relative)
+    for allowed_root in (artifacts_root, legacy_artifacts_root):
+        try:
+            relative = resolved.relative_to(allowed_root)
+        except ValueError:
+            continue
+        return artifacts_root, str(relative)
+    raise PolicyError("success.config.glob must stay within _bmad-output/implementation-artifacts or resolved implementation artifacts")
 
 
 def _load_review_contract(project_root: str, contract: dict[str, Any]) -> dict[str, Any]:

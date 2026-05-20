@@ -8,7 +8,7 @@ from story_automator.core.frontmatter import extract_frontmatter, find_frontmatt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import normalize_story_key
-from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, trim_lines, unquote_scalar
+from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -363,32 +363,10 @@ def _load_agent_config_from_state(state_file: str) -> dict:
 
 
 def _parse_scalar(raw: str) -> object:
-    value = unquote_scalar(_strip_inline_yaml_comment(raw))
+    value = unquote_scalar(strip_inline_yaml_comment(raw))
     lower = value.lower()
     if lower == "false":
         return False
     if lower == "true":
         return True
     return value
-
-
-def _strip_inline_yaml_comment(raw: str) -> str:
-    text = raw.strip()
-    in_quote = ""
-    escaped = False
-    for idx, char in enumerate(text):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\" and in_quote == '"':
-            escaped = True
-            continue
-        if char in {'"', "'"}:
-            if in_quote == char:
-                in_quote = ""
-            elif not in_quote:
-                in_quote = char
-            continue
-        if char == "#" and not in_quote and (idx == 0 or text[idx - 1].isspace()):
-            return text[:idx].rstrip()
-    return text

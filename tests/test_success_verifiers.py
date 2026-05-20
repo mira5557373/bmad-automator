@@ -11,10 +11,12 @@ from unittest.mock import patch
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_build_state_doc
-from story_automator.commands.tmux import _verify_monitor_completion, cmd_monitor_session
+from story_automator.commands.tmux import _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
 from story_automator.commands.validate_story_creation import cmd_validate_story_creation
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_policy import PolicyError
+from story_automator.core.sprint import sprint_status_get
+from story_automator.core.story_keys import normalize_story_key, sprint_status_file
 from story_automator.core.success_verifiers import create_story_artifact, epic_complete, review_completion
 
 
@@ -27,6 +29,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.project_root = Path(self.tmp.name)
         self.output_dir = self.project_root / "_bmad-output" / "story-automator"
         self.artifacts_dir = self.project_root / "_bmad-output" / "implementation-artifacts"
+        self.docs_artifacts_dir = self.project_root / "docs" / "bmad" / "implementation-artifacts"
         self._install_bundle()
         self._install_required_skills()
 
@@ -60,12 +63,99 @@ class SuccessVerifierTests(unittest.TestCase):
             )
 
     def test_create_story_artifact_rejects_absolute_glob(self) -> None:
-        with self.assertRaisesRegex(PolicyError, "success.config.glob must be relative to _bmad-output/implementation-artifacts"):
+        with self.assertRaisesRegex(PolicyError, "success.config.glob must be relative to implementation artifacts"):
             create_story_artifact(
                 project_root=str(self.project_root),
                 story_key="1.2",
                 contract={"config": {"glob": "/tmp/{story_prefix}-*.md", "expectedMatches": 1}},
             )
+
+    def test_config_implementation_artifacts_points_to_docs_bmad(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        self._write_docs_sprint_status("1-2-docs: done\n")
+
+        self.assertEqual(Path(sprint_status_file(str(self.project_root))), self.docs_artifacts_dir / "sprint-status.yaml")
+        self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-docs")
+        self.assertTrue(sprint_status_get(str(self.project_root), "1.2").done)
+
+    def test_config_preserves_hash_inside_quoted_artifacts_path(self) -> None:
+        self._write_bmad_config('implementation_artifacts: "docs/#draft/implementation-artifacts" # local folder\n')
+        artifacts_dir = self.project_root / "docs" / "#draft" / "implementation-artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        story = artifacts_dir / "1-2-docs.md"
+        story.write_text("---\nStatus: draft\nTitle: Story\n---\n", encoding="utf-8")
+        payload = create_story_artifact(project_root=str(self.project_root), story_key="1.2", contract={})
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["matches"], [str(story)])
+
+    def test_config_rejects_artifacts_path_outside_project(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        with self.assertRaisesRegex(ValueError, "BMAD config implementation_artifacts"):
+            create_story_artifact(project_root=str(self.project_root), story_key="1.2", contract={})
+
+    def test_config_output_folder_points_to_docs_bmad(self) -> None:
+        self._write_bmad_config("output_folder: docs/bmad\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        payload = create_story_artifact(project_root=str(self.project_root), story_key="1.2", contract={})
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["actualMatches"], 1)
+        self.assertEqual(payload["matches"], [str(self.docs_artifacts_dir / "1-2-docs.md")])
+
+    def test_config_supports_output_folder_placeholder(self) -> None:
+        self._write_bmad_config("output_folder: docs/bmad\nimplementation_artifacts: '{output_folder}/implementation-artifacts'\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        payload = create_story_artifact(project_root=str(self.project_root), story_key="1.2", contract={})
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["matches"], [str(self.docs_artifacts_dir / "1-2-docs.md")])
+
+    def test_docs_bmad_detected_without_config(self) -> None:
+        self._write_docs_story("1-2-docs", status="draft")
+        self._write_docs_sprint_status("1-2-docs: done\n")
+        self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-docs")
+        self.assertTrue(epic_complete(project_root=str(self.project_root), story_key="1.2")["verified"])
+
+    def test_legacy_artifacts_take_precedence_over_docs_bmad_without_config(self) -> None:
+        self._write_story("1-2-legacy", status="draft")
+        self._write_docs_story("1-2-docs", status="draft")
+        self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-legacy")
+
+    def test_legacy_root_sprint_status_fallback_is_preserved(self) -> None:
+        legacy = self.project_root / "_bmad-output" / "sprint-status.yaml"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("1-2-legacy: done\n", encoding="utf-8")
+        self.assertEqual(Path(sprint_status_file(str(self.project_root))), legacy)
+        self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-legacy")
+
+    def test_story_file_status_uses_resolved_artifacts_dir(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        story = self._write_docs_story("1-2-docs", status="ready")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["story-file-status", "1.2"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["file"], str(story))
+        self.assertEqual(payload["status"], "ready")
+
+    def test_validate_story_creation_count_uses_resolved_artifacts_dir(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["count", "1.2"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "1")
+
+    def test_step_prompt_uses_resolved_artifacts_dir(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        template = self.project_root / "prompt.md"
+        template.write_text("Story file: `{{implementation_artifacts}}/{{story_prefix}}-*.md`", encoding="utf-8")
+        with patch_env(self.project_root):
+            prompt = _render_step_prompt({"prompt": {"templatePath": str(template)}, "assets": {"files": {}}}, "1.2", "1-2", "")
+        self.assertIn("docs/bmad/implementation-artifacts/1-2-*.md", prompt)
+        self.assertNotIn("_bmad-output/implementation-artifacts", prompt)
 
     def test_review_completion_uses_contract_done_values(self) -> None:
         self._write_story("1-2-example", status="approved")
@@ -246,7 +336,7 @@ class SuccessVerifierTests(unittest.TestCase):
         calls: list[dict[str, object]] = []
 
         def fake_session_status(*args: object, **kwargs: object) -> dict[str, object]:
-            calls.append(kwargs)
+            calls.append({"args": args, **kwargs})
             return {"active_task": "/tmp/session.txt"}
 
         stdout = io.StringIO()
@@ -709,9 +799,24 @@ class SuccessVerifierTests(unittest.TestCase):
         path.write_text(f"---\nStatus: {status}\nTitle: Story\n---\n", encoding="utf-8")
         return path
 
+    def _write_docs_story(self, stem: str, *, status: str) -> Path:
+        self.docs_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        path = self.docs_artifacts_dir / f"{stem}.md"
+        path.write_text(f"---\nStatus: {status}\nTitle: Story\n---\n", encoding="utf-8")
+        return path
+
     def _write_sprint_status(self, content: str) -> None:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         (self.artifacts_dir / "sprint-status.yaml").write_text(content, encoding="utf-8")
+
+    def _write_docs_sprint_status(self, content: str) -> None:
+        self.docs_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (self.docs_artifacts_dir / "sprint-status.yaml").write_text(content, encoding="utf-8")
+
+    def _write_bmad_config(self, content: str) -> None:
+        config_dir = self.project_root / "_bmad" / "bmm"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "config.yaml").write_text(content, encoding="utf-8")
 
     def _write_review_contract(self, payload: dict[str, object]) -> Path:
         path = self.project_root / "review-contract.json"
@@ -739,7 +844,7 @@ class patch_env:
             self.previous[key] = os.environ.get(key)
             os.environ[key] = value
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, *_: object) -> None:
         import os
 
         for key, value in self.previous.items():

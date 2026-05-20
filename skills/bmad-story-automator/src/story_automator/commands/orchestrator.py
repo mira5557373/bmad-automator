@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from story_automator.core.artifact_paths import implementation_artifacts_dir
 from story_automator.core.frontmatter import (
     extract_last_action,
     find_frontmatter_value,
@@ -404,7 +405,7 @@ def _story_file_status(args: list[str]) -> int:
     if norm is None:
         print_json({"ok": False, "error": "could not normalize story key", "input": args[0]})
         return 1
-    matches = sorted((Path(get_project_root()) / "_bmad-output" / "implementation-artifacts").glob(f"{norm.prefix}-*.md"))
+    matches = sorted(implementation_artifacts_dir(get_project_root()).glob(f"{norm.prefix}-*.md"))
     if not matches:
         print_json({"ok": False, "error": "story file not found", "prefix": norm.prefix})
         return 1

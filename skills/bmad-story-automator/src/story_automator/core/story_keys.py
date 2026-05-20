@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
+from .artifact_paths import implementation_artifacts_dir, sprint_status_path
 from .utils import file_exists, read_text
 
 
@@ -15,13 +15,7 @@ class StoryKey:
 
 
 def sprint_status_file(project_root: str) -> str:
-    preferred = Path(project_root) / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
-    if preferred.is_file():
-        return str(preferred)
-    legacy = Path(project_root) / "_bmad-output" / "sprint-status.yaml"
-    if legacy.is_file():
-        return str(legacy)
-    return str(preferred)
+    return str(sprint_status_path(project_root))
 
 
 def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
@@ -40,7 +34,7 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
     else:
         return None
 
-    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    artifacts = implementation_artifacts_dir(project_root)
     if not key:
         matches = sorted(artifacts.glob(f"{prefix}-*.md"))
         if matches:

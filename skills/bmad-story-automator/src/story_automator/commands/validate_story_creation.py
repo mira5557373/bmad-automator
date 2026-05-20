@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from story_automator.core.artifact_paths import implementation_artifacts_dir
 from story_automator.core.runtime_policy import PolicyError
 from story_automator.core.success_verifiers import create_story_artifact, resolve_success_contract
 
@@ -12,7 +13,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
     action = args[0] if args else ""
     rest = args[1:] if args else []
     project_root = os.environ.get("PROJECT_ROOT", os.getcwd())
-    default_artifacts_dir = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    default_artifacts_dir = implementation_artifacts_dir(project_root)
     artifacts_dir = default_artifacts_dir
 
     def story_prefix(story_id: str) -> str:
@@ -28,7 +29,8 @@ def cmd_validate_story_creation(args: list[str]) -> int:
     def expected_matches(payload: dict[str, object] | None) -> int:
         if payload is None:
             return 1
-        return int(payload.get("expectedMatches", 1))
+        value = payload.get("expectedMatches", 1)
+        return value if isinstance(value, int) else 1
 
     def count_reason(created: int, expected: int) -> str:
         if created == expected:
@@ -51,7 +53,8 @@ def cmd_validate_story_creation(args: list[str]) -> int:
         reason_override: str | None = None,
     ) -> dict[str, object]:
         expected = expected_matches(payload)
-        created = int(payload.get("actualMatches", 0)) if payload is not None else 0
+        actual = payload.get("actualMatches", 0) if payload is not None else 0
+        created = actual if isinstance(actual, int) else 0
         valid = bool(payload.get("verified")) if payload is not None else False
         reason = count_reason(created, expected)
         if before_count is not None and after_count is not None:
