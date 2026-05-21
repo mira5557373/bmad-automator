@@ -206,6 +206,34 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout.getvalue().strip(), "1")
 
+    def test_validate_story_creation_count_rejects_missing_artifacts_dir_value(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_validate_story_creation(["count", "1.2", "--artifacts-dir"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue().strip(), "--artifacts-dir requires a value")
+
+    def test_validate_story_creation_count_rejects_empty_artifacts_dir_value(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_validate_story_creation(["count", "1.2", "--artifacts-dir", ""])
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue().strip(), "--artifacts-dir requires a value")
+
+    def test_validate_story_creation_count_rejects_flag_like_artifacts_dir_value(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_validate_story_creation(["count", "1.2", "--artifacts-dir", "--state-file"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue().strip(), "--artifacts-dir requires a value")
+
+    def test_validate_story_creation_count_rejects_unknown_argument(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_validate_story_creation(["count", "1.2", "--unknown"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue().strip(), "unsupported count argument: --unknown")
+
     def test_validate_story_creation_prefix_skips_invalid_artifacts_config(self) -> None:
         self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
         stdout = io.StringIO()
@@ -473,6 +501,18 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["source"], "artifact_glob")
 
+    def test_verify_step_create_uses_policy_with_resolved_artifacts_dir(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        self._write_docs_sprint_status("1-2-docs: done\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["verify-step", "create", "1.2"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["matches"], [str(self.docs_artifacts_dir / "1-2-docs.md")])
+
     def test_verify_step_create_uses_pinned_snapshot(self) -> None:
         self._write_story("1-2-example", status="draft")
         state_file = self._build_state()
@@ -505,6 +545,18 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["created_count"], 1)
         self.assertEqual(payload["expected"], 1)
+
+    def test_validate_story_creation_check_uses_policy_with_resolved_artifacts_dir(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-2-docs", status="draft")
+        self._write_docs_sprint_status("1-2-docs: done\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["check", "1.2"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["matches"], [str(self.docs_artifacts_dir / "1-2-docs.md")])
 
     def test_validate_story_creation_check_uses_pinned_snapshot(self) -> None:
         self._write_story("1-2-example", status="draft")

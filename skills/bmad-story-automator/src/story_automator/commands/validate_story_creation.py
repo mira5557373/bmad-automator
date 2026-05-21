@@ -122,9 +122,16 @@ def cmd_validate_story_creation(args: list[str]) -> int:
         story_id = rest[0]
         try:
             artifacts_dir: Path | None = None
-            for idx, arg in enumerate(rest[1:]):
-                if arg == "--artifacts-dir" and idx + 2 < len(rest):
-                    artifacts_dir = Path(rest[idx + 2])
+            idx = 1
+            while idx < len(rest):
+                arg = rest[idx]
+                if arg == "--artifacts-dir":
+                    if idx + 1 >= len(rest) or not rest[idx + 1] or rest[idx + 1].startswith("--"):
+                        raise ValueError("--artifacts-dir requires a value")
+                    artifacts_dir = Path(rest[idx + 1])
+                    idx += 2
+                    continue
+                raise ValueError(f"unsupported count argument: {arg}")
             if artifacts_dir is None:
                 artifacts_dir = resolve_default_artifacts_dir()
             print(count_files(story_id, artifacts_dir))
