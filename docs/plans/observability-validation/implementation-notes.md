@@ -28,6 +28,26 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-01-diagnostics-contract
+
+### Context
+
+- Phase 01 adds the shared diagnostics contract without wiring it into command outputs.
+
+### Decision, Change, Or Tradeoff
+
+- `DiagnosticIssue` and `DiagnosticEvent` are frozen dataclasses so later phases can pass stable typed values without side effects.
+- Serialized issue keys are stable and always include `type`, `field`, `expected`, `actual`, `message`, `recovery`, `code`, `severity`, and `source`.
+- `actual` is redacted during serialization; `expected` is converted to JSON-safe values without redaction so validators can explain the contract.
+- Redaction masks secret-like dict keys and inline assignments, shortens absolute paths to `<path:name>`, truncates long strings, and caps nested collections.
+- `DiagnosticEvent` is only a structured payload helper in this phase; it does not emit standalone stdout or log lines.
+- Added `tests/__init__.py` so the Phase 01 focused command `python3 -m unittest tests.test_diagnostics` works with the repository test layout.
+
+### User Impact
+
+- No CLI behavior changes in Phase 01.
+- Later phases can add `structuredIssues` from the same helper while preserving legacy fields.
+
 ## 2026-05-21 - phase-00-baseline
 
 ### Context

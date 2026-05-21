@@ -12,15 +12,15 @@
 
 ## Phase 01 - Diagnostics Contract
 
-- [ ] Read Phase 00 handoff before starting.
-- [ ] Add `core/diagnostics.py`.
-- [ ] Add `DiagnosticIssue` with `severity` and `source`.
-- [ ] Add `DiagnosticEvent`.
-- [ ] Add serialization, legacy-message, exception, and redaction helpers.
-- [ ] Add `tests/test_diagnostics.py`.
-- [ ] Preserve all command output shapes.
-- [ ] Update implementation notes with diagnostics shape decisions.
-- [ ] Append Phase 01 handoff entry.
+- [x] Read Phase 00 handoff before starting.
+- [x] Add `core/diagnostics.py`.
+- [x] Add `DiagnosticIssue` with `severity` and `source`.
+- [x] Add `DiagnosticEvent`.
+- [x] Add serialization, legacy-message, exception, and redaction helpers.
+- [x] Add `tests/test_diagnostics.py`.
+- [x] Preserve all command output shapes.
+- [x] Update implementation notes with diagnostics shape decisions.
+- [x] Append Phase 01 handoff entry.
 
 ## Phase 02 - State Validation And Transitions
 

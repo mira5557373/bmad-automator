@@ -47,6 +47,65 @@ exact command
 
 ## Phase Entries
 
+## Phase 01 - 2026-05-21 - Codex
+
+### Summary
+
+- Added the reusable diagnostics contract and tests.
+- No command modules import diagnostics yet, so CLI output shapes are unchanged in this phase.
+
+### Commands Run
+
+```bash
+sed -n '1,220p' docs/plans/observability-validation/01-diagnostics-contract.md
+sed -n '1,130p' docs/plans/observability-validation/handoff-log.md
+sed -n '1,130p' docs/plans/observability-validation/TODO.md
+rg "issue|diagnostic|structuredIssues|redact|Exception|error" skills/bmad-story-automator/src/story_automator tests -n
+sed -n '1,220p' skills/bmad-story-automator/src/story_automator/core/utils.py
+sed -n '1,220p' skills/bmad-story-automator/src/story_automator/core/runtime_policy.py
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+```
+
+### Results
+
+- Added `skills/bmad-story-automator/src/story_automator/core/diagnostics.py`.
+- Added `tests/test_diagnostics.py`.
+- Added `tests/__init__.py` so `python3 -m unittest tests.test_diagnostics` resolves the focused test module.
+- Focused diagnostics tests: `Ran 11 tests in 0.000s`, `OK`.
+- Full Python suite: `Ran 218 tests in 22.954s`, `OK`.
+
+### Decisions And Assumptions
+
+- Diagnostic issue serialized shape:
+  - `type`
+  - `field`
+  - `expected`
+  - `actual`
+  - `message`
+  - `recovery`
+  - `code`
+  - `severity`
+  - `source`
+- `DiagnosticIssue` defaults optional text fields to `""`, `severity` to `error`, and `source` to `""`.
+- `DiagnosticEvent` serialized shape: `name`, `source`, `message`, `severity`, `issues`, `context`.
+- Redaction applies to `actual` and event `context`, not to `expected`.
+- Redaction masks secret-like dict keys and inline assignments, rewrites absolute paths to `<path:name>`, truncates long strings after 160 chars, and caps collections after 6 items.
+- Phase 01 intentionally does not add `structuredIssues` to any command output. Phase 02 owns `validate-state` integration.
+
+### Blockers Or Risks
+
+- No Phase 01 blocker.
+- Risk: path redaction is intentionally conservative and may redact path-looking substrings in free-form diagnostic text. Prefer passing raw values in `actual` and user-facing details in `message`.
+
+### Next Phase Notes
+
+- Start Phase 02: state validation and transitions.
+- Recommended first command: `sed -n '1,220p' docs/plans/observability-validation/02-state-validation-and-transitions.md`.
+- Read `skills/bmad-story-automator/src/story_automator/commands/state.py` and `skills/bmad-story-automator/src/story_automator/core/sprint.py`.
+- Add `core/state_validation.py`, preserve legacy `issues: list[str]`, and add `structuredIssues` plus `issueCount`.
+- Guard `state-update` status transitions without changing non-status updates.
+
 ## Phase 00 - 2026-05-21 - Codex
 
 ### Summary
