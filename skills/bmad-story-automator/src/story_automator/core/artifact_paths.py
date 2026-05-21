@@ -16,7 +16,7 @@ def implementation_artifacts_dir(project_root: str | Path) -> Path:
         return configured
     legacy = root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS
     docs_bmad = root / DOCS_BMAD_ARTIFACTS
-    if not legacy.exists() and not (root / DEFAULT_OUTPUT_FOLDER / "sprint-status.yaml").is_file():
+    if not _legacy_artifacts_present(root, legacy):
         if docs_bmad.is_dir() or (docs_bmad / "sprint-status.yaml").is_file():
             return docs_bmad
     return legacy
@@ -51,11 +51,21 @@ def _configured_artifacts_dir(project_root: Path) -> Path | None:
         artifacts = f"{{output_folder}}/{IMPLEMENTATION_ARTIFACTS}"
     if not artifacts:
         return None
+    artifacts = artifacts.replace("{project-root}", ".")
+    output_folder = output_folder.replace("{project-root}", ".")
     artifacts = artifacts.replace("{output_folder}", output_folder)
     path = _project_relative_path(project_root, artifacts)
     if path is None:
         raise ValueError("BMAD config implementation_artifacts must stay within project root")
     return path
+
+
+def _legacy_artifacts_present(project_root: Path, legacy: Path) -> bool:
+    if (project_root / DEFAULT_OUTPUT_FOLDER / "sprint-status.yaml").is_file():
+        return True
+    if not legacy.is_dir():
+        return False
+    return any(legacy.glob("*.md")) or (legacy / "sprint-status.yaml").is_file()
 
 
 def _read_bmad_config(path: Path) -> dict[str, str]:

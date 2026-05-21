@@ -109,11 +109,59 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["matches"], [str(self.docs_artifacts_dir / "1-2-docs.md")])
 
+    def test_config_supports_project_root_placeholder_in_artifacts_path(self) -> None:
+        self._write_bmad_config('implementation_artifacts: "{project-root}/_bmad-output/implementation-artifacts"\n')
+        story = self._write_story("1-2-real", status="ready")
+
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["story-file-status", "1.2"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["file"], str(story))
+        self.assertEqual(payload["status"], "ready")
+
     def test_docs_bmad_detected_without_config(self) -> None:
         self._write_docs_story("1-2-docs", status="draft")
         self._write_docs_sprint_status("1-2-docs: done\n")
         self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-docs")
         self.assertTrue(epic_complete(project_root=str(self.project_root), story_key="1.2")["verified"])
+
+    def test_empty_legacy_dir_does_not_block_docs_fallback(self) -> None:
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self._write_docs_story("1-2-docs", status="draft")
+        self._write_docs_sprint_status("1-2-docs: done\n")
+
+        self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-docs")
+        self.assertTrue(epic_complete(project_root=str(self.project_root), story_key="1.2")["verified"])
+
+    def test_validate_story_creation_count_override_skips_invalid_default_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        custom = self.project_root / "custom-artifacts"
+        custom.mkdir(parents=True, exist_ok=True)
+        (custom / "1-2-custom.md").write_text("---\nStatus: draft\nTitle: Story\n---\n", encoding="utf-8")
+
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["count", "1.2", "--artifacts-dir", str(custom)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "1")
+
+    def test_create_story_artifact_uses_legacy_root_when_glob_matches_legacy_story(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        legacy_story = self._write_story("1-2-legacy", status="draft")
+
+        payload = create_story_artifact(
+            project_root=str(self.project_root),
+            story_key="1.2",
+            contract={"config": {"glob": "_bmad-output/implementation-artifacts/{story_prefix}-*.md", "expectedMatches": 1}},
+        )
+
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["matches"], [str(legacy_story)])
 
     def test_legacy_artifacts_take_precedence_over_docs_bmad_without_config(self) -> None:
         self._write_story("1-2-legacy", status="draft")

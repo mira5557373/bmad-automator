@@ -195,7 +195,7 @@ def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:
             relative = resolved.relative_to(allowed_root)
         except ValueError:
             continue
-        return artifacts_root, str(relative)
+        return allowed_root, str(relative)
     raise PolicyError("success.config.glob must stay within _bmad-output/implementation-artifacts or resolved implementation artifacts")
 
 

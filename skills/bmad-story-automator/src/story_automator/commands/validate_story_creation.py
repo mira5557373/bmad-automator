@@ -121,10 +121,12 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             return 1
         story_id = rest[0]
         try:
-            artifacts_dir = resolve_default_artifacts_dir()
+            artifacts_dir: Path | None = None
             for idx, arg in enumerate(rest[1:]):
                 if arg == "--artifacts-dir" and idx + 2 < len(rest):
                     artifacts_dir = Path(rest[idx + 2])
+            if artifacts_dir is None:
+                artifacts_dir = resolve_default_artifacts_dir()
             print(count_files(story_id, artifacts_dir))
             return 0
         except ValueError as exc:
