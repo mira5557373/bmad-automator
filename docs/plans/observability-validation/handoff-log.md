@@ -47,6 +47,71 @@ exact command
 
 ## Phase Entries
 
+## Phase 04 - 2026-05-21 - Codex
+
+### Summary
+
+- Added complexity and agents-plan payload validators.
+- Wired `agents-build` and `agents-resolve` to validate JSON boundaries before consuming payloads.
+- Reused `core.agent_config.build_agents_file` and `core.agent_config.resolve_agents` to reduce duplicated command behavior.
+
+### Commands Run
+
+```bash
+sed -n '1,240p' docs/plans/observability-validation/04-agent-complexity-and-story-boundaries.md
+sed -n '1,280p' skills/bmad-story-automator/src/story_automator/commands/orchestrator_epic_agents.py
+sed -n '1,260p' skills/bmad-story-automator/src/story_automator/core/agent_config.py
+rg "agents-build|agents-resolve|retro-agent|complexity|agent_config|agentConfig|parse-story|parse-epic" tests -n
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_agent_plan
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_retro_agent tests.test_runtime_layout
+python3 -m compileall -q skills/bmad-story-automator/src/story_automator
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_state_policy_metadata tests.test_replacement_unicode
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+git diff --check
+```
+
+### Results
+
+- Added `skills/bmad-story-automator/src/story_automator/core/agent_plan.py`.
+- Added `tests/test_agent_plan.py`.
+- Updated `skills/bmad-story-automator/src/story_automator/commands/orchestrator_epic_agents.py`.
+- Focused agent-plan tests: `Ran 7 tests in 0.006s`, `OK`.
+- Retro/runtime tests: `Ran 26 tests in 0.922s`, `OK`.
+- Legacy state/unicode tests: `Ran 41 tests in 2.306s`, `OK`.
+- Compile check: passed.
+- Full Python suite: `Ran 233 tests in 24.200s`, `OK`.
+
+### Decisions And Assumptions
+
+- Complexity payload rules:
+  - root object required
+  - `stories` array required
+  - each story requires non-empty string `storyId`
+  - missing complexity level defaults to `medium`
+  - present complexity level must normalize to `low`, `medium`, or `high`
+  - unknown fields are allowed
+- Agents-plan payload rules:
+  - root object required
+  - `stories` array required
+  - each story requires non-empty string `storyId`
+  - each story requires `create`, `dev`, `auto`, and `review` task selections
+  - each task selection requires non-empty string `primary`
+  - `fallback` may be `false` or a string
+  - unknown fields are allowed
+- Story/epic parser output shape was preserved unchanged. `StoryKey` and `SprintStatus` remain the typed seams.
+
+### Blockers Or Risks
+
+- No Phase 04 blocker.
+- Remaining loose payload: `parse_agent_config` in the command module still returns legacy dicts for older tests/imports, while command build/resolve paths now use core helpers.
+
+### Next Phase Notes
+
+- Start Phase 05: session runtime diagnostics.
+- Recommended first command: `sed -n '1,220p' docs/plans/observability-validation/05-session-runtime-diagnostics.md`.
+- Read `skills/bmad-story-automator/src/story_automator/core/tmux_runtime.py`, `skills/bmad-story-automator/src/story_automator/commands/tmux.py`, and session-related tests.
+- Preserve CSV outputs exactly.
+
 ## Phase 03 - 2026-05-21 - Codex
 
 ### Summary

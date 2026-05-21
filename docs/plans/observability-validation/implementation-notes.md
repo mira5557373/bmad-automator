@@ -28,6 +28,27 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-04-agent-complexity-and-story-boundaries
+
+### Context
+
+- Phase 04 hardens agent complexity and agents-plan file boundaries before command handlers consume raw JSON.
+
+### Decision, Change, Or Tradeoff
+
+- Added `core/agent_plan.py` for complexity and agents-plan validators plus file loaders.
+- `agents-build` now validates the complexity payload before delegating plan generation to `core.agent_config.build_agents_file`.
+- `agents-resolve` now validates the agents-plan payload before delegating resolution to `core.agent_config.resolve_agents`.
+- Successful `agents-build`, `agents-resolve`, and `retro-agent` output shapes are preserved.
+- Unknown fields in complexity and agents-plan payloads remain allowed unless they break required boundary contracts.
+- Fallback normalization and legacy `retro` overrides stay in existing agent config helpers.
+- Story/epic parser output was not changed; `StoryKey` and `SprintStatus` remain the typed seams for this phase to avoid unnecessary CLI JSON churn.
+
+### User Impact
+
+- Malformed complexity and agent-plan JSON now fail early with `structuredIssues`.
+- Existing valid agent selection flows keep the same response shapes.
+
 ## 2026-05-21 - phase-03-parser-and-contract-boundaries
 
 ### Context

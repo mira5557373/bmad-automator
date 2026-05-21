@@ -50,16 +50,16 @@
 
 ## Phase 04 - Agent Complexity And Story Boundaries
 
-- [ ] Read Phase 03 handoff before starting.
-- [ ] Add `core/agent_plan.py`.
-- [ ] Move duplicated agent config behavior toward core helper.
-- [ ] Add complexity JSON validator.
-- [ ] Add agents plan JSON validator.
-- [ ] Preserve fallback normalization and retro overrides.
-- [ ] Strengthen story/epic parse seams while preserving output shape.
-- [ ] Add `tests/test_agent_plan.py`.
-- [ ] Update implementation notes with remaining loose payloads and risks.
-- [ ] Append Phase 04 handoff entry.
+- [x] Read Phase 03 handoff before starting.
+- [x] Add `core/agent_plan.py`.
+- [x] Move duplicated agent config behavior toward core helper.
+- [x] Add complexity JSON validator.
+- [x] Add agents plan JSON validator.
+- [x] Preserve fallback normalization and retro overrides.
+- [x] Strengthen story/epic parse seams while preserving output shape.
+- [x] Add `tests/test_agent_plan.py`.
+- [x] Update implementation notes with remaining loose payloads and risks.
+- [x] Append Phase 04 handoff entry.
 
 ## Phase 05 - Session Runtime Diagnostics
 

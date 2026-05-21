@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 
 from story_automator.core.artifact_paths import implementation_artifacts_dir
+from story_automator.core.agent_config import build_agents_file, resolve_agents
+from story_automator.core.agent_plan import agent_plan_error, load_agents_plan, load_complexity_payload
+from story_automator.core.diagnostics import issues_from_exception
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
@@ -135,29 +138,16 @@ def agents_build_action(args: list[str]) -> int:
     if not all(options.values()) or not file_exists(options["state-file"]) or not file_exists(options["complexity-file"]):
         print_json({"ok": False, "error": "missing_args" if not all(options.values()) else "file_not_found"})
         return 1
-    config = parse_agent_config(options["config-json"])
-    complexity = json.loads(read_text(options["complexity-file"]))
-    state_fields = parse_frontmatter(read_text(options["state-file"]))
-    stories = []
-    for story in complexity.get("stories", []):
-        level = str(story.get("complexity", {}).get("level", "medium")).lower() or "medium"
-        tasks = {}
-        for task in ("create", "dev", "auto", "review"):
-            primary, fallback, model = resolve_agent(config, level, task)
-            entry = {
-                "primary": primary,
-                "fallback": False if fallback == "false" else fallback,
-            }
-            if model:
-                entry["model"] = model
-            tasks[task] = entry
-        stories.append({"storyId": story["storyId"], "title": story.get("title", ""), "complexity": level, "tasks": tasks})
-    payload = {"version": "1.0.0", "stateFile": options["state-file"], "epic": state_fields.get("epic", ""), "epicName": state_fields.get("epicName", ""), "createdAt": iso_now(), "stories": stories}
-    header = f'---\nstateFile: "{payload["stateFile"]}"\ncreatedAt: "{payload["createdAt"]}"\n---\n\n# Agents Plan: {payload["epicName"]}\n\n'
-    content = header + "```json\n" + json.dumps(payload, indent=2) + "\n```\n"
-    Path(options["output"]).parent.mkdir(parents=True, exist_ok=True)
-    Path(options["output"]).write_text(content, encoding="utf-8")
-    print_json({"ok": True, "path": options["output"], "stories": len(stories)})
+    _, issues = load_complexity_payload(options["complexity-file"])
+    if issues:
+        print_json(agent_plan_error("invalid_complexity_json", issues))
+        return 1
+    try:
+        payload = build_agents_file(options["state-file"], options["complexity-file"], options["output"], options["config-json"])
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        print_json(agent_plan_error("invalid_agent_config", issues_from_exception(exc, source="agent-plan", field="config-json")))
+        return 1
+    print_json(payload)
     return 0
 
 
@@ -178,24 +168,13 @@ def agents_resolve_action(args: list[str]) -> int:
     if not agents_path or not file_exists(agents_path):
         print_json({"ok": False, "error": "agents_file_not_found"})
         return 1
-    text = read_text(agents_path)
-    match = re.search(r"(?s)```json\s*(\{.*?\})\s*```", text)
-    block = match.group(1) if match else text.strip()
-    payload = json.loads(block)
-    for story in payload.get("stories", []):
-        if story.get("storyId") != options["story"]:
-            continue
-        selection = story.get("tasks", {}).get(options["task"])
-        if selection is None:
-            print_json({"ok": False, "error": "task_not_found"})
-            return 1
-        fallback = selection.get("fallback", "")
-        fallback = "false" if fallback in {False, "false", "none", "null"} else fallback
-        model = _normalize_model_value(selection.get("model"))
-        print_json({"ok": True, "story": options["story"], "task": options["task"], "primary": selection.get("primary", ""), "fallback": fallback, "model": model, "complexity": story.get("complexity", "")})
-        return 0
-    print_json({"ok": False, "error": "story_not_found"})
-    return 1
+    _, issues = load_agents_plan(agents_path)
+    if issues:
+        print_json(agent_plan_error("invalid_agents_json", issues))
+        return 1
+    payload = resolve_agents(agents_path, options["story"], options["task"])
+    print_json(payload)
+    return 0 if bool(payload.get("ok")) else 1
 
 
 def retro_agent_action(args: list[str]) -> int:
