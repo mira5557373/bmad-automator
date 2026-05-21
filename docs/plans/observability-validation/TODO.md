@@ -63,16 +63,16 @@
 
 ## Phase 05 - Session Runtime Diagnostics
 
-- [ ] Read Phase 04 handoff before starting.
-- [ ] Add diagnostic-aware session-state loader.
-- [ ] Preserve legacy `load_session_state()` behavior where required.
-- [ ] Add `SessionStateLoadResult` or equivalent typed result.
-- [ ] Surface `structuredIssues` in `monitor-session --json` only when relevant.
-- [ ] Preserve CSV outputs exactly.
-- [ ] Update recovery/troubleshooting docs.
-- [ ] Add session diagnostics tests.
-- [ ] Update implementation notes with preserved compatibility behavior.
-- [ ] Append Phase 05 handoff entry.
+- [x] Read Phase 04 handoff before starting.
+- [x] Add diagnostic-aware session-state loader.
+- [x] Preserve legacy `load_session_state()` behavior where required.
+- [x] Add `SessionStateLoadResult` or equivalent typed result.
+- [x] Surface `structuredIssues` in `monitor-session --json` only when relevant.
+- [x] Preserve CSV outputs exactly.
+- [x] Update recovery/troubleshooting docs.
+- [x] Add session diagnostics tests.
+- [x] Update implementation notes with preserved compatibility behavior.
+- [x] Append Phase 05 handoff entry.
 
 ## Phase 06 - E2E Docs And Release Readiness
 

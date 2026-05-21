@@ -14,6 +14,7 @@ from story_automator.core.tmux_runtime import (
     agent_type,
     generate_session_name,
     heartbeat_check,
+    monitor_session_state_issue,
     runtime_mode,
     session_status,
     skill_prefix,
@@ -400,7 +401,8 @@ def cmd_monitor_session(args: list[str]) -> int:
             output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
             return _emit_monitor(json_output, "stuck", 0, 0, str(output), "never_active")
         if state == "not_found":
-            return _emit_monitor(json_output, "not_found", last_done, last_total, "", "session_gone")
+            issue = monitor_session_state_issue(session, project_root)
+            return _emit_monitor(json_output, "not_found", last_done, last_total, "", "session_gone", structured_issue=issue)
         time.sleep(min(180 if agent == "codex" else 120, max(5, int(status["wait_estimate"]))))
     output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
     return _emit_monitor(json_output, "timeout", last_done, last_total, str(output), "max_polls_exceeded")
@@ -415,18 +417,20 @@ def _emit_monitor(
     reason: str,
     *,
     output_verified: bool | None = None,
+    structured_issue: object | None = None,
 ) -> int:
     if json_output:
-        print_json(
-            {
-                "final_state": state,
-                "todos_done": done,
-                "todos_total": total,
-                "output_file": output_file,
-                "exit_reason": reason,
-                "output_verified": False if output_verified is None else output_verified,
-            }
-        )
+        payload = {
+            "final_state": state,
+            "todos_done": done,
+            "todos_total": total,
+            "output_file": output_file,
+            "exit_reason": reason,
+            "output_verified": False if output_verified is None else output_verified,
+        }
+        if structured_issue is not None:
+            payload["structuredIssues"] = [structured_issue]
+        print_json(payload)
     else:
         print(f"{state},{done},{total},{output_file},{reason}")
     return 0

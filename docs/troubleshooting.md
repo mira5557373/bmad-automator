@@ -134,6 +134,26 @@ If tmux sessions exist but are not tracked:
 - treat them as suspicious
 - inspect their pane output before killing them
 
+## Malformed Session State
+
+Runner-backed sessions keep a private JSON state file under `/tmp`.
+Legacy readers still treat missing, unreadable, invalid, or non-object state as
+empty state for compatibility.
+
+`monitor-session --json` reports `structuredIssues` when a disappeared session
+has a malformed state file that affects the result. CSV commands keep their
+existing exact output and do not append diagnostics.
+
+Common issue types:
+
+- `session_state.invalid_json`
+- `session_state.invalid_type`
+- `session_state.unreadable`
+- `session_state.unexpected_schema_version`
+
+If one appears, remove the stale runtime file or restart the monitored session,
+then verify workflow truth from the story file and `sprint-status.yaml`.
+
 ## Long Command Issues
 
 Long prompts are written to `/tmp/sa-cmd-<session>.sh`.

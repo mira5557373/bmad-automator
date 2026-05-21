@@ -20,6 +20,7 @@ from story_automator.core.tmux_runtime import (
     command_exists,
     heartbeat_check,
     load_session_state,
+    load_session_state_diagnostics,
     pane_status,
     resolve_command_shell,
     skill_prefix,
@@ -153,6 +154,38 @@ class TmuxRuntimeStateTests(unittest.TestCase):
                 state = update_session_state(state_path, lifecycle="running")
             self.assertEqual(state["updatedAt"], "2026-04-14T18:45:00Z")
             self.assertEqual(load_session_state(state_path)["updatedAt"], "2026-04-14T18:45:00Z")
+
+    def test_load_session_state_preserves_legacy_empty_on_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_text("{bad json", encoding="utf-8")
+
+            self.assertEqual(load_session_state(state_path), {})
+
+    def test_diagnostic_session_state_loader_reports_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_text("{bad json", encoding="utf-8")
+
+            result = load_session_state_diagnostics(state_path)
+
+            self.assertFalse(result.ok)
+            self.assertTrue(result.exists)
+            self.assertEqual(result.state, {})
+            self.assertIsNotNone(result.issue)
+            self.assertEqual(result.issue.type if result.issue else "", "session_state.invalid_json")
+
+    def test_diagnostic_session_state_loader_warns_on_unexpected_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_text('{"schemaVersion":99,"lifecycle":"running"}', encoding="utf-8")
+
+            result = load_session_state_diagnostics(state_path)
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.state["schemaVersion"], 99)
+            self.assertIsNotNone(result.issue)
+            self.assertEqual(result.issue.severity if result.issue else "", "warning")
 
     def test_check_prompt_visible_accepts_claude_prompt_before_status_panel(self) -> None:
         capture = "\n".join(

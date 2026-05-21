@@ -21,6 +21,12 @@ The status script returns `session_state` in CSV column 6:
 | Retry 1 failed | Retry with `-r2` suffix in session name |
 | Retry 2 failed | Escalate to user with diagnostics |
 
+For `monitor-session --json`, malformed persisted runner state can add
+`structuredIssues` to the result. CSV status commands keep the exact six-column
+format. Treat `session_state.invalid_json`, `session_state.invalid_type`, and
+`session_state.unreadable` as runtime-state diagnostics, then verify workflow
+truth from story files and `sprint-status.yaml` before retrying.
+
 ---
 
 ## Retry Pattern

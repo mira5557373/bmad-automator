@@ -28,6 +28,25 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-05-session-runtime-diagnostics
+
+### Context
+
+- Phase 05 adds diagnostic-aware persisted session-state loading for tmux/runner monitoring.
+
+### Decision, Change, Or Tradeoff
+
+- Legacy `load_session_state()` still returns `{}` for missing, unreadable, invalid JSON, and non-object JSON state.
+- New `load_session_state_diagnostics()` returns `SessionStateLoadResult` with `ok`, `state`, `issue`, and `exists`.
+- Missing session-state remains silent in `monitor-session --json`; malformed existing state adds `structuredIssues` only when the session is gone and the state issue affects the result.
+- CSV commands keep exact existing output. `heartbeat-check`, `tmux-status-check`, and `codex-status-check` are not given structured diagnostics.
+- Unexpected state schema versions are warnings in the diagnostic loader, not hard failures.
+
+### User Impact
+
+- Existing runtime callers keep compatibility behavior.
+- Operators get structured JSON diagnostics when a stale malformed runner-state file explains a missing session.
+
 ## 2026-05-21 - phase-04-agent-complexity-and-story-boundaries
 
 ### Context

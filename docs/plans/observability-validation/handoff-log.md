@@ -47,6 +47,73 @@ exact command
 
 ## Phase Entries
 
+## Phase 05 - 2026-05-21 - Codex
+
+### Summary
+
+- Added diagnostic-aware session-state loading while preserving legacy `{}` behavior.
+- Surfaced `structuredIssues` in `monitor-session --json` only for malformed existing session state when the monitored session is gone.
+- Preserved CSV status output shapes.
+
+### Commands Run
+
+```bash
+sed -n '1,240p' docs/plans/observability-validation/05-session-runtime-diagnostics.md
+sed -n '1,280p' skills/bmad-story-automator/src/story_automator/commands/tmux.py
+rg "load_session_state|monitor-session|session_state|csv|structuredIssues|state_file" skills/bmad-story-automator/src/story_automator/core/tmux_runtime.py skills/bmad-story-automator/src/story_automator/commands/tmux.py tests -n
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_tmux_runtime
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_success_verifiers
+python3 -m compileall -q skills/bmad-story-automator/src/story_automator
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_tmux_runtime tests.test_success_verifiers
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator heartbeat-check
+PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator tmux-status-check
+PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator codex-status-check
+git diff --check
+```
+
+### Results
+
+- Updated `skills/bmad-story-automator/src/story_automator/core/tmux_runtime.py`.
+- Updated `skills/bmad-story-automator/src/story_automator/commands/tmux.py`.
+- Updated `tests/test_tmux_runtime.py`.
+- Updated `tests/test_success_verifiers.py`.
+- Updated `docs/troubleshooting.md`.
+- Updated `skills/bmad-story-automator/data/crash-recovery.md`.
+- Focused tmux runtime tests: `Ran 24 tests in 0.722s`, `OK`.
+- Focused success verifier/monitor tests: `Ran 59 tests in 27.434s`, `OK`.
+- Combined focused tests: `Ran 83 tests in 27.974s`, `OK`.
+- Full Python suite: `Ran 238 tests in 33.826s`, `OK`.
+- CSV checks:
+  - `heartbeat-check` no args: `error,0.0,,no_session`
+  - `tmux-status-check` no args: `error,0,0,no_session,30,error` and exit 1 by existing behavior
+  - `codex-status-check` no args: `error,0,0,no_session,30,error`
+
+### Decisions And Assumptions
+
+- Legacy `load_session_state()` remains silent and returns `{}` for missing, unreadable, invalid, and non-object state.
+- New `SessionStateLoadResult` fields: `ok`, `state`, `issue`, `exists`.
+- Diagnostic issue types:
+  - `session_state.missing`
+  - `session_state.unreadable`
+  - `session_state.invalid_json`
+  - `session_state.invalid_type`
+  - `session_state.unexpected_schema_version`
+- Unexpected schema version is warning severity.
+- Missing state file does not add `structuredIssues` to monitor JSON because missing state is common for gone sessions.
+
+### Blockers Or Risks
+
+- No Phase 05 blocker.
+- Risk: malformed state diagnostics are only surfaced on the `not_found` monitor path. Other runtime paths preserve internal status keys and legacy behavior.
+
+### Next Phase Notes
+
+- Start Phase 06: E2E docs and release readiness.
+- Recommended first command: `sed -n '1,220p' docs/plans/observability-validation/06-e2e-docs-and-release-readiness.md`.
+- Re-run focused tests from prior phases and broad verification.
+- Review docs examples for actual JSON field names.
+
 ## Phase 04 - 2026-05-21 - Codex
 
 ### Summary
