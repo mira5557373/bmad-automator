@@ -28,6 +28,25 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-06-e2e-docs-and-release-readiness
+
+### Context
+
+- Phase 06 closes the observability-validation plan with E2E-lite malformed input coverage, operator docs, and release verification.
+
+### Decision, Change, Or Tradeoff
+
+- Added `tests/test_diagnostics_e2e.py` to exercise malformed LLM parse output, invalid state frontmatter, illegal status transitions, malformed agent-plan JSON, and malformed persisted session state through command-level boundaries.
+- Updated operator docs to describe additive `structuredIssues` behavior while keeping legacy `issues`, `reason`, and CSV output expectations explicit.
+- Verified documented examples against actual JSON output shapes from the implemented commands.
+- Kept this phase to tests and docs only; no new runtime code was needed after Phases 01-05.
+
+### User Impact
+
+- Observability-validation is release-ready locally: focused matrix, full Python suite, CLI check, dry pack, smoke, and aggregate verify pass.
+- Release risk: smoke still emits optional `bmad-qa-generate-e2e-tests` warnings when that skill is not installed, but exits successfully.
+- File-size note: `commands/orchestrator.py` is exactly 500 lines; `core/runtime_policy.py` and `core/tmux_runtime.py` remain above the soft AGENTS limit from existing structure and were not refactored in this phase.
+
 ## 2026-05-21 - phase-05-session-runtime-diagnostics
 
 ### Context

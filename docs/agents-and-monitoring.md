@@ -30,6 +30,10 @@ flowchart TD
 
 The generated agents file is a runtime artifact, not just display text.
 
+Agent-plan boundaries validate generated JSON before use. Malformed complexity
+or agents-plan payloads return `structuredIssues` with field paths such as
+`stories[0].complexity.level` or `stories[0].tasks.dev`.
+
 ## Child-Session Command Build
 
 The helper CLI generates step-specific commands with `tmux-wrapper build-cmd`.
@@ -115,6 +119,10 @@ Important distinctions:
 - `in_progress` means the child still looks alive or recently active
 - `stuck` means no valid progress signal within the allowed window
 - `incomplete` is a review-specific result, not a generic session state
+
+`monitor-session --json` may include `structuredIssues` when malformed persisted
+runner state affects the result. CSV status helpers keep the documented columns
+unchanged.
 
 ## Review Verification
 

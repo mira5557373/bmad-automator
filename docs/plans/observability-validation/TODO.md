@@ -76,12 +76,12 @@
 
 ## Phase 06 - E2E Docs And Release Readiness
 
-- [ ] Read Phase 05 handoff before starting.
-- [ ] Add E2E-lite malformed input tests or fixtures.
-- [ ] Update operator docs for structured diagnostics and recovery hints.
-- [ ] Verify docs examples match actual JSON output.
-- [ ] Run focused tests from prior phases.
-- [ ] Run broad verification or document blocker.
-- [ ] Review diff and file sizes.
-- [ ] Update implementation notes with coverage gaps and release risks.
-- [ ] Append Phase 06 handoff entry.
+- [x] Read Phase 05 handoff before starting.
+- [x] Add E2E-lite malformed input tests or fixtures.
+- [x] Update operator docs for structured diagnostics and recovery hints.
+- [x] Verify docs examples match actual JSON output.
+- [x] Run focused tests from prior phases.
+- [x] Run broad verification or document blocker.
+- [x] Review diff and file sizes.
+- [x] Update implementation notes with coverage gaps and release risks.
+- [x] Append Phase 06 handoff entry.

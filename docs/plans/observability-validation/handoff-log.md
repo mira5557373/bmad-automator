@@ -47,6 +47,64 @@ exact command
 
 ## Phase Entries
 
+## Phase 06 - 2026-05-21 - Codex
+
+### Summary
+
+- Added command-level E2E-lite coverage for the structured diagnostics boundaries delivered in Phases 01-05.
+- Updated operator docs for additive diagnostics, monitor JSON behavior, and preserved legacy/CSV compatibility.
+- Completed release verification for the observability-validation plan.
+
+### Commands Run
+
+```bash
+sed -n '1,220p' docs/plans/observability-validation/06-e2e-docs-and-release-readiness.md
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics_e2e
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics tests.test_state_validation tests.test_orchestrator_parse tests.test_success_verifiers tests.test_agent_plan tests.test_tmux_runtime tests.test_diagnostics_e2e
+python3 -m compileall -q skills/bmad-story-automator/src/story_automator
+git diff --check
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+npm run test:cli
+npm run pack:dry-run
+npm run test:smoke
+npm run verify
+```
+
+### Results
+
+- Added `tests/test_diagnostics_e2e.py`.
+- Updated `docs/agents-and-monitoring.md`.
+- Updated `docs/how-it-works.md`.
+- Updated `docs/plans/observability-validation/TODO.md`.
+- Updated `docs/plans/observability-validation/implementation-notes.md`.
+- Updated `docs/plans/observability-validation/handoff-log.md`.
+- Focused E2E diagnostics tests: `Ran 5 tests in 5.009s`, `OK`.
+- Focused Phase 01-06 matrix: `Ran 124 tests in 33.981s`, `OK`.
+- Full Python suite: `Ran 243 tests in 38.779s`, `OK`.
+- CLI check: pass.
+- Dry pack: pass.
+- Smoke: pass with optional `bmad-qa-generate-e2e-tests` warnings.
+- Aggregate `npm run verify`: pass when run standalone. A prior parallel run raced with a simultaneous smoke test over the package artifact path and failed with `ENOENT`; rerun alone passed.
+- Diff whitespace: pass.
+- Compileall: pass.
+
+### Decisions And Assumptions
+
+- Phase 06 did not add production runtime code because earlier phase seams already expose the required diagnostics.
+- E2E-lite tests call local command entrypoints through subprocesses and temporary fixtures instead of requiring live tmux sessions or external LLM traffic.
+- Operator docs describe `structuredIssues` as additive and only present on relevant error paths.
+
+### Blockers Or Risks
+
+- No blocker.
+- Risk: no live external LLM/tmux integration E2E was added; coverage is local command/fixture based.
+- Risk: `core/runtime_policy.py` and `core/tmux_runtime.py` remain above the soft file-size target from existing structure.
+
+### Next Phase Notes
+
+- No remaining observability-validation phases.
+- Recommended release summary: structured diagnostics are now shared, state/parser/agent/session boundaries are covered, legacy output compatibility is preserved, and local verification is green.
+
 ## Phase 05 - 2026-05-21 - Codex
 
 ### Summary
