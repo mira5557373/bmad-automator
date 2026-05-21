@@ -13,6 +13,7 @@ from story_automator.core.frontmatter import (
     parse_frontmatter,
     parse_simple_frontmatter,
 )
+from story_automator.core.parse_contracts import verifier_exception_payload
 from story_automator.core.runtime_policy import (
     PolicyError,
     crash_max_retries,
@@ -465,7 +466,7 @@ def _verify_code_review(args: list[str]) -> int:
                 continue
             idx += 1
     except PolicyError as exc:
-        print_json({"verified": False, "reason": "review_contract_invalid", "input": args[0], "error": str(exc)})
+        print_json(verifier_exception_payload("review_contract_invalid", exc, source="verify-code-review", input=args[0]))
         return 1
     payload = verify_code_review_completion(get_project_root(), args[0], state_file=state_file or None)
     print_json(payload)
@@ -507,7 +508,7 @@ def _verify_step(args: list[str]) -> int:
         )
         exit_code = 0
     except (FileNotFoundError, OSError, PolicyError, ValueError) as exc:
-        payload = {"verified": False, "step": step, "input": story_key, "reason": "verifier_contract_invalid", "error": str(exc)}
+        payload = verifier_exception_payload("verifier_contract_invalid", exc, source="verify-step", step=step, input=story_key)
         exit_code = 1
     print_json(payload)
     return exit_code

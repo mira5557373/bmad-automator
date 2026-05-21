@@ -38,15 +38,15 @@
 
 ## Phase 03 - Parser And Contract Boundaries
 
-- [ ] Read Phase 02 handoff before starting.
-- [ ] Add `core/parse_contracts.py`.
-- [ ] Add field-path parser diagnostics.
-- [ ] Preserve parse success payloads exactly.
-- [ ] Preserve legacy parse failure `reason` values.
-- [ ] Extend success verifier diagnostics where safe.
-- [ ] Add parser/verifier malformed payload tests.
-- [ ] Update implementation notes with parser compatibility decisions.
-- [ ] Append Phase 03 handoff entry.
+- [x] Read Phase 02 handoff before starting.
+- [x] Add `core/parse_contracts.py`.
+- [x] Add field-path parser diagnostics.
+- [x] Preserve parse success payloads exactly.
+- [x] Preserve legacy parse failure `reason` values.
+- [x] Extend success verifier diagnostics where safe.
+- [x] Add parser/verifier malformed payload tests.
+- [x] Update implementation notes with parser compatibility decisions.
+- [x] Append Phase 03 handoff entry.
 
 ## Phase 04 - Agent Complexity And Story Boundaries
 

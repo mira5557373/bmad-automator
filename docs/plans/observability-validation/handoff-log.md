@@ -47,6 +47,67 @@ exact command
 
 ## Phase Entries
 
+## Phase 03 - 2026-05-21 - Codex
+
+### Summary
+
+- Added parser contract helpers and field-path diagnostics for malformed parse payloads.
+- Added `structuredIssues` to parse failures and verifier contract failures while preserving legacy reason/error fields.
+- Kept successful parse output unchanged.
+
+### Commands Run
+
+```bash
+sed -n '1,220p' docs/plans/observability-validation/03-parser-and-contract-boundaries.md
+sed -n '1,170p' skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py
+sed -n '1,180p' tests/test_orchestrator_parse.py
+sed -n '1,260p' skills/bmad-story-automator/src/story_automator/core/success_verifiers.py
+sed -n '420,490p' skills/bmad-story-automator/src/story_automator/commands/orchestrator.py
+sed -n '1,100p' skills/bmad-story-automator/src/story_automator/core/review_verify.py
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_orchestrator_parse tests.test_success_verifiers
+python3 -m compileall -q skills/bmad-story-automator/src/story_automator
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+```
+
+### Results
+
+- Added `skills/bmad-story-automator/src/story_automator/core/parse_contracts.py`.
+- Updated:
+  - `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
+  - `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
+  - `skills/bmad-story-automator/src/story_automator/core/review_verify.py`
+  - `tests/test_orchestrator_parse.py`
+  - `tests/test_success_verifiers.py`
+- Focused parser/verifier tests: `Ran 69 tests in 17.709s`, `OK`.
+- Compile check: passed.
+- Full Python suite: `Ran 226 tests in 24.181s`, `OK`.
+- `commands/orchestrator.py` remains at 500 LOC.
+
+### Decisions And Assumptions
+
+- Parse success payloads are unchanged and do not include diagnostics.
+- Parse failure payloads keep legacy `reason` values and add `structuredIssues`.
+- Example diagnostics:
+  - missing/invalid schema path: `parse.schemaPath`
+  - invalid required keys: `requiredKeys`
+  - invalid nested integer: `issues_found.critical`
+  - invalid enum: `status`
+  - invalid path-or-null: `story_file`
+- Verifier contract failures add `structuredIssues` when payloads already expose `reason` and `error`.
+- No diagnostic events are emitted.
+
+### Blockers Or Risks
+
+- No Phase 03 blocker.
+- Risk: the parse mini-schema still cannot express optional fields or arrays. Phase 03 preserves current expressiveness rather than expanding contracts.
+
+### Next Phase Notes
+
+- Start Phase 04: agent complexity and story boundaries.
+- Recommended first command: `sed -n '1,220p' docs/plans/observability-validation/04-agent-complexity-and-story-boundaries.md`.
+- Read `skills/bmad-story-automator/src/story_automator/commands/orchestrator_epic_agents.py`, `skills/bmad-story-automator/src/story_automator/core/agent_config.py`, and `tests` around agent config.
+- Preserve fallback normalization and retro overrides while adding structured diagnostics for malformed complexity/agent-plan JSON.
+
 ## Phase 02 - 2026-05-21 - Codex
 
 ### Summary

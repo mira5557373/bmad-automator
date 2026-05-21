@@ -1151,6 +1151,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "review_contract_invalid")
         self.assertIn("state file unreadable", str(payload.get("error")))
+        self.assertEqual(payload["structuredIssues"][0]["source"], "verify-code-review")
 
     def test_validate_story_creation_check_returns_compat_schema_on_directory_state_file(self) -> None:
         stdout = io.StringIO()
@@ -1196,6 +1197,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
         self.assertEqual(payload["error"], "--state-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "verify-step")
 
     def test_verify_code_review_rejects_incomplete_state_file_flag(self) -> None:
         stdout = io.StringIO()
@@ -1206,6 +1208,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "review_contract_invalid")
         self.assertEqual(payload["error"], "--state-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "verify-code-review")
 
     def test_validate_story_creation_check_returns_compat_schema_on_bad_counts(self) -> None:
         stdout = io.StringIO()

@@ -28,6 +28,26 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-03-parser-and-contract-boundaries
+
+### Context
+
+- Phase 03 moves parse contract validation out of command code and adds field-specific diagnostics for parse/verifier failures.
+
+### Decision, Change, Or Tradeoff
+
+- Parse success output remains exactly the child JSON payload serialized compactly; no `structuredIssues` are added on success.
+- Parse failure output preserves legacy `status: "error"` and `reason` values and adds `structuredIssues`.
+- Parser diagnostics now include field paths such as `issues_found.critical`, `story_file`, `status`, `requiredKeys`, and `parse.schemaPath`.
+- Verifier command-boundary contract failures keep existing `verified`, `reason`, and `error` fields and add `structuredIssues`.
+- No diagnostic events are emitted in parse failure JSON; only `structuredIssues` are returned.
+- Parse schema expressiveness remains limited to the existing mini-schema rules: nested objects, `integer`, `true|false`, `path or null`, pipe-delimited enums, and non-empty strings.
+
+### User Impact
+
+- Existing automation branching on legacy parse/verifier `reason` values keeps working.
+- Operators and future agents can now see the exact malformed field that caused parser rejection.
+
 ## 2026-05-21 - phase-02-state-validation-and-transitions
 
 ### Context
