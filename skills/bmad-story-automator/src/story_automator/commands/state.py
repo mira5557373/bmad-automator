@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
-from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_effective_policy
 from ..core.agent_config import normalize_model as _model_or_none
+from ..core.runtime_policy import PolicyError, snapshot_effective_policy
+from ..core.state_validation import state_validation_payload, validate_state_fields
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
 
 
@@ -256,53 +257,6 @@ def cmd_validate_state(args: list[str]) -> int:
     text = read_text(state)
     frontmatter = extract_frontmatter(text)
     fields = parse_simple_frontmatter(text)
-    issues: list[str] = []
-
-    def required(key: str, validator: Any = None) -> None:
-        value = fields.get(key)
-        if value in ("", [], None):
-            issues.append(f"Missing or empty {key}")
-            return
-        if validator and not validator(value):
-            issues.append(f"Invalid {key}")
-
-    allowed = {"INITIALIZING", "READY", "IN_PROGRESS", "PAUSED", "EXECUTION_COMPLETE", "COMPLETE", "ABORTED"}
-    required("epic")
-    required("epicName")
-    required("storyRange")
-    required("status", lambda value: isinstance(value, str) and value in allowed)
-    required("lastUpdated", lambda value: isinstance(value, str) and re.search(r"\d{4}-\d{2}-\d{2}T", value))
-    if not _has_runtime_command_config(fields, frontmatter):
-        issues.append("Missing or empty aiCommand")
-    try:
-        load_policy_for_state(state)
-    except PolicyError as exc:
-        issues.append(str(exc))
-    write_json({"ok": True, "structure": "issues" if issues else "ok", "issues": issues})
+    issues = validate_state_fields(state, fields, frontmatter)
+    write_json(state_validation_payload(issues))
     return 0
-
-
-def _has_runtime_command_config(fields: dict[str, Any], frontmatter: str) -> bool:
-    ai_command = fields.get("aiCommand")
-    if ai_command not in ("", [], None):
-        return True
-    return _has_agent_config_block(frontmatter)
-
-
-def _has_agent_config_block(frontmatter: str) -> bool:
-    in_agent_config = False
-    for raw_line in frontmatter.splitlines():
-        stripped = raw_line.strip()
-        if not in_agent_config:
-            if re.match(r"^agentConfig:\s*(?:#.*)?$", stripped):
-                in_agent_config = True
-            continue
-        if raw_line and not raw_line.startswith(" "):
-            break
-        if not stripped or stripped.startswith("#") or ":" not in stripped:
-            continue
-        key, raw = stripped.split(":", 1)
-        if key.strip() in {"defaultPrimary", "defaultFallback", "perTask", "complexityOverrides", "retro"}:
-            if key.strip() in {"perTask", "complexityOverrides", "retro"} or raw.strip():
-                return True
-    return False

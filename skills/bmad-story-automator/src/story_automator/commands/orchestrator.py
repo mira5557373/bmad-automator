@@ -22,6 +22,7 @@ from story_automator.core.runtime_policy import (
 )
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_layout import active_marker_path, active_marker_project_entry
+from story_automator.core.state_validation import status_transition_error_payload
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.sprint import sprint_status_epic, sprint_status_get
 from story_automator.core.story_keys import normalize_story_key, sprint_status_file
@@ -302,18 +303,31 @@ def _state_update(args: list[str]) -> int:
         print_json({"ok": False, "error": "file_not_found"})
         return 1
     text = read_text(args[0])
-    updated: list[str] = []
+    fields = parse_simple_frontmatter(text)
+    updates: list[tuple[str, str]] = []
     idx = 1
     while idx < len(args):
         if args[idx] == "--set" and idx + 1 < len(args):
             key, value = args[idx + 1].split("=", 1)
-            replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
-            if count:
-                text = replaced
-                updated.append(key)
+            updates.append((key, value))
             idx += 2
             continue
         idx += 1
+    pending_status = str(fields.get("status") or "")
+    for key, value in updates:
+        if key != "status":
+            continue
+        payload = status_transition_error_payload(pending_status, value)
+        if payload:
+            print_json(payload)
+            return 1
+        pending_status = value
+    updated: list[str] = []
+    for key, value in updates:
+        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
+        if count:
+            text = replaced
+            updated.append(key)
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1

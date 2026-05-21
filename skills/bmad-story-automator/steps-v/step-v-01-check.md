@@ -129,7 +129,7 @@ rm -f "$tmp_validation" "$tmp_sessions"
 | lastUpdated | ✅/❌ | ISO date |
 | aiCommand or agentConfig | ✅/❌ | at least one runtime command source is present |
 
-**Valid status values:** INITIALIZING, READY, IN_PROGRESS, PAUSED, COMPLETE, ABORTED
+**Valid status values:** INITIALIZING, READY, IN_PROGRESS, PAUSED, EXECUTION_COMPLETE, COMPLETE, ABORTED
 
 **Record issues:**
 - Missing required fields
@@ -138,7 +138,15 @@ rm -f "$tmp_validation" "$tmp_sessions"
 
 Single-pass structure issue extraction (compact output):
 ```bash
-field_issues=$(echo "$validation" | jq -r '.issues[]? | select(.type=="missing_field" or .type=="invalid_value" or .type=="yaml_error") | "\(.type): \(.field // .message)"')
+field_issues=$(echo "$validation" | jq -r '
+  if ((.structuredIssues // []) | length) > 0 then
+    .structuredIssues[]?
+    | select(.type=="missing_field" or .type=="invalid_value" or .type=="yaml_error")
+    | "\(.type): \(.field // .message)"
+  else
+    .issues[]?
+  end
+')
 ```
 
 Using `{tmuxCommands}` semantics and `sessions` output, compare state vs live sessions in one pass:

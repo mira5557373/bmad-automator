@@ -28,6 +28,27 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-21 - phase-02-state-validation-and-transitions
+
+### Context
+
+- Phase 02 wires diagnostics into `validate-state` and guards `orchestrator-helper state-update --set status=...`.
+
+### Decision, Change, Or Tradeoff
+
+- `validate-state` keeps `ok`, `structure`, and legacy `issues: list[str]`, and adds `structuredIssues` plus `issueCount`.
+- State validation now returns field-specific diagnostics for required frontmatter, status enum, last-updated shape, runtime command config, and policy snapshot metadata.
+- Status transitions follow the planned table exactly, including the compatibility allowance `IN_PROGRESS -> COMPLETE`.
+- Invalid status updates return `ok:false`, `error:"invalid_status_transition"`, `currentStatus`, `attemptedStatus`, `allowedTransitions`, `issues`, and `structuredIssues` before writing.
+- Non-status `state-update` calls keep the existing success response shape.
+- The execution workflow already said to set `IN_PROGRESS` before execution, but only in prose. Phase 02 makes that state update explicit so the later `EXECUTION_COMPLETE` update remains a valid transition.
+
+### User Impact
+
+- Existing consumers of `validate-state` legacy string issues keep working.
+- New validation/reporting code can read `structuredIssues` for field-specific diagnostics.
+- Manual state regressions such as `READY -> COMPLETE` are blocked with actionable allowed transitions.
+
 ## 2026-05-21 - phase-01-diagnostics-contract
 
 ### Context

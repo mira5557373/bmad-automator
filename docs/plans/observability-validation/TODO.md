@@ -24,17 +24,17 @@
 
 ## Phase 02 - State Validation And Transitions
 
-- [ ] Read Phase 01 handoff before starting.
-- [ ] Add `core/state_validation.py`.
-- [ ] Add field-specific state diagnostics.
-- [ ] Preserve legacy `issues: list[str]` and add `structuredIssues` plus `issueCount`.
-- [ ] Add allowed status transition table.
-- [ ] Guard `state-update` status transitions.
-- [ ] Align `steps-v/step-v-01-check.md` with `structuredIssues` and legacy fallback.
-- [ ] Update state/CLI docs.
-- [ ] Add `tests/test_state_validation.py`.
-- [ ] Update implementation notes with transition and compatibility decisions.
-- [ ] Append Phase 02 handoff entry.
+- [x] Read Phase 01 handoff before starting.
+- [x] Add `core/state_validation.py`.
+- [x] Add field-specific state diagnostics.
+- [x] Preserve legacy `issues: list[str]` and add `structuredIssues` plus `issueCount`.
+- [x] Add allowed status transition table.
+- [x] Guard `state-update` status transitions.
+- [x] Align `steps-v/step-v-01-check.md` with `structuredIssues` and legacy fallback.
+- [x] Update state/CLI docs.
+- [x] Add `tests/test_state_validation.py`.
+- [x] Update implementation notes with transition and compatibility decisions.
+- [x] Append Phase 02 handoff entry.
 
 ## Phase 03 - Parser And Contract Boundaries
 

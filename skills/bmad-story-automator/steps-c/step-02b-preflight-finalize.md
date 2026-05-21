@@ -73,6 +73,14 @@ project_slug=$(echo "$("{deriveProjectSlug}" derive-project-slug --project-root 
 Set status="IN_PROGRESS", log "Execution started".
 Update frontmatter (append `step-02b-preflight-finalize`, set `lastUpdated`).
 
+```bash
+"{stateHelper}" orchestrator-helper state-update "{outputFile}" \
+  --set status=IN_PROGRESS \
+  --set currentStep=step-02b-preflight-finalize \
+  --set lastUpdated="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** Execution started" >> "{outputFile}"
+```
+
 ---
 
 ## Then

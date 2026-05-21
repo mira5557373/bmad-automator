@@ -47,6 +47,75 @@ exact command
 
 ## Phase Entries
 
+## Phase 02 - 2026-05-21 - Codex
+
+### Summary
+
+- Added state validation diagnostics and status transition guards.
+- Updated validation step/docs for `structuredIssues` with legacy issue fallback.
+- Made the execution-start `IN_PROGRESS` state update explicit before later completion transitions.
+
+### Commands Run
+
+```bash
+sed -n '1,240p' docs/plans/observability-validation/02-state-validation-and-transitions.md
+sed -n '1,180p' docs/plans/observability-validation/handoff-log.md
+sed -n '1,360p' skills/bmad-story-automator/src/story_automator/commands/state.py
+sed -n '1,260p' skills/bmad-story-automator/src/story_automator/core/sprint.py
+rg "state-update|validate-state|structuredIssues|issues\\[|issues" -n skills/bmad-story-automator/src/story_automator/commands/orchestrator.py tests docs/state-and-resume.md docs/cli-reference.md skills/bmad-story-automator/steps-v/step-v-01-check.md
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_state_policy_metadata tests.test_replacement_unicode
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_state_validation
+python3 -m compileall -q skills/bmad-story-automator/src/story_automator
+npm run test:cli
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+```
+
+### Results
+
+- Added `skills/bmad-story-automator/src/story_automator/core/state_validation.py`.
+- Added `tests/test_state_validation.py`.
+- Updated:
+  - `skills/bmad-story-automator/src/story_automator/commands/state.py`
+  - `skills/bmad-story-automator/src/story_automator/commands/orchestrator.py`
+  - `skills/bmad-story-automator/steps-v/step-v-01-check.md`
+  - `skills/bmad-story-automator/steps-c/step-02b-preflight-finalize.md`
+  - `docs/state-and-resume.md`
+  - `docs/cli-reference.md`
+- Focused legacy state/unicode tests: `Ran 47 tests in 2.090s`, `OK`.
+- Focused state validation tests: `Ran 6 tests in 0.431s`, `OK`.
+- Compile check: passed.
+- CLI help check: passed.
+- Full Python suite: `Ran 224 tests in 23.502s`, `OK`.
+
+### Decisions And Assumptions
+
+- `validate-state` response now keeps legacy `issues` and adds:
+  - `structuredIssues`
+  - `issueCount`
+- Status transition table:
+  - `INITIALIZING` -> `INITIALIZING`, `READY`, `ABORTED`
+  - `READY` -> `READY`, `IN_PROGRESS`, `PAUSED`, `ABORTED`
+  - `IN_PROGRESS` -> `IN_PROGRESS`, `PAUSED`, `EXECUTION_COMPLETE`, `COMPLETE`, `ABORTED`
+  - `PAUSED` -> `PAUSED`, `IN_PROGRESS`, `ABORTED`
+  - `EXECUTION_COMPLETE` -> `EXECUTION_COMPLETE`, `COMPLETE`, `ABORTED`
+  - `COMPLETE` -> `COMPLETE`
+  - `ABORTED` -> `ABORTED`
+- `IN_PROGRESS -> COMPLETE` remains allowed as an explicit compatibility shortcut.
+- `state-update` validates multiple status updates in one command sequentially against pending status.
+- Non-status state updates retain `{"ok":true,"updated":[...]}` success output.
+
+### Blockers Or Risks
+
+- No Phase 02 blocker.
+- Risk: workflow authors adding a future direct `READY -> EXECUTION_COMPLETE` update must either set `IN_PROGRESS` first or update the transition table intentionally.
+
+### Next Phase Notes
+
+- Start Phase 03: parser and contract boundaries.
+- Recommended first command: `sed -n '1,220p' docs/plans/observability-validation/03-parser-and-contract-boundaries.md`.
+- Read `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`, `skills/bmad-story-automator/src/story_automator/core/success_verifiers.py`, and `tests/test_orchestrator_parse.py`.
+- Preserve successful parse payloads exactly and preserve legacy parse failure `reason` values while adding `structuredIssues` on failures.
+
 ## Phase 01 - 2026-05-21 - Codex
 
 ### Summary

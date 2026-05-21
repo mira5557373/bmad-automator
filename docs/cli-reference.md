@@ -38,6 +38,14 @@ Use these during preflight to keep story selection and complexity scoring determ
 
 Use these to create, inspect, and validate orchestration state.
 
+`validate-state` preserves the legacy response fields:
+
+- `ok`
+- `structure`
+- `issues`
+
+It also adds `structuredIssues` and `issueCount` for field-specific diagnostics. Consumers should prefer `structuredIssues` when present and keep `issues` as the legacy fallback.
+
 ## tmux Commands
 
 - `tmux-wrapper spawn`
@@ -70,6 +78,8 @@ Critical rule:
 - `orchestrator-helper agents-resolve`
 
 These commands are the orchestration control plane.
+
+`orchestrator-helper state-update <file> --set status=<value>` validates status transitions before writing. Invalid transitions return `ok:false`, `error:"invalid_status_transition"`, `currentStatus`, `attemptedStatus`, `allowedTransitions`, legacy `issues`, and `structuredIssues`. Non-status updates keep the existing `ok` and `updated` response shape.
 
 ## Agent Config Commands
 

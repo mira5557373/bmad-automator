@@ -67,6 +67,20 @@ flowchart TD
 
 The state file is updated throughout the run. It is not just a final report.
 
+Allowed status transitions:
+
+| Current | Allowed next values |
+|---------|---------------------|
+| `INITIALIZING` | `INITIALIZING`, `READY`, `ABORTED` |
+| `READY` | `READY`, `IN_PROGRESS`, `PAUSED`, `ABORTED` |
+| `IN_PROGRESS` | `IN_PROGRESS`, `PAUSED`, `EXECUTION_COMPLETE`, `COMPLETE`, `ABORTED` |
+| `PAUSED` | `PAUSED`, `IN_PROGRESS`, `ABORTED` |
+| `EXECUTION_COMPLETE` | `EXECUTION_COMPLETE`, `COMPLETE`, `ABORTED` |
+| `COMPLETE` | `COMPLETE` |
+| `ABORTED` | `ABORTED` |
+
+`orchestrator-helper state-update --set status=<value>` rejects transitions outside this table and returns structured diagnostics with `currentStatus`, `attemptedStatus`, and `allowedTransitions`.
+
 ## Marker File
 
 During active orchestration, Story Automator writes:
@@ -144,10 +158,13 @@ It checks:
 
 - required frontmatter fields
 - valid status enums
+- field-specific structured diagnostics
 - YAML/frontmatter integrity
 - session references vs live tmux sessions
 - per-story progress consistency
 - stalled or impossible progress combinations
+
+`validate-state` keeps the legacy `issues: list[str]` field for compatibility and also returns `structuredIssues: list[object]` plus `issueCount`. New validation flows should prefer `structuredIssues` and fall back to `issues` for older helpers.
 
 The validation flow combines structure, session, and progress checks before reporting a final severity bucket.
 
