@@ -187,6 +187,35 @@ class RetroAgentTests(unittest.TestCase):
         payload = self._run_retro_agent(state_file)
         self.assertEqual(payload["primary"], "codex")
 
+    def test_build_state_doc_merges_empty_explicit_complexity_task_with_legacy_level(self) -> None:
+        stdout = io.StringIO()
+        template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        config = self._config()
+        config["agentConfig"] = {
+            "defaultPrimary": "claude",
+            "defaultFallback": False,
+            "complexityOverrides": {"medium": {"retro": {}}},
+            "medium": {"retro": {"primary": "codex", "fallback": False}},
+        }
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(config),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        state_file = Path(json.loads(stdout.getvalue())["path"])
+        text = state_file.read_text(encoding="utf-8")
+        self.assertIn("complexityOverrides:\n    medium:\n      retro:\n        primary: \"codex\"\n        fallback: false\n", text)
+        payload = self._run_retro_agent(state_file)
+        self.assertEqual(payload["primary"], "codex")
+
     def test_retro_agent_uses_complexity_override_from_state(self) -> None:
         state_file = self.project_root / "retro-complexity-state.md"
         state_file.write_text(

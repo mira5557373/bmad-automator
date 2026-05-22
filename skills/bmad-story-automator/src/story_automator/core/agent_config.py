@@ -75,7 +75,9 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     if not isinstance(complexity_raw, dict):
         raise ValueError("agentConfig.complexityOverrides must be an object")
     for level, value in complexity_raw.items():
-        parsed = _parse_task_map(value)
+        if not isinstance(value, dict):
+            raise ValueError(f"agentConfig.complexityOverrides.{level} must be an object")
+        parsed = _parse_task_map(value, field=f"complexityOverrides.{level}", strict_entries=True)
         if parsed:
             config.complexity_overrides[level] = parsed
     for level in ("low", "medium", "high"):
@@ -209,13 +211,15 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
     return config
 
 
-def _parse_task_map(raw: Any) -> dict[str, AgentTaskConfig]:
+def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False) -> dict[str, AgentTaskConfig]:
     if not isinstance(raw, dict):
         return {}
     output: dict[str, AgentTaskConfig] = {}
     for task, entry in raw.items():
+        if strict_entries and not isinstance(entry, dict):
+            raise ValueError(f"agentConfig.{field}.{task} must be an object")
         parsed = _parse_task_entry(entry)
-        if parsed is None:
+        if parsed is None or not _task_config_has_values(parsed):
             continue
         output[task] = parsed
     return output
@@ -312,8 +316,12 @@ def _non_empty_task_map(task_map: dict[str, AgentTaskConfig]) -> dict[str, Agent
     return {
         task: entry
         for task, entry in task_map.items()
-        if entry.primary or entry.fallback is not None or entry.model is not None
+        if _task_config_has_values(entry)
     }
+
+
+def _task_config_has_values(entry: AgentTaskConfig) -> bool:
+    return bool(entry.primary or entry.fallback is not None or entry.model is not None)
 
 
 def _render_fallback(raw: Any) -> str:
