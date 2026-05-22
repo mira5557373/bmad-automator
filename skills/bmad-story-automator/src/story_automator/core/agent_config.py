@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from .common import ensure_dir, file_exists, iso_now, read_text, write_atomic
-from .frontmatter import find_frontmatter_value
+from .frontmatter import extract_frontmatter, find_frontmatter_value
 from .runtime_layout import runtime_provider
+from .utils import unquote_scalar
 
 
 @dataclass
@@ -29,6 +30,9 @@ class AgentConfigResolved:
     default_model: str = ""
     per_task: dict[str, AgentTaskConfig] = field(default_factory=dict)
     complexity_overrides: dict[str, dict[str, AgentTaskConfig]] = field(default_factory=dict)
+
+
+AGENT_CONFIG_HEADER_RE = re.compile(r"^agentConfig:\s*(?:#.*)?$")
 
 
 def load_presets_file(path: str | Path) -> dict[str, Any]:
@@ -70,6 +74,125 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
             parsed = _parse_task_map(data[level])
             if parsed:
                 config.complexity_overrides[level] = parsed
+    return config
+
+
+def load_agent_config_from_state(state_file: str | Path) -> AgentConfigResolved:
+    return parse_agent_config_frontmatter(extract_frontmatter(read_text(state_file)))
+
+
+def parse_agent_config_frontmatter(frontmatter: str) -> AgentConfigResolved:
+    return parse_agent_config_json(json.dumps(extract_agent_config_frontmatter(frontmatter)))
+
+
+def has_agent_config_runtime_source(frontmatter: str) -> bool:
+    config = extract_agent_config_frontmatter(frontmatter)
+    for key in ("defaultPrimary", "primary", "defaultFallback", "fallback"):
+        value = config.get(key)
+        if value not in ("", [], None):
+            return True
+    for key in ("perTask", "complexityOverrides", "retro"):
+        if key in config:
+            return True
+    return False
+
+
+def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
+    config: dict[str, object] = {}
+    in_agent_config = False
+    in_per_task = False
+    in_complexity_overrides = False
+    current_task = ""
+    current_level = ""
+
+    for raw_line in frontmatter.splitlines():
+        if not in_agent_config:
+            if AGENT_CONFIG_HEADER_RE.match(raw_line.strip()):
+                in_agent_config = True
+            continue
+
+        if raw_line and not raw_line.startswith(" "):
+            break
+
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent == 2:
+            current_task = ""
+            current_level = ""
+            if stripped == "perTask:":
+                in_per_task = True
+                in_complexity_overrides = False
+                config.setdefault("perTask", {})
+                continue
+            if stripped == "complexityOverrides:":
+                in_complexity_overrides = True
+                in_per_task = False
+                config.setdefault("complexityOverrides", {})
+                continue
+            in_per_task = False
+            in_complexity_overrides = False
+            if stripped == "retro:":
+                config.setdefault("retro", {})
+                current_task = "retro"
+                continue
+            if ":" in stripped:
+                key, raw = stripped.split(":", 1)
+                config[key.strip()] = _parse_scalar(raw)
+            continue
+
+        if indent == 4 and in_per_task and stripped.endswith(":"):
+            current_task = stripped[:-1]
+            per_task = config.setdefault("perTask", {})
+            if isinstance(per_task, dict):
+                per_task.setdefault(current_task, {})
+            continue
+
+        if indent == 4 and in_complexity_overrides and stripped.endswith(":"):
+            current_level = stripped[:-1]
+            current_task = ""
+            overrides = config.setdefault("complexityOverrides", {})
+            if isinstance(overrides, dict):
+                overrides.setdefault(current_level, {})
+            continue
+
+        if indent == 4 and current_task == "retro" and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            retro = config.setdefault("retro", {})
+            if isinstance(retro, dict):
+                retro[key.strip()] = _parse_scalar(raw.strip())
+            continue
+
+        if indent == 6 and in_per_task and current_task and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            per_task = config.setdefault("perTask", {})
+            if isinstance(per_task, dict):
+                task_cfg = per_task.setdefault(current_task, {})
+                if isinstance(task_cfg, dict):
+                    task_cfg[key.strip()] = _parse_scalar(raw.strip())
+            continue
+
+        if indent == 6 and in_complexity_overrides and current_level and stripped.endswith(":"):
+            current_task = stripped[:-1]
+            overrides = config.setdefault("complexityOverrides", {})
+            if isinstance(overrides, dict):
+                level_cfg = overrides.setdefault(current_level, {})
+                if isinstance(level_cfg, dict):
+                    level_cfg.setdefault(current_task, {})
+            continue
+
+        if indent == 8 and in_complexity_overrides and current_level and current_task and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            overrides = config.setdefault("complexityOverrides", {})
+            if isinstance(overrides, dict):
+                level_cfg = overrides.setdefault(current_level, {})
+                if isinstance(level_cfg, dict):
+                    task_cfg = level_cfg.setdefault(current_task, {})
+                    if isinstance(task_cfg, dict):
+                        task_cfg[key.strip()] = _parse_scalar(raw.strip())
+
     return config
 
 
@@ -237,6 +360,10 @@ def resolve_agents(agents_file: str | Path, story_id: str, task: str) -> dict[st
     if not block:
         return {"ok": False, "error": "agents_json_missing"}
     payload = json.loads(block)
+    return resolve_agents_payload(payload, story_id, task)
+
+
+def resolve_agents_payload(payload: dict[str, Any], story_id: str, task: str) -> dict[str, Any]:
     for story in payload.get("stories", []):
         if story.get("storyId") != story_id:
             continue
@@ -254,3 +381,35 @@ def resolve_agents(agents_file: str | Path, story_id: str, task: str) -> dict[st
             "complexity": story.get("complexity"),
         }
     return {"ok": False, "error": "story_not_found"}
+
+
+def _parse_scalar(raw: str) -> object:
+    value = unquote_scalar(_strip_inline_yaml_comment(raw))
+    lower = value.lower()
+    if lower == "false":
+        return False
+    if lower == "true":
+        return True
+    return value
+
+
+def _strip_inline_yaml_comment(raw: str) -> str:
+    text = raw.strip()
+    in_quote = ""
+    escaped = False
+    for idx, char in enumerate(text):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and in_quote == '"':
+            escaped = True
+            continue
+        if char in {'"', "'"}:
+            if in_quote == char:
+                in_quote = ""
+            elif not in_quote:
+                in_quote = char
+            continue
+        if char == "#" and not in_quote and (idx == 0 or text[idx - 1].isspace()):
+            return text[:idx].rstrip()
+    return text

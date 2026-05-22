@@ -39,6 +39,20 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload["structuredIssues"], [])
         self.assertEqual(payload["issueCount"], 0)
 
+    def test_validate_state_accepts_agent_config_header_with_comment(self) -> None:
+        state_file = self._build_state_config(aiCommand="")
+        text = state_file.read_text(encoding="utf-8")
+        text = text.replace(
+            'aiCommand: ""\n',
+            'aiCommand: ""\nagentConfig: # runtime config\n  defaultPrimary: "codex"\n',
+        )
+        state_file.write_text(text, encoding="utf-8")
+
+        payload = self._validate_state(state_file)
+
+        self.assertEqual(payload["structure"], "ok")
+        self.assertEqual(payload["issues"], [])
+
     def test_validate_state_reports_invalid_status_field(self) -> None:
         state_file = self._build_state_config(status="DONE")
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .agent_config import has_agent_config_runtime_source
 from .diagnostics import DiagnosticIssue, legacy_issue_message, serialize_issues
 from .runtime_policy import PolicyError, load_policy_for_state
 
@@ -116,7 +117,7 @@ def has_runtime_command_config(fields: dict[str, Any], frontmatter: str) -> bool
     ai_command = fields.get("aiCommand")
     if ai_command not in ("", [], None):
         return True
-    return _has_agent_config_block(frontmatter)
+    return has_agent_config_runtime_source(frontmatter)
 
 
 def _required(
@@ -161,22 +162,3 @@ def _expected_for(key: str) -> Any:
     if key == "lastUpdated":
         return "ISO-like timestamp containing YYYY-MM-DDT"
     return "valid value"
-
-
-def _has_agent_config_block(frontmatter: str) -> bool:
-    in_agent_config = False
-    for raw_line in frontmatter.splitlines():
-        stripped = raw_line.strip()
-        if not in_agent_config:
-            if re.match(r"^agentConfig:\s*(?:#.*)?$", stripped):
-                in_agent_config = True
-            continue
-        if raw_line and not raw_line.startswith(" "):
-            break
-        if not stripped or stripped.startswith("#") or ":" not in stripped:
-            continue
-        key, raw = stripped.split(":", 1)
-        if key.strip() in {"defaultPrimary", "defaultFallback", "perTask", "complexityOverrides", "retro"}:
-            if key.strip() in {"perTask", "complexityOverrides", "retro"} or raw.strip():
-                return True
-    return False

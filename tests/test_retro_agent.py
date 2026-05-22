@@ -156,6 +156,19 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "claude")
 
+    def test_retro_agent_accepts_agent_config_header_with_comment(self) -> None:
+        state_file = self.project_root / "retro-header-comment-state.md"
+        state_file.write_text(
+            "---\nagentConfig: # runtime config\n  defaultPrimary: \"codex\"\n  defaultFallback: false\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
     def _run_retro_agent(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()
         with patch_env(self.project_root), redirect_stdout(stdout):

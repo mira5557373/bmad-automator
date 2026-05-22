@@ -114,6 +114,10 @@ class TmuxRuntimeIntegrationTests(unittest.TestCase):
 
 
 class TmuxRuntimeStateTests(unittest.TestCase):
+    def test_tmux_command_module_stays_under_soft_size_limit(self) -> None:
+        command_file = Path(__file__).resolve().parents[1] / "skills" / "bmad-story-automator" / "src" / "story_automator" / "commands" / "tmux.py"
+        self.assertLessEqual(len(command_file.read_text(encoding="utf-8").splitlines()), 500)
+
     def test_skill_prefix_matches_pure_skill_layout(self) -> None:
         self.assertEqual(skill_prefix("claude"), "bmad-")
         self.assertEqual(skill_prefix("codex"), "none")

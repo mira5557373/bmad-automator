@@ -5,6 +5,7 @@ import shlex
 import time
 from pathlib import Path
 
+from story_automator.core.monitoring import emit_monitor_result
 from story_automator.core.prompt_rendering import render_step_prompt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
@@ -353,7 +354,7 @@ def cmd_monitor_session(args: list[str]) -> int:
     last_total = 0
     for _ in range(1, max_polls + 1):
         if time.time() - start >= timeout_minutes * 60:
-            return _emit_monitor(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
+            return emit_monitor_result(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
         pre_status_issue = monitor_session_state_issue(session, project_root) if json_output else None
         status = session_status(session, full=False, codex=agent == "codex", project_root=project_root, mode=runtime_mode())
         if int(status["todos_done"]) or int(status["todos_total"]):
@@ -373,7 +374,7 @@ def cmd_monitor_session(args: list[str]) -> int:
                 verified, verifier_name = verification
                 if bool(verified.get("verified")):
                     reason = "normal_completion" if verifier_name == "session_exit" else "verified_complete"
-                    return _emit_monitor(
+                    return emit_monitor_result(
                         json_output,
                         "completed",
                         last_done,
@@ -382,7 +383,7 @@ def cmd_monitor_session(args: list[str]) -> int:
                         reason,
                         output_verified=bool(verified.get("verified")),
                     )
-                return _emit_monitor(
+                return emit_monitor_result(
                     json_output,
                     "incomplete",
                     last_done,
@@ -391,10 +392,10 @@ def cmd_monitor_session(args: list[str]) -> int:
                     str(verified.get("reason") or "workflow_not_verified"),
                     output_verified=bool(verified.get("verified")),
                 )
-            return _emit_monitor(json_output, "completed", last_done, last_total, str(output), "normal_completion")
+            return emit_monitor_result(json_output, "completed", last_done, last_total, str(output), "normal_completion")
         if state == "crashed":
             crashed = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())
-            return _emit_monitor(
+            return emit_monitor_result(
                 json_output,
                 "crashed",
                 last_done,
@@ -404,41 +405,13 @@ def cmd_monitor_session(args: list[str]) -> int:
             )
         if state == "stuck":
             output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
-            return _emit_monitor(json_output, "stuck", 0, 0, str(output), "never_active")
+            return emit_monitor_result(json_output, "stuck", 0, 0, str(output), "never_active")
         if state == "not_found":
             issue = pre_status_issue or monitor_session_state_issue(session, project_root)
-            return _emit_monitor(json_output, "not_found", last_done, last_total, "", "session_gone", structured_issue=issue)
+            return emit_monitor_result(json_output, "not_found", last_done, last_total, "", "session_gone", structured_issue=issue)
         time.sleep(min(180 if agent == "codex" else 120, max(5, int(status["wait_estimate"]))))
     output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
-    return _emit_monitor(json_output, "timeout", last_done, last_total, str(output), "max_polls_exceeded")
-
-
-def _emit_monitor(
-    json_output: bool,
-    state: str,
-    done: int,
-    total: int,
-    output_file: str,
-    reason: str,
-    *,
-    output_verified: bool | None = None,
-    structured_issue: object | None = None,
-) -> int:
-    if json_output:
-        payload = {
-            "final_state": state,
-            "todos_done": done,
-            "todos_total": total,
-            "output_file": output_file,
-            "exit_reason": reason,
-            "output_verified": False if output_verified is None else output_verified,
-        }
-        if structured_issue is not None:
-            payload["structuredIssues"] = [structured_issue]
-        print_json(payload)
-    else:
-        print(f"{state},{done},{total},{output_file},{reason}")
-    return 0
+    return emit_monitor_result(json_output, "timeout", last_done, last_total, str(output), "max_polls_exceeded")
 
 
 def _verify_monitor_completion(

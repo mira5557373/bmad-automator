@@ -126,6 +126,22 @@ class AgentPlanValidationTests(unittest.TestCase):
         fields = [issue["field"] for issue in payload["structuredIssues"]]
         self.assertIn("stories[0].tasks.create.primary", fields)
 
+    def test_agents_resolve_uses_validated_payload_without_rereading(self) -> None:
+        self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"dev": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
+
+        def mutate_if_reread(path: str | Path) -> str:
+            self.agents_file.write_text(
+                json.dumps({"stories": [{"storyId": "1.1", "tasks": {"dev": {"primary": "claude", "fallback": False}}}]}),
+                encoding="utf-8",
+            )
+            return Path(path).read_text(encoding="utf-8")
+
+        with patch("story_automator.core.agent_config.read_text", side_effect=mutate_if_reread):
+            code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "dev"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["primary"], "codex")
+
     def _agents_payload(self) -> dict[str, object]:
         tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review")}
         return {"stories": [{"storyId": "1.1", "complexity": "medium", "tasks": tasks}]}
