@@ -229,6 +229,19 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
 
+    def test_retro_agent_accepts_nested_complexity_header_comments(self) -> None:
+        state_file = self.project_root / "retro-complexity-comment-state.md"
+        state_file.write_text(
+            "---\nagentConfig:\n  defaultPrimary: \"claude\"\n  defaultFallback: \"codex\"\n  complexityOverrides:\n    medium: # runtime complexity\n      retro: # runtime task\n        primary: \"codex\"\n        fallback: false\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
     def test_retro_agent_ignores_inline_yaml_comments(self) -> None:
         state_file = self.project_root / "retro-comment-state.md"
         state_file.write_text(
@@ -259,6 +272,7 @@ class RetroAgentTests(unittest.TestCase):
         cases = (
             "---\nagentConfig:\n  complexityOverrides:\n    medium: bad\n---\n",
             "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro: bad\n---\n",
+            "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro:\n        - primary: \"codex\"\n---\n",
         )
         for index, content in enumerate(cases):
             with self.subTest(index=index):

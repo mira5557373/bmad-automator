@@ -171,7 +171,7 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
             current_task = ""
             overrides = config.setdefault("complexityOverrides", {})
             if isinstance(overrides, dict):
-                if raw.strip():
+                if _has_scalar_value(raw):
                     overrides[current_level] = _parse_scalar(raw.strip())
                 else:
                     overrides.setdefault(current_level, {})
@@ -193,6 +193,12 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                     task_cfg[key.strip()] = _parse_scalar(raw.strip())
             continue
 
+        if indent == 6 and in_complexity_overrides and current_level and stripped.startswith("-"):
+            overrides = config.setdefault("complexityOverrides", {})
+            if isinstance(overrides, dict):
+                overrides[current_level] = _parse_scalar(stripped)
+            continue
+
         if indent == 6 and in_complexity_overrides and current_level and ":" in stripped:
             key, raw = stripped.split(":", 1)
             current_task = key.strip()
@@ -200,10 +206,18 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
             if isinstance(overrides, dict):
                 level_cfg = overrides.setdefault(current_level, {})
                 if isinstance(level_cfg, dict):
-                    if raw.strip():
+                    if _has_scalar_value(raw):
                         level_cfg[current_task] = _parse_scalar(raw.strip())
                     else:
                         level_cfg.setdefault(current_task, {})
+            continue
+
+        if indent >= 8 and in_complexity_overrides and current_level and current_task and stripped.startswith("-"):
+            overrides = config.setdefault("complexityOverrides", {})
+            if isinstance(overrides, dict):
+                level_cfg = overrides.setdefault(current_level, {})
+                if isinstance(level_cfg, dict):
+                    level_cfg[current_task] = _parse_scalar(stripped)
             continue
 
         if indent == 8 and in_complexity_overrides and current_level and current_task and ":" in stripped:
@@ -479,6 +493,10 @@ def _parse_scalar(raw: str) -> object:
     if lower == "true":
         return True
     return value
+
+
+def _has_scalar_value(raw: str) -> bool:
+    return bool(_strip_inline_yaml_comment(raw).strip())
 
 
 def _strip_inline_yaml_comment(raw: str) -> str:
