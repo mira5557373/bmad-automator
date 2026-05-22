@@ -1,5 +1,11 @@
 # Observability And Validation TODO
 
+## Phase-Scoped TODOs
+
+Completed historical phases use the sections below as their preserved checklist record. New clean-context work should use phase-scoped TODO files and should not read later TODO files as acceptance criteria.
+
+- [Phase 08 - Diagnostic Redaction Completion](./TODO/phase-08.md)
+
 ## Phase 00 - Baseline And Plan Reconciliation
 
 - [x] Read README, implementation notes, handoff log, and prior entries.
@@ -101,3 +107,7 @@
 - [x] Run or request final clean-context review and confirm latest baseline is `P0/P1 clean` or blocked with exact reason.
 - [x] Update implementation notes with Phase 07 decisions and risks.
 - [x] Append Phase 07 handoff entry.
+
+## Phase 08 - Diagnostic Redaction Completion
+
+- [ ] Use [TODO/phase-08.md](./TODO/phase-08.md) as the executable Phase 08 checklist.

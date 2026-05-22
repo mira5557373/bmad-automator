@@ -50,6 +50,61 @@ exact command
 Archived completed entries:
 - [Phase 00-04 archive](./handoff-log-archive-phase-00-04.md). Clean-context agents must read the archive before relying on prior phase history.
 
+## Phase 08 Planning - 2026-05-22 - Codex
+
+### Summary
+
+- Updated the observability-validation plan with the follow-up review findings.
+- Added Phase 08 for non-blocking P2 diagnostic consistency work.
+- Added a phase-scoped TODO file for Phase 08 and a deterministic gate map.
+- Preserved all completed Phase 00-07 history.
+
+### Commands Run
+
+```bash
+git status --short --branch
+date +%Y-%m-%d
+git rev-parse --short HEAD
+tmp=$(mktemp -d); f="$tmp/state.md"; printf '%s\n' '---' 'status: READY' '---' > "$f"; PYTHONPATH=skills/bmad-story-automator/src PROJECT_ROOT="$tmp" python3 -m story_automator orchestrator-helper state-update "$f" --set 'status=token=abc123'
+PYTHONPATH=skills/bmad-story-automator/src python3 - <<'PY'
+from story_automator.core.parse_contracts import verifier_exception_payload
+import json
+print(json.dumps(verifier_exception_payload('verifier_contract_invalid', ValueError('token=abc123 failed at /tmp/private/state.md'), source='verify-step'), separators=(',', ':')))
+PY
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics tests.test_orchestrator_parse tests.test_agent_plan tests.test_cli_contracts tests.test_diagnostics_e2e
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+git diff --check 33601b9757383c526d120f112a03190f0c990762...HEAD
+npm run verify
+```
+
+### Results
+
+- Review baseline at HEAD `8110c4b`: `P0/P1 clean`.
+- Focused review matrix: `Ran 73 tests in 6.010s`, `OK`.
+- Full Python suite: `Ran 299 tests in 42.017s`, `OK`.
+- `git diff --check 33601b9757383c526d120f112a03190f0c990762...HEAD`: pass.
+- `npm run verify`: pass; smoke emitted known optional `bmad-qa-generate-e2e-tests` warnings and ended with `smoke ok`.
+- Verified P2 finding: invalid `state-update` redacts `structuredIssues` but raw `attemptedStatus` and legacy `issues` can echo `token=abc123`.
+- Verified P2 finding: `verifier_exception_payload()` redacts `structuredIssues` but raw legacy `error` can echo `token=abc123` and `/tmp/private/state.md`.
+- Verified P2 finding: `validate-story-creation` compatibility failures still omit additive `structuredIssues` despite the compatibility strategy.
+
+### Decisions And Assumptions
+
+- Phase 08 should preserve legacy field names and output shapes; redaction is allowed where it prevents sensitive data exposure.
+- `allowedTransitions` should stay unchanged because it is a fixed safe enum list.
+- `structuredIssues` for `validate-story-creation` should be additive and only appear on diagnostic-worthy failures.
+- Gate map lives at [gate-map.md](./gate-map.md).
+
+### Blockers Or Risks
+
+- No blocker.
+- Risk: changing legacy `error`, `attemptedStatus`, or `issues` values to redacted text may affect scripts that expect exact raw error text. Phase 08 should document this as an intentional safety tradeoff if implemented.
+
+### Next Phase Notes
+
+- Start Phase 08 by reading [08-diagnostic-redaction-completion.md](./08-diagnostic-redaction-completion.md), [TODO/phase-08.md](./TODO/phase-08.md), [implementation-notes.md](./implementation-notes.md), this entry, and [gate-map.md](./gate-map.md).
+- Recommended first focused command after edits: `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_success_verifiers tests.test_state_validation tests.test_diagnostics_e2e`.
+
 ## Phase 07 - 2026-05-22 - Codex
 
 ### Summary

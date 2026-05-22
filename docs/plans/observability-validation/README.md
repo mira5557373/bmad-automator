@@ -16,14 +16,20 @@ This is not a full object-oriented rewrite. Use small typed/domain seams, struct
 
 ## Review Status
 
-Phase 06 local verification passed, but the clean-context review on 2026-05-22 found the branch was not ready to close issue #5. Phase 07 remediated the review findings. The latest review baseline is `P0/P1 clean`.
+Phase 06 local verification passed, but the clean-context review on 2026-05-22 found the branch was not ready to close issue #5. Phase 07 remediated the blocking findings. A follow-up review on 2026-05-22 confirmed the latest review baseline is `P0/P1 clean`, with non-blocking P2 diagnostic consistency follow-ups captured in Phase 08.
 
-Material review findings to resolve:
+Blocking review findings resolved by Phase 07:
 
 - P1: `DiagnosticEvent` is only a serialization helper; no production path emits structured lifecycle, orchestration-stage, state-transition, or policy-decision diagnostics, despite issue #5 and Phase 06 exit criteria requiring key orchestration stages to emit stable structured diagnostics or events.
 - P2: parse schema leaf rules are validated only after the parser sub-agent runs, so malformed parse contracts can fail as `sub-agent returned invalid json` instead of `parse_contract_invalid`.
 - P3: `agents-build` emits `title: null` for accepted complexity stories without titles; prior behavior emitted an empty string.
 - P3: `tmux-wrapper kill-all` default behavior changed from all automator sessions to current-project sessions, outside the additive diagnostics scope.
+
+Non-blocking P2 follow-ups captured for Phase 08:
+
+- `validate-story-creation` preserves its compatibility schema on diagnostic failures but does not yet add `structuredIssues` where the compatibility strategy says it should.
+- `state-update` redacts `structuredIssues` and opt-in events, but raw legacy fields such as `attemptedStatus` and `issues` can still echo sensitive attempted status values.
+- `verifier_exception_payload()` redacts `structuredIssues`, but the legacy `error` string can still expose raw exception text.
 
 ## Constraints
 
@@ -47,6 +53,11 @@ Diagnostic schema -> state validation and transition guards -> parser/verifier f
 5. [Phase 05 - Session Runtime Diagnostics](./05-session-runtime-diagnostics.md)
 6. [Phase 06 - E2E Docs And Release Readiness](./06-e2e-docs-and-release-readiness.md)
 7. [Phase 07 - Review Remediation](./07-review-remediation.md)
+8. [Phase 08 - Diagnostic Redaction Completion](./08-diagnostic-redaction-completion.md)
+
+## Gate Map
+
+Deterministic verification gates are tracked in [gate-map.md](./gate-map.md). Final review or smoke phases should consume that map instead of rediscovering commands from scattered notes.
 
 ## Compatibility Strategy
 
@@ -87,7 +98,9 @@ Use additive compatibility for issue #5. Preserve existing fields and add struct
 
 ## Clean Context Agent Protocol
 
-Before starting any phase, read this README, [TODO.md](./TODO.md), [implementation-notes.md](./implementation-notes.md), [handoff-log.md](./handoff-log.md), and all prior phase handoff entries. Do not rely on conversation history.
+Before starting any phase, read this README, the assigned phase file, the assigned phase TODO file when one exists, [implementation-notes.md](./implementation-notes.md), [handoff-log.md](./handoff-log.md), and relevant earlier phase handoff entries. For completed historical phases without phase-scoped TODO files, use the matching section in [TODO.md](./TODO.md) only as history. Do not rely on conversation history.
+
+Do not read later phase files or later TODO files as acceptance criteria for the current phase.
 
 Before ending any phase, append a handoff entry with exact commands, paths, SHAs, decisions, blockers, and next recommended actions.
 

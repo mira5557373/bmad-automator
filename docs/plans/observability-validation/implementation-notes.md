@@ -28,6 +28,27 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-22 - phase-08-planning
+
+### Context
+
+- A follow-up clean-context review of issue #5 plan coverage and implementation evidence found the branch `P0/P1 clean`.
+- The same review found three non-blocking P2 diagnostic consistency gaps.
+
+### Decision, Change, Or Tradeoff
+
+- Added Phase 08 rather than reopening or rewriting completed Phase 07 history.
+- Phase 08 owns:
+  - additive `structuredIssues` for diagnostic-worthy `validate-story-creation` failures
+  - redaction of invalid `state-update` compatibility fields that can echo raw attempted status values
+  - redaction of `verifier_exception_payload()` legacy `error` text
+- Added a phase-scoped TODO file for Phase 08 and a deterministic gate map for focused and broad verification.
+
+### User Impact
+
+- The current issue #5 implementation remains `P0/P1 clean`.
+- Phase 08 is a polish/hardening follow-up for privacy and consistency in legacy compatibility fields.
+
 ## 2026-05-22 - phase-07-review-remediation
 
 ### Context

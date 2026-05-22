@@ -1,0 +1,11 @@
+# Observability And Validation Gate Map
+
+| Gate | Owned by | Local command | Env/reset/cache policy | CI status | Pass/fail signal | Failure diagnostic | Blocked/risk note |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Phase 08 focused diagnostics | Phase 08 | `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_success_verifiers tests.test_state_validation tests.test_diagnostics_e2e` | Run from repo root; no cache reset required; uses temp fixtures. | Not CI-backed in this plan packet | unittest exits 0 and reports `OK` | Inspect first failing test and referenced command payload. | None. |
+| Full Python suite | Release readiness / final review | `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests` | Run from repo root; no cache reset required; uses temp fixtures. | Not CI-backed in this plan packet | unittest exits 0 and reports `OK` | Inspect failing module/test name. | No live external LLM/tmux integration coverage. |
+| Package dry run | Release readiness / final review | `npm run pack:dry-run` | Run from repo root; npm cache unchanged. | Not CI-backed in this plan packet | command exits 0 and prints tarball details | Inspect npm error and package file list. | None. |
+| CLI contract smoke | Release readiness / final review | `npm run test:cli` | Run from repo root; no cache reset required. | Not CI-backed in this plan packet | command exits 0 | Inspect CLI import/help stderr. | None. |
+| Install smoke | Release readiness / final review | `npm run test:smoke` | Run from repo root; smoke uses local temp/install fixtures. | Not CI-backed in this plan packet | command exits 0 and prints `smoke ok` | Inspect warnings/errors before final line. | Optional `bmad-qa-generate-e2e-tests` warnings are known non-blocking when exit is 0. |
+| Aggregate verify | Release readiness / final review | `npm run verify` | Run from repo root; uses npm scripts and temp fixtures. | Not CI-backed in this plan packet | command exits 0 after Python, pack, CLI, and smoke gates | Inspect the first failed subcommand. | Same optional-skill warning risk as smoke. |
+| Whitespace check | Final review | `git diff --check` | Run from repo root against current working tree. | Not CI-backed in this plan packet | command exits 0 with no output | Inspect reported file/line whitespace errors. | None. |
