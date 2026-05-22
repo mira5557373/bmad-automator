@@ -50,6 +50,113 @@ exact command
 Archived completed entries:
 - [Phase 00-04 archive](./handoff-log-archive-phase-00-04.md). Clean-context agents must read the archive before relying on prior phase history.
 
+## Phase 07 - 2026-05-22 - Codex
+
+### Summary
+
+- Added a compatibility-safe structured diagnostics event channel using `STORY_AUTOMATOR_DIAGNOSTICS_FILE` JSONL.
+- Wired production events for parse stage start/result, status transitions, story/step/epic state field updates, monitor-session lifecycle results, policy decisions, and policy load failures.
+- Validated parse contract schema leaves before sub-agent execution.
+- Restored generated agents-plan missing-title compatibility and `tmux-wrapper kill-all` default all-session compatibility.
+- Added regression coverage for event emission/redaction, parse contract preflight, agents title output, and kill-all flags.
+
+### Commands Run
+
+```bash
+sed -n '1,260p' docs/plans/observability-validation/07-review-remediation.md
+sed -n '1,260p' /Users/joon/projects/twoj/tools/_shared/bmad-latest/.claude/skills/bmad-quick-dev/SKILL.md
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics tests.test_orchestrator_parse tests.test_agent_plan tests.test_cli_contracts tests.test_diagnostics_e2e
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+git diff --check
+npm run test:cli
+npm run test:smoke
+npm run verify
+```
+
+### Results
+
+- Focused Phase 07 matrix: `Ran 73 tests in 5.785s`, `OK`.
+- Full Python suite: `Ran 299 tests in 39.940s`, `OK`.
+- `git diff --check`: pass.
+- `npm run test:cli`: pass.
+- `npm run test:smoke`: pass with known optional `bmad-qa-generate-e2e-tests` warnings.
+- `npm run verify`: pass; includes Python suite, dry pack, CLI check, and smoke.
+- Clean-context compatibility review: `P0/P1 clean`.
+- Clean-context event review initially found a P1 gap for non-status story/step state updates; fixed by adding `state.fields_updated` events. Follow-up clean-context review: `P0/P1 clean`.
+
+### Decisions And Assumptions
+
+- Event channel is opt-in JSONL via `STORY_AUTOMATOR_DIAGNOSTICS_FILE`; no unconditional stdout event output was added.
+- `state-update` emits `state.transition` for status changes and `state.fields_updated` for `epic`, `currentStory`, `currentStep`, and `lastUpdated`.
+- Event names added: `orchestration.stage.start`, `orchestration.stage.result`, `state.transition`, `state.fields_updated`, `session.lifecycle.result`, `policy.decision`, and `policy.load_failed`.
+- Redaction applies to event context and issue messages before JSONL emission.
+- The requested local `.claude/skills/bmad-quick-dev/SKILL.md` and `_bmad/bmm/config.yaml` are absent in this worktree; used the Phase 07 packet plus an installed/source quick-dev copy for workflow alignment.
+
+### Blockers Or Risks
+
+- No blocker.
+- Risk: no live external LLM/tmux integration run was added; verification remains local command, fixture, and smoke based.
+- Existing large files `core/runtime_policy.py` and `core/tmux_runtime.py` remain above the soft size limit from prior work.
+
+### Next Phase Notes
+
+- No remaining observability-validation TODO items.
+- Recommended PR summary: Phase 07 completes issue #5 remediation by adding opt-in structured events, pre-agent parse schema validation, and compatibility fixes for agents titles and `kill-all`.
+
+## Review Correction - 2026-05-22 - Codex
+
+### Summary
+
+- Updated this plan after clean-context review found unresolved issue #5 requirements.
+- Added Phase 07 review remediation and TODO items.
+- Preserved Phase 00-06 implementation history; Phase 06 local verification remains recorded, but release readiness is superseded until Phase 07 completes.
+
+### Commands Run
+
+```bash
+gh issue view 5 -R bmad-code-org/bmad-automator --json title,body,comments,state,labels,author,createdAt,updatedAt
+git diff --name-status origin/main...HEAD
+rg -n "DiagnosticEvent|serialize_event|structuredIssues|event" tests skills/bmad-story-automator/src/story_automator -g '*.py'
+PYTHONPATH=skills/bmad-story-automator/src python3 - <<'PY'
+from story_automator.core.parse_contracts import validate_parse_contract
+print(validate_parse_contract({"requiredKeys": [], "schema": {"x": 5}}))
+PY
+git show origin/main:skills/bmad-story-automator/src/story_automator/commands/tmux.py
+git show origin/main:skills/bmad-story-automator/src/story_automator/commands/orchestrator_epic_agents.py
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics tests.test_state_validation tests.test_orchestrator_parse tests.test_success_verifiers tests.test_agent_plan tests.test_tmux_runtime tests.test_diagnostics_e2e
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+git diff --check
+```
+
+### Results
+
+- Review baseline: `P0/P1 blocked`.
+- Focused diagnostics/state/parser/agent/session matrix: `Ran 145 tests in 34.388s`, `OK`.
+- Full Python suite: `Ran 291 tests in 39.637s`, `OK`.
+- `git diff --check`: pass.
+- Verified P1: `DiagnosticEvent` and `serialize_event` exist, but no production caller emits structured events.
+- Verified P2: `validate_parse_contract({"requiredKeys": [], "schema": {"x": 5}})` returns `[]`.
+- Verified P3: current `tmux-wrapper kill-all` default differs from `origin/main`.
+- Verified P3: prior `agents-build` code used `story.get("title", "")`; current core helper uses `story.get("title")`.
+
+### Decisions And Assumptions
+
+- Use Phase 07 to remediate review findings instead of editing completed Phase 00-06 history.
+- Preferred `kill-all` resolution is restoring prior default behavior unless product intent explicitly says otherwise.
+- Structured diagnostics/events must use a compatibility-safe channel; do not add unconditional stdout noise to commands with strict output contracts.
+
+### Blockers Or Risks
+
+- P1 blocker: missing production structured orchestration-stage diagnostics/events.
+- P2 risk: malformed parse contract schemas can invoke sub-agents before failing.
+- P3 risks: generated agents plan title compatibility and `kill-all` default compatibility.
+
+### Next Phase Notes
+
+- Start [Phase 07 - Review Remediation](./07-review-remediation.md).
+- First recommended command: `sed -n '1,260p' docs/plans/observability-validation/07-review-remediation.md`.
+- After implementation, run the Phase 07 focused test command and a final clean-context review.
+
 ## Phase 06 - 2026-05-21 - Codex
 
 ### Summary

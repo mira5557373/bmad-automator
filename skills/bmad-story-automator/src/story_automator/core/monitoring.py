@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .diagnostics import DiagnosticEvent, emit_diagnostic_event
 from .utils import print_json
 
 
@@ -16,6 +17,22 @@ def emit_monitor_result(
     output_verified: bool | None = None,
     structured_issue: object | None = None,
 ) -> int:
+    emit_diagnostic_event(
+        DiagnosticEvent(
+            name="session.lifecycle.result",
+            source="monitor-session",
+            message=f"monitor-session finished with {state}",
+            severity="error" if state in {"crashed", "timeout", "incomplete"} else "info",
+            context={
+                "finalState": state,
+                "todosDone": done,
+                "todosTotal": total,
+                "outputFile": output_file,
+                "reason": reason,
+                "outputVerified": False if output_verified is None else output_verified,
+            },
+        )
+    )
     if json_output:
         payload: dict[str, Any] = {
             "final_state": state,

@@ -60,7 +60,7 @@ def cmd_tmux_wrapper(args: list[str]) -> int:
         tmux_kill_session(args[1])
         return 0
     if action == "kill-all":
-        sessions, _ = tmux_list_sessions("--all-projects" not in args[1:])
+        sessions, _ = tmux_list_sessions("--project-only" in args[1:])
         for session in sessions:
             tmux_kill_session(session)
         print(f"Killed {len(sessions)} sessions")

@@ -208,7 +208,7 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sessions, [own])
 
-    def test_kill_all_defaults_to_project_scope(self) -> None:
+    def test_kill_all_defaults_to_all_automator_sessions(self) -> None:
         with (
             mock.patch("story_automator.commands.tmux.tmux_list_sessions", return_value=(["sa-one"], 0)) as list_sessions,
             mock.patch("story_automator.commands.tmux.tmux_kill_session") as kill_session,
@@ -217,8 +217,19 @@ class TmuxCommandContractTests(unittest.TestCase):
             code = cmd_tmux_wrapper(["kill-all"])
 
         self.assertEqual(code, 0)
-        list_sessions.assert_called_once_with(True)
+        list_sessions.assert_called_once_with(False)
         kill_session.assert_called_once_with("sa-one")
+
+    def test_kill_all_project_only_opt_in(self) -> None:
+        with (
+            mock.patch("story_automator.commands.tmux.tmux_list_sessions", return_value=(["sa-one"], 0)) as list_sessions,
+            mock.patch("story_automator.commands.tmux.tmux_kill_session"),
+            redirect_stdout(io.StringIO()),
+        ):
+            code = cmd_tmux_wrapper(["kill-all", "--project-only"])
+
+        self.assertEqual(code, 0)
+        list_sessions.assert_called_once_with(True)
 
     def test_kill_all_all_projects_opt_in(self) -> None:
         with (

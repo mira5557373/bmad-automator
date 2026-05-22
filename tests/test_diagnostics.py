@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from story_automator.core.diagnostics import (
+    DIAGNOSTIC_EVENTS_FILE_ENV,
     DiagnosticEvent,
     DiagnosticIssue,
+    emit_diagnostic_event,
     issues_from_exception,
     legacy_issue_message,
     redact_actual,
@@ -140,6 +143,26 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["issues"][0]["field"], "status")
         self.assertEqual(payload["context"]["path"], "<path:state.md>")
         self.assertEqual(payload["context"]["apiKey"], "<redacted>")
+
+    def test_emit_diagnostic_event_appends_jsonl_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "events.jsonl"
+            event = DiagnosticEvent(
+                name="state.transition",
+                source="state-update",
+                context={"stateFile": "/tmp/private/state.md", "token": "abc123"},
+            )
+
+            self.assertTrue(emit_diagnostic_event(event, path))
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["name"], "state.transition")
+            self.assertEqual(payload["context"]["stateFile"], "<path:state.md>")
+            self.assertEqual(payload["context"]["token"], "<redacted>")
+
+    def test_emit_diagnostic_event_is_disabled_without_target(self) -> None:
+        with unittest.mock.patch.dict("os.environ", {DIAGNOSTIC_EVENTS_FILE_ENV: ""}, clear=False):
+            self.assertFalse(emit_diagnostic_event(DiagnosticEvent(name="noop", source="test")))
 
 
 if __name__ == "__main__":

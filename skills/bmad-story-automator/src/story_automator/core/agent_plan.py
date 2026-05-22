@@ -125,7 +125,7 @@ def build_agents_file(state_file: str | Path, complexity_file: str | Path, outpu
     stories = []
     for story in complexity_payload.get("stories", []):
         level = str(((story.get("complexity") or {}).get("level")) or "medium").strip().lower() or "medium"
-        stories.append({"storyId": story.get("storyId"), "title": story.get("title"), "complexity": level, "tasks": _tasks_for(config, level)})
+        stories.append({"storyId": story.get("storyId"), "title": str(story.get("title") or ""), "complexity": level, "tasks": _tasks_for(config, level)})
     try:
         epic = find_frontmatter_value(state_file, "epic")
         epic_name = find_frontmatter_value(state_file, "epicName")

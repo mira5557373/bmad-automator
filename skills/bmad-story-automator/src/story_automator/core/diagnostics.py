@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
+DIAGNOSTIC_EVENTS_FILE_ENV = "STORY_AUTOMATOR_DIAGNOSTICS_FILE"
 MAX_STRING_LENGTH = 160
 MAX_COLLECTION_ITEMS = 6
 SENSITIVE_KEY_RE = re.compile(r"(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.IGNORECASE)
@@ -44,7 +47,7 @@ def serialize_issue(issue: DiagnosticIssue) -> dict[str, Any]:
         "field": issue.field,
         "expected": _json_safe(issue.expected),
         "actual": redact_actual(issue.actual),
-        "message": issue.message,
+        "message": redact_actual(issue.message),
         "recovery": issue.recovery,
         "code": issue.code,
         "severity": issue.severity,
@@ -65,6 +68,20 @@ def serialize_event(event: DiagnosticEvent) -> dict[str, Any]:
         "issues": serialize_issues(event.issues),
         "context": redact_actual(event.context),
     }
+
+
+def emit_diagnostic_event(event: DiagnosticEvent, path: str | Path | None = None) -> bool:
+    target = str(path or os.environ.get(DIAGNOSTIC_EVENTS_FILE_ENV, "")).strip()
+    if not target:
+        return False
+    try:
+        output = Path(target).expanduser()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(serialize_event(event), separators=(",", ":")) + "\n")
+    except OSError:
+        return False
+    return True
 
 
 def legacy_issue_message(issue: DiagnosticIssue) -> str:

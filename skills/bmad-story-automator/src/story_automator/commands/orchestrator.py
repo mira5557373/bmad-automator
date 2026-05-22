@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from story_automator.core.frontmatter import (
     parse_frontmatter,
     parse_simple_frontmatter,
 )
+from story_automator.core.orchestration_events import emit_policy_decision, emit_policy_load_failed, emit_state_fields_updated, emit_state_transition
 from story_automator.core.parse_contracts import verifier_exception_payload
 from story_automator.core.runtime_policy import (
     PolicyError,
@@ -23,22 +23,11 @@ from story_automator.core.runtime_policy import (
 )
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_layout import active_marker_path, active_marker_project_entry
-from story_automator.core.state_validation import status_transition_error_payload
+from story_automator.core.state_validation import status_transition_error_payload, validate_status_transition
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.sprint import sprint_status_epic, sprint_status_get
 from story_automator.core.story_keys import normalize_story_key, sprint_status_file
-from story_automator.core.utils import (
-    atomic_write,
-    ensure_dir,
-    extract_json_line,
-    file_exists,
-    get_project_root,
-    iso_now,
-    print_json,
-    read_text,
-    run_cmd,
-    trim_lines,
-)
+from story_automator.core.utils import atomic_write, ensure_dir, file_exists, get_project_root, iso_now, print_json, read_text, run_cmd
 from .orchestrator_epic_agents import (
     agents_build_action,
     agents_resolve_action,
@@ -315,14 +304,18 @@ def _state_update(args: list[str]) -> int:
             continue
         idx += 1
     pending_status = str(fields.get("status") or "")
+    final_status = ""
     for key, value in updates:
         if key != "status":
             continue
-        payload = status_transition_error_payload(pending_status, value)
-        if payload:
+        issue = validate_status_transition(pending_status, value)
+        if issue:
+            payload = status_transition_error_payload(pending_status, value)
+            emit_state_transition(args[0], result="blocked", current_status=pending_status, attempted_status=value, issue=issue)
             print_json(payload)
             return 1
         pending_status = value
+        final_status = value
     updated: list[str] = []
     for key, value in updates:
         replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
@@ -333,6 +326,11 @@ def _state_update(args: list[str]) -> int:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
     Path(args[0]).write_text(text, encoding="utf-8")
+    if final_status:
+        emit_state_transition(args[0], result="applied", new_status=final_status)
+    event_fields = [key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}]
+    if event_fields:
+        emit_state_fields_updated(args[0], event_fields, {key: value for key, value in updates if key in event_fields})
     print_json({"ok": True, "updated": updated})
     return 0
 
@@ -355,11 +353,13 @@ def _escalate(args: list[str]) -> int:
     try:
         policy = load_runtime_policy(get_project_root(), state_file=state_file)
     except (FileNotFoundError, PolicyError) as exc:
+        emit_policy_load_failed(trigger, state_file, str(exc))
         print_json({"escalate": True, "reason": str(exc)})
         return 0
     if trigger == "review-loop":
         cycles = _parse_context_int(context, "cycles")
         limit = review_max_cycles(policy)
+        emit_policy_decision(trigger, cycles >= limit, {"cycles": cycles, "limit": limit})
         if cycles >= limit:
             print_json({"escalate": True, "reason": f"Review loop exceeded max cycles ({cycles}/{limit})"})
         else:
@@ -368,6 +368,7 @@ def _escalate(args: list[str]) -> int:
     if trigger == "session-crash":
         retries = _parse_context_int(context, "retries")
         limit = crash_max_retries(policy)
+        emit_policy_decision(trigger, retries >= limit, {"retries": retries, "limit": limit})
         if retries >= limit:
             print_json({"escalate": True, "reason": f"Session crashed after {retries} retries"})
         else:
@@ -375,11 +376,13 @@ def _escalate(args: list[str]) -> int:
         return 0
     if trigger == "story-validation":
         created = _parse_context_int(context, "created")
+        emit_policy_decision(trigger, created != 1, {"created": created})
         if created != 1:
             print_json({"escalate": True, "reason": "No story file created" if created == 0 else f"Runaway creation: {created} files"})
         else:
             print_json({"escalate": False})
         return 0
+    emit_policy_decision(trigger, False, {"reason": "Unknown trigger"})
     print_json({"escalate": False, "reason": "Unknown trigger"})
     return 0
 

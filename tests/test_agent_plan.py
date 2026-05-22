@@ -227,6 +227,29 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(payload["fallback"], "false")
         self.assertEqual(payload["complexity"], "high")
 
+    def test_agents_build_preserves_missing_title_as_empty_string(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+
+        code, payload = self._helper(
+            [
+                "agents-build",
+                "--state-file",
+                str(self.state_file),
+                "--complexity-file",
+                str(self.complexity_file),
+                "--output",
+                str(self.agents_file),
+                "--config-json",
+                "{}",
+            ]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["stories"], 1)
+        agents_payload, issues = load_agents_plan(str(self.agents_file))
+        self.assertEqual(issues, [])
+        self.assertEqual(agents_payload["stories"][0]["title"], "")
+
     def test_agents_build_treats_null_primary_as_unset(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
 

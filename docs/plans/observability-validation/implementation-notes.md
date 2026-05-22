@@ -28,6 +28,48 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-22 - phase-07-review-remediation
+
+### Context
+
+- Phase 07 resolved the clean-context review findings that blocked issue #5 closure after Phase 06.
+
+### Decision, Change, Or Tradeoff
+
+- Added an opt-in JSONL event channel through `STORY_AUTOMATOR_DIAGNOSTICS_FILE`. Command stdout remains unchanged unless existing commands already return JSON diagnostics.
+- Added production events for parse stage start/result, state status transitions, state story/step/epic field updates, monitor-session lifecycle results, policy decisions, and policy load failures.
+- Event context and diagnostic issue messages are redacted through the shared diagnostics helpers before writing JSONL.
+- Parse contract schema leaves are validated before parser sub-agent execution; malformed leaves now return `parse_contract_invalid`.
+- Restored generated agent-plan missing-title compatibility by serializing missing titles as `""`.
+- Restored `tmux-wrapper kill-all` default compatibility to all automator sessions; `--project-only` remains opt-in.
+
+### User Impact
+
+- Operators can opt into structured lifecycle diagnostics without breaking scripts that parse stdout.
+- Phase 07 focused, broad, and aggregate verification passed. Final clean-context baseline is `P0/P1 clean`.
+
+## 2026-05-22 - review-correction
+
+### Context
+
+- Clean-context review was run against branch diff `origin/main...HEAD` for GitHub issue #5 and the observability-validation plan.
+- The review checked plan coverage and implementation evidence from source and tests.
+
+### Decision, Change, Or Tradeoff
+
+- Phase 06's local release-ready claim is superseded by review findings until Phase 07 is completed.
+- Added Phase 07 to resolve the blocking findings instead of rewriting completed Phase 00-06 history.
+- The P1 blocker is that `DiagnosticEvent` is defined and serializable, but no production code emits structured lifecycle, orchestration-stage, state-transition, session, or policy-decision events. Existing implementation mostly adds `structuredIssues` to malformed/error paths.
+- Additional findings to resolve:
+  - malformed parse schema leaves are caught only after parser sub-agent execution
+  - missing complexity story titles serialize as `null` instead of the prior empty string
+  - `tmux-wrapper kill-all` default behavior changed outside additive diagnostics scope
+
+### User Impact
+
+- The branch should not close issue #5 until Phase 07 reaches a `P0/P1 clean` review baseline.
+- Focused and broad Python verification still passed before this correction, so the blocker is a requirements/coverage gap rather than an existing test failure.
+
 ## 2026-05-21 - phase-06-e2e-docs-and-release-readiness
 
 ### Context

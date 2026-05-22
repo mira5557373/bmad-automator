@@ -14,6 +14,17 @@ This is not a full object-oriented rewrite. Use small typed/domain seams, struct
 - Agent plan and complexity payload handling still accepts raw JSON/dicts at command boundaries and can raise late exceptions.
 - Existing policy validation, policy snapshots, `StoryKey`, `SprintStatus`, success verifier contracts, and tmux runtime dataclasses are useful anchors. Build from them instead of replacing everything.
 
+## Review Status
+
+Phase 06 local verification passed, but the clean-context review on 2026-05-22 found the branch was not ready to close issue #5. Phase 07 remediated the review findings. The latest review baseline is `P0/P1 clean`.
+
+Material review findings to resolve:
+
+- P1: `DiagnosticEvent` is only a serialization helper; no production path emits structured lifecycle, orchestration-stage, state-transition, or policy-decision diagnostics, despite issue #5 and Phase 06 exit criteria requiring key orchestration stages to emit stable structured diagnostics or events.
+- P2: parse schema leaf rules are validated only after the parser sub-agent runs, so malformed parse contracts can fail as `sub-agent returned invalid json` instead of `parse_contract_invalid`.
+- P3: `agents-build` emits `title: null` for accepted complexity stories without titles; prior behavior emitted an empty string.
+- P3: `tmux-wrapper kill-all` default behavior changed from all automator sessions to current-project sessions, outside the additive diagnostics scope.
+
 ## Constraints
 
 - Preserve existing public CLI commands and successful workflow behavior unless a phase explicitly documents a compatibility reason.
@@ -35,6 +46,7 @@ Diagnostic schema -> state validation and transition guards -> parser/verifier f
 4. [Phase 04 - Agent Complexity And Story Boundaries](./04-agent-complexity-and-story-boundaries.md)
 5. [Phase 05 - Session Runtime Diagnostics](./05-session-runtime-diagnostics.md)
 6. [Phase 06 - E2E Docs And Release Readiness](./06-e2e-docs-and-release-readiness.md)
+7. [Phase 07 - Review Remediation](./07-review-remediation.md)
 
 ## Compatibility Strategy
 

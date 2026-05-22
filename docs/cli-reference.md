@@ -46,6 +46,10 @@ Use these to create, inspect, and validate orchestration state.
 
 It also adds `structuredIssues` and `issueCount` for field-specific diagnostics. Consumers should prefer `structuredIssues` when present and keep `issues` as the legacy fallback.
 
+## Diagnostic Events
+
+Command stdout stays backward-compatible. Set `STORY_AUTOMATOR_DIAGNOSTICS_FILE=/path/to/events.jsonl` to opt in to structured diagnostic events. The helper appends one redacted JSON object per line for orchestration-stage parse results, state transitions, monitor-session lifecycle results, and policy load failures.
+
 ## tmux Commands
 
 - `tmux-wrapper spawn`

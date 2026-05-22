@@ -85,3 +85,19 @@
 - [x] Review diff and file sizes.
 - [x] Update implementation notes with coverage gaps and release risks.
 - [x] Append Phase 06 handoff entry.
+
+## Phase 07 - Review Remediation
+
+- [x] Read README, TODO, implementation notes, handoff log, Phase 06 handoff, and 2026-05-22 review correction entry.
+- [x] Resolve the structured diagnostics/event channel for key orchestration lifecycle/stage/state/session/policy decisions.
+- [x] Add production structured diagnostics/events without breaking legacy command output.
+- [x] Add tests for event emission and redacted context.
+- [x] Validate parse contract schema leaves before sub-agent execution.
+- [x] Add a regression test that invalid parse schema leaves return `parse_contract_invalid` and do not call the parser sub-agent.
+- [x] Restore generated agent-plan missing-title compatibility (`""`, not `null`).
+- [x] Restore or explicitly document `tmux-wrapper kill-all` compatibility behavior.
+- [x] Run focused Phase 07 tests.
+- [x] Run broad verification or document exact blockers.
+- [x] Run or request final clean-context review and confirm latest baseline is `P0/P1 clean` or blocked with exact reason.
+- [x] Update implementation notes with Phase 07 decisions and risks.
+- [x] Append Phase 07 handoff entry.

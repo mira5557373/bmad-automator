@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from story_automator.core.diagnostics import issues_from_exception
+from story_automator.core.diagnostics import DiagnosticEvent, DiagnosticIssue, emit_diagnostic_event, issues_from_exception
 from story_automator.core.parse_contracts import ParseContractError, load_parse_contract, parse_failure_payload, validate_payload
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, parser_runtime_config, step_contract
 from story_automator.core.utils import COMMAND_TIMEOUT_EXIT, extract_json_line, print_json, read_text, run_cmd, trim_lines
@@ -58,6 +58,7 @@ def parse_output_action(args: list[str]) -> int:
         print_json(parse_failure_payload("runtime_policy_invalid", issues_from_exception(exc, source="runtime-policy", field="runtime.parser")))
         return 1
     prompt = _build_parse_prompt(contract, parse_contract, "\n".join(lines))
+    _emit_parse_event("orchestration.stage.start", step, "Starting parse-output stage", context={"provider": parser_cfg["provider"], "model": parser_cfg["model"], "timeoutSeconds": parser_cfg["timeoutSeconds"], "contentLines": len(lines)})
     result = run_cmd(
         str(parser_cfg["provider"]),
         "-p",
@@ -69,21 +70,29 @@ def parse_output_action(args: list[str]) -> int:
     )
     if result.exit_code != 0:
         reason = "sub-agent call timed out" if result.exit_code == COMMAND_TIMEOUT_EXIT else "sub-agent call failed"
-        print_json(parse_failure_payload(reason, issues_from_exception(result.error or RuntimeError(reason), source="parse-output", field="sub_agent")))
+        issues = issues_from_exception(result.error or RuntimeError(reason), source="parse-output", field="sub_agent")
+        _emit_parse_event("orchestration.stage.result", step, reason, severity="error", issues=issues)
+        print_json(parse_failure_payload(reason, issues))
         return 1
     json_line = extract_json_line(result.output)
     if not json_line:
-        print_json(parse_failure_payload("sub-agent returned invalid json", issues_from_exception(ValueError("no json object found"), source="parse-output", field="payload")))
+        issues = issues_from_exception(ValueError("no json object found"), source="parse-output", field="payload")
+        _emit_parse_event("orchestration.stage.result", step, "sub-agent returned invalid json", severity="error", issues=issues)
+        print_json(parse_failure_payload("sub-agent returned invalid json", issues))
         return 1
     try:
         payload = json.loads(json_line)
     except json.JSONDecodeError as exc:
-        print_json(parse_failure_payload("sub-agent returned invalid json", issues_from_exception(exc, source="parse-output", field="payload")))
+        issues = issues_from_exception(exc, source="parse-output", field="payload")
+        _emit_parse_event("orchestration.stage.result", step, "sub-agent returned invalid json", severity="error", issues=issues)
+        print_json(parse_failure_payload("sub-agent returned invalid json", issues))
         return 1
     issues = validate_payload(payload, parse_contract)
     if issues:
+        _emit_parse_event("orchestration.stage.result", step, "sub-agent returned invalid json", severity="error", issues=issues)
         print_json(parse_failure_payload("sub-agent returned invalid json", issues))
         return 1
+    _emit_parse_event("orchestration.stage.result", step, "Parse-output stage completed", context={"status": payload.get("status", "")})
     print(json.dumps(payload, separators=(",", ":")))
     return 0
 
@@ -92,3 +101,17 @@ def _build_parse_prompt(contract: dict[str, object], parse_contract: dict[str, o
     label = str(contract.get("label") or "session")
     schema = json.dumps(parse_contract.get("schema") or {}, separators=(",", ":"))
     return f"Analyze this {label} session output. Return JSON only:\n{schema}\n\nSession output:\n---\n{content}\n---"
+
+
+def _emit_parse_event(
+    name: str,
+    step: str,
+    message: str,
+    *,
+    severity: str = "info",
+    issues: list[DiagnosticIssue] | None = None,
+    context: dict[str, object] | None = None,
+) -> None:
+    payload = {"step": step}
+    payload.update(context or {})
+    emit_diagnostic_event(DiagnosticEvent(name=name, source="parse-output", message=message, severity=severity, issues=issues or [], context=payload))

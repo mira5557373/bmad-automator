@@ -88,6 +88,22 @@ class OrchestratorParseTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "parse_contract_invalid")
         self.assertEqual(payload["structuredIssues"][0]["field"], "requiredKeys")
 
+    def test_invalid_schema_leaf_rejected_before_sub_agent(self) -> None:
+        schema = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "parse" / "review.json"
+        schema.write_text(json.dumps({"requiredKeys": ["status"], "schema": {"issues_found": {"critical": 5}}}), encoding="utf-8")
+        stdout = io.StringIO()
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), patch(
+            "story_automator.commands.orchestrator_parse.run_cmd",
+            return_value=CommandResult('{"status":"SUCCESS"}', 0),
+        ) as mock_run, redirect_stdout(stdout):
+            code = parse_output_action([str(self.output_file), "review"])
+
+        self.assertEqual(code, 1)
+        mock_run.assert_not_called()
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["reason"], "parse_contract_invalid")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "schema.issues_found.critical")
+
     def test_invalid_child_json_rejected(self) -> None:
         stdout = io.StringIO()
         with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), patch(
