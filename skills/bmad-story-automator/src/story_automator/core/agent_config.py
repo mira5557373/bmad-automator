@@ -157,8 +157,18 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                 in_complexity_overrides = False
                 config.setdefault("perTask", {})
                 continue
+            if stripped == "perTask: {}":
+                in_per_task = False
+                in_complexity_overrides = False
+                config.setdefault("perTask", {})
+                continue
             if stripped == "complexityOverrides:":
                 in_complexity_overrides = True
+                in_per_task = False
+                config.setdefault("complexityOverrides", {})
+                continue
+            if stripped == "complexityOverrides: {}":
+                in_complexity_overrides = False
                 in_per_task = False
                 config.setdefault("complexityOverrides", {})
                 continue

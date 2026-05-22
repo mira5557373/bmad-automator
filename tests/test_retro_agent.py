@@ -255,6 +255,19 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
 
+    def test_retro_agent_accepts_inline_empty_agent_config_maps(self) -> None:
+        state_file = self.project_root / "retro-inline-empty-map-state.md"
+        state_file.write_text(
+            "---\nagentConfig:\n  defaultPrimary: \"codex\"\n  defaultFallback: false\n  perTask: {}\n  complexityOverrides: {}\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
     def test_retro_agent_ignores_inline_yaml_comments(self) -> None:
         state_file = self.project_root / "retro-comment-state.md"
         state_file.write_text(
