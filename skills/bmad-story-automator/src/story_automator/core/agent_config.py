@@ -232,6 +232,19 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                     task_cfg = level_cfg.setdefault(current_task, {})
                     if isinstance(task_cfg, dict):
                         task_cfg[key.strip()] = _parse_scalar(raw.strip())
+            continue
+
+        if in_complexity_overrides and indent > 2:
+            overrides = config.setdefault("complexityOverrides", {})
+            if current_level and isinstance(overrides, dict):
+                if current_task:
+                    level_cfg = overrides.setdefault(current_level, {})
+                    if isinstance(level_cfg, dict):
+                        level_cfg[current_task] = _parse_scalar(stripped)
+                else:
+                    overrides[current_level] = _parse_scalar(stripped)
+            else:
+                config["complexityOverrides"] = _parse_scalar(stripped)
 
     return config
 
