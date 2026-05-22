@@ -242,6 +242,19 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
 
+    def test_retro_agent_accepts_quoted_nested_complexity_keys(self) -> None:
+        state_file = self.project_root / "retro-complexity-quoted-state.md"
+        state_file.write_text(
+            "---\nagentConfig:\n  defaultPrimary: \"claude\"\n  defaultFallback: \"codex\"\n  complexityOverrides:\n    \"medium\":\n      \"retro\":\n        \"primary\": \"codex\"\n        \"fallback\": false\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
     def test_retro_agent_ignores_inline_yaml_comments(self) -> None:
         state_file = self.project_root / "retro-comment-state.md"
         state_file.write_text(
@@ -291,6 +304,22 @@ class RetroAgentTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(payload["error"], "invalid_agent_config")
                 self.assertIn("complexityOverrides", payload["structuredIssues"][0]["message"])
+
+    def test_retro_agent_rejects_unterminated_frontmatter(self) -> None:
+        state_file = self.project_root / "retro-unterminated-state.md"
+        state_file.write_text(
+            "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro:\n        primary: \"codex\"\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["retro-agent", "--state-file", str(state_file)])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertIn("unterminated", payload["structuredIssues"][0]["message"])
 
     def _run_retro_agent(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()
