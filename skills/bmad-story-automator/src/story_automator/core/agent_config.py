@@ -55,6 +55,8 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     if not isinstance(data, dict):
         raise ValueError("agentConfig must be an object")
     config = AgentConfigResolved()
+    if "agentConfig" in data and data.get("agentConfig") not in ("", None):
+        raise ValueError("agentConfig must be an object")
     config.default_primary = data.get("defaultPrimary") or data.get("primary") or "auto"
     if "defaultFallback" in data:
         fallback_raw = data.get("defaultFallback")
@@ -127,6 +129,10 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
         if not in_agent_config:
             if AGENT_CONFIG_HEADER_RE.match(raw_line.strip()):
                 in_agent_config = True
+                continue
+            if raw_line.strip().startswith("agentConfig:"):
+                key, raw = raw_line.strip().split(":", 1)
+                config[_parse_key(key)] = _parse_scalar(raw)
             continue
 
         if raw_line and not raw_line.startswith(" "):
