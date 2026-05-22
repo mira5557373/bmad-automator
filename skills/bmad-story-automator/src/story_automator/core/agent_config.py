@@ -171,6 +171,9 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
             current_task = ""
             overrides = config.setdefault("complexityOverrides", {})
             if isinstance(overrides, dict):
+                if current_level.startswith("-"):
+                    overrides[current_level] = _parse_scalar(stripped)
+                    continue
                 if _has_scalar_value(raw):
                     overrides[current_level] = _parse_scalar(raw.strip())
                 else:
