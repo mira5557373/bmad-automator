@@ -255,6 +255,25 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
 
+    def test_retro_agent_rejects_invalid_nested_complexity_override_frontmatter(self) -> None:
+        cases = (
+            "---\nagentConfig:\n  complexityOverrides:\n    medium: bad\n---\n",
+            "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro: bad\n---\n",
+        )
+        for index, content in enumerate(cases):
+            with self.subTest(index=index):
+                state_file = self.project_root / f"retro-invalid-complexity-{index}.md"
+                state_file.write_text(content, encoding="utf-8")
+                stdout = io.StringIO()
+
+                with patch_env(self.project_root), redirect_stdout(stdout):
+                    code = cmd_orchestrator_helper(["retro-agent", "--state-file", str(state_file)])
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"], "invalid_agent_config")
+                self.assertIn("complexityOverrides", payload["structuredIssues"][0]["message"])
+
     def _run_retro_agent(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()
         with patch_env(self.project_root), redirect_stdout(stdout):

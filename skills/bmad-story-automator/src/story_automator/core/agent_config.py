@@ -165,12 +165,16 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                 per_task.setdefault(current_task, {})
             continue
 
-        if indent == 4 and in_complexity_overrides and stripped.endswith(":"):
-            current_level = stripped[:-1]
+        if indent == 4 and in_complexity_overrides and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            current_level = key.strip()
             current_task = ""
             overrides = config.setdefault("complexityOverrides", {})
             if isinstance(overrides, dict):
-                overrides.setdefault(current_level, {})
+                if raw.strip():
+                    overrides[current_level] = _parse_scalar(raw.strip())
+                else:
+                    overrides.setdefault(current_level, {})
             continue
 
         if indent == 4 and current_task == "retro" and ":" in stripped:
@@ -189,13 +193,17 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                     task_cfg[key.strip()] = _parse_scalar(raw.strip())
             continue
 
-        if indent == 6 and in_complexity_overrides and current_level and stripped.endswith(":"):
-            current_task = stripped[:-1]
+        if indent == 6 and in_complexity_overrides and current_level and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            current_task = key.strip()
             overrides = config.setdefault("complexityOverrides", {})
             if isinstance(overrides, dict):
                 level_cfg = overrides.setdefault(current_level, {})
                 if isinstance(level_cfg, dict):
-                    level_cfg.setdefault(current_task, {})
+                    if raw.strip():
+                        level_cfg[current_task] = _parse_scalar(raw.strip())
+                    else:
+                        level_cfg.setdefault(current_task, {})
             continue
 
         if indent == 8 and in_complexity_overrides and current_level and current_task and ":" in stripped:
