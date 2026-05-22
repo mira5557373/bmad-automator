@@ -135,6 +135,10 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
                 config[_parse_key(key)] = _parse_scalar(raw)
             continue
 
+        if raw_line.startswith("\t"):
+            config["agentConfig"] = _parse_scalar(raw_line.strip())
+            continue
+
         if raw_line and not raw_line.startswith(" "):
             break
 
