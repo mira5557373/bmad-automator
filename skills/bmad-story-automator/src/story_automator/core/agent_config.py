@@ -69,9 +69,9 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     retro_task = _parse_task_entry(data.get("retro"))
     if retro_task is not None:
         config.per_task.setdefault("retro", retro_task)
-    complexity_raw = data.get("complexityOverrides")
-    if complexity_raw is None:
-        complexity_raw = {}
+    complexity_raw = data.get("complexityOverrides", {})
+    if "complexityOverrides" in data and complexity_raw is None:
+        raise ValueError("agentConfig.complexityOverrides must be an object")
     if not isinstance(complexity_raw, dict):
         raise ValueError("agentConfig.complexityOverrides must be an object")
     for level, value in complexity_raw.items():
@@ -137,6 +137,8 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
             continue
 
         indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent != 2 and _is_misindented_agent_config_section(stripped, in_per_task, in_complexity_overrides):
+            config[_parse_key(stripped.split(":", 1)[0])] = _parse_scalar(stripped)
         if indent == 2:
             current_task = ""
             current_level = ""
@@ -533,6 +535,16 @@ def _parse_scalar(raw: str) -> object:
 
 def _parse_key(raw: str) -> str:
     return unquote_scalar(raw.strip())
+
+
+def _is_misindented_agent_config_section(stripped: str, in_per_task: bool, in_complexity_overrides: bool) -> bool:
+    if ":" not in stripped:
+        return False
+    key, _ = stripped.split(":", 1)
+    parsed_key = _parse_key(key)
+    if parsed_key in {"perTask", "complexityOverrides"}:
+        return True
+    return parsed_key == "retro" and not in_per_task and not in_complexity_overrides
 
 
 def _has_scalar_value(raw: str) -> bool:
