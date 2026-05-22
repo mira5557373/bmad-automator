@@ -240,6 +240,8 @@ def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False) 
     for task, entry in raw.items():
         if strict_entries and not isinstance(entry, dict):
             raise ValueError(f"agentConfig.{field}.{task} must be an object")
+        if strict_entries and isinstance(entry, dict):
+            _validate_task_entry(entry, f"agentConfig.{field}.{task}")
         parsed = _parse_task_entry(entry)
         if parsed is None or not _task_config_has_values(parsed):
             continue
@@ -289,6 +291,21 @@ def normalize_model(raw: Any) -> str:
 
 # Backward-compatible private alias for in-module callers.
 _normalize_model = normalize_model
+
+
+def _validate_task_entry(raw: dict[str, Any], field: str) -> None:
+    allowed = {"primary", "fallback"}
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise ValueError(f"{field}.{unknown[0]} is not supported")
+    if "primary" in raw and _is_empty_agent_value(raw["primary"]):
+        raise ValueError(f"{field}.primary must be a non-empty string")
+    if "fallback" in raw and _is_empty_agent_value(raw["fallback"]):
+        raise ValueError(f"{field}.fallback must be a non-empty string or false")
+
+
+def _is_empty_agent_value(raw: Any) -> bool:
+    return raw is None or (isinstance(raw, str) and not raw.strip())
 
 
 def render_agent_config_frontmatter(raw_config: dict[str, Any]) -> str:

@@ -273,6 +273,8 @@ class RetroAgentTests(unittest.TestCase):
             "---\nagentConfig:\n  complexityOverrides:\n    medium: bad\n---\n",
             "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro: bad\n---\n",
             "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro:\n        - primary: \"codex\"\n---\n",
+            "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro:\n        primary:\n---\n",
+            "---\nagentConfig:\n  complexityOverrides:\n    medium:\n      retro:\n        fallback:\n---\n",
         )
         for index, content in enumerate(cases):
             with self.subTest(index=index):
