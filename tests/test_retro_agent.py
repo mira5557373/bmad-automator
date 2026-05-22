@@ -306,6 +306,7 @@ class RetroAgentTests(unittest.TestCase):
             "---\nagentConfig:\n  defaultPrimary: \"claude\"\n    complexityOverrides:\n      medium:\n        retro:\n          primary: \"codex\"\n---\n",
             "---\nagentConfig: bad\n  complexityOverrides:\n    medium:\n      retro:\n        primary: \"codex\"\n---\n",
             "---\nagentConfig:\n\tdefaultPrimary: \"claude\"\n\tcomplexityOverrides:\n\t  medium:\n\t    retro:\n\t      primary: \"codex\"\n---\n",
+            "---\nagentConfig:\ncomplexityOverrides:\n  medium:\n    retro:\n      primary: \"codex\"\n---\n",
         )
         for index, content in enumerate(cases):
             with self.subTest(index=index):

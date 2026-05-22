@@ -140,6 +140,8 @@ def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
             continue
 
         if raw_line and not raw_line.startswith(" "):
+            if _is_misindented_agent_config_section(raw_line.strip(), in_per_task, in_complexity_overrides):
+                config[_parse_key(raw_line.strip().split(":", 1)[0])] = _parse_scalar(raw_line.strip())
             break
 
         stripped = raw_line.strip()
