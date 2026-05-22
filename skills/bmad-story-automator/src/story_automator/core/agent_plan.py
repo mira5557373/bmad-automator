@@ -27,11 +27,13 @@ def validate_complexity_payload(payload: object) -> list[DiagnosticIssue]:
         story_id = story.get("storyId")
         if not isinstance(story_id, str) or not story_id.strip():
             issues.append(_issue("missing_field", f"{field}.storyId", "non-empty string", story_id, "Complexity storyId must be a non-empty string"))
-        complexity = story.get("complexity") or {}
-        if complexity and not isinstance(complexity, dict):
+        complexity = story.get("complexity")
+        if complexity is None:
+            complexity = {}
+        elif not isinstance(complexity, dict):
             issues.append(_issue("invalid_type", f"{field}.complexity", "object", complexity, "Complexity must be an object"))
             continue
-        level = str((complexity.get("level") if isinstance(complexity, dict) else "") or "medium").strip().lower()
+        level = str(complexity.get("level") or "medium").strip().lower()
         if level not in COMPLEXITY_LEVELS:
             issues.append(_issue("invalid_value", f"{field}.complexity.level", sorted(COMPLEXITY_LEVELS), level, "Complexity level must be low, medium, or high"))
     return issues

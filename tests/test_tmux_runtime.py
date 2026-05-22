@@ -166,6 +166,13 @@ class TmuxRuntimeStateTests(unittest.TestCase):
 
             self.assertEqual(load_session_state(state_path), {})
 
+    def test_load_session_state_preserves_legacy_empty_on_invalid_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_bytes(b"\xff")
+
+            self.assertEqual(load_session_state(state_path), {})
+
     def test_diagnostic_session_state_loader_reports_invalid_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = Path(temp_dir) / "state.json"
@@ -178,6 +185,19 @@ class TmuxRuntimeStateTests(unittest.TestCase):
             self.assertEqual(result.state, {})
             self.assertIsNotNone(result.issue)
             self.assertEqual(result.issue.type if result.issue else "", "session_state.invalid_json")
+
+    def test_diagnostic_session_state_loader_reports_invalid_utf8_as_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_bytes(b"\xff")
+
+            result = load_session_state_diagnostics(state_path)
+
+            self.assertFalse(result.ok)
+            self.assertTrue(result.exists)
+            self.assertEqual(result.state, {})
+            self.assertIsNotNone(result.issue)
+            self.assertEqual(result.issue.type if result.issue else "", "session_state.unreadable")
 
     def test_diagnostic_session_state_loader_warns_on_unexpected_schema_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

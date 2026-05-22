@@ -24,7 +24,7 @@ def load_session_state(path: str | Path) -> dict[str, object]:
         return {}
     try:
         raw = json.loads(read_text(target))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return raw if isinstance(raw, dict) else {}
 
@@ -35,7 +35,7 @@ def load_session_state_diagnostics(path: str | Path) -> SessionStateLoadResult:
         return SessionStateLoadResult(False, {}, _session_issue("session_state.missing", "file exists", "", "Session state file is missing"), False)
     try:
         text = read_text(target)
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return SessionStateLoadResult(False, {}, _session_issue("session_state.unreadable", "readable JSON file", str(exc), "Session state file is unreadable"), True)
     try:
         raw = json.loads(text)

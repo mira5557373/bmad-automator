@@ -8,6 +8,7 @@ from pathlib import Path
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_validate_state
+from story_automator.core.state_validation import has_runtime_command_config
 from tests.test_replacement_unicode import _FixtureMixin, patch_env
 
 
@@ -52,6 +53,12 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
 
         self.assertEqual(payload["structure"], "ok")
         self.assertEqual(payload["issues"], [])
+
+    def test_runtime_command_config_rejects_whitespace_only_command(self) -> None:
+        self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, ""))
+        self.assertFalse(has_runtime_command_config({"aiCommand": ["", "  "]}, ""))
+        self.assertTrue(has_runtime_command_config({"aiCommand": ["  claude  "]}, ""))
+        self.assertTrue(has_runtime_command_config({"aiCommand": "   "}, 'agentConfig:\n  defaultPrimary: "codex"\n'))
 
     def test_validate_state_reports_invalid_status_field(self) -> None:
         state_file = self._build_state_config(status="DONE")

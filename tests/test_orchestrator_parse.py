@@ -64,6 +64,19 @@ class OrchestratorParseTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "parse_contract_invalid")
         self.assertEqual(payload["structuredIssues"][0]["field"], "--state-file")
 
+    def test_missing_explicit_state_file_reports_runtime_policy_field(self) -> None:
+        stdout = io.StringIO()
+        missing_state = self.project_root / "missing-state.md"
+
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), redirect_stdout(stdout):
+            code = parse_output_action([str(self.output_file), "create", "--state-file", str(missing_state)])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["reason"], "runtime_policy_invalid")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "runtime-policy")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "runtime.policy")
+
     def test_non_string_required_key_rejected(self) -> None:
         schema = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "parse" / "create.json"
         schema.write_text(json.dumps({"requiredKeys": [True], "schema": {}}), encoding="utf-8")

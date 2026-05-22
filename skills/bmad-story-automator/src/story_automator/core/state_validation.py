@@ -115,7 +115,9 @@ def state_validation_payload(issues: list[DiagnosticIssue]) -> dict[str, Any]:
 
 def has_runtime_command_config(fields: dict[str, Any], frontmatter: str) -> bool:
     ai_command = fields.get("aiCommand")
-    if ai_command not in ("", [], None):
+    if isinstance(ai_command, str) and ai_command.strip():
+        return True
+    if isinstance(ai_command, list) and any(isinstance(item, str) and item.strip() for item in ai_command):
         return True
     return has_agent_config_runtime_source(frontmatter)
 

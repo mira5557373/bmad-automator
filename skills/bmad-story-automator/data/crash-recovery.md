@@ -23,8 +23,8 @@ The status script returns `session_state` in CSV column 6:
 
 For `monitor-session --json`, malformed persisted runner state can add
 `structuredIssues` to the result. CSV status commands keep the exact six-column
-format. Treat `session_state.invalid_json`, `session_state.invalid_type`, and
-`session_state.unreadable` as runtime-state diagnostics, then verify workflow
+format. Treat `session_state.invalid_json`, `session_state.invalid_type`,
+`session_state.unexpected_schema_version`, and `session_state.unreadable` as runtime-state diagnostics, then verify workflow
 truth from story files and `sprint-status.yaml` before retrying.
 
 ---

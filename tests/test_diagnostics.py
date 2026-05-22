@@ -77,6 +77,16 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["source"], "parse-output")
         self.assertEqual(payload["message"], "bad json")
 
+    def test_issues_from_exception_redacts_message(self) -> None:
+        issues = issues_from_exception(ValueError("token=abc123 failed at /tmp/private/state.json"), source="parse-output", field="payload")
+
+        payload = serialize_issue(issues[0])
+
+        self.assertIn("token=<redacted>", payload["message"])
+        self.assertIn("<path:state.json>", payload["message"])
+        self.assertNotIn("abc123", payload["message"])
+        self.assertNotIn("/tmp/private", payload["message"])
+
     def test_redact_actual_masks_sensitive_dict_keys(self) -> None:
         payload = redact_actual({"token": "abc123", "safe": "visible", "nested": {"password": "pw"}})
 

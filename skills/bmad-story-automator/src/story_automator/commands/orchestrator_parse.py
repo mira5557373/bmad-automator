@@ -35,14 +35,27 @@ def parse_output_action(args: list[str]) -> int:
     lines = trim_lines(content)[:150]
     try:
         policy = load_runtime_policy(state_file=state_file)
+    except PolicyError as exc:
+        message = str(exc)
+        if "parse schema" in message or "policy data file missing" in message:
+            print_json(parse_failure_payload("parse_contract_invalid", issues_from_exception(exc, source="parse-contract", field="parse.schemaPath")))
+        else:
+            print_json(parse_failure_payload("runtime_policy_invalid", issues_from_exception(exc, source="runtime-policy", field="runtime.policy")))
+        return 1
+    try:
         contract = step_contract(policy, step)
+    except PolicyError as exc:
+        print_json(parse_failure_payload("step_contract_invalid", issues_from_exception(exc, source="step-contract", field="step")))
+        return 1
+    try:
         parse_contract = load_parse_contract(contract)
-        parser_cfg = parser_runtime_config(policy)
     except ParseContractError as exc:
         print_json(parse_failure_payload("parse_contract_invalid", exc.issues))
         return 1
-    except (FileNotFoundError, json.JSONDecodeError, ValueError, PolicyError) as exc:
-        print_json(parse_failure_payload("parse_contract_invalid", issues_from_exception(exc, source="parse-contract", field="parse.schemaPath")))
+    try:
+        parser_cfg = parser_runtime_config(policy)
+    except PolicyError as exc:
+        print_json(parse_failure_payload("runtime_policy_invalid", issues_from_exception(exc, source="runtime-policy", field="runtime.parser")))
         return 1
     prompt = _build_parse_prompt(contract, parse_contract, "\n".join(lines))
     result = run_cmd(

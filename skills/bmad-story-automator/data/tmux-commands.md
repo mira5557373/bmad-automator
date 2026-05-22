@@ -36,12 +36,9 @@ project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
 
 **Generate full session name:**
 ```bash
-project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
-project_hash=$(python3 - <<'PY'
-import hashlib, pathlib
-print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
-PY
-)
+script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
+project_slug=$("$script" tmux-wrapper project-slug)
+project_hash=$("$script" tmux-wrapper project-hash)
 timestamp=$(date +%y%m%d-%H%M%S)  # Returns "260114-223045"
 session_name="sa-${project_slug}-${project_hash}-${timestamp}-e{epic}-s{story_suffix}-{step}"
 ```
@@ -50,23 +47,17 @@ session_name="sa-${project_slug}-${project_hash}-${timestamp}-e{epic}-s{story_su
 
 **List only current project's sessions:**
 ```bash
-project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
-project_hash=$(python3 - <<'PY'
-import hashlib, pathlib
-print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
-PY
-)
+script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
+project_slug=$("$script" tmux-wrapper project-slug)
+project_hash=$("$script" tmux-wrapper project-hash)
 tmux list-sessions 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-"
 ```
 
 **Kill only current project's sessions:**
 ```bash
-project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
-project_hash=$(python3 - <<'PY'
-import hashlib, pathlib
-print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
-PY
-)
+script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
+project_slug=$("$script" tmux-wrapper project-slug)
+project_hash=$("$script" tmux-wrapper project-hash)
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-" | xargs -I {} tmux kill-session -t {}
 ```
 

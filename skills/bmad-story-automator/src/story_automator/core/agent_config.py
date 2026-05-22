@@ -37,6 +37,12 @@ AGENT_COMPLEXITY_LEVELS = {"low", "medium", "high"}
 AGENT_TASKS = {"create", "dev", "auto", "review", "retro"}
 
 
+class AgentPlanInputError(ValueError):
+    def __init__(self, field: str, exc: Exception) -> None:
+        super().__init__(str(exc) or exc.__class__.__name__)
+        self.field = field
+
+
 def load_presets_file(path: str | Path) -> dict[str, Any]:
     preset_path = Path(path)
     if not file_exists(preset_path):
@@ -484,8 +490,14 @@ def extract_json_block(text: str) -> str:
 
 
 def build_agents_file(state_file: str | Path, complexity_file: str | Path, output_path: str | Path, config_json: str) -> dict[str, Any]:
-    config = parse_agent_config_json(config_json)
-    complexity_payload = json.loads(read_text(complexity_file))
+    try:
+        config = parse_agent_config_json(config_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise AgentPlanInputError("config-json", exc) from exc
+    try:
+        complexity_payload = json.loads(read_text(complexity_file))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise AgentPlanInputError("complexity-file", exc) from exc
     stories = []
     for story in complexity_payload.get("stories", []):
         level = str(((story.get("complexity") or {}).get("level")) or "medium").strip().lower() or "medium"
@@ -507,20 +519,21 @@ def build_agents_file(state_file: str | Path, complexity_file: str | Path, outpu
                 "tasks": tasks,
             }
         )
-    payload = {
-        "version": "1.0.0",
-        "stateFile": str(state_file),
-        "epic": find_frontmatter_value(state_file, "epic"),
-        "epicName": find_frontmatter_value(state_file, "epicName"),
-        "createdAt": iso_now(),
-        "stories": stories,
-    }
+    try:
+        epic = find_frontmatter_value(state_file, "epic")
+        epic_name = find_frontmatter_value(state_file, "epicName")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise AgentPlanInputError("state-file", exc) from exc
+    payload = {"version": "1.0.0", "stateFile": str(state_file), "epic": epic, "epicName": epic_name, "createdAt": iso_now(), "stories": stories}
     header = (
         f"---\nstateFile: {json.dumps(str(state_file))}\ncreatedAt: {json.dumps(payload['createdAt'])}\n---\n\n"
         f"# Agents Plan: {payload['epicName']}\n\n```json\n{json.dumps(payload, indent=2)}\n```\n"
     )
-    ensure_dir(Path(output_path).parent)
-    write_atomic(output_path, header)
+    try:
+        ensure_dir(Path(output_path).parent)
+        write_atomic(output_path, header)
+    except OSError as exc:
+        raise AgentPlanInputError("output", exc) from exc
     return {"ok": True, "path": str(output_path), "stories": len(stories)}
 
 

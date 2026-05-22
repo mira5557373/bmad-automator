@@ -38,6 +38,15 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertEqual(payload["stories"][0]["storyId"], "1.1")
 
+    def test_complexity_payload_rejects_falsy_non_object_complexity(self) -> None:
+        for complexity in ("", 0, False, []):
+            with self.subTest(complexity=complexity):
+                issues = validate_complexity_payload({"stories": [{"storyId": "1.1", "complexity": complexity}]})
+
+                self.assertEqual(len(issues), 1)
+                self.assertEqual(issues[0].type, "invalid_type")
+                self.assertEqual(issues[0].field, "stories[0].complexity")
+
     def test_agents_plan_payload_requires_all_task_selections(self) -> None:
         issues = validate_agents_plan_payload({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "claude"}}}]})
 
@@ -102,6 +111,30 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "invalid_agent_config")
         self.assertEqual(payload["structuredIssues"][0]["type"], "ValueError")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "config-json")
+
+    def test_agents_build_reports_output_write_failures_on_output_field(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1"}]}), encoding="utf-8")
+        output_parent = self.project_root / "not-a-dir"
+        output_parent.write_text("blocker", encoding="utf-8")
+
+        code, payload = self._helper(
+            [
+                "agents-build",
+                "--state-file",
+                str(self.state_file),
+                "--complexity-file",
+                str(self.complexity_file),
+                "--output",
+                str(output_parent / "agents.md"),
+                "--config-json",
+                "{}",
+            ]
+        )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "output")
 
     def test_agents_build_rejects_non_object_complexity_overrides(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1"}]}), encoding="utf-8")
