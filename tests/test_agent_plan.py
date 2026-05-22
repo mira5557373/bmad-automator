@@ -124,7 +124,7 @@ class AgentPlanValidationTests(unittest.TestCase):
 
                 self.assertEqual(code, 1)
                 self.assertEqual(payload["error"], "invalid_agent_config")
-                self.assertIn("complexityOverrides", payload["structuredIssues"][0]["message"])
+                self.assertRegex(payload["structuredIssues"][0]["message"], r"complexityOverrides|medium")
 
     def test_agents_build_rejects_invalid_nested_complexity_overrides(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1"}]}), encoding="utf-8")
@@ -135,6 +135,12 @@ class AgentPlanValidationTests(unittest.TestCase):
             {"complexityOverrides": {"medium": {"retro": {"primary": ["codex"]}}}},
             {"complexityOverrides": {"medium": {"retro": {"fallback": []}}}},
             {"complexityOverrides": {"medium": {"retro": {"fallback": True}}}},
+            {"complexityOverrides": {"medum": {"retro": {"primary": "codex"}}}},
+            {"complexityOverrides": {"medium": {"retrro": {"primary": "codex"}}}},
+            {"medium": "bad"},
+            {"medium": {"retrro": {"primary": "codex"}}},
+            {"medium": {"dev": {"primary": ["codex"]}}},
+            {"medium": {"dev": {"fallback": True}}},
         ):
             with self.subTest(config=config):
                 code, payload = self._helper(
@@ -153,7 +159,7 @@ class AgentPlanValidationTests(unittest.TestCase):
 
                 self.assertEqual(code, 1)
                 self.assertEqual(payload["error"], "invalid_agent_config")
-                self.assertIn("complexityOverrides", payload["structuredIssues"][0]["message"])
+                self.assertRegex(payload["structuredIssues"][0]["message"], r"complexityOverrides|medium")
 
     def test_agents_build_and_resolve_preserve_success_shapes(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "HIGH"}}]}), encoding="utf-8")

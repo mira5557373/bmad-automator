@@ -33,6 +33,8 @@ class AgentConfigResolved:
 
 
 AGENT_CONFIG_HEADER_RE = re.compile(r"^agentConfig:\s*(?:#.*)?$")
+AGENT_COMPLEXITY_LEVELS = {"low", "medium", "high"}
+AGENT_TASKS = {"create", "dev", "auto", "review", "retro"}
 
 
 def load_presets_file(path: str | Path) -> dict[str, Any]:
@@ -77,6 +79,8 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     if not isinstance(complexity_raw, dict):
         raise ValueError("agentConfig.complexityOverrides must be an object")
     for level, value in complexity_raw.items():
+        if level not in AGENT_COMPLEXITY_LEVELS:
+            raise ValueError(f"agentConfig.complexityOverrides.{level} is not supported")
         if not isinstance(value, dict):
             raise ValueError(f"agentConfig.complexityOverrides.{level} must be an object")
         parsed = _parse_task_map(value, field=f"complexityOverrides.{level}", strict_entries=True)
@@ -85,7 +89,9 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     for level in ("low", "medium", "high"):
         if level not in data:
             continue
-        parsed = _parse_task_map(data[level])
+        if not isinstance(data[level], dict):
+            raise ValueError(f"agentConfig.{level} must be an object")
+        parsed = _parse_task_map(data[level], field=level, strict_entries=True)
         if not parsed:
             continue
         existing = config.complexity_overrides.setdefault(level, {})
@@ -281,6 +287,8 @@ def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False) 
         return {}
     output: dict[str, AgentTaskConfig] = {}
     for task, entry in raw.items():
+        if strict_entries and task not in AGENT_TASKS:
+            raise ValueError(f"agentConfig.{field}.{task} is not supported")
         if strict_entries and not isinstance(entry, dict):
             raise ValueError(f"agentConfig.{field}.{task} must be an object")
         if strict_entries and isinstance(entry, dict):
