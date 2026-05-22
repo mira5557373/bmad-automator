@@ -52,6 +52,8 @@ def save_presets_file(path: str | Path, data: dict[str, Any]) -> None:
 
 def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("agentConfig must be an object")
     config = AgentConfigResolved()
     config.default_primary = data.get("defaultPrimary") or data.get("primary") or "auto"
     if "defaultFallback" in data:
@@ -218,8 +220,9 @@ def _parse_task_entry(raw: Any) -> AgentTaskConfig | None:
         model = _normalize_model(raw.get("model"))
     else:
         model = None
+    primary = raw.get("primary")
     return AgentTaskConfig(
-        primary=str(raw.get("primary", "")),
+        primary=str(primary or ""),
         fallback=raw.get("fallback"),
         model=model,
     )
@@ -249,6 +252,62 @@ def normalize_model(raw: Any) -> str:
 
 # Backward-compatible private alias for in-module callers.
 _normalize_model = normalize_model
+
+
+def render_agent_config_frontmatter(raw_config: dict[str, Any]) -> str:
+    config = parse_agent_config_json(json.dumps(raw_config))
+    lines = [
+        "agentConfig:",
+        f"  defaultPrimary: {json.dumps(config.default_primary)}",
+        f"  defaultFallback: {_render_fallback(config.default_fallback)}",
+    ]
+    if "defaultModel" in raw_config:
+        lines.append(f"  defaultModel: {json.dumps(config.default_model)}")
+    _append_task_map(lines, "perTask", config.per_task, indent=2)
+    if config.complexity_overrides:
+        lines.append("  complexityOverrides:")
+        for level in sorted(config.complexity_overrides):
+            task_map = _non_empty_task_map(config.complexity_overrides[level])
+            if not task_map:
+                continue
+            lines.append(f"    {level}:")
+            _append_task_entries(lines, task_map, indent=6)
+    return "\n".join(lines) + "\n"
+
+
+def _append_task_map(lines: list[str], label: str, task_map: dict[str, AgentTaskConfig], *, indent: int) -> None:
+    task_map = _non_empty_task_map(task_map)
+    if not task_map:
+        return
+    lines.append(f"{' ' * indent}{label}:")
+    _append_task_entries(lines, task_map, indent=indent + 2)
+
+
+def _append_task_entries(lines: list[str], task_map: dict[str, AgentTaskConfig], *, indent: int) -> None:
+    for task in sorted(task_map):
+        entry = task_map[task]
+        lines.append(f"{' ' * indent}{task}:")
+        if entry.primary:
+            lines.append(f"{' ' * (indent + 2)}primary: {json.dumps(entry.primary)}")
+        if entry.fallback is not None:
+            lines.append(f"{' ' * (indent + 2)}fallback: {_render_fallback(entry.fallback)}")
+        if entry.model is not None:
+            lines.append(f"{' ' * (indent + 2)}model: {json.dumps(entry.model)}")
+
+
+def _non_empty_task_map(task_map: dict[str, AgentTaskConfig]) -> dict[str, AgentTaskConfig]:
+    return {
+        task: entry
+        for task, entry in task_map.items()
+        if entry.primary or entry.fallback is not None or entry.model is not None
+    }
+
+
+def _render_fallback(raw: Any) -> str:
+    normalized = normalize_fallback_value(raw)
+    if normalized == "false":
+        return "false"
+    return json.dumps(normalized)
 
 
 def normalize_fallback_value(raw: Any) -> str:

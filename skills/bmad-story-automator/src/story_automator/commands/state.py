@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ..core.agent_config import render_agent_config_frontmatter
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
-from ..core.agent_config import normalize_model as _model_or_none
 from ..core.runtime_policy import PolicyError, snapshot_effective_policy
 from ..core.state_validation import state_validation_payload, validate_state_fields
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
@@ -81,75 +81,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
     text = re.sub(r"(?m)^customInstructions:.*$", lambda m: f"customInstructions: {custom_instructions}", text)
     agent_config = config.get("agentConfig")
     if isinstance(agent_config, dict):
-        per_task = agent_config.get("perTask", {})
-        if not isinstance(per_task, dict):
-            per_task = {}
-        legacy_retro = agent_config.get("retro")
-        if isinstance(legacy_retro, dict) and "retro" not in per_task:
-            per_task = {**per_task, "retro": legacy_retro}
-        default_fallback = agent_config.get("defaultFallback")
-        if "defaultFallback" not in agent_config:
-            default_fallback = agent_config.get("fallback", False)
-        if default_fallback is None:
-            default_fallback = False
-        default_primary = agent_config.get("defaultPrimary")
-        if default_primary is None:
-            default_primary = agent_config.get("primary") or "auto"
-
-        lines = [
-            "agentConfig:",
-            f"  defaultPrimary: {json.dumps(default_primary)}",
-            f"  defaultFallback: {json.dumps(default_fallback)}",
-        ]
-        # Model serialization preserves three states so round-trips through
-        # `_load_agent_config_from_state` + `resolve_agent` keep the same
-        # semantics as the in-memory config:
-        #   - key ABSENT  → no `model` line (task inherits defaultModel)
-        #   - key PRESENT, sentinel  → `model: ""`  (explicit opt-out — clears
-        #     any inherited defaultModel; later parsed back as empty string,
-        #     `"model" in entry` is True, resolver assigns "" overriding the
-        #     default)
-        #   - key PRESENT, real ID  → `model: "<id>"`
-        # See bma-d's review of 5ada2c2 for the round-trip regression that
-        # motivated this — without preserving the explicit clear, retro/dev
-        # tasks silently re-inherited `defaultModel` after persistence.
-        if "defaultModel" in agent_config:
-            lines.append(f"  defaultModel: {json.dumps(_model_or_none(agent_config.get('defaultModel')))}")
-        if isinstance(per_task, dict) and per_task:
-            lines.append("  perTask:")
-            for task in sorted(per_task):
-                entry = per_task[task]
-                if not isinstance(entry, dict):
-                    continue
-                lines.append(f"    {task}:")
-                if "primary" in entry:
-                    lines.append(f"      primary: {json.dumps(entry['primary'])}")
-                if "fallback" in entry:
-                    value = entry["fallback"]
-                    lines.append(f"      fallback: {'false' if value is False else json.dumps(value)}")
-                if "model" in entry:
-                    lines.append(f"      model: {json.dumps(_model_or_none(entry.get('model')))}")
-        complexity_overrides = agent_config.get("complexityOverrides", {})
-        if isinstance(complexity_overrides, dict) and complexity_overrides:
-            lines.append("  complexityOverrides:")
-            for level in sorted(complexity_overrides):
-                task_map = complexity_overrides[level]
-                if not isinstance(task_map, dict) or not task_map:
-                    continue
-                lines.append(f"    {level}:")
-                for task in sorted(task_map):
-                    entry = task_map[task]
-                    if not isinstance(entry, dict):
-                        continue
-                    lines.append(f"      {task}:")
-                    if "primary" in entry:
-                        lines.append(f"        primary: {json.dumps(entry['primary'])}")
-                    if "fallback" in entry:
-                        value = entry["fallback"]
-                        lines.append(f"        fallback: {'false' if value is False else json.dumps(value)}")
-                    if "model" in entry:
-                        lines.append(f"        model: {json.dumps(_model_or_none(entry.get('model')))}")
-        block = "\n".join(lines) + "\n"
+        block = render_agent_config_frontmatter(agent_config)
         text = re.sub(r"(?m)^agentConfig:\n(?:(?:\s{2}.*\n)*)", block, text)
     for key, value in replacements.items():
         text = re.sub(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {json.dumps(v)}", text)
