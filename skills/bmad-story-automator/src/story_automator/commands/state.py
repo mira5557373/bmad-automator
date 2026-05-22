@@ -81,7 +81,11 @@ def cmd_build_state_doc(args: list[str]) -> int:
     text = re.sub(r"(?m)^customInstructions:.*$", lambda m: f"customInstructions: {custom_instructions}", text)
     agent_config = config.get("agentConfig")
     if isinstance(agent_config, dict):
-        block = render_agent_config_frontmatter(agent_config)
+        try:
+            block = render_agent_config_frontmatter(agent_config)
+        except ValueError as exc:
+            write_json({"ok": False, "error": "invalid_agent_config", "reason": str(exc)})
+            return 1
         text = re.sub(r"(?m)^agentConfig:\n(?:(?:\s{2}.*\n)*)", block, text)
     for key, value in replacements.items():
         text = re.sub(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {json.dumps(v)}", text)

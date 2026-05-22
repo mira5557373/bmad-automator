@@ -357,7 +357,7 @@ def _legacy_config_to_core(config: dict) -> AgentConfigResolved:
         json.dumps(
             {
                 "defaultPrimary": config.get("defaultPrimary", "auto"),
-                "defaultFallback": config.get("defaultFallback", "false"),
+                "defaultFallback": config.get("defaultFallback", False),
                 "defaultModel": config.get("defaultModel", ""),
                 "perTask": config.get("perTask", {}),
                 "complexityOverrides": config.get("complexityOverrides", {}),

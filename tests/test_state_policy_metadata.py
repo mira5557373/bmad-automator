@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from story_automator.commands.orchestrator_epic_agents import parse_agent_config
+from story_automator.commands.orchestrator_epic_agents import parse_agent_config, resolve_agent
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_build_state_doc, cmd_validate_state
 from story_automator.commands.tmux import _build_cmd, cmd_tmux_wrapper
@@ -412,6 +412,36 @@ class StatePolicyMetadataTests(unittest.TestCase):
         state_file = self._build_state({"agentConfig": {"defaultPrimary": None, "defaultFallback": False}})
 
         self.assertIn('defaultPrimary: "auto"', state_file.read_text(encoding="utf-8"))
+
+    def test_build_state_doc_returns_json_on_invalid_agent_config(self) -> None:
+        stdout = io.StringIO()
+        template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        config = self._config()
+        config["agentConfig"] = {"complexityOverrides": "bad"}
+
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(config),
+                ]
+            )
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertIn("complexityOverrides", payload["reason"])
+
+    def test_legacy_resolve_agent_defaults_missing_fallback_to_disabled(self) -> None:
+        primary, fallback, model = resolve_agent({"defaultPrimary": "codex"}, "medium", "review")
+
+        self.assertEqual(primary, "codex")
+        self.assertEqual(fallback, "false")
+        self.assertEqual(model, "")
 
     def test_build_cmd_returns_exit_code_one_when_prompt_template_becomes_directory(self) -> None:
         state_file = self._build_state()

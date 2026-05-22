@@ -237,8 +237,6 @@ def _validate_task_selection(issues: list[DiagnosticIssue], selection: dict[str,
     fallback = selection.get("fallback", False)
     if not (fallback is False or isinstance(fallback, str)):
         issues.append(_issue("invalid_type", f"{task_field}.fallback", "false or string", fallback, f"{task} fallback must be false or a string"))
-    elif isinstance(fallback, str):
-        normalize_fallback_value(fallback)
 
 
 def _issue(issue_type: str, field: str, expected: Any, actual: Any, message: str) -> DiagnosticIssue:

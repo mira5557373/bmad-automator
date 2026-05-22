@@ -69,6 +69,19 @@ class CliParserContractTests(unittest.TestCase):
         self.assertEqual(payload["complexity"]["score"], 3)
         self.assertEqual(payload["complexity"]["level"], "Medium")
 
+    def test_parse_story_read_failure_returns_json_error(self) -> None:
+        epic = self._epic_file()
+        rules = self.root / "rules.json"
+        rules.write_text("{}", encoding="utf-8")
+
+        with mock.patch("story_automator.cli.parse_story", side_effect=OSError("permission denied")):
+            code, payload = self._main_json(["parse-story", "--epic", str(epic), "--story", "1.1", "--rules", str(rules)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["ok"], False)
+        self.assertEqual(payload["error"], "file_read_failed")
+        self.assertIn("permission denied", payload["reason"])
+
     def test_module_subprocess_preserves_json_error_contract(self) -> None:
         result = self._subprocess([sys.executable, "-m", "story_automator", "parse-story-range", "--input", "all", "--total", "abc"])
 

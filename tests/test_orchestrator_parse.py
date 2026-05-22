@@ -54,6 +54,25 @@ class OrchestratorParseTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["reason"], "parse_contract_invalid")
         self.assertEqual(payload["structuredIssues"][0]["field"], "parse.schemaPath")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "parse-contract")
+
+    def test_missing_prompt_template_reports_runtime_policy_field(self) -> None:
+        override_dir = self.project_root / "_bmad" / "bmm"
+        override_dir.mkdir(parents=True)
+        (override_dir / "story-automator.policy.json").write_text(
+            json.dumps({"steps": {"create": {"prompt": {"templateFile": "missing.md"}}}}),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), redirect_stdout(stdout):
+            code = parse_output_action([str(self.output_file), "create"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["reason"], "runtime_policy_invalid")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "runtime-policy")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "runtime.policy")
 
     def test_missing_state_file_flag_value_rejected(self) -> None:
         stdout = io.StringIO()
@@ -87,6 +106,7 @@ class OrchestratorParseTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["reason"], "parse_contract_invalid")
         self.assertEqual(payload["structuredIssues"][0]["field"], "requiredKeys")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "parse-contract")
 
     def test_invalid_schema_leaf_rejected_before_sub_agent(self) -> None:
         schema = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "parse" / "review.json"
@@ -103,6 +123,7 @@ class OrchestratorParseTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["reason"], "parse_contract_invalid")
         self.assertEqual(payload["structuredIssues"][0]["field"], "schema.issues_found.critical")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "parse-contract")
 
     def test_invalid_child_json_rejected(self) -> None:
         stdout = io.StringIO()

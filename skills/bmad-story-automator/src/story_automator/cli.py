@@ -130,6 +130,9 @@ def _cmd_parse_story(args: list[str]) -> int:
     try:
         print_json(parse_story(epic, story, rules))
         return 0
+    except OSError as exc:
+        print_json({"ok": False, "error": "file_read_failed", "reason": str(exc)})
+        return 1
     except json.JSONDecodeError:
         print_json({"ok": False, "error": "invalid_rules_json"})
         return 1

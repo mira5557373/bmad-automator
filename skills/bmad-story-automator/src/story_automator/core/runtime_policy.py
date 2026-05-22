@@ -29,7 +29,9 @@ def load_bundled_policy(project_root: str | None = None, *, resolve_assets: bool
 
 
 class PolicyError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "runtime_policy_invalid") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def load_effective_policy(project_root: str | None = None, *, resolve_assets: bool = True) -> dict[str, Any]:
@@ -338,9 +340,9 @@ def _resolve_policy_paths(policy: dict[str, Any], *, project_root: Path, bundle_
         parse = contract.setdefault("parse", {})
         schema_file = str(parse.get("schemaFile") or "").strip()
         if not schema_file:
-            raise PolicyError(f"missing parse schema for {name}")
-        parse["schemaPath"] = _resolve_data_path(schema_file, project_root=project_root, bundle_root=bundle_root)
-        _set_or_verify_hash(parse, path_key="schemaPath", hash_key="schemaHash", label="policy parse schema")
+            raise PolicyError(f"missing parse schema for {name}", code="parse_contract_invalid")
+        parse["schemaPath"] = _resolve_data_path(schema_file, project_root=project_root, bundle_root=bundle_root, code="parse_contract_invalid")
+        _set_or_verify_hash(parse, path_key="schemaPath", hash_key="schemaHash", label="policy parse schema", code="parse_contract_invalid")
         success = contract.setdefault("success", {})
         contract_file = str(success.get("contractFile") or "").strip()
         if contract_file:
@@ -416,20 +418,20 @@ def _resolve_candidate_file(
     return ""
 
 
-def _resolve_data_path(path_value: str, *, project_root: Path, bundle_root: Path) -> str:
+def _resolve_data_path(path_value: str, *, project_root: Path, bundle_root: Path, code: str = "runtime_policy_invalid") -> str:
     portable = resolve_portable_path(path_value, project_root)
     if portable:
         if not portable.is_file():
-            raise PolicyError(f"policy data file missing: {path_value}")
+            raise PolicyError(f"policy data file missing: {path_value}", code=code)
         return str(portable)
     raw = Path(path_value)
     allowed_roots = (bundle_root.resolve(), project_root.resolve())
     if raw.is_absolute():
         resolved = raw.resolve()
         if not _is_within_any(resolved, allowed_roots):
-            raise PolicyError(f"policy data path escapes allowed roots: {path_value}")
+            raise PolicyError(f"policy data path escapes allowed roots: {path_value}", code=code)
         if not resolved.is_file():
-            raise PolicyError(f"policy data file missing: {raw}")
+            raise PolicyError(f"policy data file missing: {raw}", code=code)
         return str(resolved)
     escaped_all = True
     for base in allowed_roots:
@@ -440,8 +442,8 @@ def _resolve_data_path(path_value: str, *, project_root: Path, bundle_root: Path
         if candidate.is_file():
             return str(candidate)
     if escaped_all:
-        raise PolicyError(f"policy data path escapes allowed roots: {path_value}")
-    raise PolicyError(f"policy data file missing: {path_value}")
+        raise PolicyError(f"policy data path escapes allowed roots: {path_value}", code=code)
+    raise PolicyError(f"policy data file missing: {path_value}", code=code)
 
 
 def _snapshot_relative_dir(policy: dict[str, Any]) -> str:
@@ -476,14 +478,14 @@ def _resolve_state_path(project_root: Path, path: Path, *, allow_outside: bool =
     return _ensure_within(candidate, project_root.resolve(), label)
 
 
-def _set_or_verify_hash(payload: dict[str, Any], *, path_key: str, hash_key: str, label: str) -> None:
+def _set_or_verify_hash(payload: dict[str, Any], *, path_key: str, hash_key: str, label: str, code: str = "runtime_policy_invalid") -> None:
     path = str(payload.get(path_key) or "").strip()
     if not path:
         return
     actual = md5_hex8(read_text(path))
     expected = str(payload.get(hash_key) or "").strip()
     if expected and expected != actual:
-        raise PolicyError(f"{label} hash mismatch: {path}")
+        raise PolicyError(f"{label} hash mismatch: {path}", code=code)
     payload[hash_key] = actual
 
 

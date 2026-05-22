@@ -40,12 +40,12 @@ def validate_parse_contract(payload: object) -> list[DiagnosticIssue]:
         ]
     required_keys = payload.get("requiredKeys")
     if not isinstance(required_keys, list):
-        issues.append(_issue("invalid_type", "requiredKeys", "array of strings", required_keys, "Parse contract requiredKeys must be an array"))
+        issues.append(_issue("invalid_type", "requiredKeys", "array of strings", required_keys, "Parse contract requiredKeys must be an array", source="parse-contract"))
     elif any(not isinstance(key, str) or not key.strip() for key in required_keys):
-        issues.append(_issue("invalid_value", "requiredKeys", "non-empty string keys", required_keys, "Parse contract requiredKeys must contain non-empty strings"))
+        issues.append(_issue("invalid_value", "requiredKeys", "non-empty string keys", required_keys, "Parse contract requiredKeys must contain non-empty strings", source="parse-contract"))
     schema = payload.get("schema")
     if not isinstance(schema, dict):
-        issues.append(_issue("invalid_type", "schema", "object", schema, "Parse contract schema must be an object"))
+        issues.append(_issue("invalid_type", "schema", "object", schema, "Parse contract schema must be an object", source="parse-contract"))
     else:
         _validate_schema_contract(schema, "schema", issues)
     return issues
@@ -119,7 +119,7 @@ def _validate_schema_contract(schema: object, path: str, issues: list[Diagnostic
         return
     if isinstance(schema, str) and schema.strip():
         return
-    issues.append(_issue("invalid_type", path, "schema rule string or object", schema, "Parse schema leaf must be a non-empty string"))
+    issues.append(_issue("invalid_type", path, "schema rule string or object", schema, "Parse schema leaf must be a non-empty string", source="parse-contract"))
 
 
 def _issue(

@@ -36,8 +36,7 @@ def parse_output_action(args: list[str]) -> int:
     try:
         policy = load_runtime_policy(state_file=state_file)
     except PolicyError as exc:
-        message = str(exc)
-        if "parse schema" in message or "policy data file missing" in message:
+        if exc.code == "parse_contract_invalid":
             print_json(parse_failure_payload("parse_contract_invalid", issues_from_exception(exc, source="parse-contract", field="parse.schemaPath")))
         else:
             print_json(parse_failure_payload("runtime_policy_invalid", issues_from_exception(exc, source="runtime-policy", field="runtime.policy")))
