@@ -268,6 +268,32 @@ class RetroAgentTests(unittest.TestCase):
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
 
+    def test_retro_agent_accepts_inline_nested_agent_config_maps(self) -> None:
+        state_file = self.project_root / "retro-inline-nested-map-state.md"
+        state_file.write_text(
+            "---\nagentConfig:\n  defaultPrimary: claude\n  perTask: {retro: {primary: codex, fallback: false}}\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
+    def test_retro_agent_accepts_inline_agent_config_header_map(self) -> None:
+        state_file = self.project_root / "retro-inline-header-map-state.md"
+        state_file.write_text(
+            "---\nagentConfig: {defaultPrimary: codex, defaultFallback: false}\n---\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_retro_agent(state_file)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
     def test_retro_agent_ignores_inline_yaml_comments(self) -> None:
         state_file = self.project_root / "retro-comment-state.md"
         state_file.write_text(

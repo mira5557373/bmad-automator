@@ -263,21 +263,51 @@ class AgentPlanValidationTests(unittest.TestCase):
     def test_agents_resolve_uses_validated_payload_without_rereading(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"dev": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
 
-        def mutate_if_reread(path: str | Path) -> str:
+        calls = 0
+
+        def mutate_after_first_read(path: str | Path) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return Path(path).read_text(encoding="utf-8")
             self.agents_file.write_text(
                 json.dumps({"stories": [{"storyId": "1.1", "tasks": {"dev": {"primary": "claude", "fallback": False}}}]}),
                 encoding="utf-8",
             )
             return Path(path).read_text(encoding="utf-8")
 
-        with patch("story_automator.core.agent_config.read_text", side_effect=mutate_if_reread):
+        with patch("story_automator.core.agent_plan.read_text", side_effect=mutate_after_first_read):
             code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "dev"])
 
         self.assertEqual(code, 0)
         self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(calls, 1)
+
+    def test_agents_build_emits_retro_task_when_configured(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+
+        code, payload = self._helper(
+            [
+                "agents-build",
+                "--state-file",
+                str(self.state_file),
+                "--complexity-file",
+                str(self.complexity_file),
+                "--output",
+                str(self.agents_file),
+                "--config-json",
+                json.dumps({"defaultPrimary": "codex", "complexityOverrides": {"medium": {"retro": {"primary": "claude"}}}}),
+            ]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["stories"], 1)
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "retro"])
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["primary"], "claude")
 
     def _agents_payload(self) -> dict[str, object]:
-        tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review")}
+        tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review", "retro")}
         return {"stories": [{"storyId": "1.1", "complexity": "medium", "tasks": tasks}]}
 
     def _helper(self, args: list[str]) -> tuple[int, dict[str, object]]:
