@@ -369,8 +369,8 @@ verify_legacy_backups() {
 }
 
 pack_fixture_tarball() {
-  PACK_TARBALL="$(cd "$ROOT_DIR" && npm pack --silent)"
-  PACK_TARBALL="$ROOT_DIR/$PACK_TARBALL"
+  PACK_TARBALL="$(cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMP_DIR")"
+  PACK_TARBALL="$TMP_DIR/$PACK_TARBALL"
   [ -f "$PACK_TARBALL" ] || {
     echo "Missing packed tarball: $PACK_TARBALL" >&2
     exit 1

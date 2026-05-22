@@ -58,6 +58,19 @@ def validate_state_fields(state_path: str, fields: dict[str, Any], frontmatter: 
 
 
 def validate_status_transition(current: str, attempted: str) -> DiagnosticIssue | None:
+    if attempted not in VALID_STATUSES:
+        return DiagnosticIssue(
+            type="invalid_value",
+            field="status",
+            expected=sorted(VALID_STATUSES),
+            actual=attempted,
+            message=f"Invalid status {attempted}",
+            recovery="Choose a valid orchestration status.",
+            code="STATE_STATUS_INVALID",
+            source="state-update",
+        )
+    if current not in VALID_STATUSES:
+        return None
     allowed = ALLOWED_STATUS_TRANSITIONS.get(current, set())
     if attempted in allowed:
         return None

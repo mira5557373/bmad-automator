@@ -12,8 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .diagnostics import DiagnosticIssue
-from .diagnostics import serialize_issue
+from .session_state import STATE_SCHEMA_VERSION, load_session_state, load_session_state_diagnostics, serialized_session_state_issue
 from .utils import (
     atomic_write,
     command_exists,
@@ -28,7 +27,6 @@ from .utils import (
 )
 from .runtime_layout import runtime_provider
 
-STATE_SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 200
 DEFAULT_HEIGHT = 50
 REMAIN_ON_EXIT = "on"
@@ -58,14 +56,6 @@ class PaneSnapshot:
     dead_status: int | None
 
 
-@dataclass(frozen=True)
-class SessionStateLoadResult:
-    ok: bool
-    state: dict[str, object]
-    issue: DiagnosticIssue | None
-    exists: bool
-
-
 def runtime_mode() -> str:
     value = os.environ.get(RUNNER_MODE_ENV, "auto").strip().lower()
     return value if value in VALID_RUNTIME_MODES else "auto"
@@ -82,7 +72,7 @@ def resolve_command_shell() -> str:
 def generate_session_name(step: str, epic: str, story_id: str, cycle: str = "") -> str:
     stamp = time.strftime("%y%m%d-%H%M%S", time.localtime())
     suffix = story_id.replace(".", "-")
-    name = f"sa-{project_slug()}-{stamp}-e{epic}-s{suffix}-{step}"
+    name = f"sa-{project_slug()}-{project_hash()}-{stamp}-e{epic}-s{suffix}-{step}"
     if cycle:
         name += f"-r{cycle}"
     return name
@@ -151,61 +141,13 @@ def tmux_list_sessions(project_only: bool) -> tuple[list[str], int]:
         return ([], code)
     sessions = [line.strip() for line in output.splitlines() if line.strip().startswith("sa-")]
     if project_only:
-        prefix = f"sa-{project_slug()}-"
+        prefix = f"sa-{project_slug()}-{project_hash()}-"
         sessions = [line for line in sessions if line.startswith(prefix)]
     return (sessions, 0)
 
 
-def load_session_state(path: str | Path) -> dict[str, object]:
-    target = Path(path)
-    if not target.exists():
-        return {}
-    try:
-        raw = json.loads(read_text(target))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
-
-
-def load_session_state_diagnostics(path: str | Path) -> SessionStateLoadResult:
-    target = Path(path)
-    if not target.exists():
-        return SessionStateLoadResult(False, {}, _session_issue("session_state.missing", "file exists", "", "Session state file is missing"), False)
-    try:
-        text = read_text(target)
-    except OSError as exc:
-        return SessionStateLoadResult(False, {}, _session_issue("session_state.unreadable", "readable JSON file", str(exc), "Session state file is unreadable"), True)
-    try:
-        raw = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return SessionStateLoadResult(False, {}, _session_issue("session_state.invalid_json", "valid JSON object", str(exc), "Session state file contains invalid JSON"), True)
-    if not isinstance(raw, dict):
-        return SessionStateLoadResult(False, {}, _session_issue("session_state.invalid_type", "JSON object", raw, "Session state file must contain a JSON object"), True)
-    version = raw.get("schemaVersion")
-    if version not in (None, STATE_SCHEMA_VERSION):
-        return SessionStateLoadResult(True, raw, _session_issue("session_state.unexpected_schema_version", STATE_SCHEMA_VERSION, version, "Session state schema version is newer or unexpected", severity="warning"), True)
-    return SessionStateLoadResult(True, raw, None, True)
-
-
-def _session_issue(issue_type: str, expected: object, actual: object, message: str, *, severity: str = "error") -> DiagnosticIssue:
-    return DiagnosticIssue(
-        type=issue_type,
-        field="session_state",
-        expected=expected,
-        actual=actual,
-        message=message,
-        recovery="Remove the stale runtime state file or restart the monitored session.",
-        code=issue_type.upper().replace(".", "_"),
-        severity=severity,
-        source="monitor-session",
-    )
-
-
 def monitor_session_state_issue(session: str, project_root: str) -> object | None:
-    result = load_session_state_diagnostics(session_paths(session, project_root).state)
-    if result.issue is None or result.issue.type == "session_state.missing":
-        return None
-    return serialize_issue(result.issue)
+    return serialized_session_state_issue(session_paths(session, project_root).state)
 
 
 def save_session_state(path: str | Path, payload: dict[str, object]) -> None:

@@ -42,7 +42,11 @@ def cmd_tmux_wrapper(args: list[str]) -> int:
     if action == "name":
         if len(args) < 4:
             return _usage(1)
-        cycle = args[4] if len(args) > 4 else ""
+        try:
+            cycle = _cycle_arg(args)
+        except PolicyError as exc:
+            print(str(exc), file=__import__("sys").stderr)
+            return 1
         print(generate_session_name(args[1], args[2], args[3], cycle))
         return 0
     if action == "list":
@@ -55,7 +59,7 @@ def cmd_tmux_wrapper(args: list[str]) -> int:
         tmux_kill_session(args[1])
         return 0
     if action == "kill-all":
-        sessions, _ = tmux_list_sessions("--project-only" in args[1:])
+        sessions, _ = tmux_list_sessions("--all-projects" not in args[1:])
         for session in sessions:
             tmux_kill_session(session)
         print(f"Killed {len(sessions)} sessions")
@@ -115,7 +119,7 @@ def _usage(code: int) -> int:
     print("  name <step> <epic> <story_id> [--cycle N]", file=target)
     print("  list [--project-only]", file=target)
     print("  kill <session_name>", file=target)
-    print("  kill-all [--project-only]", file=target)
+    print("  kill-all [--project-only|--all-projects]", file=target)
     print("  exists <session_name>", file=target)
     print("  build-cmd <step> <story_id> [--agent TYPE] [--model ID] [--state-file PATH] [extra_instruction]", file=target)
     print("  project-slug", file=target)
@@ -350,6 +354,7 @@ def cmd_monitor_session(args: list[str]) -> int:
     for _ in range(1, max_polls + 1):
         if time.time() - start >= timeout_minutes * 60:
             return _emit_monitor(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
+        pre_status_issue = monitor_session_state_issue(session, project_root) if json_output else None
         status = session_status(session, full=False, codex=agent == "codex", project_root=project_root, mode=runtime_mode())
         if int(status["todos_done"]) or int(status["todos_total"]):
             last_done = int(status["todos_done"])
@@ -401,7 +406,7 @@ def cmd_monitor_session(args: list[str]) -> int:
             output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
             return _emit_monitor(json_output, "stuck", 0, 0, str(output), "never_active")
         if state == "not_found":
-            issue = monitor_session_state_issue(session, project_root)
+            issue = pre_status_issue or monitor_session_state_issue(session, project_root)
             return _emit_monitor(json_output, "not_found", last_done, last_total, "", "session_gone", structured_issue=issue)
         time.sleep(min(180 if agent == "codex" else 120, max(5, int(status["wait_estimate"]))))
     output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
@@ -471,6 +476,14 @@ def _flag_value(args: list[str], idx: int, flag: str) -> str:
         raise PolicyError(f"{flag} requires a value")
     return args[idx + 1]
 
+def _optional_flag_value(args: list[str], flag: str) -> str:
+    return _flag_value(args, args.index(flag), flag) if flag in args else ""
+
+
+def _cycle_arg(args: list[str]) -> str:
+    if "--cycle" in args:
+        return _optional_flag_value(args, "--cycle")
+    return args[4] if len(args) > 4 else ""
 
 def _raw_agent_selection() -> str:
     value = os.environ.get("AI_AGENT", "").strip().lower()
@@ -483,9 +496,9 @@ def _raw_agent_selection() -> str:
 
 def _resolve_agent_selection(agent: str, project_root: str) -> str:
     value = str(agent or "").strip().lower()
-    if value in {"", "auto", "runtime"}:
-        return runtime_provider(project_root)
-    return value
+    return runtime_provider(project_root) if value in {"", "auto", "runtime"} else value
+
+
 def _infer_agent_from_command(command: str) -> str:
     value = command.strip()
     if not value:

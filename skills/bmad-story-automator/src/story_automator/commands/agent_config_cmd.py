@@ -19,7 +19,9 @@ def cmd_agent_config(args: list[str]) -> int:
         if not file_path:
             print_json({"ok": False, "error": "missing_file"})
             return 1
-        data = load_presets_file(file_path)
+        data = _load_presets_or_report(file_path)
+        if data is None:
+            return 1
         presets = [{"name": preset["name"], "createdAt": preset["createdAt"]} for preset in data.get("presets", [])]
         print_json({"ok": True, "presets": presets, "count": len(presets)})
         return 0
@@ -32,7 +34,9 @@ def cmd_agent_config(args: list[str]) -> int:
         except json.JSONDecodeError:
             print_json({"ok": False, "error": "invalid_config_json"})
             return 1
-        data = load_presets_file(file_path)
+        data = _load_presets_or_report(file_path)
+        if data is None:
+            return 1
         action_name = "created"
         for preset in data["presets"]:
             if preset["name"].lower() == name.lower():
@@ -49,7 +53,10 @@ def cmd_agent_config(args: list[str]) -> int:
         if not file_path or not name.strip():
             print_json({"ok": False, "error": "missing_args"})
             return 1
-        for preset in load_presets_file(file_path)["presets"]:
+        data = _load_presets_or_report(file_path)
+        if data is None:
+            return 1
+        for preset in data["presets"]:
             if preset["name"].lower() == name.lower():
                 print_json({"ok": True, "name": preset["name"], "config": preset["config"]})
                 return 0
@@ -59,7 +66,9 @@ def cmd_agent_config(args: list[str]) -> int:
         if not file_path or not name.strip():
             print_json({"ok": False, "error": "missing_args"})
             return 1
-        data = load_presets_file(file_path)
+        data = _load_presets_or_report(file_path)
+        if data is None:
+            return 1
         filtered = [preset for preset in data["presets"] if preset["name"].lower() != name.lower()]
         if len(filtered) == len(data["presets"]):
             print_json({"ok": False, "error": "preset_not_found", "name": name})
@@ -82,3 +91,14 @@ def _flag_map(args: list[str]) -> dict[str, str]:
             continue
         index += 1
     return output
+
+
+def _load_presets_or_report(file_path: str) -> dict | None:
+    try:
+        return load_presets_file(file_path)
+    except json.JSONDecodeError:
+        print_json({"ok": False, "error": "invalid_presets_json"})
+        return None
+    except OSError as exc:
+        print_json({"ok": False, "error": "presets_file_error", "reason": str(exc)})
+        return None

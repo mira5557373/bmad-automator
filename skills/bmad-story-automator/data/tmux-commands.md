@@ -6,18 +6,19 @@
 
 ## Session Names
 
-**Pattern (v3.0 - MULTI-PROJECT):** `sa-{project_slug}-{YYMMDD}-{HHMMSS}-e{epic}-s{story}-{step}`
+**Pattern (v3.1 - HASH-SCOPED MULTI-PROJECT):** `sa-{project_slug}-{project_hash}-{YYMMDD}-{HHMMSS}-e{epic}-s{story}-{step}`
 
 **Examples:**
-- `sa-myproj-260114-223045-e6-s64-dev` (Project "myproject", Epic 6, Story 6.4, dev step)
-- `sa-webapp-260114-223512-e6-s64-review-1` (Project "webapp", review cycle 1)
+- `sa-myproj-a1b2c3d4-260114-223045-e6-s64-dev` (Project "myproject", Epic 6, Story 6.4, dev step)
+- `sa-webapp-e5f6a7b8-260114-223512-e6-s64-review-r1` (Project "webapp", review cycle 1)
 
 ### Project Slug for Multi-Project Support
 
-**Why project slug (v3.0):**
+**Why project slug + hash (v3.1):**
 - **Isolates sessions per project** - List only current project's sessions
 - **Prevents cross-project interference** - Won't kill another project's sessions
 - **Enables parallel orchestration** - Run story-automator on multiple projects simultaneously
+- **Avoids same-folder-name collisions** - Worktrees with the same basename still get different hashes
 
 **Generate project slug:**
 ```bash
@@ -36,8 +37,13 @@ project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
 **Generate full session name:**
 ```bash
 project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
+project_hash=$(python3 - <<'PY'
+import hashlib, pathlib
+print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
+PY
+)
 timestamp=$(date +%y%m%d-%H%M%S)  # Returns "260114-223045"
-session_name="sa-${project_slug}-${timestamp}-e{epic}-s{story_suffix}-{step}"
+session_name="sa-${project_slug}-${project_hash}-${timestamp}-e{epic}-s{story_suffix}-{step}"
 ```
 
 ### Listing/Killing Project-Specific Sessions
@@ -45,13 +51,23 @@ session_name="sa-${project_slug}-${timestamp}-e{epic}-s{story_suffix}-{step}"
 **List only current project's sessions:**
 ```bash
 project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
-tmux list-sessions 2>/dev/null | grep "^sa-${project_slug}-"
+project_hash=$(python3 - <<'PY'
+import hashlib, pathlib
+print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
+PY
+)
+tmux list-sessions 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-"
 ```
 
 **Kill only current project's sessions:**
 ```bash
 project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
-tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^sa-${project_slug}-" | xargs -I {} tmux kill-session -t {}
+project_hash=$(python3 - <<'PY'
+import hashlib, pathlib
+print(hashlib.md5(str(pathlib.Path.cwd().resolve()).encode(), usedforsecurity=False).hexdigest()[:8])
+PY
+)
+tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-" | xargs -I {} tmux kill-session -t {}
 ```
 
 ### No Dots in Session Names
@@ -65,7 +81,7 @@ session_suffix=$(echo "{story_id}" | tr '.' '-')
 ```
 
 **WRONG:** `sa-epic6-s6.2-review-1` ← Will fail with "can't find pane" error
-**RIGHT:** `sa-epic6-s6-2-review-1` ← Works correctly
+**RIGHT:** `sa-myproj-a1b2c3d4-260114-223045-e6-s6-2-review-r1` ← Works correctly
 
 ---
 

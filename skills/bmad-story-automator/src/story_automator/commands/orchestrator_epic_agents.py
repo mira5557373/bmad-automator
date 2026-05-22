@@ -5,11 +5,10 @@ import re
 from pathlib import Path
 
 from story_automator.core.artifact_paths import implementation_artifacts_dir
-from story_automator.core.agent_config import build_agents_file, resolve_agents
-from story_automator.core.agent_plan import agent_plan_error, load_agents_plan, load_complexity_payload
+from story_automator.core.agent_config import AgentConfigResolved, build_agents_file, parse_agent_config_json, resolve_agent_for_task, resolve_agents
+from story_automator.core.agent_plan import agent_plan_error, load_agents_plan_for_resolution, load_complexity_payload
 from story_automator.core.diagnostics import issues_from_exception
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
-from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
 from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
@@ -168,7 +167,7 @@ def agents_resolve_action(args: list[str]) -> int:
     if not agents_path or not file_exists(agents_path):
         print_json({"ok": False, "error": "agents_file_not_found"})
         return 1
-    _, issues = load_agents_plan(agents_path)
+    _, issues = load_agents_plan_for_resolution(agents_path, options["story"], options["task"])
     if issues:
         print_json(agent_plan_error("invalid_agents_json", issues))
         return 1
@@ -307,84 +306,44 @@ def _is_explicit_full_key(value: str, norm: StoryKey) -> bool:
 
 
 def parse_agent_config(raw: str) -> dict:
-    data = json.loads(raw)
-    per_task = data.get("perTask", {})
-    if not isinstance(per_task, dict):
-        per_task = {}
-    retro = data.get("retro")
-    if isinstance(retro, dict) and "retro" not in per_task:
-        per_task = {**per_task, "retro": retro}
-    complexity_overrides = data.get("complexityOverrides")
-    if not isinstance(complexity_overrides, dict):
-        complexity_overrides = {level: data[level] for level in ("low", "medium", "high") if isinstance(data.get(level), dict)}
-    if "defaultFallback" in data:
-        fallback_raw = data.get("defaultFallback")
-    elif "fallback" in data:
-        fallback_raw = data.get("fallback")
-    else:
-        fallback_raw = False
+    config = parse_agent_config_json(raw)
     return {
-        "defaultPrimary": data.get("defaultPrimary") or data.get("primary") or "auto",
-        "defaultFallback": "false" if fallback_raw in {False, "false", "none", "null"} else (fallback_raw or "false"),
-        "defaultModel": _normalize_model_value(data.get("defaultModel")),
-        "perTask": per_task,
-        "complexityOverrides": complexity_overrides,
+        "defaultPrimary": config.default_primary,
+        "defaultFallback": config.default_fallback,
+        "defaultModel": config.default_model,
+        "perTask": {
+            task: _task_config_to_dict(task_config)
+            for task, task_config in config.per_task.items()
+        },
+        "complexityOverrides": {
+            level: {
+                task: _task_config_to_dict(task_config)
+                for task, task_config in task_map.items()
+            }
+            for level, task_map in config.complexity_overrides.items()
+        },
     }
 
 
-def resolve_agent(config: dict, level: str, task: str) -> tuple[str, str, str]:
-    primary = config["defaultPrimary"]
-    fallback = config["defaultFallback"]
-    model = config.get("defaultModel", "")
-    if task in config["perTask"]:
-        entry = config["perTask"][task]
-        if isinstance(entry, dict):
-            primary = entry.get("primary", primary)
-            if "fallback" in entry:
-                fallback = "false" if entry["fallback"] in {False, "false", "none", "null"} else entry["fallback"]
-            # `"model" in entry` distinguishes "key absent" (inherit default)
-            # from "key present with sentinel" ("" after normalization → clear
-            # the inherited defaultModel, the documented opt-out behavior).
-            if "model" in entry:
-                model = _normalize_model_value(entry.get("model"))
-    level_map = config["complexityOverrides"].get(level, {})
-    if not isinstance(level_map, dict):
-        level_map = {}
-    if task in level_map:
-        entry = level_map[task]
-        if isinstance(entry, dict):
-            primary = entry.get("primary", primary)
-            if "fallback" in entry:
-                fallback = "false" if entry["fallback"] in {False, "false", "none", "null"} else entry["fallback"]
-            if "model" in entry:
-                model = _normalize_model_value(entry.get("model"))
-    return (_resolve_primary_agent(primary), _resolve_fallback_agent(fallback), model)
+def resolve_agent(config: dict | AgentConfigResolved, level: str, task: str) -> tuple[str, str, str]:
+    core_config = config if isinstance(config, AgentConfigResolved) else _legacy_config_to_core(config)
+    return resolve_agent_for_task(core_config, level, task)
 
 
-# Delegate to the canonical normalizer in core.agent_config so the sentinel
-# set is defined in exactly one place.
-from story_automator.core.agent_config import normalize_model as _normalize_model_value  # noqa: E402
+def _task_config_to_dict(task_config: object) -> dict[str, object]:
+    primary = getattr(task_config, "primary", "")
+    fallback = getattr(task_config, "fallback", None)
+    model = getattr(task_config, "model", None)
+    payload: dict[str, object] = {"primary": primary, "fallback": fallback}
+    if model is not None:
+        payload["model"] = model
+    return payload
 
 
-def _resolve_primary_agent(raw: object) -> str:
-    value = str(raw or "").strip().lower()
-    if value in {"", "auto", "runtime"}:
-        return runtime_provider()
-    return value
-
-
-def _resolve_fallback_agent(raw: object) -> str:
-    value = "false" if raw is False else str(raw or "")
-    normalized = value.strip().lower()
-    if normalized in {"", "auto", "runtime", "false", "none", "null"}:
-        return "false"
-    return normalized
-
-
-def _load_agent_config_from_state(state_file: str) -> dict:
+def _load_agent_config_from_state(state_file: str) -> AgentConfigResolved:
     text = extract_frontmatter(read_text(state_file))
     if not text:
-        return parse_agent_config("{}")
+        return parse_agent_config_json("{}")
 
     config: dict[str, object] = {}
     in_agent_config = False
@@ -479,7 +438,21 @@ def _load_agent_config_from_state(state_file: str) -> dict:
                     if isinstance(task_cfg, dict):
                         task_cfg[key.strip()] = _parse_scalar(raw.strip())
 
-    return parse_agent_config(json.dumps(config))
+    return parse_agent_config_json(json.dumps(config))
+
+
+def _legacy_config_to_core(config: dict) -> AgentConfigResolved:
+    return parse_agent_config_json(
+        json.dumps(
+            {
+                "defaultPrimary": config.get("defaultPrimary", "auto"),
+                "defaultFallback": config.get("defaultFallback", "false"),
+                "defaultModel": config.get("defaultModel", ""),
+                "perTask": config.get("perTask", {}),
+                "complexityOverrides": config.get("complexityOverrides", {}),
+            }
+        )
+    )
 
 
 def _parse_scalar(raw: str) -> object:

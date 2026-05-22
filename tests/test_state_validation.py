@@ -74,6 +74,26 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload, {"ok": True, "updated": ["status"]})
         self.assertIn("status: IN_PROGRESS", state_file.read_text(encoding="utf-8"))
 
+    def test_state_update_can_repair_invalid_legacy_status(self) -> None:
+        state_file = self._build_state_config(status="DONE")
+
+        code, payload = self._state_update(state_file, "status=READY")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "updated": ["status"]})
+        self.assertIn("status: READY", state_file.read_text(encoding="utf-8"))
+
+    def test_state_update_rejects_invalid_attempted_status(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, "status=DONE")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_status_transition")
+        self.assertEqual(payload["currentStatus"], "READY")
+        self.assertEqual(payload["attemptedStatus"], "DONE")
+        self.assertEqual(payload["structuredIssues"][0]["type"], "invalid_value")
+
     def test_state_update_still_allows_non_status_updates(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")
 

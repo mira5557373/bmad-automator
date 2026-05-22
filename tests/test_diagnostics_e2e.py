@@ -72,17 +72,19 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertIn("stories[0].tasks.create.primary", fields)
         self.assertIn("stories[0].tasks.dev", fields)
 
-    def test_monitor_json_reports_malformed_session_state_only_in_json(self) -> None:
+    def test_monitor_json_keeps_malformed_session_state_when_legacy_status_deletes_file(self) -> None:
         session = "sa-test-session"
         paths = session_paths(session, self.project_root)
         paths.state.parent.mkdir(parents=True, exist_ok=True)
         paths.state.write_text("{bad json", encoding="utf-8")
 
         stdout = io.StringIO()
-        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), patch(
-            "story_automator.commands.tmux.session_status",
-            return_value={"active_task": "", "todos_done": 0, "todos_total": 0, "wait_estimate": 0, "session_state": "not_found"},
-        ), redirect_stdout(stdout):
+        with (
+            patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root), "SA_TMUX_RUNTIME": "auto", "AI_AGENT": "claude"}),
+            patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
+            patch("story_automator.core.tmux_runtime.run_cmd", return_value=("", 1)),
+            redirect_stdout(stdout),
+        ):
             code = cmd_monitor_session([session, "--json", "--max-polls", "1"])
 
         self.assertEqual(code, 0)

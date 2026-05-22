@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
-from story_automator.core.agent_plan import load_agents_plan, load_complexity_payload, validate_agents_plan_payload, validate_complexity_payload
+from story_automator.core.agent_plan import load_agents_plan, load_agents_plan_for_resolution, load_complexity_payload, validate_agents_plan_payload, validate_complexity_payload
 
 
 class AgentPlanValidationTests(unittest.TestCase):
@@ -53,6 +53,14 @@ class AgentPlanValidationTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
         self.assertEqual(payload["stories"][0]["storyId"], "1.1")
+
+    def test_agents_plan_resolution_loader_accepts_partial_requested_task(self) -> None:
+        self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
+
+        payload, issues = load_agents_plan_for_resolution(str(self.agents_file), "1.1", "create")
+
+        self.assertEqual(issues, [])
+        self.assertEqual(payload["stories"][0]["tasks"]["create"]["primary"], "codex")
 
     def test_agents_build_rejects_invalid_complexity_payload_with_structured_issues(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "complexity": {"level": "giant"}}]}), encoding="utf-8")
@@ -99,16 +107,24 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(payload["fallback"], "false")
         self.assertEqual(payload["complexity"], "high")
 
-    def test_agents_resolve_rejects_malformed_agents_file_with_structured_issues(self) -> None:
+    def test_agents_resolve_allows_partial_direct_agents_file(self) -> None:
+        self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "create"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["primary"], "codex")
+        self.assertEqual(payload["fallback"], "false")
+
+    def test_agents_resolve_rejects_malformed_requested_task_with_structured_issues(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": ""}}}]}), encoding="utf-8")
 
-        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "dev"])
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "create"])
 
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "invalid_agents_json")
         fields = [issue["field"] for issue in payload["structuredIssues"]]
         self.assertIn("stories[0].tasks.create.primary", fields)
-        self.assertIn("stories[0].tasks.dev", fields)
 
     def _agents_payload(self) -> dict[str, object]:
         tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review")}

@@ -70,7 +70,7 @@ verified=$(echo "$validation" | jq -r '.verified')
 # List/kill sessions
 "$scripts" tmux-wrapper list [--project-only]
 "$scripts" tmux-wrapper kill <session_name>
-"$scripts" tmux-wrapper kill-all [--project-only]
+"$scripts" tmux-wrapper kill-all [--project-only|--all-projects]
 ```
 
 ### $scripts monitor-session

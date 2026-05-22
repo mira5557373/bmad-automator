@@ -33,12 +33,12 @@ truth from story files and `sprint-status.yaml` before retrying.
 
 ```bash
 # On crash/not_found, spawn retry with unique suffix
-project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
+project_slug=$("$scripts" tmux-wrapper project-slug)
+PROJECT_HASH=$("$scripts" tmux-wrapper project-hash)
 timestamp=$(date +%y%m%d-%H%M%S)
-session_name="sa-${project_slug}-${timestamp}-e{epic}-s{story_suffix}-{step}-r2"
+session_name="sa-${project_slug}-${PROJECT_HASH}-${timestamp}-e{epic}-s{story_suffix}-{step}-r2"
 
 # Clear stale state (project-scoped v2.0)
-PROJECT_HASH=$(echo -n "$PWD" | md5sum 2>/dev/null | cut -c1-8 || echo -n "$PWD" | md5 -q 2>/dev/null | cut -c1-8)
 rm -f "/tmp/.sa-${PROJECT_HASH}-session-${session_name}-state.json"
 # ... spawn and monitor as normal
 ```
