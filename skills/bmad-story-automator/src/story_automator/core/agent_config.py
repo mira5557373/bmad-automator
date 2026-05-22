@@ -339,14 +339,14 @@ def _validate_task_entry(raw: dict[str, Any], field: str) -> None:
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ValueError(f"{field}.{unknown[0]} is not supported")
-    if "primary" in raw and _is_empty_agent_value(raw["primary"]):
+    if "primary" in raw and not _is_non_empty_string(raw["primary"]):
         raise ValueError(f"{field}.primary must be a non-empty string")
-    if "fallback" in raw and _is_empty_agent_value(raw["fallback"]):
+    if "fallback" in raw and not (raw["fallback"] is False or _is_non_empty_string(raw["fallback"])):
         raise ValueError(f"{field}.fallback must be a non-empty string or false")
 
 
-def _is_empty_agent_value(raw: Any) -> bool:
-    return raw is None or (isinstance(raw, str) and not raw.strip())
+def _is_non_empty_string(raw: Any) -> bool:
+    return isinstance(raw, str) and bool(raw.strip())
 
 
 def render_agent_config_frontmatter(raw_config: dict[str, Any]) -> str:

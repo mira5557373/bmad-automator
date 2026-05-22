@@ -132,6 +132,9 @@ class AgentPlanValidationTests(unittest.TestCase):
         for config in (
             {"complexityOverrides": {"medium": "bad"}},
             {"complexityOverrides": {"medium": {"retro": "bad"}}},
+            {"complexityOverrides": {"medium": {"retro": {"primary": ["codex"]}}}},
+            {"complexityOverrides": {"medium": {"retro": {"fallback": []}}}},
+            {"complexityOverrides": {"medium": {"retro": {"fallback": True}}}},
         ):
             with self.subTest(config=config):
                 code, payload = self._helper(
