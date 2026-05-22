@@ -16,28 +16,32 @@ def check_epic_complete_action(args: list[str]) -> int:
         print_json({"ok": False, "error": "epic_number and story_id required"})
         return 1
     epic, story = args[0], args[1]
+    project_root = get_project_root()
     state_file = ""
     tail = args[2:]
     for idx, arg in enumerate(tail):
         if arg == "--state-file" and idx + 1 < len(tail):
             state_file = tail[idx + 1]
-    if story.split(".", 1)[0] != epic:
-        print_json({"ok": True, "isLastStory": False, "epic": int(epic), "storyId": story, "reason": "story_not_in_epic"})
+    story_norm = normalize_story_key(project_root, story)
+    story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
+    epic_value = _epic_json_value(epic)
+    if story_epic != epic:
+        print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "story_not_in_epic"})
         return 0
     stories: list[str] = []
     if state_file and file_exists(state_file):
         story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
-        stories = [sid for sid in story_range if isinstance(sid, str) and sid.startswith(f"{epic}.")]
+        stories = [sid for sid in story_range if isinstance(sid, str) and _story_epic(project_root, sid) == epic]
         source = "state_file"
     else:
-        stories, _ = sprint_status_epic(get_project_root(), epic)
+        stories, _ = sprint_status_epic(project_root, epic)
         source = "sprint_status"
     if stories:
-        stories = sorted(set(stories), key=lambda item: tuple(int(part) for part in item.replace("-", ".").split(".")[:2]))
+        stories = sorted(set(stories), key=lambda item: _story_sort_key(project_root, item))
         last = stories[-1]
-        print_json({"ok": True, "isLastStory": story in {last, last.replace("-", ".")}, "epic": int(epic), "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
+        print_json({"ok": True, "isLastStory": _same_story(project_root, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
         return 0
-    print_json({"ok": True, "isLastStory": False, "epic": int(epic), "storyId": story, "reason": "could_not_determine", "source": "fallback"})
+    print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
     return 0
 
 
@@ -52,7 +56,8 @@ def get_epic_stories_action(args: list[str]) -> int:
         if arg == "--state-file" and idx + 1 < len(tail):
             state_file = tail[idx + 1]
     if state_file and file_exists(state_file):
-        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and sid.startswith(f"{epic}.")]
+        project_root = get_project_root()
+        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_epic(project_root, sid) == epic]
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
             return 0
@@ -62,7 +67,8 @@ def get_epic_stories_action(args: list[str]) -> int:
         return 0
     epic_file = find_epic_file(epic)
     if epic_file:
-        stories = sorted(set(re.findall(rf"\b{re.escape(epic)}\.\d+", read_text(epic_file))), key=lambda item: tuple(int(part) for part in item.split(".")))
+        project_root = get_project_root()
+        stories = sorted(set(re.findall(rf"\b{re.escape(epic)}\.\d+", read_text(epic_file))), key=lambda item: _story_sort_key(project_root, item))
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
             return 0
@@ -205,6 +211,34 @@ def find_epic_file(epic: str) -> str:
         if matches:
             return str(matches[0])
     return ""
+
+
+def _epic_json_value(epic: str) -> int | str:
+    return int(epic) if epic.isdigit() else epic
+
+
+def _story_epic(project_root: str, story: str) -> str:
+    norm = normalize_story_key(project_root, story)
+    if norm is not None:
+        return norm.id.rsplit(".", 1)[0]
+    return story.split(".", 1)[0]
+
+
+def _story_sort_key(project_root: str, story: str) -> tuple[int, str]:
+    norm = normalize_story_key(project_root, story)
+    if norm is not None:
+        _, _, story_num = norm.id.rpartition(".")
+        if story_num.isdigit():
+            return (int(story_num), norm.id)
+    return (0, story)
+
+
+def _same_story(project_root: str, left: str, right: str) -> bool:
+    left_norm = normalize_story_key(project_root, left)
+    right_norm = normalize_story_key(project_root, right)
+    if left_norm is not None and right_norm is not None:
+        return left_norm.id == right_norm.id
+    return left == right
 
 
 def parse_agent_config(raw: str) -> dict:

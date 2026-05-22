@@ -48,11 +48,10 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
         story_id = f"{epic_part}.{story_num}"
         key = ""
     elif re.fullmatch(r"[A-Za-z][\w-]*-\d+-.+", value):
-        head = value
-        match = re.match(r"^([A-Za-z][\w-]*?)-(\d+)-", head)
-        if match is None:
+        split = _split_non_numeric_full_key(value)
+        if split is None:
             return None
-        epic_part, story_num = match.group(1), match.group(2)
+        epic_part, story_num = split
         prefix = f"{epic_part}-{story_num}"
         story_id = f"{epic_part}.{story_num}"
         key = value
@@ -74,3 +73,15 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
     if not key:
         key = prefix
     return StoryKey(id=story_id, prefix=prefix, key=key)
+
+
+def _split_non_numeric_full_key(value: str) -> tuple[str, str] | None:
+    matches = list(re.finditer(r"(?=-(\d+)-)", value))
+    if not matches:
+        return None
+    match = matches[0]
+    if len(matches) > 1:
+        last = matches[-1]
+        if int(last.group(1)) < 100:
+            match = last
+    return value[: match.start()], match.group(1)
