@@ -69,13 +69,24 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     retro_task = _parse_task_entry(data.get("retro"))
     if retro_task is not None:
         config.per_task.setdefault("retro", retro_task)
-    for level, value in (data.get("complexityOverrides") or {}).items():
-        config.complexity_overrides[level] = _parse_task_map(value)
+    complexity_raw = data.get("complexityOverrides")
+    if complexity_raw is None:
+        complexity_raw = {}
+    if not isinstance(complexity_raw, dict):
+        raise ValueError("agentConfig.complexityOverrides must be an object")
+    for level, value in complexity_raw.items():
+        parsed = _parse_task_map(value)
+        if parsed:
+            config.complexity_overrides[level] = parsed
     for level in ("low", "medium", "high"):
-        if level not in config.complexity_overrides and level in data:
-            parsed = _parse_task_map(data[level])
-            if parsed:
-                config.complexity_overrides[level] = parsed
+        if level not in data:
+            continue
+        parsed = _parse_task_map(data[level])
+        if not parsed:
+            continue
+        existing = config.complexity_overrides.setdefault(level, {})
+        for task, entry in parsed.items():
+            existing.setdefault(task, entry)
     return config
 
 
@@ -264,14 +275,16 @@ def render_agent_config_frontmatter(raw_config: dict[str, Any]) -> str:
     if "defaultModel" in raw_config:
         lines.append(f"  defaultModel: {json.dumps(config.default_model)}")
     _append_task_map(lines, "perTask", config.per_task, indent=2)
-    if config.complexity_overrides:
+    override_lines: list[str] = []
+    for level in sorted(config.complexity_overrides):
+        task_map = _non_empty_task_map(config.complexity_overrides[level])
+        if not task_map:
+            continue
+        override_lines.append(f"    {level}:")
+        _append_task_entries(override_lines, task_map, indent=6)
+    if override_lines:
         lines.append("  complexityOverrides:")
-        for level in sorted(config.complexity_overrides):
-            task_map = _non_empty_task_map(config.complexity_overrides[level])
-            if not task_map:
-                continue
-            lines.append(f"    {level}:")
-            _append_task_entries(lines, task_map, indent=6)
+        lines.extend(override_lines)
     return "\n".join(lines) + "\n"
 
 

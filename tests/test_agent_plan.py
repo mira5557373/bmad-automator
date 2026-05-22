@@ -103,6 +103,27 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_agent_config")
         self.assertEqual(payload["structuredIssues"][0]["type"], "ValueError")
 
+    def test_agents_build_rejects_non_object_complexity_overrides(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1"}]}), encoding="utf-8")
+
+        code, payload = self._helper(
+            [
+                "agents-build",
+                "--state-file",
+                str(self.state_file),
+                "--complexity-file",
+                str(self.complexity_file),
+                "--output",
+                str(self.agents_file),
+                "--config-json",
+                json.dumps({"complexityOverrides": "bad"}),
+            ]
+        )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertIn("complexityOverrides", payload["structuredIssues"][0]["message"])
+
     def test_agents_build_and_resolve_preserve_success_shapes(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "HIGH"}}]}), encoding="utf-8")
 
