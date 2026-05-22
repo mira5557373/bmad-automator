@@ -59,6 +59,8 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertFalse(has_runtime_command_config({"aiCommand": ["", "  "]}, ""))
         self.assertTrue(has_runtime_command_config({"aiCommand": ["  claude  "]}, ""))
         self.assertTrue(has_runtime_command_config({"aiCommand": "   "}, 'agentConfig:\n  defaultPrimary: "codex"\n'))
+        self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, "agentConfig:\n  defaultPrimary:\n"))
+        self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, "agentConfig:\n  complexityOverrides:\n    - medium:\n"))
 
     def test_validate_state_reports_invalid_status_field(self) -> None:
         state_file = self._build_state_config(status="DONE")

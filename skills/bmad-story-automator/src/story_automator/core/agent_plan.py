@@ -11,6 +11,7 @@ from .utils import ensure_dir, iso_now, read_text, write_atomic
 
 
 TASKS = ("create", "dev", "auto", "review", "retro")
+REQUIRED_TASKS = ("create", "dev", "auto", "review")
 COMPLEXITY_LEVELS = {"low", "medium", "high"}
 
 
@@ -66,20 +67,23 @@ def validate_agents_plan_payload(payload: object) -> list[DiagnosticIssue]:
         if not isinstance(tasks, dict):
             issues.append(_issue("invalid_type", f"{field}.tasks", "object", tasks, "Agents plan tasks must be an object"))
             continue
-        for task in TASKS:
+        for task in REQUIRED_TASKS:
             selection = tasks.get(task)
             task_field = f"{field}.tasks.{task}"
             if not isinstance(selection, dict):
                 issues.append(_issue("missing_field", task_field, "task selection object", selection, f"Agents plan must include {task} task selection"))
                 continue
-            primary = selection.get("primary")
-            if not isinstance(primary, str) or not primary.strip():
-                issues.append(_issue("missing_field", f"{task_field}.primary", "non-empty string", primary, f"{task} primary agent must be a non-empty string"))
-            fallback = selection.get("fallback", False)
-            if not (fallback is False or isinstance(fallback, str)):
-                issues.append(_issue("invalid_type", f"{task_field}.fallback", "false or string", fallback, f"{task} fallback must be false or a string"))
-            elif isinstance(fallback, str):
-                normalize_fallback_value(fallback)
+            _validate_task_selection(issues, selection, task_field, task)
+        for task, selection in tasks.items():
+            if task in REQUIRED_TASKS:
+                continue
+            if task != "retro":
+                continue
+            task_field = f"{field}.tasks.{task}"
+            if isinstance(selection, dict):
+                _validate_task_selection(issues, selection, task_field, task)
+            else:
+                issues.append(_issue("invalid_type", task_field, "task selection object", selection, f"{task} task selection must be an object"))
     return issues
 
 
@@ -224,6 +228,17 @@ def _tasks_for(config: Any, level: str) -> dict[str, dict[str, str | bool]]:
             entry["model"] = model
         tasks[task] = entry
     return tasks
+
+
+def _validate_task_selection(issues: list[DiagnosticIssue], selection: dict[str, Any], task_field: str, task: str) -> None:
+    primary = selection.get("primary")
+    if not isinstance(primary, str) or not primary.strip():
+        issues.append(_issue("missing_field", f"{task_field}.primary", "non-empty string", primary, f"{task} primary agent must be a non-empty string"))
+    fallback = selection.get("fallback", False)
+    if not (fallback is False or isinstance(fallback, str)):
+        issues.append(_issue("invalid_type", f"{task_field}.fallback", "false or string", fallback, f"{task} fallback must be false or a string"))
+    elif isinstance(fallback, str):
+        normalize_fallback_value(fallback)
 
 
 def _issue(issue_type: str, field: str, expected: Any, actual: Any, message: str) -> DiagnosticIssue:

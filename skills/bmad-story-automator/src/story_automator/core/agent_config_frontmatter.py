@@ -35,7 +35,7 @@ def _extract_agent_config_block(lines: list[str], header_index: int) -> dict[str
 def _parse_indented_map(lines: list[str]) -> dict[str, object]:
     root: dict[str, object] = {}
     stack: list[tuple[int, dict[str, object]]] = [(0, root)]
-    for raw_line in lines:
+    for line_index, raw_line in enumerate(lines):
         line = _strip_inline_yaml_comment(raw_line.rstrip())
         if not line.strip():
             continue
@@ -55,17 +55,25 @@ def _parse_indented_map(lines: list[str]) -> dict[str, object]:
 
         key, raw_value = stripped.split(":", 1)
         parent = stack[-1][1]
-        value = _parse_scalar(raw_value)
+        value = {} if not raw_value.strip() and _has_nested_child(lines, line_index, indent) else _parse_scalar(raw_value)
         parent[_parse_key(key)] = value
         if isinstance(value, dict) and not raw_value.strip():
             stack.append((indent, value))
     return root
 
 
+def _has_nested_child(lines: list[str], line_index: int, indent: int) -> bool:
+    for candidate in lines[line_index + 1 :]:
+        if not candidate.strip():
+            continue
+        return len(candidate) - len(candidate.lstrip(" ")) > indent
+    return False
+
+
 def _parse_scalar(raw: str) -> object:
     value = _strip_inline_yaml_comment(raw).strip()
     if not value:
-        return {}
+        return ""
     if value.startswith("{") and value.endswith("}"):
         return _parse_inline_map(value)
     value = unquote_scalar(value)

@@ -110,10 +110,13 @@ def parse_agent_config_frontmatter(frontmatter: str) -> AgentConfigResolved:
 
 
 def has_agent_config_runtime_source(frontmatter: str) -> bool:
-    config = extract_agent_config_frontmatter(frontmatter)
+    try:
+        config = extract_agent_config_frontmatter(frontmatter)
+    except ValueError:
+        return False
     for key in ("defaultPrimary", "primary", "defaultFallback", "fallback"):
         value = config.get(key)
-        if value not in ("", [], None):
+        if value not in ("", [], {}, None):
             return True
     for key in ("perTask", "complexityOverrides", "retro"):
         if key in config:
@@ -334,3 +337,11 @@ def resolve_agents_payload(payload: dict[str, Any], story_id: str, task: str) ->
     from .agent_plan import resolve_agents_payload as _resolve_agents_payload
 
     return _resolve_agents_payload(payload, story_id, task)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "AgentPlanInputError":
+        from .agent_plan import AgentPlanInputError
+
+        return AgentPlanInputError
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

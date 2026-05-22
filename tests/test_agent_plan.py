@@ -54,6 +54,14 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertIn("stories[0].tasks.dev", fields)
         self.assertIn("stories[0].tasks.auto", fields)
         self.assertIn("stories[0].tasks.review", fields)
+        self.assertNotIn("stories[0].tasks.retro", fields)
+
+    def test_agents_plan_payload_accepts_legacy_four_task_plan(self) -> None:
+        tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review")}
+
+        issues = validate_agents_plan_payload({"version": "1.0.0", "stories": [{"storyId": "1.1", "tasks": tasks}]})
+
+        self.assertEqual(issues, [])
 
     def test_agents_plan_loader_extracts_markdown_json_block(self) -> None:
         self.agents_file.write_text("```json\n" + json.dumps(self._agents_payload()) + "\n```\n", encoding="utf-8")
@@ -305,6 +313,15 @@ class AgentPlanValidationTests(unittest.TestCase):
         code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "retro"])
         self.assertEqual(code, 0)
         self.assertEqual(payload["primary"], "claude")
+
+    def test_agent_config_plan_imports_remain_compatible(self) -> None:
+        from story_automator.core.agent_config import AgentPlanInputError, build_agents_file, extract_json_block, resolve_agents, resolve_agents_payload
+
+        self.assertTrue(issubclass(AgentPlanInputError, ValueError))
+        self.assertTrue(callable(build_agents_file))
+        self.assertTrue(callable(resolve_agents))
+        self.assertTrue(callable(resolve_agents_payload))
+        self.assertEqual(extract_json_block("```json\n{\"ok\":true}\n```"), '{"ok":true}')
 
     def _agents_payload(self) -> dict[str, object]:
         tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review", "retro")}
