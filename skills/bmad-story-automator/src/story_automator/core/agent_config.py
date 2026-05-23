@@ -321,10 +321,16 @@ def extract_json_block(text: str) -> str:
     return _extract_json_block(text)
 
 
-def build_agents_file(state_file: str | Path, complexity_file: str | Path, output_path: str | Path, config_json: str) -> dict[str, Any]:
+def build_agents_file(
+    state_file: str | Path,
+    complexity_file: str | Path,
+    output_path: str | Path,
+    config_json: str,
+    complexity_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from .agent_plan import build_agents_file as _build_agents_file
 
-    return _build_agents_file(state_file, complexity_file, output_path, config_json)
+    return _build_agents_file(state_file, complexity_file, output_path, config_json, complexity_payload=complexity_payload)
 
 
 def resolve_agents(agents_file: str | Path, story_id: str, task: str) -> dict[str, Any]:

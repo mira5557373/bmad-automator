@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_config import normalize_fallback_value, normalize_model, parse_agent_config_json, resolve_agent_for_task
-from .diagnostics import DiagnosticIssue, issues_from_exception, serialize_issues
+from .diagnostics import DiagnosticIssue, issues_from_exception, legacy_issue_message, serialize_issues
 from .frontmatter import extract_json_block, find_frontmatter_value
 from .utils import ensure_dir, iso_now, read_text, write_atomic
 
@@ -112,15 +112,24 @@ def load_agents_plan_for_resolution(path: str, story_id: str, task: str) -> tupl
     return payload if isinstance(payload, dict) else {}, issues
 
 
-def build_agents_file(state_file: str | Path, complexity_file: str | Path, output_path: str | Path, config_json: str) -> dict[str, Any]:
+def build_agents_file(
+    state_file: str | Path,
+    complexity_file: str | Path,
+    output_path: str | Path,
+    config_json: str,
+    complexity_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     try:
         config = parse_agent_config_json(config_json)
     except (json.JSONDecodeError, ValueError) as exc:
         raise AgentPlanInputError("config-json", exc) from exc
-    try:
-        complexity_payload = json.loads(read_text(complexity_file))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise AgentPlanInputError("complexity-file", exc) from exc
+    if complexity_payload is None:
+        complexity_payload, issues = load_complexity_payload(str(complexity_file))
+    else:
+        issues = validate_complexity_payload(complexity_payload)
+    if issues:
+        message = "; ".join(legacy_issue_message(issue) for issue in issues)
+        raise AgentPlanInputError("complexity-file", ValueError(message)) from None
 
     stories = []
     for story in complexity_payload.get("stories", []):

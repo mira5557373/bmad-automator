@@ -313,7 +313,7 @@ def _state_update(args: list[str]) -> int:
             continue
         issue = validate_status_transition(pending_status, value)
         if issue:
-            payload = status_transition_error_payload(pending_status, value)
+            payload = status_transition_error_payload(pending_status, value, issue)
             emit_state_transition(args[0], result="blocked", current_status=pending_status, attempted_status=value, issue=issue)
             print_json(payload)
             return 1

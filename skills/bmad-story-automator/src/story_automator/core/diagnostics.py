@@ -66,7 +66,7 @@ def serialize_event(event: DiagnosticEvent) -> dict[str, Any]:
     return {
         "name": event.name,
         "source": event.source,
-        "message": event.message,
+        "message": redact_actual(event.message),
         "severity": event.severity,
         "issues": serialize_issues(event.issues),
         "context": redact_actual(event.context),

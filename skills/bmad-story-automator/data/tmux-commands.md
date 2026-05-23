@@ -22,11 +22,12 @@
 
 **Generate project slug:**
 ```bash
-# First 8 chars of project directory name (lowercase, alphanumeric only)
-project_slug=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-8)
+script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
+project_slug=$("$script" tmux-wrapper project-slug)
+project_hash=$("$script" tmux-wrapper project-hash)
 ```
 
-**Example:** Project at `/home/user/my-awesome-project` → `project_slug="myawesom"`
+**Example:** Project at `/home/user/my-awesome-project` → `project_slug="myawesom"` plus a stable project hash.
 
 **Why timestamps with seconds (v2.1):**
 - Prevents collisions when multiple sessions spawn in same minute

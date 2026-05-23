@@ -9,7 +9,7 @@ from pathlib import Path
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_validate_state
 from story_automator.core.diagnostics import DiagnosticIssue
-from story_automator.core.state_validation import has_runtime_command_config, state_validation_payload, validate_state_fields
+from story_automator.core.state_validation import has_runtime_command_config, state_validation_payload, status_transition_error_payload, validate_state_fields, validate_status_transition
 from tests.test_replacement_unicode import _FixtureMixin, patch_env
 
 
@@ -132,6 +132,19 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertIn("Invalid status transition from READY to COMPLETE", payload["issues"])
         self.assertEqual(payload["structuredIssues"][0]["field"], "status")
         self.assertEqual(state_file.read_text(encoding="utf-8"), before)
+
+    def test_status_transition_payload_uses_precomputed_issue(self) -> None:
+        issue = validate_status_transition("READY", "COMPLETE")
+        self.assertIsNotNone(issue)
+
+        payload = status_transition_error_payload("READY", "COMPLETE", issue)
+
+        self.assertEqual(payload["error"], "invalid_status_transition")
+        self.assertEqual(payload["structuredIssues"][0]["message"], "Invalid status transition from READY to COMPLETE")
+
+    def test_status_transition_payload_rejects_valid_transition(self) -> None:
+        with self.assertRaises(ValueError):
+            status_transition_error_payload("READY", "IN_PROGRESS")
 
     def test_state_update_allows_valid_status_transition(self) -> None:
         state_file = self._build_state_config(status="READY")

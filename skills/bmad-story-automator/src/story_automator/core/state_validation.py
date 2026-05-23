@@ -104,10 +104,10 @@ def validate_status_transition(current: str, attempted: str) -> DiagnosticIssue 
     )
 
 
-def status_transition_error_payload(current: str, attempted: str) -> dict[str, Any] | None:
-    issue = validate_status_transition(current, attempted)
+def status_transition_error_payload(current: str, attempted: str, issue: DiagnosticIssue | None = None) -> dict[str, Any]:
+    issue = issue or validate_status_transition(current, attempted)
     if not issue:
-        return None
+        raise ValueError("status_transition_error_payload requires an invalid transition")
     legacy_message = str(redact_actual(legacy_issue_message(issue)))
     return {
         "ok": False,

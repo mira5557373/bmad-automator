@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from story_automator.core.diagnostics import (
@@ -141,7 +142,7 @@ class DiagnosticsTests(unittest.TestCase):
         event = DiagnosticEvent(
             name="state.validation",
             source="validate-state",
-            message="validation complete",
+            message="validation complete token=abc123 at /tmp/private/state.md",
             severity="warning",
             issues=[DiagnosticIssue(type="missing_field", field="status", source="validate-state")],
             context={"path": "/tmp/state.md", "apiKey": "secret"},
@@ -150,6 +151,9 @@ class DiagnosticsTests(unittest.TestCase):
         payload = serialize_event(event)
 
         self.assertEqual(payload["name"], "state.validation")
+        self.assertIn("token=<redacted>", payload["message"])
+        self.assertNotIn("abc123", payload["message"])
+        self.assertNotIn("/tmp/private", payload["message"])
         self.assertEqual(payload["issues"][0]["field"], "status")
         self.assertEqual(payload["context"]["path"], "<path:state.md>")
         self.assertEqual(payload["context"]["apiKey"], "<redacted>")

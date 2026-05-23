@@ -137,12 +137,12 @@ def agents_build_action(args: list[str]) -> int:
     if not all(options.values()) or not file_exists(options["state-file"]) or not file_exists(options["complexity-file"]):
         print_json({"ok": False, "error": "missing_args" if not all(options.values()) else "file_not_found"})
         return 1
-    _, issues = load_complexity_payload(options["complexity-file"])
+    complexity_payload, issues = load_complexity_payload(options["complexity-file"])
     if issues:
         print_json(agent_plan_error("invalid_complexity_json", issues))
         return 1
     try:
-        payload = build_agents_file(options["state-file"], options["complexity-file"], options["output"], options["config-json"])
+        payload = build_agents_file(options["state-file"], options["complexity-file"], options["output"], options["config-json"], complexity_payload=complexity_payload)
     except AgentPlanInputError as exc:
         cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
         print_json(agent_plan_error("invalid_agent_config", issues_from_exception(cause, source="agent-plan", field=exc.field)))

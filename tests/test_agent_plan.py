@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
-from story_automator.core.agent_plan import load_agents_plan, load_agents_plan_for_resolution, load_complexity_payload, validate_agents_plan_payload, validate_complexity_payload
+from story_automator.core.agent_plan import AgentPlanInputError, build_agents_file, load_agents_plan, load_agents_plan_for_resolution, load_complexity_payload, validate_agents_plan_payload, validate_complexity_payload
 
 
 class AgentPlanValidationTests(unittest.TestCase):
@@ -98,6 +98,48 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "invalid_complexity_json")
         self.assertEqual(payload["structuredIssues"][0]["field"], "stories[0].complexity.level")
+
+    def test_build_agents_file_direct_call_validates_complexity_payload(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "complexity": False}]}), encoding="utf-8")
+
+        with self.assertRaises(AgentPlanInputError) as ctx:
+            build_agents_file(self.state_file, self.complexity_file, self.agents_file, "{}")
+
+        self.assertEqual(ctx.exception.field, "complexity-file")
+        self.assertIn("Complexity must be an object", str(ctx.exception))
+
+    def test_agents_build_uses_validated_complexity_payload_without_rereading(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+        calls = 0
+        real_read_text = Path.read_text
+
+        def mutate_after_first_complexity_read(path: Path, *args: object, **kwargs: object) -> str:
+            nonlocal calls
+            if path == self.complexity_file:
+                calls += 1
+                if calls == 1:
+                    return real_read_text(path, *args, **kwargs)
+                return json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": False}]})
+            return real_read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", mutate_after_first_complexity_read):
+            code, payload = self._helper(
+                [
+                    "agents-build",
+                    "--state-file",
+                    str(self.state_file),
+                    "--complexity-file",
+                    str(self.complexity_file),
+                    "--output",
+                    str(self.agents_file),
+                    "--config-json",
+                    "{}",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["stories"], 1)
+        self.assertEqual(calls, 1)
 
     def test_agents_build_rejects_non_object_agent_config(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1"}]}), encoding="utf-8")
