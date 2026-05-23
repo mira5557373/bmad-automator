@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from story_automator.commands.orchestrator_epic_agents import check_epic_complete_action, get_epic_stories_action
 from story_automator.core.sprint import sprint_status_epic, sprint_status_get
-from story_automator.core.story_keys import normalize_story_key
+from story_automator.core.story_keys import normalize_story_key, normalize_story_key_for_epic
 
 
 class NormalizeStoryKeyTests(unittest.TestCase):
@@ -87,8 +87,22 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.prefix, "release-2026-1")
         self.assertEqual(result.key, "release-2026-1-ship")
 
-    def test_numeric_leading_title_full_key_uses_first_story_boundary(self) -> None:
+    def test_compound_epic_name_with_story_number_above_99(self) -> None:
+        result = normalize_story_key(str(self.project_root), "release-2026-123-ship")
+        assert result is not None
+        self.assertEqual(result.id, "release-2026.123")
+        self.assertEqual(result.prefix, "release-2026-123")
+        self.assertEqual(result.key, "release-2026-123-ship")
+
+    def test_numeric_leading_title_full_key_uses_rightmost_story_boundary(self) -> None:
         result = normalize_story_key(str(self.project_root), "multi-leg-3-2026-release")
+        assert result is not None
+        self.assertEqual(result.id, "multi-leg-3.2026")
+        self.assertEqual(result.prefix, "multi-leg-3-2026")
+        self.assertEqual(result.key, "multi-leg-3-2026-release")
+
+    def test_numeric_leading_title_full_key_uses_epic_hint_when_available(self) -> None:
+        result = normalize_story_key_for_epic(str(self.project_root), "multi-leg", "multi-leg-3-2026-release")
         assert result is not None
         self.assertEqual(result.id, "multi-leg.3")
         self.assertEqual(result.prefix, "multi-leg-3")
@@ -166,6 +180,30 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertTrue(payload["isLastStory"])
         self.assertEqual(payload["lastInEpic"], "multi-leg-4-strict-asset-precision-registration")
 
+    def test_check_epic_complete_uses_epic_hint_for_numeric_title_segments(self) -> None:
+        state_file = self.project_root / "state.md"
+        state_file.write_text(
+            textwrap.dedent(
+                """\
+                ---
+                storyRange:
+                  - multi-leg-3-2026-release
+                  - multi-leg-4-next
+                ---
+                """
+            ),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), redirect_stdout(stdout):
+            exit_code = check_epic_complete_action(["multi-leg", "multi-leg-4-next", "--state-file", str(state_file)])
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["isLastStory"])
+        self.assertEqual(payload["lastInEpic"], "multi-leg-4-next")
+        self.assertEqual(payload["epicStoryCount"], 2)
+
     def test_sprint_status_epic_rejects_overlapping_non_numeric_epic_prefix(self) -> None:
         sprint_status = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
         sprint_status.write_text(
@@ -198,6 +236,56 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(stories, ["phase-2-1-title"])
         self.assertEqual(done, 1)
 
+    def test_sprint_status_epic_accepts_numeric_segment_in_title(self) -> None:
+        sprint_status = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        sprint_status.write_text(
+            textwrap.dedent(
+                """\
+                development_status:
+                  multi-leg-3-2026-release: done
+                  multi-leg-4-next: done
+                """
+            ),
+            encoding="utf-8",
+        )
+        stories, done = sprint_status_epic(str(self.project_root), "multi-leg")
+        self.assertEqual(stories, ["multi-leg-3-2026-release", "multi-leg-4-next"])
+        self.assertEqual(done, 2)
+
+    def test_sprint_status_epic_deduplicates_normalized_story_ids(self) -> None:
+        sprint_status = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        sprint_status.write_text(
+            textwrap.dedent(
+                """\
+                development_status:
+                  multi-leg.3: done
+                  multi-leg-3-lossless-quantity-serialization: done
+                  multi-leg-4-strict-asset-precision-registration: ready-for-dev
+                """
+            ),
+            encoding="utf-8",
+        )
+        stories, done = sprint_status_epic(str(self.project_root), "multi-leg")
+        self.assertEqual(stories, ["multi-leg-3-lossless-quantity-serialization", "multi-leg-4-strict-asset-precision-registration"])
+        self.assertEqual(done, 1)
+
+    def test_sprint_status_epic_prefers_full_key_duplicate_status(self) -> None:
+        sprint_status = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        sprint_status.write_text(
+            textwrap.dedent(
+                """\
+                development_status:
+                  multi-leg.3: ready-for-dev
+                  multi-leg-3-lossless-quantity-serialization: done
+                  multi-leg-4-strict-asset-precision-registration: done
+                """
+            ),
+            encoding="utf-8",
+        )
+        stories, done = sprint_status_epic(str(self.project_root), "multi-leg")
+        self.assertEqual(stories, ["multi-leg-3-lossless-quantity-serialization", "multi-leg-4-strict-asset-precision-registration"])
+        self.assertEqual(done, 2)
+
     def test_get_epic_stories_state_file_accepts_non_numeric_full_keys(self) -> None:
         state_file = self.project_root / "state.md"
         state_file.write_text(
@@ -221,6 +309,29 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(payload["epic"], "multi-leg")
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["source"], "state_file")
+
+    def test_get_epic_stories_state_file_accepts_numeric_title_segments(self) -> None:
+        state_file = self.project_root / "state.md"
+        state_file.write_text(
+            textwrap.dedent(
+                """\
+                ---
+                storyRange:
+                  - multi-leg-3-2026-release
+                  - multi-leg-ui-99-unrelated
+                ---
+                """
+            ),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), redirect_stdout(stdout):
+            exit_code = get_epic_stories_action(["multi-leg", "--state-file", str(state_file)])
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["stories"], ["multi-leg-3-2026-release"])
+        self.assertEqual(payload["count"], 1)
 
     # --- Rejection paths ---
 

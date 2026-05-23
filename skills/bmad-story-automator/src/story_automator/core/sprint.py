@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .story_keys import normalize_story_key, sprint_status_file
+from .story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic, sprint_status_file
 from .utils import file_exists, read_text, trim_lines
 
 
@@ -38,9 +38,8 @@ def sprint_status_epic(project_root: str, epic: str) -> tuple[list[str], int]:
     status_file = sprint_status_file(project_root)
     if not file_exists(status_file):
         return ([], 0)
-    stories: list[str] = []
-    seen: set[str] = set()
-    done_count = 0
+    story_order: list[str] = []
+    story_rows: dict[str, tuple[int, str, str]] = {}
     for line in trim_lines(read_text(status_file)):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -49,14 +48,22 @@ def sprint_status_epic(project_root: str, epic: str) -> tuple[list[str], int]:
         if len(parts) < 2:
             continue
         key = parts[0].strip()
-        norm = normalize_story_key(project_root, key)
+        norm = normalize_story_key_for_epic(project_root, epic, key)
         if norm is None or norm.id.rsplit(".", 1)[0] != epic:
             continue
-        if key in seen:
-            continue
-        stories.append(key)
-        seen.add(key)
         status = parts[1].strip().split()
-        if status and status[0] == "done":
-            done_count += 1
+        rank = _status_key_rank(key, norm)
+        if norm.id not in story_rows:
+            story_order.append(norm.id)
+        previous = story_rows.get(norm.id)
+        if previous is None or rank >= previous[0]:
+            story_rows[norm.id] = (rank, key, status[0] if status else "")
+    stories = [story_rows[story_id][1] for story_id in story_order]
+    done_count = sum(1 for story_id in story_order if story_rows[story_id][2] == "done")
     return (stories, done_count)
+
+
+def _status_key_rank(key: str, norm: StoryKey) -> int:
+    if key == norm.key and key not in {norm.id, norm.prefix}:
+        return 2
+    return 1

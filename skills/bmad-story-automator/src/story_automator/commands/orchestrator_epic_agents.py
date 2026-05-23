@@ -7,7 +7,7 @@ from pathlib import Path
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
-from story_automator.core.story_keys import normalize_story_key
+from story_automator.core.story_keys import normalize_story_key, normalize_story_key_for_epic
 from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, trim_lines, unquote_scalar
 
 
@@ -22,7 +22,7 @@ def check_epic_complete_action(args: list[str]) -> int:
     for idx, arg in enumerate(tail):
         if arg == "--state-file" and idx + 1 < len(tail):
             state_file = tail[idx + 1]
-    story_norm = normalize_story_key(project_root, story)
+    story_norm = normalize_story_key_for_epic(project_root, epic, story)
     story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
     epic_value = _epic_json_value(epic)
     if story_epic != epic:
@@ -31,15 +31,15 @@ def check_epic_complete_action(args: list[str]) -> int:
     stories: list[str] = []
     if state_file and file_exists(state_file):
         story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
-        stories = [sid for sid in story_range if isinstance(sid, str) and _story_epic(project_root, sid) == epic]
+        stories = [sid for sid in story_range if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
         source = "state_file"
     else:
         stories, _ = sprint_status_epic(project_root, epic)
         source = "sprint_status"
     if stories:
-        stories = sorted(set(stories), key=lambda item: _story_sort_key(project_root, item))
+        stories = sorted(set(stories), key=lambda item: _story_sort_key(project_root, item, epic))
         last = stories[-1]
-        print_json({"ok": True, "isLastStory": _same_story(project_root, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
+        print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
         return 0
     print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
     return 0
@@ -57,7 +57,7 @@ def get_epic_stories_action(args: list[str]) -> int:
             state_file = tail[idx + 1]
     if state_file and file_exists(state_file):
         project_root = get_project_root()
-        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_epic(project_root, sid) == epic]
+        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
             return 0
@@ -68,7 +68,7 @@ def get_epic_stories_action(args: list[str]) -> int:
     epic_file = find_epic_file(epic)
     if epic_file:
         project_root = get_project_root()
-        stories = sorted(set(re.findall(rf"\b{re.escape(epic)}\.\d+", read_text(epic_file))), key=lambda item: _story_sort_key(project_root, item))
+        stories = sorted(set(re.findall(rf"\b{re.escape(epic)}\.\d+", read_text(epic_file))), key=lambda item: _story_sort_key(project_root, item, epic))
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
             return 0
@@ -224,8 +224,15 @@ def _story_epic(project_root: str, story: str) -> str:
     return story.split(".", 1)[0]
 
 
-def _story_sort_key(project_root: str, story: str) -> tuple[int, str]:
-    norm = normalize_story_key(project_root, story)
+def _story_matches_epic(project_root: str, epic: str, story: str) -> bool:
+    norm = normalize_story_key_for_epic(project_root, epic, story)
+    if norm is not None:
+        return norm.id.rsplit(".", 1)[0] == epic
+    return story.split(".", 1)[0] == epic
+
+
+def _story_sort_key(project_root: str, story: str, epic: str = "") -> tuple[int, str]:
+    norm = normalize_story_key_for_epic(project_root, epic, story) if epic else normalize_story_key(project_root, story)
     if norm is not None:
         _, _, story_num = norm.id.rpartition(".")
         if story_num.isdigit():
@@ -233,9 +240,9 @@ def _story_sort_key(project_root: str, story: str) -> tuple[int, str]:
     return (0, story)
 
 
-def _same_story(project_root: str, left: str, right: str) -> bool:
-    left_norm = normalize_story_key(project_root, left)
-    right_norm = normalize_story_key(project_root, right)
+def _same_story(project_root: str, epic: str, left: str, right: str) -> bool:
+    left_norm = normalize_story_key_for_epic(project_root, epic, left)
+    right_norm = normalize_story_key_for_epic(project_root, epic, right)
     if left_norm is not None and right_norm is not None:
         return left_norm.id == right_norm.id
     return left == right

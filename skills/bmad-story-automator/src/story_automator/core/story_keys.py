@@ -58,6 +58,26 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
     else:
         return None
 
+    return _complete_story_key(project_root, story_id, prefix, key)
+
+
+def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> StoryKey | None:
+    dotted = re.fullmatch(rf"{re.escape(epic)}\.(\d+)", value)
+    if dotted:
+        story_num = dotted.group(1)
+        return _complete_story_key(project_root, f"{epic}.{story_num}", f"{epic}-{story_num}", "")
+
+    dashed = re.fullmatch(rf"{re.escape(epic)}-(\d+)(?:-.+)?", value)
+    if dashed:
+        story_num = dashed.group(1)
+        prefix = f"{epic}-{story_num}"
+        key = value if value != prefix else ""
+        return _complete_story_key(project_root, f"{epic}.{story_num}", prefix, key)
+
+    return normalize_story_key(project_root, value)
+
+
+def _complete_story_key(project_root: str, story_id: str, prefix: str, key: str) -> StoryKey:
     artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
     if not key:
         matches = sorted(artifacts.glob(f"{prefix}-*.md"))
@@ -79,9 +99,5 @@ def _split_non_numeric_full_key(value: str) -> tuple[str, str] | None:
     matches = list(re.finditer(r"(?=-(\d+)-)", value))
     if not matches:
         return None
-    match = matches[0]
-    if len(matches) > 1:
-        last = matches[-1]
-        if int(last.group(1)) < 100:
-            match = last
+    match = matches[-1]
     return value[: match.start()], match.group(1)
