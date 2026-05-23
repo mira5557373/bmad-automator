@@ -1240,7 +1240,17 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
         self.assertEqual(payload["error"], "--state-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--state-file")
         self.assertEqual(payload["structuredIssues"][0]["source"], "verify-step")
+
+    def test_verify_step_rejects_incomplete_output_file_flag_with_field(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["verify-step", "create", "1.2", "--output-file"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "--output-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--output-file")
 
     def test_verify_code_review_rejects_incomplete_state_file_flag(self) -> None:
         stdout = io.StringIO()
@@ -1251,6 +1261,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "review_contract_invalid")
         self.assertEqual(payload["error"], "--state-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--state-file")
         self.assertEqual(payload["structuredIssues"][0]["source"], "verify-code-review")
 
     def test_verifier_exception_payload_redacts_legacy_error(self) -> None:
@@ -1264,6 +1275,18 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertNotIn("token=abc123", serialized)
         self.assertNotIn("/tmp/private", serialized)
         self.assertEqual(payload["error"], "token=<redacted> failed at <path:state.md>")
+
+    def test_validate_story_creation_reason_redacts_sensitive_context(self) -> None:
+        stdout = io.StringIO()
+        missing = self.project_root / "token=abc123" / "missing-state.md"
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["check", "1.2", "--state-file", str(missing)])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("token=abc123", serialized)
+        self.assertNotIn(str(self.project_root), serialized)
+        self.assertIn("token=<redacted>", payload["reason"])
 
     def test_validate_story_creation_check_returns_compat_schema_on_bad_counts(self) -> None:
         stdout = io.StringIO()

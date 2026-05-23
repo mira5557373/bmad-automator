@@ -69,8 +69,8 @@ def parse_failure_payload(reason: str, issues: list[DiagnosticIssue] | None = No
     return {"status": "error", "reason": reason, "structuredIssues": serialize_issues(issues or [])}
 
 
-def verifier_exception_payload(reason: str, exc: Exception, *, source: str, **extra: object) -> dict[str, object]:
-    issues = issues_from_exception(exc, source=source)
+def verifier_exception_payload(reason: str, exc: Exception, *, source: str, field: str = "", **extra: object) -> dict[str, object]:
+    issues = issues_from_exception(exc, source=source, field=field)
     return {"verified": False, "reason": reason, "error": redact_actual(str(exc)), **extra, "structuredIssues": serialize_issues(issues)}
 
 

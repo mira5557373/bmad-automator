@@ -12,8 +12,11 @@ DIAGNOSTIC_EVENTS_FILE_ENV = "STORY_AUTOMATOR_DIAGNOSTICS_FILE"
 MAX_STRING_LENGTH = 160
 MAX_COLLECTION_ITEMS = 6
 SENSITIVE_KEY_RE = re.compile(r"(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.IGNORECASE)
+SECRET_QUOTED_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(['\"])(?:(?!\2).)*\2"
+)
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*([^\s,;]+)"
+    r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
 ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])(?:/[^\s,;:]+)+")
 
@@ -147,6 +150,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def _redact_string(value: str) -> str:
+    value = SECRET_QUOTED_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     value = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     value = ABSOLUTE_PATH_RE.sub(_path_placeholder, value)
     if len(value) > MAX_STRING_LENGTH:

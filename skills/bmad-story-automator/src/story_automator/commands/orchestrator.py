@@ -472,7 +472,7 @@ def _verify_code_review(args: list[str]) -> int:
                 continue
             idx += 1
     except PolicyError as exc:
-        print_json(verifier_exception_payload("review_contract_invalid", exc, source="verify-code-review", input=args[0]))
+        print_json(verifier_exception_payload("review_contract_invalid", exc, source="verify-code-review", field="--state-file", input=args[0]))
         return 1
     payload = verify_code_review_completion(get_project_root(), args[0], state_file=state_file or None)
     print_json(payload)
@@ -514,16 +514,16 @@ def _verify_step(args: list[str]) -> int:
         )
         exit_code = 0
     except (FileNotFoundError, OSError, PolicyError, ValueError) as exc:
-        payload = verifier_exception_payload("verifier_contract_invalid", exc, source="verify-step", step=step, input=story_key)
+        message = str(exc)
+        field = "--state-file" if message.startswith("--state-file requires") else "--output-file" if message.startswith("--output-file requires") else ""
+        payload = verifier_exception_payload("verifier_contract_invalid", exc, source="verify-step", field=field, step=step, input=story_key)
         exit_code = 1
     print_json(payload)
     return exit_code
 
-
 def _parse_context_int(context: str, key: str) -> int:
     match = re.search(rf"{re.escape(key)}=(\d+)", context)
     return int(match.group(1)) if match else 0
-
 
 def _flag_value(args: list[str], idx: int, flag: str) -> str:
     if idx + 1 >= len(args) or not args[idx + 1].strip() or args[idx + 1].startswith("--"):

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_validate_state
-from story_automator.core.state_validation import has_runtime_command_config
+from story_automator.core.diagnostics import DiagnosticIssue
+from story_automator.core.state_validation import has_runtime_command_config, state_validation_payload, validate_state_fields
 from tests.test_replacement_unicode import _FixtureMixin, patch_env
 
 
@@ -73,6 +74,50 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(issue["actual"], "DONE")
         self.assertIn("EXECUTION_COMPLETE", issue["expected"])
 
+    def test_validate_state_reports_wrong_typed_required_fields_from_frontmatter(self) -> None:
+        state_file = self._build_state_config(epicName=["Epic 1"], storyRange="1.1")
+
+        payload = self._validate_state(state_file)
+
+        fields = {issue["field"]: issue for issue in payload["structuredIssues"]}
+        self.assertEqual(fields["epicName"]["expected"], "non-empty string")
+        self.assertEqual(fields["storyRange"]["expected"], "array of non-empty story IDs")
+
+    def test_validate_state_fields_rejects_non_string_epic(self) -> None:
+        issues = validate_state_fields(
+            str(self.project_root / "state.md"),
+            {
+                "epic": 1,
+                "epicName": "Epic 1",
+                "storyRange": ["1.1"],
+                "status": "READY",
+                "lastUpdated": "2026-04-13T00:00:00Z",
+                "aiCommand": "claude",
+            },
+            "",
+        )
+
+        epic_issue = next(issue for issue in issues if issue.field == "epic")
+        self.assertEqual(epic_issue.type, "invalid_value")
+
+    def test_validate_state_legacy_issues_redact_sensitive_context(self) -> None:
+        payload = state_validation_payload(
+            [
+                DiagnosticIssue(
+                    type="invalid_value",
+                    field="policySnapshotFile",
+                    actual="/tmp/token=abc123/snapshot.json",
+                    message="policy snapshot missing: /tmp/token=abc123/snapshot.json",
+                    source="validate-state",
+                )
+            ]
+        )
+
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("token=abc123", serialized)
+        self.assertNotIn("/tmp/token=abc123", serialized)
+        self.assertIn("token=<redacted>", payload["issues"][0])
+
     def test_state_update_blocks_invalid_status_transition(self) -> None:
         state_file = self._build_state_config(status="READY")
         before = state_file.read_text(encoding="utf-8")
@@ -105,6 +150,19 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload, {"ok": True, "updated": ["status"]})
         self.assertIn("status: READY", state_file.read_text(encoding="utf-8"))
+
+    def test_state_update_blocks_completion_from_invalid_current_status(self) -> None:
+        state_file = self._build_state_config(status="BOGUS")
+        before = state_file.read_text(encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "status=COMPLETE")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_status_transition")
+        self.assertEqual(payload["currentStatus"], "BOGUS")
+        self.assertEqual(payload["attemptedStatus"], "COMPLETE")
+        self.assertEqual(payload["allowedTransitions"], ["ABORTED", "READY"])
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
 
     def test_state_update_rejects_invalid_attempted_status(self) -> None:
         state_file = self._build_state_config(status="READY")

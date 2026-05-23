@@ -106,6 +106,16 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("abc123", redacted)
         self.assertNotIn("password:pw", redacted)
 
+    def test_redact_actual_masks_bearer_and_quoted_secret_values(self) -> None:
+        redacted = redact_actual('Authorization: Bearer abc123 token="abc 123" api_key=Basic xyz')
+
+        self.assertIn("Authorization=<redacted>", redacted)
+        self.assertIn("token=<redacted>", redacted)
+        self.assertIn("api_key=<redacted>", redacted)
+        self.assertNotIn("abc123", redacted)
+        self.assertNotIn("abc 123", redacted)
+        self.assertNotIn("xyz", redacted)
+
     def test_redact_actual_shortens_absolute_paths_and_long_strings(self) -> None:
         redacted = redact_actual(f"/Users/joon/project/private/story.md {'x' * 220}")
 

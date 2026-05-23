@@ -9,6 +9,7 @@ from .runtime_policy import PolicyError, load_policy_for_state
 
 
 VALID_STATUSES = {"INITIALIZING", "READY", "IN_PROGRESS", "PAUSED", "EXECUTION_COMPLETE", "COMPLETE", "ABORTED"}
+INVALID_CURRENT_STATUS_REPAIR_TRANSITIONS = {"READY", "ABORTED"}
 ALLOWED_STATUS_TRANSITIONS = {
     "INITIALIZING": {"INITIALIZING", "READY", "ABORTED"},
     "READY": {"READY", "IN_PROGRESS", "PAUSED", "ABORTED"},
@@ -22,9 +23,14 @@ ALLOWED_STATUS_TRANSITIONS = {
 
 def validate_state_fields(state_path: str, fields: dict[str, Any], frontmatter: str) -> list[DiagnosticIssue]:
     issues: list[DiagnosticIssue] = []
-    _required(issues, fields, "epic")
-    _required(issues, fields, "epicName")
-    _required(issues, fields, "storyRange")
+    _required(issues, fields, "epic", lambda value: isinstance(value, str) and bool(value.strip()))
+    _required(issues, fields, "epicName", lambda value: isinstance(value, str) and bool(value.strip()))
+    _required(
+        issues,
+        fields,
+        "storyRange",
+        lambda value: isinstance(value, list) and all(isinstance(item, str) and bool(item.strip()) for item in value),
+    )
     _required(issues, fields, "status", lambda value: isinstance(value, str) and value in VALID_STATUSES)
     _required(issues, fields, "lastUpdated", lambda value: isinstance(value, str) and re.search(r"\d{4}-\d{2}-\d{2}T", value))
     if not has_runtime_command_config(fields, frontmatter):
@@ -71,7 +77,18 @@ def validate_status_transition(current: str, attempted: str) -> DiagnosticIssue 
             source="state-update",
         )
     if current not in VALID_STATUSES:
-        return None
+        if attempted in INVALID_CURRENT_STATUS_REPAIR_TRANSITIONS:
+            return None
+        return DiagnosticIssue(
+            type="invalid_status_transition",
+            field="status",
+            expected=sorted(INVALID_CURRENT_STATUS_REPAIR_TRANSITIONS),
+            actual=attempted,
+            message=f"Invalid status transition from {current or '<missing>'} to {attempted}",
+            recovery="Repair the current status to READY or ABORTED before continuing.",
+            code="STATE_STATUS_TRANSITION_INVALID",
+            source="state-update",
+        )
     allowed = ALLOWED_STATUS_TRANSITIONS.get(current, set())
     if attempted in allowed:
         return None
@@ -97,7 +114,7 @@ def status_transition_error_payload(current: str, attempted: str) -> dict[str, A
         "error": "invalid_status_transition",
         "currentStatus": redact_actual(current),
         "attemptedStatus": redact_actual(attempted),
-        "allowedTransitions": sorted(ALLOWED_STATUS_TRANSITIONS.get(current, set())),
+        "allowedTransitions": sorted(ALLOWED_STATUS_TRANSITIONS.get(current, INVALID_CURRENT_STATUS_REPAIR_TRANSITIONS)),
         "issues": [legacy_message],
         "structuredIssues": serialize_issues([issue]),
     }
@@ -132,7 +149,7 @@ def parse_state_update_argument(raw: str) -> tuple[str, str] | dict[str, Any]:
 
 
 def state_validation_payload(issues: list[DiagnosticIssue]) -> dict[str, Any]:
-    legacy_issues = [legacy_issue_message(issue) for issue in issues]
+    legacy_issues = [str(redact_actual(legacy_issue_message(issue))) for issue in issues]
     return {
         "ok": True,
         "structure": "issues" if issues else "ok",
@@ -192,4 +209,8 @@ def _expected_for(key: str) -> Any:
         return sorted(VALID_STATUSES)
     if key == "lastUpdated":
         return "ISO-like timestamp containing YYYY-MM-DDT"
+    if key in {"epic", "epicName"}:
+        return "non-empty string"
+    if key == "storyRange":
+        return "array of non-empty story IDs"
     return "valid value"
