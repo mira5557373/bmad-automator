@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from story_automator.core.artifact_paths import implementation_artifacts_dir
+from story_automator.core.diagnostics import DiagnosticIssue, serialize_issues
 from story_automator.core.runtime_policy import PolicyError
 from story_automator.core.success_verifiers import create_story_artifact, resolve_success_contract
 
@@ -51,6 +52,18 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             return f"RUNAWAY CREATION: {created} files created instead of {expected}"
         return f"Unexpected story artifact count: {created} files instead of {expected}"
 
+    def check_issue(field: str, reason: str) -> DiagnosticIssue:
+        return DiagnosticIssue(
+            type="invalid_value",
+            field=field,
+            expected="valid validate-story-creation check input",
+            actual=reason,
+            message=reason,
+            recovery="Fix the validate-story-creation input or referenced state/policy file and retry.",
+            code="VALIDATE_STORY_CREATION_INVALID",
+            source="validate-story-creation",
+        )
+
     def build_check_response(
         story_id: str,
         payload: dict[str, object] | None,
@@ -96,6 +109,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
         story_id: str,
         *,
         reason: str,
+        field: str = "check",
         before_count: int | None = None,
         after_count: int | None = None,
     ) -> int:
@@ -107,6 +121,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             valid_override=False,
             reason_override=reason,
         )
+        response["structuredIssues"] = serialize_issues([check_issue(field, reason)])
         print(json.dumps(response, separators=(",", ":")))
         return 1
 
@@ -145,7 +160,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
 
     if action == "check":
         if not rest:
-            return print_check_error("", reason="story_id required")
+            return print_check_error("", reason="story_id required", field="story_id")
         story_id = rest[0]
         state_file = ""
         artifacts_dir: Path | None = None
@@ -160,7 +175,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                     idx += 2
                 else:
                     before_count, after_count = parsed_delta_counts(before_value, after_value)
-                    return print_check_error(story_id, reason="--before requires a value", before_count=before_count, after_count=after_count)
+                    return print_check_error(story_id, reason="--before requires a value", field="--before", before_count=before_count, after_count=after_count)
                 continue
             if rest[idx] == "--after":
                 after_seen = True
@@ -169,7 +184,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                     idx += 2
                 else:
                     before_count, after_count = parsed_delta_counts(before_value, after_value)
-                    return print_check_error(story_id, reason="--after requires a value", before_count=before_count, after_count=after_count)
+                    return print_check_error(story_id, reason="--after requires a value", field="--after", before_count=before_count, after_count=after_count)
                 continue
             if rest[idx] == "--artifacts-dir" and idx + 1 < len(rest):
                 artifacts_dir = Path(rest[idx + 1])
@@ -177,33 +192,34 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                 continue
             if rest[idx] == "--artifacts-dir":
                 before_count, after_count = parsed_delta_counts(before_value, after_value)
-                return print_check_error(story_id, reason="--artifacts-dir requires a value", before_count=before_count, after_count=after_count)
+                return print_check_error(story_id, reason="--artifacts-dir requires a value", field="--artifacts-dir", before_count=before_count, after_count=after_count)
             if rest[idx] == "--state-file" and idx + 1 < len(rest):
                 state_file = rest[idx + 1]
                 idx += 2
                 continue
             if rest[idx] == "--state-file":
                 before_count, after_count = parsed_delta_counts(before_value, after_value)
-                return print_check_error(story_id, reason="--state-file requires a value", before_count=before_count, after_count=after_count)
+                return print_check_error(story_id, reason="--state-file requires a value", field="--state-file", before_count=before_count, after_count=after_count)
             before_count, after_count = parsed_delta_counts(before_value, after_value)
-            return print_check_error(story_id, reason=f"unsupported check argument: {rest[idx]}", before_count=before_count, after_count=after_count)
+            return print_check_error(story_id, reason=f"unsupported check argument: {rest[idx]}", field="check.argument", before_count=before_count, after_count=after_count)
         if before_seen != after_seen:
-            return print_check_error(story_id, reason="both --before and --after are required together")
+            return print_check_error(story_id, reason="both --before and --after are required together", field="--before/--after")
         before_count = after_count = None
         if before_seen and after_seen:
             try:
                 before_count = int(before_value or "")
                 after_count = int(after_value or "")
             except ValueError:
-                return print_check_error(story_id, reason="before/after must be integers")
+                return print_check_error(story_id, reason="before/after must be integers", field="--before/--after")
         try:
             default_artifacts_dir = resolve_default_artifacts_dir()
         except ARTIFACT_RESOLUTION_ERRORS as exc:
-            return print_check_error(story_id, reason=str(exc), before_count=before_count, after_count=after_count)
+            return print_check_error(story_id, reason=str(exc), field="policy", before_count=before_count, after_count=after_count)
         if artifacts_dir is not None and artifacts_dir != default_artifacts_dir:
             return print_check_error(
                 story_id,
                 reason="validate-story-creation check no longer supports --artifacts-dir overrides; use count/list for custom folders",
+                field="--artifacts-dir",
                 before_count=before_count,
                 after_count=after_count,
             )
@@ -211,7 +227,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             payload = create_check_payload(story_id, state_file)
             response = build_check_response(story_id, payload, before_count=before_count, after_count=after_count)
         except (FileNotFoundError, PolicyError, OSError, ValueError) as exc:
-            return print_check_error(story_id, reason=str(exc), before_count=before_count, after_count=after_count)
+            return print_check_error(story_id, reason=str(exc), field="state_file" if state_file else "policy", before_count=before_count, after_count=after_count)
         print(json.dumps(response, separators=(",", ":")))
         return 0
 
@@ -243,7 +259,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
 
     if action and action not in {"count", "check", "list", "prefix"}:
         if not rest:
-            return print_check_error(action, reason="both --before and --after are required together")
+            return print_check_error(action, reason="both --before and --after are required together", field="--before/--after")
         if len(rest) == 1:
             return cmd_validate_story_creation(["check", action, "--before", rest[0]])
         return cmd_validate_story_creation(["check", action, "--before", rest[0], "--after", rest[1], *rest[2:]])

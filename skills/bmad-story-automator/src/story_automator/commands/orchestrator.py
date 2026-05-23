@@ -23,7 +23,7 @@ from story_automator.core.runtime_policy import (
 )
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_layout import active_marker_path, active_marker_project_entry
-from story_automator.core.state_validation import status_transition_error_payload, validate_status_transition
+from story_automator.core.state_validation import parse_state_update_argument, status_transition_error_payload, validate_status_transition
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.sprint import sprint_status_epic, sprint_status_get
 from story_automator.core.story_keys import normalize_story_key, sprint_status_file
@@ -297,9 +297,12 @@ def _state_update(args: list[str]) -> int:
     updates: list[tuple[str, str]] = []
     idx = 1
     while idx < len(args):
-        if args[idx] == "--set" and idx + 1 < len(args):
-            key, value = args[idx + 1].split("=", 1)
-            updates.append((key, value))
+        if args[idx] == "--set":
+            parsed = parse_state_update_argument(args[idx + 1] if idx + 1 < len(args) else "")
+            if isinstance(parsed, dict):
+                print_json(parsed)
+                return 1
+            updates.append(parsed)
             idx += 2
             continue
         idx += 1

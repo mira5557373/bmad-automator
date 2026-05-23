@@ -14,6 +14,7 @@ from story_automator.commands.state import cmd_build_state_doc, cmd_sprint_compa
 from story_automator.commands.tmux import _build_cmd, _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
 from story_automator.commands.validate_story_creation import cmd_validate_story_creation
 from story_automator.core.artifact_paths import implementation_artifacts_relpath
+from story_automator.core.parse_contracts import verifier_exception_payload
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_policy import PolicyError
 from story_automator.core.sprint import sprint_status_get
@@ -1176,6 +1177,17 @@ class SuccessVerifierTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertFalse(payload["valid"])
         self.assertIn("missing-state.md", payload["reason"])
+        self.assertEqual(payload["structuredIssues"][0]["field"], "state_file")
+        self.assertEqual(payload["structuredIssues"][0]["source"], "validate-story-creation")
+
+    def test_validate_story_creation_bad_counts_include_structured_issues(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_validate_story_creation(["check", "1.2", "--before", "x", "--after", "1"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["reason"], "before/after must be integers")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--before/--after")
 
     def test_review_wrapper_normalizes_directory_state_file(self) -> None:
         payload = verify_code_review_completion(str(self.project_root), "1.2", state_file=self.project_root)
@@ -1240,6 +1252,18 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "review_contract_invalid")
         self.assertEqual(payload["error"], "--state-file requires a value")
         self.assertEqual(payload["structuredIssues"][0]["source"], "verify-code-review")
+
+    def test_verifier_exception_payload_redacts_legacy_error(self) -> None:
+        payload = verifier_exception_payload(
+            "verifier_contract_invalid",
+            ValueError("token=abc123 failed at /tmp/private/state.md"),
+            source="verify-step",
+        )
+
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("token=abc123", serialized)
+        self.assertNotIn("/tmp/private", serialized)
+        self.assertEqual(payload["error"], "token=<redacted> failed at <path:state.md>")
 
     def test_validate_story_creation_check_returns_compat_schema_on_bad_counts(self) -> None:
         stdout = io.StringIO()

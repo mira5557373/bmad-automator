@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .diagnostics import DiagnosticIssue, issues_from_exception, serialize_issues
+from .diagnostics import DiagnosticIssue, issues_from_exception, redact_actual, serialize_issues
 from .utils import read_text
 
 
@@ -71,7 +71,7 @@ def parse_failure_payload(reason: str, issues: list[DiagnosticIssue] | None = No
 
 def verifier_exception_payload(reason: str, exc: Exception, *, source: str, **extra: object) -> dict[str, object]:
     issues = issues_from_exception(exc, source=source)
-    return {"verified": False, "reason": reason, "error": str(exc), **extra, "structuredIssues": serialize_issues(issues)}
+    return {"verified": False, "reason": reason, "error": redact_actual(str(exc)), **extra, "structuredIssues": serialize_issues(issues)}
 
 
 def _validate_schema(payload: object, schema: object, path: str, issues: list[DiagnosticIssue]) -> None:

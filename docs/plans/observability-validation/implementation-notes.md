@@ -28,6 +28,26 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-05-22 - phase-08-completion
+
+### Context
+
+- Phase 08 completed the remaining diagnostic consistency and redaction follow-ups from the issue #5 review loop.
+- A follow-up review also verified a malformed `state-update --set` CLI boundary gap.
+
+### Decision, Change, Or Tradeoff
+
+- `validate-story-creation check` now preserves its legacy compatibility fields and adds `structuredIssues` on diagnostic-worthy failures.
+- Invalid `state-update` transitions now redact legacy `currentStatus`, `attemptedStatus`, and `issues` values through the shared diagnostics redactor.
+- Malformed `state-update --set` values now return `ok:false`, `error:"invalid_set_argument"`, legacy `issues`, and `structuredIssues` instead of raising `ValueError`.
+- `verifier_exception_payload()` now redacts the legacy `error` field consistently with `structuredIssues`.
+- Legacy `validate-story-creation reason` remains unchanged for compatibility; the new `structuredIssues` payload carries the redacted diagnostic copy.
+
+### User Impact
+
+- Diagnostic JSON is more consistent and safer for logs while preserving existing field names.
+- Follow-up needed: `None`.
+
 ## 2026-05-22 - phase-08-planning
 
 ### Context

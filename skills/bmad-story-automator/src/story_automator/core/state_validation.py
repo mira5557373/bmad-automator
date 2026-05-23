@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from .agent_config import has_agent_config_runtime_source
-from .diagnostics import DiagnosticIssue, legacy_issue_message, serialize_issues
+from .diagnostics import DiagnosticIssue, legacy_issue_message, redact_actual, serialize_issues
 from .runtime_policy import PolicyError, load_policy_for_state
 
 
@@ -91,15 +91,44 @@ def status_transition_error_payload(current: str, attempted: str) -> dict[str, A
     issue = validate_status_transition(current, attempted)
     if not issue:
         return None
+    legacy_message = str(redact_actual(legacy_issue_message(issue)))
     return {
         "ok": False,
         "error": "invalid_status_transition",
-        "currentStatus": current,
-        "attemptedStatus": attempted,
+        "currentStatus": redact_actual(current),
+        "attemptedStatus": redact_actual(attempted),
         "allowedTransitions": sorted(ALLOWED_STATUS_TRANSITIONS.get(current, set())),
-        "issues": [legacy_issue_message(issue)],
+        "issues": [legacy_message],
         "structuredIssues": serialize_issues([issue]),
     }
+
+
+def state_update_argument_error_payload(raw: str) -> dict[str, Any]:
+    issue = DiagnosticIssue(
+        type="invalid_value",
+        field="--set",
+        expected="KEY=VALUE",
+        actual=raw,
+        message="state-update --set requires KEY=VALUE",
+        recovery="Pass --set with a frontmatter key and value, for example --set status=READY.",
+        code="STATE_UPDATE_SET_INVALID",
+        source="state-update",
+    )
+    return {
+        "ok": False,
+        "error": "invalid_set_argument",
+        "issues": [str(redact_actual(legacy_issue_message(issue)))],
+        "structuredIssues": serialize_issues([issue]),
+    }
+
+
+def parse_state_update_argument(raw: str) -> tuple[str, str] | dict[str, Any]:
+    if not raw or raw.startswith("--") or "=" not in raw:
+        return state_update_argument_error_payload(raw)
+    key, value = raw.split("=", 1)
+    if not key.strip():
+        return state_update_argument_error_payload(raw)
+    return key, value
 
 
 def state_validation_payload(issues: list[DiagnosticIssue]) -> dict[str, Any]:

@@ -50,6 +50,65 @@ exact command
 Archived completed entries:
 - [Phase 00-04 archive](./handoff-log-archive-phase-00-04.md). Clean-context agents must read the archive before relying on prior phase history.
 
+## Phase 08 - 2026-05-22 - Codex
+
+### Summary
+
+- Completed Phase 08 diagnostic redaction follow-ups.
+- Added additive `structuredIssues` to `validate-story-creation check` diagnostic failures while preserving legacy compatibility fields.
+- Redacted invalid `state-update` legacy transition fields and verifier legacy `error` text through the shared diagnostics redactor.
+- Added structured diagnostics for malformed `state-update --set` arguments, including missing values and empty keys.
+- Added regression tests for token/path redaction, malformed `--set`, `validate-story-creation` structured issues, and verifier error redaction.
+
+### Commands Run
+
+```bash
+gh issue view 5 -R bmad-code-org/bmad-automator --json title,body,state,url
+tmp=$(mktemp -d); f="$tmp/state.md"; printf '%s\n' '---' 'status: READY' '---' > "$f"; PYTHONPATH=skills/bmad-story-automator/src PROJECT_ROOT="$tmp" python3 -m story_automator orchestrator-helper state-update "$f" --set status
+tmp=$(mktemp -d); f="$tmp/state.md"; printf '%s\n' '---' 'status: READY' '---' > "$f"; PYTHONPATH=skills/bmad-story-automator/src PROJECT_ROOT="$tmp" python3 -m story_automator orchestrator-helper state-update "$f" --set 'status=token=abc123'
+tmp=$(mktemp -d); PYTHONPATH=skills/bmad-story-automator/src PROJECT_ROOT="$tmp" python3 -m story_automator validate-story-creation check 1.2 --state-file "$tmp/missing-state.md"
+PYTHONPATH=skills/bmad-story-automator/src python3 - <<'PY'
+from story_automator.core.parse_contracts import verifier_exception_payload
+import json
+print(json.dumps(verifier_exception_payload('verifier_contract_invalid', ValueError('token=abc123 failed at /tmp/private/state.md'), source='verify-step'), separators=(',', ':')))
+PY
+python3 -m py_compile skills/bmad-story-automator/src/story_automator/commands/orchestrator.py skills/bmad-story-automator/src/story_automator/commands/validate_story_creation.py skills/bmad-story-automator/src/story_automator/core/state_validation.py skills/bmad-story-automator/src/story_automator/core/parse_contracts.py tests/test_state_validation.py tests/test_success_verifiers.py
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_state_validation tests.test_success_verifiers
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_success_verifiers tests.test_state_validation tests.test_diagnostics_e2e
+PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
+git diff --check
+npm run verify
+```
+
+### Results
+
+- Verified original P2 findings before fixes:
+  - malformed `state-update --set status` raised `ValueError`
+  - invalid status `token=abc123` leaked in `attemptedStatus` and legacy `issues`
+  - `validate-story-creation check` failure omitted `structuredIssues`
+  - `verifier_exception_payload()` legacy `error` leaked raw `token=abc123` and `/tmp/private/state.md`
+- Focused Phase 08 tests after fixes: `Ran 84 tests`, `OK`.
+- Full Python suite after fixes: `Ran 310 tests`, `OK`.
+- `git diff --check`: pass.
+- `npm run verify`: pass after final edge-case fixes; smoke emitted known optional `bmad-qa-generate-e2e-tests` warnings and ended with `smoke ok`.
+
+### Decisions And Assumptions
+
+- Legacy field names and response shapes are preserved.
+- `validate-story-creation reason` remains unchanged for compatibility; the new `structuredIssues` payload carries the redacted diagnostic copy.
+- `state-update` invalid transition legacy fields now redact raw values; `allowedTransitions` remains unchanged.
+- `orchestrator.py` remains at 500 lines by moving `--set` argument validation into `core/state_validation.py`.
+
+### Blockers Or Risks
+
+- No blocker.
+- Risk: no live external LLM/tmux integration E2E was added; coverage remains local command, fixture, and smoke based.
+
+### Next Phase Notes
+
+- Latest review baseline after Phase 08 is `P0/P1 clean`; final read-only review found no actionable `P0-P3` findings.
+- Recommended PR summary: completes issue #5 diagnostic consistency by adding remaining structured issue payloads, redacting legacy diagnostic fields, and hardening malformed state-update CLI inputs.
+
 ## Phase 08 Planning - 2026-05-22 - Codex
 
 ### Summary

@@ -117,6 +117,56 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload["attemptedStatus"], "DONE")
         self.assertEqual(payload["structuredIssues"][0]["type"], "invalid_value")
 
+    def test_state_update_redacts_secret_like_attempted_status_in_legacy_fields(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, "status=token=abc123")
+
+        self.assertEqual(code, 1)
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("token=abc123", serialized)
+        self.assertEqual(payload["attemptedStatus"], "token=<redacted>")
+        self.assertEqual(payload["issues"], ["Invalid status token=<redacted>"])
+
+    def test_state_update_redacts_absolute_path_attempted_status_in_legacy_fields(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, "status=/tmp/private/state.md")
+
+        self.assertEqual(code, 1)
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("/tmp/private", serialized)
+        self.assertEqual(payload["attemptedStatus"], "<path:state.md>")
+        self.assertEqual(payload["issues"], ["Invalid status <path:state.md>"])
+
+    def test_state_update_rejects_malformed_set_argument_with_structured_issue(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, "status")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_set_argument")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--set")
+        self.assertEqual(payload["structuredIssues"][0]["expected"], "KEY=VALUE")
+
+    def test_state_update_rejects_trailing_set_argument_with_structured_issue(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update_args(state_file, ["--set"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_set_argument")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--set")
+
+    def test_state_update_rejects_empty_set_key_with_structured_issue(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, "=READY")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_set_argument")
+        self.assertEqual(payload["structuredIssues"][0]["actual"], "=READY")
+
     def test_state_update_still_allows_non_status_updates(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")
 
@@ -139,9 +189,12 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         return self._build_state(config)
 
     def _state_update(self, state_file: Path, update: str) -> tuple[int, dict[str, object]]:
+        return self._state_update_args(state_file, ["--set", update])
+
+    def _state_update_args(self, state_file: Path, args: list[str]) -> tuple[int, dict[str, object]]:
         stdout = io.StringIO()
         with patch_env(self.project_root), redirect_stdout(stdout):
-            code = cmd_orchestrator_helper(["state-update", str(state_file), "--set", update])
+            code = cmd_orchestrator_helper(["state-update", str(state_file), *args])
         return code, json.loads(stdout.getvalue())
 
 
