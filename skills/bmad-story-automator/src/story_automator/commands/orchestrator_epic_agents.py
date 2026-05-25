@@ -7,7 +7,7 @@ from pathlib import Path
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
-from story_automator.core.story_keys import normalize_story_key, normalize_story_key_for_epic
+from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
 from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, trim_lines, unquote_scalar
 
 
@@ -37,7 +37,7 @@ def check_epic_complete_action(args: list[str]) -> int:
         stories, _ = sprint_status_epic(project_root, epic)
         source = "sprint_status"
     if stories:
-        stories = sorted(set(stories), key=lambda item: _story_sort_key(project_root, item, epic))
+        stories = sorted(_dedupe_stories_for_epic(project_root, epic, stories), key=lambda item: _story_sort_key(project_root, item, epic))
         last = stories[-1]
         print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
         return 0
@@ -59,6 +59,7 @@ def get_epic_stories_action(args: list[str]) -> int:
         project_root = get_project_root()
         stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
         if stories:
+            stories = _dedupe_stories_for_epic(project_root, epic, stories)
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
             return 0
     stories, _ = sprint_status_epic(get_project_root(), epic)
@@ -80,7 +81,8 @@ def check_blocking_action(args: list[str]) -> int:
     if not args:
         print_json({"ok": False, "error": "story_id_required"})
         return 1
-    norm = normalize_story_key(get_project_root(), args[0])
+    project_root = get_project_root()
+    norm = normalize_story_key(project_root, args[0])
     if norm is None:
         print_json({"ok": False, "error": "could_not_normalize_key", "input": args[0]})
         return 1
@@ -92,12 +94,12 @@ def check_blocking_action(args: list[str]) -> int:
     dependents: list[str] = []
     current_story = ""
     for line in trim_lines(read_text(epic_file)):
-        match = re.match(r"^###\s+Story\s+(\d+\.\d+):", line)
+        match = re.match(r"^###\s+Story\s+([^:]+):", line)
         if match:
-            current_story = match.group(1)
+            current_story = match.group(1).strip()
             continue
         if current_story and re.search(r"(?i)Dependencies:|\*\*Dependencies\*\*:", line):
-            if norm.id in line or norm.prefix in line:
+            if _line_references_story(project_root, epic, norm, line):
                 dependents.append(current_story)
     if dependents:
         print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents)), "reason": "dependent_stories", "source": "epic_file"})
@@ -217,13 +219,6 @@ def _epic_json_value(epic: str) -> int | str:
     return int(epic) if epic.isdigit() else epic
 
 
-def _story_epic(project_root: str, story: str) -> str:
-    norm = normalize_story_key(project_root, story)
-    if norm is not None:
-        return norm.id.rsplit(".", 1)[0]
-    return story.split(".", 1)[0]
-
-
 def _story_matches_epic(project_root: str, epic: str, story: str) -> bool:
     norm = normalize_story_key_for_epic(project_root, epic, story)
     if norm is not None:
@@ -246,6 +241,35 @@ def _same_story(project_root: str, epic: str, left: str, right: str) -> bool:
     if left_norm is not None and right_norm is not None:
         return left_norm.id == right_norm.id
     return left == right
+
+
+def _dedupe_stories_for_epic(project_root: str, epic: str, stories: list[str]) -> list[str]:
+    story_order: list[str] = []
+    story_rows: dict[str, tuple[int, str]] = {}
+    for story in stories:
+        norm = normalize_story_key_for_epic(project_root, epic, story)
+        story_id = norm.id if norm is not None else story
+        if story_id not in story_rows:
+            story_order.append(story_id)
+        rank = _story_key_rank(story, norm)
+        previous = story_rows.get(story_id)
+        if previous is None or rank >= previous[0]:
+            story_rows[story_id] = (rank, story)
+    return [story_rows[story_id][1] for story_id in story_order]
+
+
+def _story_key_rank(story: str, norm: StoryKey | None) -> int:
+    if norm is not None and story == norm.key and story not in {norm.id, norm.prefix}:
+        return 2
+    return 1
+
+
+def _line_references_story(project_root: str, epic: str, target: StoryKey, line: str) -> bool:
+    for match in re.finditer(r"\b(?:\d+\.\d+|\d+-\d+(?:-[\w]+)*|[A-Za-z][\w-]*(?:\.\d+|-\d+(?:-[\w]+)*))\b", line):
+        norm = normalize_story_key_for_epic(project_root, epic, match.group(0))
+        if norm is not None and norm.id == target.id:
+            return True
+    return False
 
 
 def parse_agent_config(raw: str) -> dict:

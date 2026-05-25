@@ -69,6 +69,9 @@ def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> St
 
     dashed = re.fullmatch(rf"{re.escape(epic)}-(\d+)(?:-.+)?", value)
     if dashed:
+        generic = normalize_story_key(project_root, value)
+        if "-" not in epic and generic is not None and generic.id.rsplit(".", 1)[0].startswith(f"{epic}-"):
+            return None
         story_num = dashed.group(1)
         prefix = f"{epic}-{story_num}"
         key = value if value != prefix else ""
@@ -100,4 +103,8 @@ def _split_non_numeric_full_key(value: str) -> tuple[str, str] | None:
     if not matches:
         return None
     match = matches[-1]
+    first_story_num = int(matches[0].group(1))
+    last_story_num = int(matches[-1].group(1))
+    if len(matches) > 1 and first_story_num < 1000 and (first_story_num > 2 or last_story_num >= 10):
+        match = matches[0]
     return value[: match.start()], match.group(1)

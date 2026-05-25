@@ -16,8 +16,8 @@ def parse_epic_file(epic_file: str | Path) -> dict[str, Any]:
         if line.startswith("# "):
             epic_title = line.removeprefix("# ").strip()
             break
-    story_re = re.compile(r"^###\s+Story\s+(\d+)\.(\d+):\s*(.*)$")
-    epic_re = re.compile(r"^##\s+Epic\s+(\d+):\s*(.*)$")
+    story_re = re.compile(r"^###\s+Story\s+([A-Za-z][\w-]*|\d+)\.(\d+):\s*(.*)$")
+    epic_re = re.compile(r"^##\s+Epic\s+([A-Za-z][\w-]*|\d+):\s*(.*)$")
     current_epic_title = ""
     stories: list[dict[str, str]] = []
     for line in lines:
@@ -151,7 +151,14 @@ def epic_complete(epic_file: str | Path, range_csv: str) -> dict[str, Any]:
     story_ids = [story["storyId"] for story in parse_epic_file(epic_file)["stories"]]
     if not story_ids:
         raise ValueError("no_stories_found")
-    max_epic_story = max(story_ids, key=lambda value: tuple(int(part) for part in value.split(".", 1)))
+    max_epic_story = max(story_ids, key=_story_sort_key)
     selected = [part.strip() for part in range_csv.split(",") if part.strip()]
-    max_range_story = max(selected, key=lambda value: tuple(int(part) for part in value.split(".", 1))) if selected else "0.0"
+    max_range_story = max(selected, key=_story_sort_key) if selected else "0.0"
     return {"ok": True, "epicComplete": max_range_story == max_epic_story, "maxEpicStory": max_epic_story}
+
+
+def _story_sort_key(value: str) -> tuple[int, int, str, int, str]:
+    epic, _, story_num = value.rpartition(".")
+    if epic.isdigit():
+        return (0, int(epic), "", int(story_num) if story_num.isdigit() else 0, value)
+    return (1, 0, epic, int(story_num) if story_num.isdigit() else 0, value)

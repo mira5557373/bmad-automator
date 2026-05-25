@@ -118,6 +118,13 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["epic"], "1")
 
+    def test_epic_complete_handles_numeric_leading_title_segments(self) -> None:
+        self._write_sprint_status("multi-leg-3-2026-release: done\nmulti-leg-4-next: done\n")
+        payload = epic_complete(project_root=str(self.project_root), story_key="multi-leg-3-2026-release")
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["epic"], "multi-leg")
+        self.assertEqual(payload["doneStories"], 2)
+
     def test_review_wrapper_uses_pinned_state_snapshot(self) -> None:
         self._write_story("1-2-example", status="approved")
         state_file = self._build_state()
