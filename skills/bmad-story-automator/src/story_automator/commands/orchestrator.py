@@ -12,7 +12,7 @@ from story_automator.core.frontmatter import (
     parse_frontmatter,
     parse_simple_frontmatter,
 )
-from story_automator.core.orchestration_events import emit_policy_decision, emit_policy_load_failed, emit_state_fields_updated, emit_state_transition
+from story_automator.core.orchestration_events import emit_policy_decision, emit_policy_load_failed
 from story_automator.core.parse_contracts import verifier_exception_payload
 from story_automator.core.runtime_policy import (
     PolicyError,
@@ -23,7 +23,6 @@ from story_automator.core.runtime_policy import (
 )
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_layout import active_marker_path, active_marker_project_entry
-from story_automator.core.state_validation import parse_state_update_argument, status_transition_error_payload, validate_status_transition
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.sprint import sprint_status_epic, sprint_status_get
 from story_automator.core.story_keys import normalize_story_key, sprint_status_file
@@ -37,6 +36,7 @@ from .orchestrator_epic_agents import (
     retro_agent_action,
 )
 from .orchestrator_parse import parse_output_action
+from .orchestrator_state import state_update_action
 
 
 def cmd_orchestrator_helper(args: list[str]) -> int:
@@ -53,7 +53,7 @@ def cmd_orchestrator_helper(args: list[str]) -> int:
         "state-latest": _state_latest,
         "state-latest-incomplete": _state_latest_incomplete,
         "state-summary": _state_summary,
-        "state-update": _state_update,
+        "state-update": state_update_action,
         "escalate": _escalate,
         "commit-ready": _commit_ready,
         "normalize-key": _normalize_key,
@@ -286,66 +286,6 @@ def _state_summary(args: list[str]) -> int:
         payload["policyError"] = policy_error
     print_json(payload)
     return 0
-
-
-def _state_update(args: list[str]) -> int:
-    if not args or not file_exists(args[0]):
-        print_json({"ok": False, "error": "file_not_found"})
-        return 1
-    text = read_text(args[0])
-    fields = parse_simple_frontmatter(text)
-    updates: list[tuple[str, str]] = []
-    idx = 1
-    while idx < len(args):
-        if args[idx] == "--set":
-            parsed = parse_state_update_argument(args[idx + 1] if idx + 1 < len(args) else "")
-            if isinstance(parsed, dict):
-                print_json(parsed)
-                return 1
-            updates.append(parsed)
-            idx += 2
-            continue
-        idx += 1
-    pending_status = str(fields.get("status") or "")
-    final_status = ""
-    for key, value in updates:
-        if key != "status":
-            continue
-        issue = validate_status_transition(pending_status, value)
-        if issue:
-            payload = status_transition_error_payload(pending_status, value, issue)
-            emit_state_transition(args[0], result="blocked", current_status=pending_status, attempted_status=value, issue=issue)
-            print_json(payload)
-            return 1
-        pending_status = value
-        final_status = value
-    updated: list[str] = []
-    frontmatter, body = _split_frontmatter(text)
-    for key, value in updates:
-        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", frontmatter)
-        if count:
-            frontmatter = replaced
-            updated.append(key)
-    if not updated:
-        print_json({"ok": False, "error": "keys_not_found", "updated": []})
-        return 1
-    Path(args[0]).write_text(frontmatter + body, encoding="utf-8")
-    if final_status:
-        emit_state_transition(args[0], result="applied", new_status=final_status)
-    event_fields = [key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}]
-    if event_fields:
-        emit_state_fields_updated(args[0], event_fields, {key: value for key, value in updates if key in event_fields})
-    print_json({"ok": True, "updated": updated})
-    return 0
-
-
-def _split_frontmatter(text: str) -> tuple[str, str]:
-    if not text.startswith("---"):
-        return text, ""
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return text, ""
-    return f"{parts[0]}---{parts[1]}---", parts[2]
 
 
 def _escalate(args: list[str]) -> int:
