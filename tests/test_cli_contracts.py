@@ -223,12 +223,12 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--cycle requires a value", stderr.getvalue())
 
-    def test_project_only_session_filter_uses_slug_and_hash(self) -> None:
+    def test_project_only_session_filter_keeps_legacy_slug_sessions(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
         other_root = self.root.parent / "other" / self.root.name
         other = f"sa-{project_slug(str(other_root))}-{project_hash(str(other_root))}-260521-101011-e5-s5-3-review"
-        legacy_collision = f"sa-{project_slug(str(self.root))}-260521-101012-e5-s5-3-review"
-        output = "\n".join([own, other, legacy_collision, "unrelated"])
+        legacy = f"sa-{project_slug(str(self.root))}-260521-101012-e5-s5-3-review"
+        output = "\n".join([own, other, legacy, "unrelated"])
 
         with (
             mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}),
@@ -238,7 +238,7 @@ class TmuxCommandContractTests(unittest.TestCase):
             sessions, code = tmux_list_sessions(project_only=True)
 
         self.assertEqual(code, 0)
-        self.assertEqual(sessions, [own])
+        self.assertEqual(sessions, [own, legacy])
 
     def test_project_only_session_filter_keeps_current_project_legacy_sessions_with_artifacts(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
@@ -259,7 +259,7 @@ class TmuxCommandContractTests(unittest.TestCase):
             legacy_state.unlink(missing_ok=True)
 
         self.assertEqual(code, 0)
-        self.assertEqual(sessions, [own, legacy_own])
+        self.assertEqual(sessions, [own, legacy_own, legacy_other])
 
     def test_kill_all_defaults_to_all_automator_sessions(self) -> None:
         with (

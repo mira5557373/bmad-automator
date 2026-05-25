@@ -152,8 +152,11 @@ def _matches_current_project_session(session: str) -> bool:
     legacy_prefix = f"sa-{project_slug()}-"
     if not session.startswith(legacy_prefix):
         return False
-    paths = session_paths(session)
-    return any(path.exists() for path in (paths.state, paths.command, paths.runner, paths.output))
+    remainder = session[len(legacy_prefix) :]
+    first_segment = remainder.split("-", 1)[0]
+    if re.fullmatch(r"[0-9a-f]{8}", first_segment):
+        return False
+    return True
 
 
 def monitor_session_state_issue(session: str, project_root: str) -> object | None:
