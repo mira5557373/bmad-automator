@@ -6,19 +6,19 @@
 
 ## Session Names
 
-**Pattern (v3.1 - HASH-SCOPED MULTI-PROJECT):** `sa-{project_slug}-{project_hash}-{YYMMDD}-{HHMMSS}-e{epic}-s{story}-{step}`
+**Pattern:** `sa-{project_slug}-{YYMMDD}-{HHMMSS}-e{epic}-s{story}-{step}`
 
 **Examples:**
-- `sa-myproj-a1b2c3d4-260114-223045-e6-s64-dev` (Project "myproject", Epic 6, Story 6.4, dev step)
-- `sa-webapp-e5f6a7b8-260114-223512-e6-s64-review-r1` (Project "webapp", review cycle 1)
+- `sa-myproj-260114-223045-e6-s64-dev` (Project "myproject", Epic 6, Story 6.4, dev step)
+- `sa-webapp-260114-223512-e6-s64-review-r1` (Project "webapp", review cycle 1)
 
 ### Project Slug for Multi-Project Support
 
-**Why project slug + hash (v3.1):**
+**Why project slug + artifact hash (v3.1):**
 - **Isolates sessions per project** - List only current project's sessions
 - **Prevents cross-project interference** - Won't kill another project's sessions
 - **Enables parallel orchestration** - Run story-automator on multiple projects simultaneously
-- **Avoids same-folder-name collisions** - Worktrees with the same basename still get different hashes
+- **Avoids same-folder-name collisions** - Runtime artifacts are scoped by project hash while public session names keep their legacy shape
 
 **Generate project slug:**
 ```bash
@@ -27,7 +27,7 @@ project_slug=$("$script" tmux-wrapper project-slug)
 project_hash=$("$script" tmux-wrapper project-hash)
 ```
 
-**Example:** Project at `/home/user/my-awesome-project` → `project_slug="myawesom"` plus a stable project hash.
+**Example:** Project at `/home/user/my-awesome-project` → `project_slug="myawesom"` plus a stable project hash for runtime artifacts.
 
 **Why timestamps with seconds (v2.1):**
 - Prevents collisions when multiple sessions spawn in same minute
@@ -66,7 +66,7 @@ session_suffix=$(echo "{story_id}" | tr '.' '-')
 ```
 
 **WRONG:** `sa-epic6-s6.2-review-1` ← Will fail with "can't find pane" error
-**RIGHT:** `sa-myproj-a1b2c3d4-260114-223045-e6-s6-2-review-r1` ← Works correctly
+**RIGHT:** `sa-myproj-260114-223045-e6-s6-2-review-r1` ← Works correctly
 
 ---
 

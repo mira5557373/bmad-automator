@@ -202,7 +202,8 @@ class TmuxCommandContractTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         session = stdout.getvalue().strip()
-        self.assertIn(f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-", session)
+        self.assertIn(f"sa-{project_slug(str(self.root))}-", session)
+        self.assertNotIn(f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-", session)
         self.assertTrue(session.endswith("-review-r2"), session)
         self.assertNotIn("-r--cycle", session)
 
@@ -239,6 +240,27 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sessions, [own])
 
+    def test_project_only_session_filter_keeps_current_project_legacy_sessions_with_artifacts(self) -> None:
+        own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
+        legacy_own = f"sa-{project_slug(str(self.root))}-260521-101012-e5-s5-3-review"
+        legacy_other = f"sa-{project_slug(str(self.root))}-260521-101013-e5-s5-4-review"
+        legacy_state = Path(tempfile.gettempdir()) / f".sa-{project_hash(str(self.root))}-session-{legacy_own}-state.json"
+        legacy_state.write_text("{}", encoding="utf-8")
+        output = "\n".join([own, legacy_own, legacy_other])
+
+        try:
+            with (
+                mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}),
+                mock.patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
+                mock.patch("story_automator.core.tmux_runtime.run_cmd", return_value=(output, 0)),
+            ):
+                sessions, code = tmux_list_sessions(project_only=True)
+        finally:
+            legacy_state.unlink(missing_ok=True)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sessions, [own, legacy_own])
+
     def test_kill_all_defaults_to_all_automator_sessions(self) -> None:
         with (
             mock.patch("story_automator.commands.tmux.tmux_list_sessions", return_value=(["sa-one"], 0)) as list_sessions,
@@ -273,11 +295,12 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 0)
         list_sessions.assert_called_once_with(False)
 
-    def test_generate_session_name_includes_project_hash(self) -> None:
+    def test_generate_session_name_preserves_legacy_public_shape(self) -> None:
         with mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}):
             session = generate_session_name("dev", "2", "2.4")
 
-        self.assertIn(f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-", session)
+        self.assertIn(f"sa-{project_slug(str(self.root))}-", session)
+        self.assertNotIn(f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-", session)
         self.assertTrue(session.endswith("-e2-s2-4-dev"), session)
 
 

@@ -72,7 +72,7 @@ def resolve_command_shell() -> str:
 def generate_session_name(step: str, epic: str, story_id: str, cycle: str = "") -> str:
     stamp = time.strftime("%y%m%d-%H%M%S", time.localtime())
     suffix = story_id.replace(".", "-")
-    name = f"sa-{project_slug()}-{project_hash()}-{stamp}-e{epic}-s{suffix}-{step}"
+    name = f"sa-{project_slug()}-{stamp}-e{epic}-s{suffix}-{step}"
     if cycle:
         name += f"-r{cycle}"
     return name
@@ -141,9 +141,19 @@ def tmux_list_sessions(project_only: bool) -> tuple[list[str], int]:
         return ([], code)
     sessions = [line.strip() for line in output.splitlines() if line.strip().startswith("sa-")]
     if project_only:
-        prefix = f"sa-{project_slug()}-{project_hash()}-"
-        sessions = [line for line in sessions if line.startswith(prefix)]
+        sessions = [line for line in sessions if _matches_current_project_session(line)]
     return (sessions, 0)
+
+
+def _matches_current_project_session(session: str) -> bool:
+    hashed_prefix = f"sa-{project_slug()}-{project_hash()}-"
+    if session.startswith(hashed_prefix):
+        return True
+    legacy_prefix = f"sa-{project_slug()}-"
+    if not session.startswith(legacy_prefix):
+        return False
+    paths = session_paths(session)
+    return any(path.exists() for path in (paths.state, paths.command, paths.runner, paths.output))
 
 
 def monitor_session_state_issue(session: str, project_root: str) -> object | None:

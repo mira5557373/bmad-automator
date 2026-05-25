@@ -36,7 +36,7 @@ truth from story files and `sprint-status.yaml` before retrying.
 project_slug=$("$scripts" tmux-wrapper project-slug)
 PROJECT_HASH=$("$scripts" tmux-wrapper project-hash)
 timestamp=$(date +%y%m%d-%H%M%S)
-session_name="sa-${project_slug}-${PROJECT_HASH}-${timestamp}-e{epic}-s{story_suffix}-{step}-r2"
+session_name="sa-${project_slug}-${timestamp}-e{epic}-s{story_suffix}-{step}-r2"
 
 # Clear stale state (project-scoped v2.0)
 rm -f "/tmp/.sa-${PROJECT_HASH}-session-${session_name}-state.json"
