@@ -31,6 +31,10 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
         if match:
             status = match.group(1).strip()
             return SprintStatus(True, norm.key, status, status == "done")
+        match = re.search(rf"(?m)^\s*({re.escape(norm.prefix)}-[^:\s]+)\s*:\s*(\S+)", content)
+        if match:
+            status = match.group(2).strip()
+            return SprintStatus(True, match.group(1).strip(), status, status == "done")
     return SprintStatus(False, story_key, "not_found", False)
 
 

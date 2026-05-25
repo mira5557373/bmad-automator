@@ -192,6 +192,25 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.status, "done")
         self.assertTrue(result.done)
 
+    def test_sprint_status_get_falls_back_to_status_prefix_when_artifact_slug_differs(self) -> None:
+        artifacts = self.project_root / "_bmad-output" / "implementation-artifacts"
+        (artifacts / "1-2-old-title.md").write_text("", encoding="utf-8")
+        sprint_status = artifacts / "sprint-status.yaml"
+        sprint_status.write_text(
+            textwrap.dedent(
+                """\
+                development_status:
+                  1-2-new-title: done
+                """
+            ),
+            encoding="utf-8",
+        )
+        result = sprint_status_get(str(self.project_root), "1.2")
+        self.assertTrue(result.found)
+        self.assertEqual(result.story, "1-2-new-title")
+        self.assertEqual(result.status, "done")
+        self.assertTrue(result.done)
+
     def test_check_epic_complete_accepts_non_numeric_epic(self) -> None:
         sprint_status = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
         sprint_status.write_text(
