@@ -60,6 +60,7 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertFalse(has_runtime_command_config({"aiCommand": ["", "  "]}, ""))
         self.assertTrue(has_runtime_command_config({"aiCommand": ["  claude  "]}, ""))
         self.assertTrue(has_runtime_command_config({"aiCommand": "   "}, 'agentConfig:\n  defaultPrimary: "codex"\n'))
+        self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, '  agentConfig:\n    defaultPrimary: "codex"\n'))
         self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, "agentConfig:\n  defaultPrimary:\n"))
         self.assertFalse(has_runtime_command_config({"aiCommand": "   "}, "agentConfig:\n  complexityOverrides:\n    - medium:\n"))
 
@@ -246,6 +247,31 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload, {"ok": True, "updated": ["aiCommand"]})
         self.assertIn("aiCommand: claude --resume", state_file.read_text(encoding="utf-8"))
+
+    def test_state_update_only_rewrites_frontmatter(self) -> None:
+        state_file = self._build_state_config(status="COMPLETE")
+        text = state_file.read_text(encoding="utf-8").replace("currentStep: null\n", "currentStep: step-old\n", 1)
+        state_file.write_text(text + "\nstatus: body-marker\ncurrentStep: body-step\n", encoding="utf-8")
+
+        code, payload = self._state_update_args(state_file, ["--set", "status=COMPLETE", "--set", "currentStep=step-next"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "updated": ["status", "currentStep"]})
+        text = state_file.read_text(encoding="utf-8")
+        frontmatter = text.split("---", 2)[1]
+        body = text.split("---", 2)[2]
+        self.assertIn("status: COMPLETE", frontmatter)
+        self.assertIn("currentStep: step-next", frontmatter)
+        self.assertIn("status: body-marker", body)
+        self.assertIn("currentStep: body-step", body)
+
+    def test_state_update_strips_set_key_whitespace(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, " status=COMPLETE")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_status_transition")
 
     def _validate_state(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()

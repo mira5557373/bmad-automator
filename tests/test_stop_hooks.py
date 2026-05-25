@@ -395,6 +395,14 @@ class StopHookTests(unittest.TestCase):
         self.assertIn('verification_state == "pending_trust"', step_text)
         self.assertIn("HALT", step_text)
 
+    def test_preflight_finalize_uses_single_execution_timestamp(self) -> None:
+        step_text = (REPO_ROOT / "skills" / "bmad-story-automator" / "steps-c" / "step-02b-preflight-finalize.md").read_text(encoding="utf-8")
+
+        execution_block = step_text.split("Set status=\"IN_PROGRESS\"", 1)[1].split("```", 2)[1]
+        self.assertEqual(execution_block.count("date -u"), 1)
+        self.assertIn('lastUpdated="$ts_now"', execution_block)
+        self.assertIn('echo "- **[$ts_now]** Execution started"', execution_block)
+
     def test_stop_hook_uses_project_root_env_when_invoked_from_nested_directory(self) -> None:
         self._install_bundle(".agents")
         marker = self.project_root / ".agents" / ".story-automator-active"

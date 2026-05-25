@@ -320,15 +320,16 @@ def _state_update(args: list[str]) -> int:
         pending_status = value
         final_status = value
     updated: list[str] = []
+    frontmatter, body = _split_frontmatter(text)
     for key, value in updates:
-        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
+        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", frontmatter)
         if count:
-            text = replaced
+            frontmatter = replaced
             updated.append(key)
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
-    Path(args[0]).write_text(text, encoding="utf-8")
+    Path(args[0]).write_text(frontmatter + body, encoding="utf-8")
     if final_status:
         emit_state_transition(args[0], result="applied", new_status=final_status)
     event_fields = [key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}]
@@ -336,6 +337,15 @@ def _state_update(args: list[str]) -> int:
         emit_state_fields_updated(args[0], event_fields, {key: value for key, value in updates if key in event_fields})
     print_json({"ok": True, "updated": updated})
     return 0
+
+
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    if not text.startswith("---"):
+        return text, ""
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return text, ""
+    return f"{parts[0]}---{parts[1]}---", parts[2]
 
 
 def _escalate(args: list[str]) -> int:

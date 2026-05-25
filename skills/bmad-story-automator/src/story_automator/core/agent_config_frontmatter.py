@@ -7,9 +7,10 @@ from .utils import unquote_scalar
 
 def extract_agent_config_frontmatter(frontmatter: str) -> dict[str, object]:
     for index, raw_line in enumerate(frontmatter.splitlines()):
-        stripped = raw_line.strip()
-        if stripped.startswith("agentConfig:"):
+        if raw_line.startswith("agentConfig:"):
             return _extract_agent_config_block(frontmatter.splitlines(), index)
+        if raw_line.strip().startswith("agentConfig:"):
+            raise ValueError("agentConfig must be a top-level frontmatter key")
     return {}
 
 
@@ -39,6 +40,8 @@ def _parse_indented_map(lines: list[str]) -> dict[str, object]:
         line = _strip_inline_yaml_comment(raw_line.rstrip())
         if not line.strip():
             continue
+        if "\t" in line:
+            raise ValueError("agentConfig block must use spaces, not tabs")
         indent = len(line) - len(line.lstrip(" "))
         if indent % 2 != 0:
             raise ValueError("agentConfig indentation must use two-space levels")

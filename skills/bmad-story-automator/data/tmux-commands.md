@@ -38,10 +38,7 @@ project_hash=$("$script" tmux-wrapper project-hash)
 **Generate full session name:**
 ```bash
 script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
-project_slug=$("$script" tmux-wrapper project-slug)
-project_hash=$("$script" tmux-wrapper project-hash)
-timestamp=$(date +%y%m%d-%H%M%S)  # Returns "260114-223045"
-session_name="sa-${project_slug}-${project_hash}-${timestamp}-e{epic}-s{story_suffix}-{step}"
+session_name=$("$script" tmux-wrapper name "{step}" "{epic}" "{story_id}")
 ```
 
 ### Listing/Killing Project-Specific Sessions
@@ -49,17 +46,13 @@ session_name="sa-${project_slug}-${project_hash}-${timestamp}-e{epic}-s{story_su
 **List only current project's sessions:**
 ```bash
 script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
-project_slug=$("$script" tmux-wrapper project-slug)
-project_hash=$("$script" tmux-wrapper project-hash)
-tmux list-sessions 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-"
+"$script" tmux-wrapper list --project-only
 ```
 
 **Kill only current project's sessions:**
 ```bash
 script="$(printf "%s" "{project_root}/{installed-skill-root}/bmad-story-automator/scripts/story-automator")"
-project_slug=$("$script" tmux-wrapper project-slug)
-project_hash=$("$script" tmux-wrapper project-hash)
-tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^sa-${project_slug}-${project_hash}-" | xargs -I {} tmux kill-session -t {}
+"$script" tmux-wrapper kill-all --project-only
 ```
 
 ### No Dots in Session Names

@@ -131,6 +131,13 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("My Project", redacted)
         self.assertNotIn("private/state.md", redacted)
 
+    def test_redact_actual_masks_windows_absolute_paths(self) -> None:
+        redacted = redact_actual(r"C:\Users\joon\private\state.md token=abc123")
+
+        self.assertEqual(redacted, "<path:state.md> token=<redacted>")
+        self.assertNotIn(r"C:\Users", redacted)
+        self.assertNotIn(r"private\state.md", redacted)
+
     def test_redact_actual_limits_nested_collections(self) -> None:
         payload = redact_actual({"values": list(range(10)), **{f"k{i}": i for i in range(10)}})
 

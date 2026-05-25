@@ -19,9 +19,9 @@ SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
 ABSOLUTE_PATH_WITH_EXT_RE = re.compile(
-    r"(?<![\w.-])/(?:[^,\n;:]+/)+[^,\n;:]*?\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
+    r"(?<![\w.-])(?:/(?:[^,\n;:]+/)+[^,\n;:]*?|[A-Za-z]:[\\/](?:[^,\n;:]+[\\/])+[^,\n;:]*?)\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
 )
-ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])(?:/[^\s,;:]+)+")
+ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])(?:/[^\s,;:]+|[A-Za-z]:[\\/][^\s,;:]+)+")
 
 
 @dataclass(frozen=True)
@@ -164,5 +164,5 @@ def _redact_string(value: str) -> str:
 
 def _path_placeholder(match: re.Match[str]) -> str:
     path = match.group(0)
-    name = Path(path).name
+    name = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     return f"<path:{name}>" if name else "<path>"
