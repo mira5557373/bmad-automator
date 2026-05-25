@@ -152,9 +152,20 @@ def epic_complete(epic_file: str | Path, range_csv: str) -> dict[str, Any]:
     if not story_ids:
         raise ValueError("no_stories_found")
     max_epic_story = max(story_ids, key=_story_sort_key)
-    selected = [part.strip() for part in range_csv.split(",") if part.strip()]
+    selected = [_canonical_story_id(part.strip(), story_ids) for part in range_csv.split(",") if part.strip()]
     max_range_story = max(selected, key=_story_sort_key) if selected else "0.0"
     return {"ok": True, "epicComplete": max_range_story == max_epic_story, "maxEpicStory": max_epic_story}
+
+
+def _canonical_story_id(value: str, story_ids: list[str]) -> str:
+    if value in story_ids:
+        return value
+    for story_id in story_ids:
+        epic, _, story_num = story_id.rpartition(".")
+        prefix = f"{epic}-{story_num}"
+        if value == prefix or value.startswith(f"{prefix}-"):
+            return story_id
+    return value
 
 
 def _story_sort_key(value: str) -> tuple[int, int, str, int, str]:

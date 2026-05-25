@@ -63,6 +63,20 @@ Acceptance Criteria
         self.assertTrue(payload["epicComplete"])
         self.assertEqual(payload["maxEpicStory"], "multi-leg.4")
 
+    def test_epic_complete_accepts_non_numeric_full_story_keys(self) -> None:
+        self.epic_file.write_text(
+            """# Epic Multi Leg
+## Epic multi-leg: Multi Leg
+### Story multi-leg.3: Quantity precision
+### Story multi-leg.4: Next step
+""",
+            encoding="utf-8",
+        )
+        payload = epic_complete(self.epic_file, "multi-leg-3-quantity-precision,multi-leg-4-next-step")
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["epicComplete"])
+        self.assertEqual(payload["maxEpicStory"], "multi-leg.4")
+
     def test_epic_complete_sorts_numeric_epics_numerically(self) -> None:
         self.epic_file.write_text(
             """# Epic Numeric

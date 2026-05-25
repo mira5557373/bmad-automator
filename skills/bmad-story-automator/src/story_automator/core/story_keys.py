@@ -101,15 +101,25 @@ def _split_non_numeric_full_key(project_root: str, value: str) -> tuple[str, str
     matches = list(re.finditer(r"(?=-(\d+)-)", value))
     if not matches:
         return None
+    single_story = [
+        match
+        for match in matches[1:]
+        if _is_single_story_key(project_root, value, match)
+    ]
+    if single_story:
+        match = max(single_story, key=lambda item: item.start())
+        return value[: match.start()], match.group(1)
     known = [match for match in matches if _epic_exists(project_root, value[: match.start()])]
-    match = max(known, key=lambda item: item.start()) if known else matches[0]
+    match = max(known, key=lambda item: item.start()) if known else _single_story_epic_match(project_root, value, matches)
     return value[: match.start()], match.group(1)
 
 
 def _has_known_longer_epic(project_root: str, epic: str, value: str) -> bool:
     for match in re.finditer(r"(?=-(\d+)-)", value):
         candidate_epic = value[: match.start()]
-        if candidate_epic != epic and candidate_epic.startswith(f"{epic}-") and _epic_exists(project_root, candidate_epic):
+        if candidate_epic == epic or not candidate_epic.startswith(f"{epic}-"):
+            continue
+        if _epic_exists(project_root, candidate_epic) or _is_single_story_key(project_root, value, match):
             return True
     return False
 
@@ -123,6 +133,25 @@ def _epic_exists(project_root: str, epic: str) -> bool:
     pattern = re.compile(rf"(?m)^\s*{re.escape(epic)}-(\d+)(?:-[^:\s]+)?\s*:")
     story_nums = {match.group(1) for match in pattern.finditer(read_text(status_file))}
     return len(story_nums) > 1
+
+
+def _is_single_story_key(project_root: str, value: str, match: re.Match[str]) -> bool:
+    status_file = sprint_status_file(project_root)
+    return (
+        match.group(1) == "1"
+        and file_exists(status_file)
+        and re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)) is not None
+    )
+
+
+def _single_story_epic_match(project_root: str, value: str, matches: list[re.Match[str]]) -> re.Match[str]:
+    status_file = sprint_status_file(project_root)
+    if not file_exists(status_file) or not re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)):
+        return matches[0]
+    for match in reversed(matches[1:]):
+        if _is_single_story_key(project_root, value, match):
+            return match
+    return matches[0]
 
 
 def _epic_file_exists(project_root: str, epic: str) -> bool:

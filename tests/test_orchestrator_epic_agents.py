@@ -170,6 +170,42 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertEqual(payload["stories"], ["multi-leg-3", "multi-leg-4-next"])
         self.assertEqual(payload["count"], 2)
 
+    def test_get_epic_stories_state_file_ignores_malformed_dotted_entries(self) -> None:
+        state_file = self._write_state(
+            """
+            storyRange:
+              - multi-leg.foo
+            """
+        )
+        exit_code, payload = self._run_action(get_epic_stories_action, ["multi-leg", "--state-file", str(state_file)])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["count"], 0)
+
+    def test_check_blocking_uses_single_story_compound_epic_key(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-phase-2-test.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story phase-2.2: Later
+                Dependencies: phase-2-1-title
+                """
+            ),
+            encoding="utf-8",
+        )
+        self._write_sprint_status(
+            """
+            development_status:
+              phase-2-1-title: done
+            """
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["phase-2-1-title"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["blocking"])
+        self.assertEqual(payload["epic"], "phase-2")
+        self.assertEqual(payload["dependents"], ["phase-2.2"])
+
     def _write_sprint_status(self, content: str) -> None:
         path = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
         path.write_text(textwrap.dedent(content), encoding="utf-8")

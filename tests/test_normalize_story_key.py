@@ -155,6 +155,14 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.prefix, "phase-2-1")
         self.assertEqual(result.key, "phase-2-1-title")
 
+    def test_single_story_compound_epic_with_numeric_segment_uses_status_key(self) -> None:
+        self._write_sprint_status("phase-2-1-title: done\n")
+        result = normalize_story_key(str(self.project_root), "phase-2-1-title")
+        assert result is not None
+        self.assertEqual(result.id, "phase-2.1")
+        self.assertEqual(result.prefix, "phase-2-1")
+        self.assertEqual(result.key, "phase-2-1-title")
+
     def test_compound_epic_name_with_numeric_segment_above_two_uses_known_epic(self) -> None:
         self._write_sprint_status("phase-3-1-title: done\nphase-3-2-next: ready-for-dev\n")
         result = normalize_story_key(str(self.project_root), "phase-3-1-title")
@@ -278,6 +286,46 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         stories, done = sprint_status_epic(str(self.project_root), "phase")
         self.assertEqual(stories, [])
         self.assertEqual(done, 0)
+
+    def test_sprint_status_epic_rejects_single_story_longer_epic_prefix(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              phase-2-1-title: done
+            """
+        )
+        stories, done = sprint_status_epic(str(self.project_root), "phase")
+        self.assertEqual(stories, [])
+        self.assertEqual(done, 0)
+
+        stories, done = sprint_status_epic(str(self.project_root), "phase-2")
+        self.assertEqual(stories, ["phase-2-1-title"])
+        self.assertEqual(done, 1)
+
+    def test_sprint_status_epic_rejects_multiple_single_story_longer_epic_prefixes(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              phase-2-1-title: done
+              phase-3-1-other: done
+            """
+        )
+        stories, done = sprint_status_epic(str(self.project_root), "phase")
+        self.assertEqual(stories, [])
+        self.assertEqual(done, 0)
+
+        stories, done = sprint_status_epic(str(self.project_root), "phase-2")
+        self.assertEqual(stories, ["phase-2-1-title"])
+        self.assertEqual(done, 1)
+
+        stories, done = sprint_status_epic(str(self.project_root), "phase-3")
+        self.assertEqual(stories, ["phase-3-1-other"])
+        self.assertEqual(done, 1)
+
+        result = normalize_story_key(str(self.project_root), "phase-2-1-title")
+        assert result is not None
+        self.assertEqual(result.id, "phase-2.1")
+        self.assertEqual(result.prefix, "phase-2-1")
 
     def test_sprint_status_epic_rejects_hyphenated_known_longer_epic_prefix(self) -> None:
         self._write_sprint_status(

@@ -43,6 +43,18 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["actualMatches"], 1)
 
+    def test_create_story_artifact_handles_single_story_compound_epic_key(self) -> None:
+        self._write_sprint_status("phase-2-1-title: done\n")
+        self._write_story("phase-2-1-title", status="draft")
+        payload = create_story_artifact(
+            project_root=str(self.project_root),
+            story_key="phase-2-1-title",
+            contract={"config": {"glob": "_bmad-output/implementation-artifacts/{story_prefix}-*.md", "expectedMatches": 1}},
+        )
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["story"], "phase-2-1-title")
+        self.assertEqual(payload["actualMatches"], 1)
+
     def test_create_story_artifact_rejects_glob_that_escapes_project_root(self) -> None:
         with self.assertRaisesRegex(PolicyError, "success.config.glob escapes project root"):
             create_story_artifact(
@@ -131,6 +143,13 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["verified"])
         self.assertEqual(payload["epic"], "multi-leg")
         self.assertEqual(payload["doneStories"], 2)
+
+    def test_epic_complete_handles_single_story_compound_epic_key(self) -> None:
+        self._write_sprint_status("phase-2-1-title: done\n")
+        payload = epic_complete(project_root=str(self.project_root), story_key="phase-2-1-title")
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["epic"], "phase-2")
+        self.assertEqual(payload["doneStories"], 1)
 
     def test_review_wrapper_uses_pinned_state_snapshot(self) -> None:
         self._write_story("1-2-example", status="approved")

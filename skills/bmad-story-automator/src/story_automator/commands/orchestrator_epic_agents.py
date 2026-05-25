@@ -223,7 +223,7 @@ def _story_matches_epic(project_root: str, epic: str, story: str) -> bool:
     norm = normalize_story_key_for_epic(project_root, epic, story)
     if norm is not None:
         return norm.id.rsplit(".", 1)[0] == epic
-    return story.split(".", 1)[0] == epic
+    return False
 
 
 def _story_sort_key(project_root: str, story: str, epic: str = "") -> tuple[int, str]:
