@@ -167,7 +167,11 @@ def agents_resolve_action(args: list[str]) -> int:
     if not options["story"] or not options["task"] or (not options["state-file"] and not options["agents-file"]):
         print_json({"ok": False, "error": "missing_args"})
         return 1
-    agents_path = options["agents-file"] or find_frontmatter_value(options["state-file"], "agentsFile")
+    try:
+        agents_path = options["agents-file"] or find_frontmatter_value(options["state-file"], "agentsFile")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        print_json(agent_plan_error("invalid_state_file", issues_from_exception(exc, source="agent-plan", field="state-file")))
+        return 1
     if not agents_path or not file_exists(agents_path):
         print_json({"ok": False, "error": "agents_file_not_found"})
         return 1

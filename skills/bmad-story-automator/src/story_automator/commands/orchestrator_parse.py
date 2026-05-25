@@ -26,7 +26,7 @@ def parse_output_action(args: list[str]) -> int:
         idx += 1
     try:
         content = read_text(output_file)
-    except FileNotFoundError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print_json(parse_failure_payload("output file not found or empty", issues_from_exception(exc, source="parse-output", field="output_file")))
         return 1
     if not content.strip():

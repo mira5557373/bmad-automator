@@ -1267,13 +1267,13 @@ class SuccessVerifierTests(unittest.TestCase):
     def test_verifier_exception_payload_redacts_legacy_error(self) -> None:
         payload = verifier_exception_payload(
             "verifier_contract_invalid",
-            ValueError("token=abc123 failed at /tmp/private/state.md"),
+            ValueError("token=abc123 failed at /Users/joon/My Project/private/state.md"),
             source="verify-step",
         )
 
         serialized = json.dumps(payload, separators=(",", ":"))
         self.assertNotIn("token=abc123", serialized)
-        self.assertNotIn("/tmp/private", serialized)
+        self.assertNotIn("My Project/private", serialized)
         self.assertEqual(payload["error"], "token=<redacted> failed at <path:state.md>")
 
     def test_validate_story_creation_reason_redacts_sensitive_context(self) -> None:

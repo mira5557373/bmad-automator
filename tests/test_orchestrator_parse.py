@@ -96,6 +96,20 @@ class OrchestratorParseTests(unittest.TestCase):
         self.assertEqual(payload["structuredIssues"][0]["source"], "runtime-policy")
         self.assertEqual(payload["structuredIssues"][0]["field"], "runtime.policy")
 
+    def test_output_file_directory_reports_json_failure(self) -> None:
+        stdout = io.StringIO()
+        directory = self.project_root / "output-dir"
+        directory.mkdir()
+
+        with patch.dict("os.environ", {"PROJECT_ROOT": str(self.project_root)}), redirect_stdout(stdout):
+            code = parse_output_action([str(directory), "create"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["reason"], "output file not found or empty")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "output_file")
+
     def test_non_string_required_key_rejected(self) -> None:
         schema = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "parse" / "create.json"
         schema.write_text(json.dumps({"requiredKeys": [True], "schema": {}}), encoding="utf-8")

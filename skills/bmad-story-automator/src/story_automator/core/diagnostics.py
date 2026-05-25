@@ -18,6 +18,9 @@ SECRET_QUOTED_ASSIGNMENT_RE = re.compile(
 SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
+ABSOLUTE_PATH_WITH_EXT_RE = re.compile(
+    r"(?<![\w.-])/(?:[^,\n;:]+/)+[^,\n;:]*?\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
+)
 ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])(?:/[^\s,;:]+)+")
 
 
@@ -152,6 +155,7 @@ def _json_safe(value: Any) -> Any:
 def _redact_string(value: str) -> str:
     value = SECRET_QUOTED_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     value = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
+    value = ABSOLUTE_PATH_WITH_EXT_RE.sub(_path_placeholder, value)
     value = ABSOLUTE_PATH_RE.sub(_path_placeholder, value)
     if len(value) > MAX_STRING_LENGTH:
         return f"{value[:MAX_STRING_LENGTH]}...<truncated {len(value) - MAX_STRING_LENGTH} chars>"

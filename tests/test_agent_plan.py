@@ -333,6 +333,16 @@ class AgentPlanValidationTests(unittest.TestCase):
         fields = [issue["field"] for issue in payload["structuredIssues"]]
         self.assertIn("stories[0].tasks.create.primary", fields)
 
+    def test_agents_resolve_state_file_directory_reports_json_error(self) -> None:
+        state_dir = self.project_root / "state-dir"
+        state_dir.mkdir()
+
+        code, payload = self._helper(["agents-resolve", "--state-file", str(state_dir), "--story", "1.1", "--task", "create"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_state_file")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "state-file")
+
     def test_agents_resolve_uses_validated_payload_without_rereading(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"dev": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
 
@@ -387,6 +397,12 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertTrue(callable(resolve_agents))
         self.assertTrue(callable(resolve_agents_payload))
         self.assertEqual(extract_json_block("```json\n{\"ok\":true}\n```"), '{"ok":true}')
+
+    def test_check_epic_complete_rejects_non_numeric_epic(self) -> None:
+        code, payload = self._helper(["check-epic-complete", "abc", "abc.1"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_epic_number")
 
     def _agents_payload(self) -> dict[str, object]:
         tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review", "retro")}
