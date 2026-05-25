@@ -261,6 +261,9 @@ def _parse_int(value: Any, field: str, *, minimum: int | None = None) -> int:
 
 
 def _epic_identifier(project_root: str, story_key: str) -> str:
+    if re.fullmatch(r"\d+|[A-Za-z][\w-]*", story_key):
+        if not story_key.isdigit() and sprint_status_epic(project_root, story_key)[0]:
+            return story_key
     if re.fullmatch(r"\d+", story_key):
         return story_key
     norm = normalize_story_key(project_root, story_key)

@@ -48,7 +48,7 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
         story_id = f"{epic_part}.{story_num}"
         key = ""
     elif re.fullmatch(r"[A-Za-z][\w-]*-\d+-.+", value):
-        split = _split_non_numeric_full_key(value)
+        split = _split_non_numeric_full_key(project_root, value)
         if split is None:
             return None
         epic_part, story_num = split
@@ -69,8 +69,7 @@ def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> St
 
     dashed = re.fullmatch(rf"{re.escape(epic)}-(\d+)(?:-.+)?", value)
     if dashed:
-        generic = normalize_story_key(project_root, value)
-        if "-" not in epic and generic is not None and generic.id.rsplit(".", 1)[0].startswith(f"{epic}-"):
+        if _has_known_longer_epic(project_root, epic, value):
             return None
         story_num = dashed.group(1)
         prefix = f"{epic}-{story_num}"
@@ -98,13 +97,37 @@ def _complete_story_key(project_root: str, story_id: str, prefix: str, key: str)
     return StoryKey(id=story_id, prefix=prefix, key=key)
 
 
-def _split_non_numeric_full_key(value: str) -> tuple[str, str] | None:
+def _split_non_numeric_full_key(project_root: str, value: str) -> tuple[str, str] | None:
     matches = list(re.finditer(r"(?=-(\d+)-)", value))
     if not matches:
         return None
-    match = matches[-1]
-    first_story_num = int(matches[0].group(1))
-    last_story_num = int(matches[-1].group(1))
-    if len(matches) > 1 and first_story_num < 1000 and (first_story_num > 2 or last_story_num >= 10):
-        match = matches[0]
+    known = [match for match in matches if _epic_exists(project_root, value[: match.start()])]
+    match = max(known, key=lambda item: item.start()) if known else matches[0]
     return value[: match.start()], match.group(1)
+
+
+def _has_known_longer_epic(project_root: str, epic: str, value: str) -> bool:
+    for match in re.finditer(r"(?=-(\d+)-)", value):
+        candidate_epic = value[: match.start()]
+        if candidate_epic != epic and candidate_epic.startswith(f"{epic}-") and _epic_exists(project_root, candidate_epic):
+            return True
+    return False
+
+
+def _epic_exists(project_root: str, epic: str) -> bool:
+    if _epic_file_exists(project_root, epic):
+        return True
+    status_file = sprint_status_file(project_root)
+    if not file_exists(status_file):
+        return False
+    pattern = re.compile(rf"(?m)^\s*{re.escape(epic)}-(\d+)(?:-[^:\s]+)?\s*:")
+    story_nums = {match.group(1) for match in pattern.finditer(read_text(status_file))}
+    return len(story_nums) > 1
+
+
+def _epic_file_exists(project_root: str, epic: str) -> bool:
+    root = Path(project_root)
+    for base in (root / "_bmad-output" / "implementation-artifacts", root / "docs" / "epics"):
+        if (base / f"epic-{epic}.md").is_file() or next(base.glob(f"epic-{epic}-*.md"), None) is not None:
+            return True
+    return False
