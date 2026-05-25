@@ -108,6 +108,16 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.field, "complexity-file")
         self.assertIn("Complexity must be an object", str(ctx.exception))
 
+    def test_build_agents_file_build_loop_rejects_falsy_non_object_complexity(self) -> None:
+        payload = {"stories": [{"storyId": "1.1", "complexity": False}]}
+
+        with patch("story_automator.core.agent_plan.validate_complexity_payload", return_value=[]):
+            with self.assertRaises(AgentPlanInputError) as ctx:
+                build_agents_file(self.state_file, self.complexity_file, self.agents_file, "{}", complexity_payload=payload)
+
+        self.assertEqual(ctx.exception.field, "complexity-file")
+        self.assertIn("Complexity must be an object", str(ctx.exception))
+
     def test_agents_build_uses_validated_complexity_payload_without_rereading(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
         calls = 0

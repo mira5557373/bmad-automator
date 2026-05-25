@@ -133,7 +133,7 @@ def build_agents_file(
 
     stories = []
     for story in complexity_payload.get("stories", []):
-        level = str(((story.get("complexity") or {}).get("level")) or "medium").strip().lower() or "medium"
+        level = _story_complexity_level(story)
         stories.append({"storyId": story.get("storyId"), "title": str(story.get("title") or ""), "complexity": level, "tasks": _tasks_for(config, level)})
     try:
         epic = find_frontmatter_value(state_file, "epic")
@@ -196,6 +196,15 @@ def _load_agents_plan_payload(path: str) -> tuple[dict[str, Any], list[Diagnosti
     if not isinstance(stories, list):
         return payload, [_issue("invalid_type", "stories", "array", stories, "Agents plan stories must be an array")]
     return payload, []
+
+
+def _story_complexity_level(story: dict[str, Any]) -> str:
+    complexity = story.get("complexity")
+    if complexity is None:
+        return "medium"
+    if not isinstance(complexity, dict):
+        raise AgentPlanInputError("complexity-file", ValueError("Complexity must be an object"))
+    return str(complexity.get("level") or "medium").strip().lower() or "medium"
 
 
 def _validate_agents_plan_resolution(payload: dict[str, Any], story_id: str, task: str) -> list[DiagnosticIssue]:
