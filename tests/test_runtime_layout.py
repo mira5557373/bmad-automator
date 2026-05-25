@@ -143,10 +143,10 @@ class RuntimeLayoutTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"PROJECT_ROOT": str(self.project_root), "AI_AGENT": ""}, clear=False):
             config = parse_agent_config_json("{}")
-            primary, fallback = resolve_agent_for_task(config, "medium", "dev")
+            primary, fallback, model = resolve_agent_for_task(config, "medium", "dev")
 
             self.assertEqual(agent_type(), "codex")
-            self.assertEqual((primary, fallback), ("codex", "false"))
+            self.assertEqual((primary, fallback, model), ("codex", "false", ""))
 
     def test_runtime_version_tracks_python_release_version(self) -> None:
         self.assertEqual(runtime_version, "1.15.0")
@@ -154,7 +154,7 @@ class RuntimeLayoutTests(unittest.TestCase):
     def test_explicit_agent_values_are_normalized(self) -> None:
         config = parse_agent_config_json('{"defaultPrimary":" Codex ","defaultFallback":" Claude "}')
 
-        self.assertEqual(resolve_agent_for_task(config, "medium", "dev"), ("codex", "claude"))
+        self.assertEqual(resolve_agent_for_task(config, "medium", "dev"), ("codex", "claude", ""))
 
     def test_marker_path_command_uses_runtime_layout(self) -> None:
         self._install_bundle(".agents")

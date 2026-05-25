@@ -257,16 +257,22 @@ verify_common_install() {
   assert_not_contains "bin/" "$story_dir/data/monitoring-pattern.md"
   assert_contains 'state-file "$state_file"' "$story_dir/data/code-review-loop.md"
   assert_contains 'build-cmd review {story_id} --agent "$review_agent" --state-file "$state_file"' "$story_dir/data/code-review-loop.md"
+  assert_contains 'build-cmd review {story_id} --agent "$review_agent" --model "$review_primary_model" --state-file "$state_file"' "$story_dir/data/code-review-loop.md"
   assert_contains 'workflow review --story-key {story_id} --state-file "$state_file"' "$story_dir/data/code-review-loop.md"
   assert_contains 'parse-output "$output_file" review --state-file "$state_file"' "$story_dir/data/code-review-loop.md"
   assert_contains 'verify-code-review {story_id} --state-file "$state_file"' "$story_dir/data/code-review-loop.md"
   assert_contains 'orchestrator-helper verify-step create {story_id} --state-file "$state_file"' "$story_dir/steps-c/step-03-execute.md"
   assert_contains 'build-cmd create {story_id} --agent "$current_agent" --state-file "$state_file"' "$story_dir/steps-c/step-03-execute.md"
+  assert_contains 'build-cmd create {story_id} --agent "$current_agent" --model "$primary_model" --state-file "$state_file"' "$story_dir/steps-c/step-03-execute.md"
   assert_contains 'build-cmd dev {story_id} --agent "$current_agent" --state-file "$state_file"' "$story_dir/steps-c/step-03-execute.md"
+  assert_contains 'build-cmd dev {story_id} --agent "$current_agent" --model "$primary_model" --state-file "$state_file"' "$story_dir/steps-c/step-03-execute.md"
   assert_contains 'build-cmd auto {story_id} --agent "$current_agent" --state-file "$state_file"' "$story_dir/steps-c/step-03a-execute-review.md"
+  assert_contains 'build-cmd auto {story_id} --agent "$current_agent" --model "$primary_model" --state-file "$state_file"' "$story_dir/steps-c/step-03a-execute-review.md"
+  assert_contains 'should_apply_primary_model' "$story_dir/data/retry-fallback-strategy.md"
   assert_contains 'parse-output "$review_log" review --state-file "$state_file"' "$story_dir/steps-c/step-03a-execute-review.md"
   assert_contains 'validation_passed=$(echo "$validation" | jq -r '\''.verified'\'')' "$story_dir/data/retry-fallback-implementation.md"
   assert_contains 'build-cmd {step} {story_id} --agent "$current_agent" --state-file "$state_file"' "$story_dir/data/retry-fallback-implementation.md"
+  assert_contains 'build-cmd {step} {story_id} --agent "$current_agent" --model "$primary_model" --state-file "$state_file"' "$story_dir/data/retry-fallback-implementation.md"
   assert_contains 'orchestrator-helper verify-step create 5.3 --state-file "$state_file"' "$story_dir/data/monitoring-pattern.md"
   assert_contains 'workflow create --story-key 5.3 --state-file "$state_file"' "$story_dir/data/monitoring-pattern.md"
   assert_not_contains 'parse-output "$output_file" create' "$story_dir/data/monitoring-pattern.md"
@@ -283,6 +289,11 @@ verify_qa_prompts() {
   auto_codex="$(cd "$root" && "$story_dir/scripts/story-automator" tmux-wrapper build-cmd auto 5.3 --agent codex)"
   review_claude="$(cd "$root" && "$story_dir/scripts/story-automator" tmux-wrapper build-cmd review 5.3 --agent claude)"
   retro_claude="$(cd "$root" && "$story_dir/scripts/story-automator" tmux-wrapper build-cmd retro 5 --agent claude)"
+  # Per-task model injection on both providers, including the bracketed `[1m]`
+  # variant that earlier review rounds flagged as glob-prone.
+  local review_claude_model auto_codex_model
+  review_claude_model="$(cd "$root" && "$story_dir/scripts/story-automator" tmux-wrapper build-cmd review 5.3 --agent claude --model 'claude-opus-4-7[1m]')"
+  auto_codex_model="$(cd "$root" && "$story_dir/scripts/story-automator" tmux-wrapper build-cmd auto 5.3 --agent codex --model gpt-5.5)"
 
   assert_string_contains "claude --dangerously-skip-permissions" "$auto_claude"
   assert_string_contains "READ this skill first: $skills_root/bmad-qa-generate-e2e-tests/SKILL.md" "$auto_claude"
@@ -297,6 +308,14 @@ verify_qa_prompts() {
   assert_string_contains "READ this skill first: $skills_root/bmad-retrospective/SKILL.md" "$retro_claude"
   assert_string_contains "Assume the user will NOT provide any input to the retrospective directly." "$retro_claude"
   assert_string_contains "Update docs that have verified discrepancies" "$retro_claude"
+
+  # Model flag propagation
+  assert_string_contains "claude --dangerously-skip-permissions --model 'claude-opus-4-7[1m]'" "$review_claude_model"
+  assert_string_contains "--model gpt-5.5" "$auto_codex_model"
+  assert_string_contains "codex exec -s workspace-write" "$auto_codex_model"
+  # Model NEVER leaks into the no-flag form
+  assert_string_not_contains "--model" "$auto_claude"
+  assert_string_not_contains "--model" "$auto_codex"
 
   assert_string_not_contains "/bmad-bmm-" "$auto_claude"
   assert_string_not_contains "/bmad-tea-" "$auto_claude"
