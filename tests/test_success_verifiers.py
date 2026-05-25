@@ -1022,6 +1022,23 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["final_state"], "not_found")
         self.assertEqual(payload["structuredIssues"][0]["type"], "session_state.invalid_json")
 
+    def test_monitor_session_checks_session_state_issue_only_when_session_is_gone(self) -> None:
+        session = "sa-test-session"
+        statuses = [
+            {"active_task": "", "todos_done": 0, "todos_total": 0, "wait_estimate": 0, "session_state": "running"},
+            {"active_task": "", "todos_done": 0, "todos_total": 0, "wait_estimate": 0, "session_state": "running"},
+            {"active_task": "", "todos_done": 0, "todos_total": 0, "wait_estimate": 0, "session_state": "not_found"},
+        ]
+        stdout = io.StringIO()
+        with patch_env(self.project_root), patch("story_automator.commands.tmux.time.sleep"), patch(
+            "story_automator.commands.tmux.session_status",
+            side_effect=statuses,
+        ), patch("story_automator.commands.tmux.monitor_session_state_issue", return_value=None) as state_issue_mock, redirect_stdout(stdout):
+            code = cmd_monitor_session([session, "--json", "--max-polls", "3"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(state_issue_mock.call_count, 2)
+
     def test_monitor_session_csv_does_not_include_structured_issues(self) -> None:
         session = "sa-test-session"
         paths = session_paths(session, self.project_root)

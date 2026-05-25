@@ -102,3 +102,6 @@ def _load_presets_or_report(file_path: str) -> dict | None:
     except (OSError, UnicodeDecodeError) as exc:
         print_json({"ok": False, "error": "presets_file_error", "reason": str(exc)})
         return None
+    except ValueError:
+        print_json({"ok": False, "error": "invalid_presets_json"})
+        return None

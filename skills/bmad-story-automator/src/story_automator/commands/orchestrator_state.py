@@ -76,8 +76,8 @@ def _replace_frontmatter_values(frontmatter: str, updates: list[tuple[str, str]]
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
     if not text.startswith("---"):
-        return text, ""
+        return "", text
     parts = text.split("---", 2)
     if len(parts) < 3:
-        return text, ""
+        return "", text
     return f"{parts[0]}---{parts[1]}---", parts[2]

@@ -352,10 +352,10 @@ def cmd_monitor_session(args: list[str]) -> int:
     start = time.time()
     last_done = 0
     last_total = 0
+    session_state_issue = monitor_session_state_issue(session, project_root) if json_output else None
     for _ in range(1, max_polls + 1):
         if time.time() - start >= timeout_minutes * 60:
             return emit_monitor_result(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
-        pre_status_issue = monitor_session_state_issue(session, project_root) if json_output else None
         status = session_status(session, full=False, codex=agent == "codex", project_root=project_root, mode=runtime_mode())
         if int(status["todos_done"]) or int(status["todos_total"]):
             last_done = int(status["todos_done"])
@@ -407,7 +407,7 @@ def cmd_monitor_session(args: list[str]) -> int:
             output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
             return emit_monitor_result(json_output, "stuck", 0, 0, str(output), "never_active")
         if state == "not_found":
-            issue = pre_status_issue or monitor_session_state_issue(session, project_root)
+            issue = session_state_issue or (monitor_session_state_issue(session, project_root) if json_output else None)
             return emit_monitor_result(json_output, "not_found", last_done, last_total, "", "session_gone", structured_issue=issue)
         time.sleep(min(180 if agent == "codex" else 120, max(5, int(status["wait_estimate"]))))
     output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]

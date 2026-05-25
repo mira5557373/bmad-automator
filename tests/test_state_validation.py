@@ -265,6 +265,26 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertIn("status: body-marker", body)
         self.assertIn("currentStep: body-step", body)
 
+    def test_state_update_rejects_file_without_frontmatter_without_rewriting_body(self) -> None:
+        state_file = self.project_root / "body-only.md"
+        state_file.write_text("body\nstatus: body-marker\n", encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "status=READY")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload, {"ok": False, "error": "keys_not_found", "updated": []})
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "body\nstatus: body-marker\n")
+
+    def test_state_update_rejects_unterminated_frontmatter_without_rewriting_body(self) -> None:
+        state_file = self.project_root / "unterminated.md"
+        state_file.write_text("---\nstatus: body-marker\n", encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "status=READY")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload, {"ok": False, "error": "keys_not_found", "updated": []})
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "---\nstatus: body-marker\n")
+
     def test_state_update_strips_set_key_whitespace(self) -> None:
         state_file = self._build_state_config(status="READY")
 
@@ -272,6 +292,15 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "invalid_status_transition")
+
+    def test_state_update_strips_set_value_whitespace(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, " status = IN_PROGRESS")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "updated": ["status"]})
+        self.assertIn("status: IN_PROGRESS", state_file.read_text(encoding="utf-8"))
 
     def _validate_state(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()

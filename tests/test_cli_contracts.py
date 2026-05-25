@@ -170,6 +170,16 @@ class AgentConfigCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "presets_file_error")
 
+    def test_presets_wrong_shape_returns_stable_error(self) -> None:
+        for payload_text in ("[]", '"bad"', '{"presets": {}}'):
+            with self.subTest(payload=payload_text):
+                self.presets.write_text(payload_text, encoding="utf-8")
+
+                code, payload = self._agent(["list", "--file", str(self.presets)])
+
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"], "invalid_presets_json")
+
     def _agent(self, args: list[str]) -> tuple[int, dict[str, object]]:
         stdout = io.StringIO()
         with redirect_stdout(stdout):

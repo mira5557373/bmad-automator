@@ -36,11 +36,9 @@ def validate_complexity_payload(payload: object) -> list[DiagnosticIssue]:
         story_id = story.get("storyId")
         if not isinstance(story_id, str) or not story_id.strip():
             issues.append(_issue("missing_field", f"{field}.storyId", "non-empty string", story_id, "Complexity storyId must be a non-empty string"))
-        complexity = story.get("complexity")
-        if complexity is None:
-            complexity = {}
-        elif not isinstance(complexity, dict):
-            issues.append(_issue("invalid_type", f"{field}.complexity", "object", complexity, "Complexity must be an object"))
+        complexity, issue = _story_complexity(story, field)
+        if issue:
+            issues.append(issue)
             continue
         level = str(complexity.get("level") or "medium").strip().lower()
         if level not in COMPLEXITY_LEVELS:
@@ -132,8 +130,8 @@ def build_agents_file(
         raise AgentPlanInputError("complexity-file", ValueError(message)) from None
 
     stories = []
-    for story in complexity_payload.get("stories", []):
-        level = _story_complexity_level(story)
+    for index, story in enumerate(complexity_payload.get("stories", [])):
+        level = _story_complexity_level(story, f"stories[{index}]")
         stories.append({"storyId": story.get("storyId"), "title": str(story.get("title") or ""), "complexity": level, "tasks": _tasks_for(config, level)})
     try:
         epic = find_frontmatter_value(state_file, "epic")
@@ -198,12 +196,19 @@ def _load_agents_plan_payload(path: str) -> tuple[dict[str, Any], list[Diagnosti
     return payload, []
 
 
-def _story_complexity_level(story: dict[str, Any]) -> str:
+def _story_complexity(story: dict[str, Any], field: str) -> tuple[dict[str, Any], DiagnosticIssue | None]:
     complexity = story.get("complexity")
     if complexity is None:
-        return "medium"
+        return {}, None
     if not isinstance(complexity, dict):
-        raise AgentPlanInputError("complexity-file", ValueError("Complexity must be an object"))
+        return {}, _issue("invalid_type", f"{field}.complexity", "object", complexity, "Complexity must be an object")
+    return complexity, None
+
+
+def _story_complexity_level(story: dict[str, Any], field: str) -> str:
+    complexity, issue = _story_complexity(story, field)
+    if issue:
+        raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(issue)))
     return str(complexity.get("level") or "medium").strip().lower() or "medium"
 
 

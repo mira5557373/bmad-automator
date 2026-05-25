@@ -40,8 +40,12 @@ def load_presets_file(path: str | Path) -> dict[str, Any]:
     if not file_exists(preset_path):
         return {"version": "1.0.0", "presets": []}
     data = json.loads(read_text(preset_path))
+    if not isinstance(data, dict):
+        raise ValueError("presets file must be an object")
     data.setdefault("version", "1.0.0")
     data.setdefault("presets", [])
+    if not isinstance(data["presets"], list):
+        raise ValueError("presets file presets must be an array")
     return data
 
 
@@ -56,7 +60,7 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
         raise ValueError("agentConfig must be an object")
     config = AgentConfigResolved()
     if "agentConfig" in data and data.get("agentConfig") not in ("", None):
-        raise ValueError("agentConfig must be an object")
+        raise ValueError("unexpected nested agentConfig key; pass the inner config object directly")
     config.default_primary = data.get("defaultPrimary") or data.get("primary") or "auto"
     if "defaultFallback" in data:
         fallback_raw = data.get("defaultFallback")

@@ -60,6 +60,10 @@ class AgentCliModelTests(unittest.TestCase):
 
 
 class CoreAgentConfigModelTests(unittest.TestCase):
+    def test_parse_agent_config_json_rejects_nested_agent_config_with_clear_message(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unexpected nested agentConfig key"):
+            parse_agent_config_json(json.dumps({"agentConfig": {"defaultPrimary": "codex"}}))
+
     def test_per_task_model_is_resolved(self) -> None:
         config = parse_agent_config_json(
             json.dumps(
