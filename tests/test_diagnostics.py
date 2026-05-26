@@ -107,6 +107,27 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("abc123", redacted)
         self.assertNotIn("password:pw", redacted)
 
+    def test_redact_actual_masks_prefixed_env_secret_assignments(self) -> None:
+        redacted = redact_actual("OPENAI_API_KEY=sk-test123 GITHUB_TOKEN=ghp_abc123 keep=this")
+
+        self.assertIn("OPENAI_API_KEY=<redacted>", redacted)
+        self.assertIn("GITHUB_TOKEN=<redacted>", redacted)
+        self.assertIn("keep=this", redacted)
+        self.assertNotIn("sk-test123", redacted)
+        self.assertNotIn("ghp_abc123", redacted)
+
+    def test_redact_actual_preserves_non_secret_token_words(self) -> None:
+        redacted = redact_actual({"tokenized": "true", "my_token_count": 5, "GITHUB_TOKEN": "ghp_abc123"})
+        text = redact_actual("tokenized=value my_token_count=5 token_value=abc123")
+
+        self.assertEqual(redacted["tokenized"], "true")
+        self.assertEqual(redacted["my_token_count"], 5)
+        self.assertEqual(redacted["GITHUB_TOKEN"], "<redacted>")
+        self.assertIn("tokenized=value", text)
+        self.assertIn("my_token_count=5", text)
+        self.assertIn("token_value=<redacted>", text)
+        self.assertNotIn("abc123", text)
+
     def test_redact_actual_masks_bearer_and_quoted_secret_values(self) -> None:
         redacted = redact_actual('Authorization: Bearer abc123 token="abc 123" api_key=Basic xyz')
 

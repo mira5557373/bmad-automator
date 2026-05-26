@@ -156,7 +156,11 @@ def _matches_current_project_session(session: str) -> bool:
     first_segment = remainder.split("-", 1)[0]
     if re.fullmatch(r"[0-9a-f]{8}", first_segment):
         return False
-    return True
+    try:
+        paths = session_paths(session)
+    except ValueError:
+        return False
+    return any(path.exists() for path in (paths.state, paths.command, paths.runner, paths.output))
 
 
 def monitor_session_state_issue(session: str, project_root: str) -> object | None:

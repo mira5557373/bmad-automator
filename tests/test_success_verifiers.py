@@ -1293,6 +1293,25 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertNotIn("My Project/private", serialized)
         self.assertEqual(payload["error"], "token=<redacted> failed at <path:state.md>")
 
+    def test_verifier_exception_payload_redacts_extra_fields(self) -> None:
+        payload = verifier_exception_payload(
+            "verifier_contract_invalid",
+            ValueError("--state-file requires a value"),
+            source="verify-step",
+            input="OPENAI_API_KEY=sk-cli123 /Users/joon/private/state.md",
+            token="abc123",
+            api_key="sk-extra123",
+        )
+
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertNotIn("sk-cli123", serialized)
+        self.assertNotIn("abc123", serialized)
+        self.assertNotIn("sk-extra123", serialized)
+        self.assertNotIn("/Users/joon/private", serialized)
+        self.assertEqual(payload["input"], "OPENAI_API_KEY=<redacted> <path:state.md>")
+        self.assertEqual(payload["token"], "<redacted>")
+        self.assertEqual(payload["api_key"], "<redacted>")
+
     def test_validate_story_creation_reason_redacts_sensitive_context(self) -> None:
         stdout = io.StringIO()
         missing = self.project_root / "token=abc123" / "missing-state.md"

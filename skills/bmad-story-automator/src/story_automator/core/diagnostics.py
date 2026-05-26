@@ -11,12 +11,13 @@ from typing import Any
 DIAGNOSTIC_EVENTS_FILE_ENV = "STORY_AUTOMATOR_DIAGNOSTICS_FILE"
 MAX_STRING_LENGTH = 160
 MAX_COLLECTION_ITEMS = 6
-SENSITIVE_KEY_RE = re.compile(r"(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.IGNORECASE)
+SECRET_KEY_PATTERN = r"(?:[A-Za-z0-9]+[_.-])*(?:authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)(?:[_.-](?:hash|id|key|secret|value))?"
+SENSITIVE_KEY_RE = re.compile(rf"^{SECRET_KEY_PATTERN}$", re.IGNORECASE)
 SECRET_QUOTED_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(['\"])(?:(?!\2).)*\2"
+    rf"(?i)(?<![A-Za-z0-9_.-])({SECRET_KEY_PATTERN})(?![A-Za-z0-9_.-])\s*[:=]\s*(['\"])(?:(?!\2).)*\2"
 )
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(authorization|credential|password|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
+    rf"(?i)(?<![A-Za-z0-9_.-])({SECRET_KEY_PATTERN})(?![A-Za-z0-9_.-])\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
 ABSOLUTE_PATH_WITH_EXT_RE = re.compile(
     r"(?<![\w.-])(?:/(?:[^,\n;:]+/)+[^,\n;:]*?|[A-Za-z]:[\\/](?:[^,\n;:]+[\\/])+[^,\n;:]*?)\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"

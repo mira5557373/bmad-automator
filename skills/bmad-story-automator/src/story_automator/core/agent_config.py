@@ -46,6 +46,18 @@ def load_presets_file(path: str | Path) -> dict[str, Any]:
     data.setdefault("presets", [])
     if not isinstance(data["presets"], list):
         raise ValueError("presets file presets must be an array")
+    for index, preset in enumerate(data["presets"]):
+        if not isinstance(preset, dict):
+            raise ValueError(f"presets file presets[{index}] must be an object")
+        for key in ("name", "createdAt", "config"):
+            if key not in preset:
+                raise ValueError(f"presets file presets[{index}].{key} is required")
+        if not isinstance(preset["name"], str) or not preset["name"].strip():
+            raise ValueError(f"presets file presets[{index}].name must be a non-empty string")
+        if not isinstance(preset["createdAt"], str) or not preset["createdAt"].strip():
+            raise ValueError(f"presets file presets[{index}].createdAt must be a non-empty string")
+        if not isinstance(preset["config"], dict):
+            raise ValueError(f"presets file presets[{index}].config must be an object")
     return data
 
 

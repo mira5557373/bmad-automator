@@ -171,7 +171,7 @@ class AgentConfigCommandContractTests(unittest.TestCase):
         self.assertEqual(payload["error"], "presets_file_error")
 
     def test_presets_wrong_shape_returns_stable_error(self) -> None:
-        for payload_text in ("[]", '"bad"', '{"presets": {}}'):
+        for payload_text in ("[]", '"bad"', '{"presets": {}}', '{"presets":[{}]}', '{"presets":["bad"]}'):
             with self.subTest(payload=payload_text):
                 self.presets.write_text(payload_text, encoding="utf-8")
 
@@ -223,7 +223,7 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--cycle requires a value", stderr.getvalue())
 
-    def test_project_only_session_filter_keeps_legacy_slug_sessions(self) -> None:
+    def test_project_only_session_filter_rejects_legacy_slug_sessions_without_current_artifacts(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
         other_root = self.root.parent / "other" / self.root.name
         other = f"sa-{project_slug(str(other_root))}-{project_hash(str(other_root))}-260521-101011-e5-s5-3-review"
@@ -238,7 +238,7 @@ class TmuxCommandContractTests(unittest.TestCase):
             sessions, code = tmux_list_sessions(project_only=True)
 
         self.assertEqual(code, 0)
-        self.assertEqual(sessions, [own, legacy])
+        self.assertEqual(sessions, [own])
 
     def test_project_only_session_filter_keeps_current_project_legacy_sessions_with_artifacts(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
@@ -259,7 +259,22 @@ class TmuxCommandContractTests(unittest.TestCase):
             legacy_state.unlink(missing_ok=True)
 
         self.assertEqual(code, 0)
-        self.assertEqual(sessions, [own, legacy_own, legacy_other])
+        self.assertEqual(sessions, [own, legacy_own])
+
+    def test_project_only_session_filter_ignores_invalid_same_slug_sessions(self) -> None:
+        own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
+        invalid = f"sa-{project_slug(str(self.root))}-bad name"
+        output = "\n".join([own, invalid])
+
+        with (
+            mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}),
+            mock.patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
+            mock.patch("story_automator.core.tmux_runtime.run_cmd", return_value=(output, 0)),
+        ):
+            sessions, code = tmux_list_sessions(project_only=True)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sessions, [own])
 
     def test_kill_all_defaults_to_all_automator_sessions(self) -> None:
         with (
