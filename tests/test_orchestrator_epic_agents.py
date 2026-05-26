@@ -127,6 +127,36 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertFalse(payload["blocking"])
         self.assertEqual(payload["dependents"], [])
 
+    def test_check_blocking_does_not_match_sibling_full_key_dependency(self) -> None:
+        self._write_epic_file(
+            """
+            ### Story multi-leg.4: Later
+            Dependencies: multi-leg-3-old
+            """
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["multi-leg-3-new"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["blocking"])
+        self.assertEqual(payload["dependents"], [])
+
+    def test_check_blocking_does_not_treat_longer_dotted_epic_reference_as_current_epic(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-release.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story release.4: Later
+                Dependencies: release-3-phase-2.1
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["release.3"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["blocking"])
+        self.assertEqual(payload["dependents"], [])
+
     def test_get_epic_stories_state_file_accepts_non_numeric_full_keys(self) -> None:
         state_file = self._write_state(
             """
@@ -212,6 +242,40 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertEqual(payload["stories"], ["multi-leg.3"])
         self.assertEqual(payload["count"], 1)
 
+    def test_get_epic_stories_epic_file_accepts_full_key_headers(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-multi-leg.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story multi-leg-3-old: Old
+                ### Story multi-leg-4-next: Next
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(get_epic_stories_action, ["multi-leg"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["stories"], ["multi-leg-3-old", "multi-leg-4-next"])
+        self.assertEqual(payload["count"], 2)
+
+    def test_get_epic_stories_epic_file_ignores_other_epic_full_key_headers(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-multi-leg.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story multi-leg.3: Good
+                ### Story 1-2-unrelated: Other
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(get_epic_stories_action, ["multi-leg"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["stories"], ["multi-leg.3"])
+        self.assertEqual(payload["count"], 1)
+
     def test_check_blocking_uses_single_story_compound_epic_key(self) -> None:
         path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-phase-2-test.md"
         path.write_text(
@@ -253,6 +317,74 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertTrue(payload["blocking"])
         self.assertEqual(payload["dependents"], ["multi-leg.4"])
         self.assertEqual(payload["source"], "epic_file")
+
+    def test_check_blocking_accepts_full_key_header_in_exact_epic_file(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-multi-leg.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story multi-leg-4-next: Later
+                Dependencies: multi-leg.3
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["multi-leg.3"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["blocking"])
+        self.assertEqual(payload["dependents"], ["multi-leg-4-next"])
+        self.assertEqual(payload["source"], "epic_file")
+
+    def test_check_blocking_accepts_full_key_header_in_suffixed_epic_file(self) -> None:
+        self._write_epic_file(
+            """
+            ### Story multi-leg-4-next: Later
+            Dependencies: multi-leg.3
+            """
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["multi-leg.3"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["blocking"])
+        self.assertEqual(payload["dependents"], ["multi-leg-4-next"])
+        self.assertEqual(payload["source"], "epic_file")
+
+    def test_check_blocking_ignores_longer_epic_file_matched_by_prefix_glob(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-multi-leg-ui.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story multi-leg-ui.1: UI
+                Dependencies: multi-leg.3
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["multi-leg.3"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["blocking"])
+        self.assertEqual(payload["dependents"], [])
+        self.assertEqual(payload["reason"], "epic_file_not_found")
+
+    def test_check_blocking_ignores_exact_epic_file_without_matching_story_headers(self) -> None:
+        path = self.project_root / "_bmad-output" / "implementation-artifacts" / "epic-multi-leg.md"
+        path.write_text(
+            textwrap.dedent(
+                """
+                ### Story multi-leg-ui.1: UI
+                Dependencies: multi-leg.3
+                """
+            ),
+            encoding="utf-8",
+        )
+        exit_code, payload = self._run_action(check_blocking_action, ["multi-leg.3"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["blocking"])
+        self.assertEqual(payload["dependents"], [])
+        self.assertEqual(payload["reason"], "epic_file_not_found")
 
     def test_check_blocking_sorts_dependents_by_story_number(self) -> None:
         self._write_epic_file(

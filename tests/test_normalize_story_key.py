@@ -227,6 +227,14 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.prefix, "release-2026-phase-2-1")
         self.assertEqual(result.key, "release-2026-phase-2-1-title")
 
+    def test_single_story_multi_numeric_epic_with_short_numeric_segment_uses_status_key(self) -> None:
+        self._write_sprint_status("release-3-phase-2-1-title: done\n")
+        result = normalize_story_key(str(self.project_root), "release-3-phase-2-1-title")
+        assert result is not None
+        self.assertEqual(result.id, "release-3-phase-2.1")
+        self.assertEqual(result.prefix, "release-3-phase-2-1")
+        self.assertEqual(result.key, "release-3-phase-2-1-title")
+
     # --- Key resolution via filesystem and sprint-status ---
 
     def test_resolves_key_from_artifact_glob_non_numeric(self) -> None:
@@ -327,11 +335,34 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         result = sprint_status_get(str(self.project_root), "release.2026")
         self.assertFalse(result.found)
 
+    def test_sprint_status_get_rejects_longer_epic_with_non_numeric_next_segment(self) -> None:
+        self._write_sprint_status("release-2026-phase-2-1-title: done\n")
+        result = sprint_status_get(str(self.project_root), "release.2026")
+        self.assertFalse(result.found)
+        self.assertEqual(result.status, "not_found")
+
+    def test_sprint_status_get_rejects_short_numeric_longer_epic_boundary(self) -> None:
+        self._write_sprint_status("release-3-phase-2-1-title: done\n")
+        result = sprint_status_get(str(self.project_root), "release.3")
+        self.assertFalse(result.found)
+        self.assertEqual(result.status, "not_found")
+
+        longer = sprint_status_get(str(self.project_root), "release-3-phase-2.1")
+        self.assertTrue(longer.found)
+        self.assertEqual(longer.story, "release-3-phase-2-1-title")
+
     def test_sprint_status_get_resolves_four_digit_story_with_short_numeric_title_segment(self) -> None:
         self._write_sprint_status("multi-leg-2026-3-release: done\n")
         result = sprint_status_get(str(self.project_root), "multi-leg.2026")
         self.assertTrue(result.found)
         self.assertEqual(result.story, "multi-leg-2026-3-release")
+        self.assertEqual(result.status, "done")
+
+    def test_sprint_status_get_resolves_four_digit_story_with_short_numeric_later_title_segment(self) -> None:
+        self._write_sprint_status("multi-leg-2026-part-2-fix: done\n")
+        result = sprint_status_get(str(self.project_root), "multi-leg.2026")
+        self.assertTrue(result.found)
+        self.assertEqual(result.story, "multi-leg-2026-part-2-fix")
         self.assertEqual(result.status, "done")
 
     def test_sprint_status_get_resolves_multi_numeric_epic_with_title(self) -> None:
@@ -368,6 +399,26 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.story, "multi-leg-3-new")
         self.assertEqual(result.status, "done")
         self.assertTrue(result.done)
+
+    def test_sprint_status_get_prefers_requested_full_key_over_sibling_full_key(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              multi-leg-3-old: done
+              multi-leg-3-new: ready-for-dev
+            """
+        )
+        result = sprint_status_get(str(self.project_root), "multi-leg-3-old")
+        self.assertTrue(result.found)
+        self.assertEqual(result.story, "multi-leg-3-old")
+        self.assertEqual(result.status, "done")
+        self.assertTrue(result.done)
+
+    def test_sprint_status_get_does_not_use_sibling_when_requested_full_key_missing(self) -> None:
+        self._write_sprint_status("multi-leg-3-old: done\n")
+        result = sprint_status_get(str(self.project_root), "multi-leg-3-new")
+        self.assertFalse(result.found)
+        self.assertEqual(result.status, "not_found")
 
     def test_sprint_status_get_prefers_exact_dotted_over_bare_prefix_alias(self) -> None:
         self._write_sprint_status(

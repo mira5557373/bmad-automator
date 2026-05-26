@@ -108,6 +108,97 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["story"], "multi-leg-3-lossless")
         self.assertEqual(payload["sprint_status"], "done")
 
+    def test_review_completion_prefers_requested_full_key_over_sibling_status(self) -> None:
+        self._write_sprint_status("multi-leg-3-old: done\nmulti-leg-3-new: ready-for-dev\n")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="multi-leg-3-old",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["sprint-status.yaml"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-3-old")
+        self.assertEqual(payload["sprint_status"], "done")
+
+    def test_review_completion_does_not_verify_requested_full_key_from_sibling_status(self) -> None:
+        self._write_sprint_status("multi-leg-3-old: done\n")
+        self._write_story("multi-leg-3-new", status="ready-for-dev")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="multi-leg-3-new",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["sprint-status.yaml", "story-file"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-3-new")
+        self.assertEqual(payload["sprint_status"], "not_found")
+
+    def test_review_completion_rejects_longer_epic_artifact_for_dotted_id(self) -> None:
+        self._write_story("release-2026-phase-2-1-title", status="done")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="release.2026",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["story-file"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story"], "release-2026")
+        self.assertEqual(payload["story_file_status"], "unknown")
+
+    def test_review_completion_rejects_short_numeric_longer_epic_status_for_dotted_id(self) -> None:
+        self._write_sprint_status("release-3-phase-2-1-title: done\n")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="release.3",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["sprint-status.yaml"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story"], "release-3")
+        self.assertEqual(payload["sprint_status"], "not_found")
+
+    def test_review_completion_resolves_four_digit_story_with_numeric_later_title_segment(self) -> None:
+        self._write_sprint_status("multi-leg-2026-part-2-fix: done\n")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="multi-leg.2026",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["sprint-status.yaml"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-2026-part-2-fix")
+        self.assertEqual(payload["sprint_status"], "done")
+
+    def test_review_completion_resolves_four_digit_story_file_with_numeric_later_title_segment(self) -> None:
+        self._write_story("multi-leg-2026-part-2-fix", status="done")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="multi-leg.2026",
+            contract={
+                "doneValues": ["done"],
+                "sourceOrder": ["story-file"],
+                "syncSprintStatus": False,
+            },
+        )
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-2026-part-2-fix")
+        self.assertEqual(payload["story_file_status"], "done")
+
     def test_review_completion_reports_sprint_selected_story(self) -> None:
         self._write_story("multi-leg-3-old", status="approved")
         self._write_sprint_status("multi-leg-3-new: done\n")

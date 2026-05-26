@@ -62,6 +62,12 @@ def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
 
 
 def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> StoryKey | None:
+    if "." in value:
+        norm = normalize_story_key(project_root, value)
+        if norm is None or norm.id.rsplit(".", 1)[0] != epic:
+            return None
+        return norm
+
     dotted = re.fullmatch(rf"{re.escape(epic)}\.(\d+)", value)
     if dotted:
         story_num = dotted.group(1)
@@ -83,14 +89,14 @@ def _complete_story_key(project_root: str, story_id: str, prefix: str, key: str)
     artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
     if not key:
         for match in sorted(artifacts.glob(f"{prefix}-*.md")):
-            if _full_key_matches_story(project_root, match.stem, story_id):
+            if _full_key_matches_story(project_root, match.stem, story_id, allow_ambiguous_same_id=False):
                 key = match.stem
                 break
     if not key:
         status_file = sprint_status_file(project_root)
         if file_exists(status_file):
             for status_key in _status_keys(read_text(status_file)):
-                if status_key.startswith(f"{prefix}-") and _full_key_matches_story(project_root, status_key, story_id):
+                if status_key.startswith(f"{prefix}-") and _full_key_matches_story(project_root, status_key, story_id, allow_ambiguous_same_id=True):
                     key = status_key
                     break
     if not key:
@@ -138,10 +144,12 @@ def _status_keys(content: str) -> list[str]:
     return keys
 
 
-def _full_key_matches_story(project_root: str, key: str, story_id: str) -> bool:
+def _full_key_matches_story(project_root: str, key: str, story_id: str, *, allow_ambiguous_same_id: bool) -> bool:
     norm = normalize_story_key(project_root, key)
-    if norm is not None and norm.id == story_id:
-        return True
+    if norm is not None:
+        if not allow_ambiguous_same_id and _has_ambiguous_later_boundary(key, story_id):
+            return False
+        return norm.id == story_id
     prefix = story_id.replace(".", "-")
     if not key.startswith(f"{prefix}-"):
         return False
@@ -149,8 +157,19 @@ def _full_key_matches_story(project_root: str, key: str, story_id: str) -> bool:
     remainder = key[len(prefix) + 1 :]
     first_segment = remainder.split("-", 1)[0]
     if not first_segment.isdigit():
-        return True
+        return not _has_ambiguous_later_boundary(key, story_id)
     return len(story_num) >= 4 and int(first_segment) <= 99
+
+
+def _has_ambiguous_later_boundary(key: str, story_id: str) -> bool:
+    story_num = story_id.rsplit(".", 1)[-1]
+    if len(story_num) < 4:
+        return False
+    prefix = story_id.replace(".", "-")
+    if not key.startswith(f"{prefix}-"):
+        return False
+    remainder = key[len(prefix) + 1 :]
+    return re.search(r"^[^-]+-\d+-\d+-", remainder) is not None
 
 
 def _epic_exists(project_root: str, epic: str) -> bool:
@@ -203,9 +222,7 @@ def _single_story_numeric_epic(epic: str) -> bool:
         return True
     if len(numeric_indexes) == 2:
         first, second = numeric_indexes
-        return len(segments[first]) >= 4 and int(segments[second]) <= 99 and any(
-            not segment.isdigit() for segment in segments[first + 1 : second]
-        )
+        return int(segments[second]) <= 99 and any(not segment.isdigit() for segment in segments[first + 1 : second])
     return False
 
 

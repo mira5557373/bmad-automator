@@ -70,11 +70,15 @@ def _status_key_rank(key: str, norm: StoryKey) -> int:
 
 def _best_status_match(project_root: str, content: str, story_key: str, norm: StoryKey) -> SprintStatus | None:
     candidates: list[tuple[int, int, str, str]] = []
-    for rank, key in ((3, story_key), (2, norm.id), (2, norm.prefix)):
+    explicit_full_key = story_key == norm.key and story_key not in {norm.id, norm.prefix}
+    requested_rank = 5 if explicit_full_key else 3
+    for rank, key in ((requested_rank, story_key), (2, norm.id), (2, norm.prefix)):
         match = _exact_status_match(content, key)
         if match:
             candidates.append((rank, len(candidates), key, match.group(1).strip()))
     for key, status in _status_rows(content):
+        if explicit_full_key and key != story_key:
+            continue
         if key.startswith(f"{norm.prefix}-") and _status_key_matches_story(project_root, key, norm.id):
             candidates.append((4, len(candidates), key, status))
     if not candidates:
@@ -102,8 +106,8 @@ def _status_rows(content: str) -> list[tuple[str, str]]:
 
 def _status_key_matches_story(project_root: str, key: str, story_id: str) -> bool:
     norm = normalize_story_key(project_root, key)
-    if norm is not None and norm.id == story_id:
-        return True
+    if norm is not None:
+        return norm.id == story_id
     prefix = story_id.replace(".", "-")
     if not key.startswith(f"{prefix}-"):
         return False
@@ -111,5 +115,16 @@ def _status_key_matches_story(project_root: str, key: str, story_id: str) -> boo
     remainder = key[len(prefix) + 1 :]
     first_segment = remainder.split("-", 1)[0]
     if not first_segment.isdigit():
-        return True
+        return not _has_ambiguous_later_boundary(key, story_id)
     return len(story_num) >= 4 and int(first_segment) <= 99
+
+
+def _has_ambiguous_later_boundary(key: str, story_id: str) -> bool:
+    story_num = story_id.rsplit(".", 1)[-1]
+    if len(story_num) < 4:
+        return False
+    prefix = story_id.replace(".", "-")
+    if not key.startswith(f"{prefix}-"):
+        return False
+    remainder = key[len(prefix) + 1 :]
+    return re.search(r"^[^-]+-\d+-\d+-", remainder) is not None

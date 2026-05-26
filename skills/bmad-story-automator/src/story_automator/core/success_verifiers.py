@@ -101,7 +101,7 @@ def review_completion(
         return {"verified": False, "reason": "could_not_normalize_key", "input": story_key}
     review_contract = _load_review_contract(project_root, contract or {})
     done_values = {value.lower() for value in review_contract["doneValues"]}
-    sprint = sprint_status_get(project_root, norm.id)
+    sprint = sprint_status_get(project_root, story_key)
     selected_story = _selected_review_story(sprint.story, norm) if sprint.found else norm.key
     story_file = _story_artifact_path(project_root, norm.prefix, selected_story)
     story_status = find_frontmatter_value_case(story_file, "Status") if story_file else ""
