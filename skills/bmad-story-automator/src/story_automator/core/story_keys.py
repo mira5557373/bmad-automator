@@ -82,16 +82,17 @@ def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> St
 def _complete_story_key(project_root: str, story_id: str, prefix: str, key: str) -> StoryKey:
     artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
     if not key:
-        matches = sorted(artifacts.glob(f"{prefix}-*.md"))
-        if matches:
-            key = matches[0].stem
+        for match in sorted(artifacts.glob(f"{prefix}-*.md")):
+            if _full_key_matches_story(project_root, match.stem, story_id):
+                key = match.stem
+                break
     if not key:
         status_file = sprint_status_file(project_root)
         if file_exists(status_file):
-            content = read_text(status_file)
-            match = re.search(rf"(?m)^\s*({re.escape(prefix)}-[^:\s]+)\s*:", content)
-            if match:
-                key = match.group(1).strip()
+            for status_key in _status_keys(read_text(status_file)):
+                if status_key.startswith(f"{prefix}-") and _full_key_matches_story(project_root, status_key, story_id):
+                    key = status_key
+                    break
     if not key:
         key = prefix
     return StoryKey(id=story_id, prefix=prefix, key=key)
@@ -110,7 +111,10 @@ def _split_non_numeric_full_key(project_root: str, value: str) -> tuple[str, str
         match = max(single_story, key=lambda item: item.start())
         return value[: match.start()], match.group(1)
     known = [match for match in matches if _epic_exists(project_root, value[: match.start()])]
-    match = max(known, key=lambda item: item.start()) if known else _single_story_epic_match(project_root, value, matches)
+    if known:
+        match = max(known, key=lambda item: item.start())
+        return value[: match.start()], match.group(1)
+    match = _numeric_epic_segment_match(matches) or _single_story_epic_match(project_root, value, matches)
     return value[: match.start()], match.group(1)
 
 
@@ -122,6 +126,31 @@ def _has_known_longer_epic(project_root: str, epic: str, value: str) -> bool:
         if _epic_exists(project_root, candidate_epic) or _is_single_story_key(project_root, value, match):
             return True
     return False
+
+
+def _status_keys(content: str) -> list[str]:
+    keys: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        keys.append(stripped.split(":", 1)[0].strip())
+    return keys
+
+
+def _full_key_matches_story(project_root: str, key: str, story_id: str) -> bool:
+    norm = normalize_story_key(project_root, key)
+    if norm is not None and norm.id == story_id:
+        return True
+    prefix = story_id.replace(".", "-")
+    if not key.startswith(f"{prefix}-"):
+        return False
+    story_num = story_id.rsplit(".", 1)[-1]
+    remainder = key[len(prefix) + 1 :]
+    first_segment = remainder.split("-", 1)[0]
+    if not first_segment.isdigit():
+        return True
+    return len(story_num) >= 4 and int(first_segment) <= 99
 
 
 def _epic_exists(project_root: str, epic: str) -> bool:
@@ -137,8 +166,11 @@ def _epic_exists(project_root: str, epic: str) -> bool:
 
 def _is_single_story_key(project_root: str, value: str, match: re.Match[str]) -> bool:
     status_file = sprint_status_file(project_root)
+    candidate_epic = value[: match.start()]
     return (
         match.group(1) == "1"
+        and _last_epic_segment_is_numeric(candidate_epic)
+        and _single_story_numeric_epic(candidate_epic)
         and file_exists(status_file)
         and re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)) is not None
     )
@@ -152,6 +184,29 @@ def _single_story_epic_match(project_root: str, value: str, matches: list[re.Mat
         if _is_single_story_key(project_root, value, match):
             return match
     return matches[0]
+
+
+def _numeric_epic_segment_match(matches: list[re.Match[str]]) -> re.Match[str] | None:
+    if len(matches) < 2 or len(matches[0].group(1)) < 4 or len(matches[1].group(1)) < 3:
+        return None
+    return matches[1]
+
+
+def _last_epic_segment_is_numeric(epic: str) -> bool:
+    return epic.rsplit("-", 1)[-1].isdigit()
+
+
+def _single_story_numeric_epic(epic: str) -> bool:
+    segments = epic.split("-")
+    numeric_indexes = [index for index, segment in enumerate(segments) if segment.isdigit()]
+    if len(numeric_indexes) == 1:
+        return True
+    if len(numeric_indexes) == 2:
+        first, second = numeric_indexes
+        return len(segments[first]) >= 4 and int(segments[second]) <= 99 and any(
+            not segment.isdigit() for segment in segments[first + 1 : second]
+        )
+    return False
 
 
 def _epic_file_exists(project_root: str, epic: str) -> bool:

@@ -102,13 +102,14 @@ def review_completion(
     review_contract = _load_review_contract(project_root, contract or {})
     done_values = {value.lower() for value in review_contract["doneValues"]}
     sprint = sprint_status_get(project_root, norm.id)
-    story_file = _story_artifact_path(project_root, norm.prefix)
+    selected_story = _selected_review_story(sprint.story, norm) if sprint.found else norm.key
+    story_file = _story_artifact_path(project_root, norm.prefix, selected_story)
     story_status = find_frontmatter_value_case(story_file, "Status") if story_file else ""
     for source in review_contract["sourceOrder"]:
         if source == "sprint-status.yaml" and sprint.status.lower() in done_values:
             return {
                 "verified": True,
-                "story": norm.key,
+                "story": selected_story,
                 "sprint_status": sprint.status,
                 "story_file_status": story_status or "unknown",
                 "source": "sprint-status.yaml",
@@ -116,7 +117,7 @@ def review_completion(
         if source == "story-file" and story_status.lower() in done_values:
             payload: dict[str, object] = {
                 "verified": True,
-                "story": norm.key,
+                "story": selected_story,
                 "sprint_status": sprint.status,
                 "story_file_status": story_status,
                 "source": "story-file",
@@ -126,7 +127,7 @@ def review_completion(
             return payload
     return {
         "verified": False,
-        "story": norm.key,
+        "story": selected_story,
         "sprint_status": sprint.status,
         "story_file_status": story_status or "unknown",
         "reason": "workflow_not_complete",
@@ -172,9 +173,19 @@ def _format_story_pattern(pattern: str, story) -> str:
     )
 
 
-def _story_artifact_path(project_root: str, story_prefix: str) -> Path | None:
-    matches = sorted((Path(project_root) / "_bmad-output" / "implementation-artifacts").glob(f"{story_prefix}-*.md"))
+def _story_artifact_path(project_root: str, story_prefix: str, preferred_story: str = "") -> Path | None:
+    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    if preferred_story:
+        preferred = artifacts / f"{preferred_story}.md"
+        return preferred if preferred.is_file() else None
+    matches = sorted(artifacts.glob(f"{story_prefix}-*.md"))
     return matches[0] if matches else None
+
+
+def _selected_review_story(sprint_story: str, norm) -> str:
+    if sprint_story in {norm.id, norm.prefix}:
+        return norm.key
+    return sprint_story
 
 
 def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:

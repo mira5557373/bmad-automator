@@ -21,20 +21,15 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
     if not file_exists(status_file):
         return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
     content = read_text(status_file)
-    match = re.search(rf"(?m)^\s*{re.escape(story_key)}:\s*(\S+)", content)
+    norm = normalize_story_key(project_root, story_key)
+    if norm is not None:
+        result = _best_status_match(project_root, content, story_key, norm)
+        if result is not None:
+            return result
+    match = _exact_status_match(content, story_key)
     if match:
         status = match.group(1).strip()
         return SprintStatus(True, story_key, status, status == "done")
-    norm = normalize_story_key(project_root, story_key)
-    if norm is not None:
-        match = re.search(rf"(?m)^\s*{re.escape(norm.key)}:\s*(\S+)", content)
-        if match:
-            status = match.group(1).strip()
-            return SprintStatus(True, norm.key, status, status == "done")
-        match = re.search(rf"(?m)^\s*({re.escape(norm.prefix)}-[^:\s]+)\s*:\s*(\S+)", content)
-        if match:
-            status = match.group(2).strip()
-            return SprintStatus(True, match.group(1).strip(), status, status == "done")
     return SprintStatus(False, story_key, "not_found", False)
 
 
@@ -71,3 +66,50 @@ def _status_key_rank(key: str, norm: StoryKey) -> int:
     if key == norm.key and key not in {norm.id, norm.prefix}:
         return 2
     return 1
+
+
+def _best_status_match(project_root: str, content: str, story_key: str, norm: StoryKey) -> SprintStatus | None:
+    candidates: list[tuple[int, int, str, str]] = []
+    for rank, key in ((3, story_key), (2, norm.id), (2, norm.prefix)):
+        match = _exact_status_match(content, key)
+        if match:
+            candidates.append((rank, len(candidates), key, match.group(1).strip()))
+    for key, status in _status_rows(content):
+        if key.startswith(f"{norm.prefix}-") and _status_key_matches_story(project_root, key, norm.id):
+            candidates.append((4, len(candidates), key, status))
+    if not candidates:
+        return None
+    _, _, key, status = max(candidates)
+    return SprintStatus(True, key, status, status == "done")
+
+
+def _exact_status_match(content: str, key: str) -> re.Match[str] | None:
+    return re.search(rf"(?m)^\s*{re.escape(key)}:\s*(\S+)", content)
+
+
+def _status_rows(content: str) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for line in trim_lines(content):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        key, status = stripped.split(":", 1)
+        parts = status.strip().split()
+        if parts:
+            rows.append((key.strip(), parts[0]))
+    return rows
+
+
+def _status_key_matches_story(project_root: str, key: str, story_id: str) -> bool:
+    norm = normalize_story_key(project_root, key)
+    if norm is not None and norm.id == story_id:
+        return True
+    prefix = story_id.replace(".", "-")
+    if not key.startswith(f"{prefix}-"):
+        return False
+    story_num = story_id.rsplit(".", 1)[-1]
+    remainder = key[len(prefix) + 1 :]
+    first_segment = remainder.split("-", 1)[0]
+    if not first_segment.isdigit():
+        return True
+    return len(story_num) >= 4 and int(first_segment) <= 99

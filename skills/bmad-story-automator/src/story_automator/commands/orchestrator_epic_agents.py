@@ -69,7 +69,7 @@ def get_epic_stories_action(args: list[str]) -> int:
     epic_file = find_epic_file(epic)
     if epic_file:
         project_root = get_project_root()
-        stories = sorted(set(re.findall(rf"\b{re.escape(epic)}\.\d+", read_text(epic_file))), key=lambda item: _story_sort_key(project_root, item, epic))
+        stories = sorted(_story_ids_from_epic_file(epic_file, epic), key=lambda item: _story_sort_key(project_root, item, epic))
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
             return 0
@@ -102,7 +102,7 @@ def check_blocking_action(args: list[str]) -> int:
             if _line_references_story(project_root, epic, norm, line):
                 dependents.append(current_story)
     if dependents:
-        print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents)), "reason": "dependent_stories", "source": "epic_file"})
+        print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents), key=lambda item: _story_sort_key(project_root, item, epic)), "reason": "dependent_stories", "source": "epic_file"})
         return 0
     print_json({"ok": True, "blocking": False, "story": norm.id, "epic": epic, "dependents": [], "reason": "no_dependents_found", "source": "epic_file"})
     return 0
@@ -208,8 +208,11 @@ def retro_agent_action(args: list[str]) -> int:
 
 def find_epic_file(epic: str) -> str:
     root = Path(get_project_root())
-    for pattern in (f"_bmad-output/implementation-artifacts/epic-{epic}-*.md", f"docs/epics/epic-{epic}-*.md"):
-        matches = sorted(root.glob(pattern))
+    for base in (root / "_bmad-output" / "implementation-artifacts", root / "docs" / "epics"):
+        exact = base / f"epic-{epic}.md"
+        if exact.is_file():
+            return str(exact)
+        matches = sorted(base.glob(f"epic-{epic}-*.md"))
         if matches:
             return str(matches[0])
     return ""
@@ -217,6 +220,18 @@ def find_epic_file(epic: str) -> str:
 
 def _epic_json_value(epic: str) -> int | str:
     return int(epic) if epic.isdigit() else epic
+
+
+def _story_ids_from_epic_file(epic_file: str, epic: str) -> list[str]:
+    story_re = re.compile(rf"^###\s+Story\s+({re.escape(epic)}\.\d+):")
+    stories: list[str] = []
+    seen: set[str] = set()
+    for line in trim_lines(read_text(epic_file)):
+        match = story_re.match(line)
+        if match and match.group(1) not in seen:
+            stories.append(match.group(1))
+            seen.add(match.group(1))
+    return stories
 
 
 def _story_matches_epic(project_root: str, epic: str, story: str) -> bool:
