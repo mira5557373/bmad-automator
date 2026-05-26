@@ -9,7 +9,6 @@ from story_automator.core.monitoring import emit_monitor_result
 from story_automator.core.prompt_rendering import render_step_prompt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
-from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.tmux_runtime import (
     agent_cli,
     agent_type,
@@ -30,6 +29,9 @@ from story_automator.core.utils import (
     project_hash,
     project_slug,
 )
+from story_automator.commands.tmux_monitor import parse_monitor_int_option as _parse_positive_int_option
+from story_automator.commands.tmux_monitor import parse_monitor_value_option as _parse_monitor_value_option
+from story_automator.commands.tmux_monitor import verify_monitor_completion as _verify_monitor_completion
 
 
 def cmd_tmux_wrapper(args: list[str]) -> int:
@@ -297,7 +299,7 @@ def cmd_monitor_session(args: list[str]) -> int:
     max_polls = 30
     initial_wait = 5
     timeout_minutes = 60
-    json_output = False
+    json_output = "--json" in args[1:]
     workflow = "dev"
     story_key = ""
     state_file = ""
@@ -306,42 +308,62 @@ def cmd_monitor_session(args: list[str]) -> int:
     idx = 1
     while idx < len(args):
         arg = args[idx]
-        if arg == "--max-polls" and idx + 1 < len(args):
-            max_polls = int(args[idx + 1])
+        if arg == "--max-polls":
+            parsed = _parse_positive_int_option("--max-polls", args[idx + 1] if idx + 1 < len(args) else "", json_output, minimum=0)
+            if parsed is None:
+                return 1
+            max_polls = parsed
             idx += 2
             continue
-        if arg == "--initial-wait" and idx + 1 < len(args):
-            initial_wait = int(args[idx + 1])
+        if arg == "--initial-wait":
+            parsed = _parse_positive_int_option("--initial-wait", args[idx + 1] if idx + 1 < len(args) else "", json_output, minimum=0)
+            if parsed is None:
+                return 1
+            initial_wait = parsed
             idx += 2
             continue
-        if arg == "--timeout" and idx + 1 < len(args):
-            timeout_minutes = int(args[idx + 1])
+        if arg == "--timeout":
+            parsed = _parse_positive_int_option("--timeout", args[idx + 1] if idx + 1 < len(args) else "", json_output)
+            if parsed is None:
+                return 1
+            timeout_minutes = parsed
             idx += 2
             continue
         if arg == "--json":
             json_output = True
-        elif arg == "--agent" and idx + 1 < len(args):
-            agent = args[idx + 1]
+        elif arg == "--agent":
+            parsed = _parse_monitor_value_option("--agent", args, idx, json_output)
+            if parsed is None:
+                return 1
+            agent = parsed
             idx += 2
             continue
-        elif arg == "--workflow" and idx + 1 < len(args):
-            workflow = args[idx + 1]
+        elif arg == "--workflow":
+            parsed = _parse_monitor_value_option("--workflow", args, idx, json_output)
+            if parsed is None:
+                return 1
+            workflow = parsed
             idx += 2
             continue
-        elif arg == "--story-key" and idx + 1 < len(args):
-            story_key = args[idx + 1]
+        elif arg == "--story-key":
+            parsed = _parse_monitor_value_option("--story-key", args, idx, json_output)
+            if parsed is None:
+                return 1
+            story_key = parsed
             idx += 2
             continue
         elif arg == "--state-file":
-            try:
-                state_file = _flag_value(args, idx, "--state-file")
-            except PolicyError as exc:
-                print(str(exc), file=__import__("sys").stderr)
+            parsed = _parse_monitor_value_option("--state-file", args, idx, json_output)
+            if parsed is None:
                 return 1
+            state_file = parsed
             idx += 2
             continue
-        elif arg == "--project-root" and idx + 1 < len(args):
-            project_root = args[idx + 1]
+        elif arg == "--project-root":
+            parsed = _parse_monitor_value_option("--project-root", args, idx, json_output)
+            if parsed is None:
+                return 1
+            project_root = parsed
             idx += 2
             continue
         idx += 1
@@ -412,36 +434,6 @@ def cmd_monitor_session(args: list[str]) -> int:
         time.sleep(min(180 if agent == "codex" else 120, max(5, int(status["wait_estimate"]))))
     output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
     return emit_monitor_result(json_output, "timeout", last_done, last_total, str(output), "max_polls_exceeded")
-
-
-def _verify_monitor_completion(
-    workflow: str,
-    *,
-    project_root: str,
-    story_key: str,
-    output_file: str,
-    state_file: str | Path | None = None,
-) -> tuple[dict[str, object], str] | None:
-    try:
-        contract = resolve_success_contract(project_root, workflow, state_file=state_file)
-    except (FileNotFoundError, OSError, PolicyError, ValueError):
-        return ({"verified": False, "reason": "verifier_contract_invalid"}, "")
-    verifier_name = str(contract.get("verifier") or "").strip()
-    if not verifier_name:
-        return ({"verified": False, "reason": "verifier_contract_invalid"}, "")
-    if verifier_name in {"create_story_artifact", "review_completion", "epic_complete"} and not story_key.strip():
-        return ({"verified": False, "reason": "story_key_required", "verifier": verifier_name}, verifier_name)
-    try:
-        result = run_success_verifier(
-            verifier_name,
-            project_root=project_root,
-            story_key=story_key,
-            output_file=output_file,
-            contract=contract,
-        )
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, OSError, PolicyError, ValueError):
-        return ({"verified": False, "reason": "verifier_contract_invalid"}, verifier_name)
-    return (result, verifier_name)
 
 
 def _flag_value(args: list[str], idx: int, flag: str) -> str:

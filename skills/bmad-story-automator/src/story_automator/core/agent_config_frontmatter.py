@@ -79,7 +79,7 @@ def _parse_scalar(raw: str) -> object:
         return ""
     if value.startswith("{") and value.endswith("}"):
         return _parse_inline_map(value)
-    value = unquote_scalar(value)
+    value = _unquote_checked(value)
     lower = value.lower()
     if lower == "false":
         return False
@@ -143,7 +143,15 @@ def _split_top_level(raw: str, separator: str, *, maxsplit: int = 0) -> list[str
 
 
 def _parse_key(raw: str) -> str:
-    return unquote_scalar(raw.strip())
+    return _unquote_checked(raw.strip())
+
+
+def _unquote_checked(value: str) -> str:
+    starts = value[0] if value[:1] in {'"', "'"} else ""
+    ends = value[-1] if value[-1:] in {'"', "'"} else ""
+    if bool(starts) != bool(ends) or (starts and starts != ends):
+        raise ValueError("agentConfig quoted values must be closed")
+    return unquote_scalar(value)
 
 
 def _strip_inline_yaml_comment(raw: str) -> str:

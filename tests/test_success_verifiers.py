@@ -908,7 +908,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["output_verified"])
 
     def test_monitor_dispatch_rejects_verifier_side_file_error(self) -> None:
-        with patch("story_automator.commands.tmux.run_success_verifier", side_effect=FileNotFoundError("missing.json")):
+        with patch("story_automator.commands.tmux_monitor.run_success_verifier", side_effect=FileNotFoundError("missing.json")):
             result = _verify_monitor_completion(
                 "review",
                 project_root=str(self.project_root),
@@ -943,7 +943,7 @@ class SuccessVerifierTests(unittest.TestCase):
         ]
         with patch_env(self.project_root), patch("story_automator.commands.tmux.time.sleep"), patch(
             "story_automator.commands.tmux.session_status", side_effect=statuses
-        ), patch("story_automator.commands.tmux.run_success_verifier", side_effect=FileNotFoundError("missing.json")), redirect_stdout(stdout):
+        ), patch("story_automator.commands.tmux_monitor.run_success_verifier", side_effect=FileNotFoundError("missing.json")), redirect_stdout(stdout):
             code = cmd_monitor_session(["fake-session", "--json", "--workflow", "review", "--story-key", "1.2"])
         self.assertEqual(code, 0)
         payload = json.loads(stdout.getvalue())
@@ -978,6 +978,66 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["final_state"], "timeout")
         self.assertEqual(payload["exit_reason"], "max_polls_exceeded")
         self.assertFalse(payload["output_verified"])
+
+    def test_monitor_session_bad_numeric_option_returns_json_error(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--max-polls", "abc", "--json"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "invalid_numeric_option")
+        self.assertEqual(payload["flag"], "--max-polls")
+
+    def test_monitor_session_bad_numeric_option_redacts_json_value(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "token=abc123"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["value"], "token=<redacted>")
+        self.assertNotIn("abc123", json.dumps(payload, separators=(",", ":")))
+
+    def test_monitor_session_missing_numeric_option_value_returns_json_error(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "invalid_numeric_option")
+        self.assertEqual(payload["flag"], "--max-polls")
+
+    def test_monitor_session_missing_numeric_option_value_returns_stderr_error(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_monitor_session(["fake-session", "--max-polls"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--max-polls requires a positive integer", stderr.getvalue())
+
+    def test_monitor_session_missing_value_option_returns_json_error(self) -> None:
+        for flag in ("--agent", "--workflow", "--story-key", "--state-file", "--project-root"):
+            with self.subTest(flag=flag):
+                stdout = io.StringIO()
+                with patch_env(self.project_root), redirect_stdout(stdout):
+                    code = cmd_monitor_session(["fake-session", "--json", flag])
+
+                self.assertEqual(code, 1)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["error"], "missing_option_value")
+                self.assertEqual(payload["flag"], flag)
+
+    def test_monitor_session_rejects_next_flag_as_value_option(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--agent", "--workflow", "review"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "missing_option_value")
+        self.assertEqual(payload["flag"], "--agent")
 
     def test_monitor_session_runtime_agent_uses_resolved_provider_flags(self) -> None:
         calls: list[dict[str, object]] = []
@@ -1021,6 +1081,20 @@ class SuccessVerifierTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["final_state"], "not_found")
         self.assertEqual(payload["structuredIssues"][0]["type"], "session_state.invalid_json")
+
+    def test_monitor_session_json_reports_non_numeric_schema_version(self) -> None:
+        session = "sa-test-session"
+        paths = session_paths(session, self.project_root)
+        paths.state.parent.mkdir(parents=True, exist_ok=True)
+        paths.state.write_text('{"schemaVersion":"bad","lifecycle":"running"}', encoding="utf-8")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session([session, "--json", "--max-polls", "1", "--initial-wait", "0"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["final_state"], "not_found")
+        self.assertEqual(payload["structuredIssues"][0]["type"], "session_state.unexpected_schema_version")
 
     def test_monitor_session_checks_session_state_issue_only_when_session_is_gone(self) -> None:
         session = "sa-test-session"
@@ -1322,7 +1396,7 @@ class SuccessVerifierTests(unittest.TestCase):
         serialized = json.dumps(payload, separators=(",", ":"))
         self.assertNotIn("token=abc123", serialized)
         self.assertNotIn(str(self.project_root), serialized)
-        self.assertIn("token=<redacted>", payload["reason"])
+        self.assertIn("<path:missing-state.md>", payload["reason"])
 
     def test_validate_story_creation_check_returns_compat_schema_on_bad_counts(self) -> None:
         stdout = io.StringIO()

@@ -117,7 +117,7 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         serialized = json.dumps(payload, separators=(",", ":"))
         self.assertNotIn("token=abc123", serialized)
         self.assertNotIn("/tmp/token=abc123", serialized)
-        self.assertIn("token=<redacted>", payload["issues"][0])
+        self.assertIn("<path:snapshot.json>", payload["issues"][0])
 
     def test_state_update_blocks_invalid_status_transition(self) -> None:
         state_file = self._build_state_config(status="READY")

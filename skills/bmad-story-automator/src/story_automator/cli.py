@@ -19,6 +19,7 @@ from .commands.state import cmd_build_state_doc, cmd_sprint_compare, cmd_state_m
 from .commands.tmux import cmd_codex_status_check, cmd_heartbeat_check, cmd_monitor_session, cmd_tmux_status_check, cmd_tmux_wrapper
 from .commands.validate_story_creation import cmd_validate_story_creation
 from .core.common import help_flag, print_json
+from .core.diagnostics import redact_actual
 from .core.epic_parser import epic_complete, parse_epic_file, parse_story, parse_story_range
 
 
@@ -131,7 +132,7 @@ def _cmd_parse_story(args: list[str]) -> int:
         print_json(parse_story(epic, story, rules))
         return 0
     except OSError as exc:
-        print_json({"ok": False, "error": "file_read_failed", "reason": str(exc)})
+        print_json({"ok": False, "error": "file_read_failed", "reason": str(redact_actual(str(exc)))})
         return 1
     except json.JSONDecodeError:
         print_json({"ok": False, "error": "invalid_rules_json"})

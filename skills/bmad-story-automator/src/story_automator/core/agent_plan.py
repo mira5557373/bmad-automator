@@ -166,6 +166,12 @@ def resolve_agents_payload(payload: dict[str, Any], story_id: str, task: str) ->
         selection = (story.get("tasks") or {}).get(task)
         if not selection:
             return {"ok": False, "error": "task_not_found"}
+        if not isinstance(selection, dict):
+            return agent_plan_error("invalid_agents_json", [_issue("invalid_type", f"stories[].tasks.{task}", "task selection object", selection, f"{task} task selection must be an object")])
+        issues: list[DiagnosticIssue] = []
+        _validate_task_selection(issues, selection, f"stories[].tasks.{task}", task)
+        if issues:
+            return agent_plan_error("invalid_agents_json", issues)
         fallback = normalize_fallback_value(selection.get("fallback"))
         return {
             "ok": True,
@@ -234,6 +240,9 @@ def _validate_agents_plan_resolution(payload: dict[str, Any], story_id: str, tas
         fallback = selection.get("fallback", False)
         if not (fallback is False or isinstance(fallback, str)):
             return [_issue("invalid_type", f"{field}.tasks.{task}.fallback", "false or string", fallback, f"{task} fallback must be false or a string")]
+        model = selection.get("model")
+        if not _is_model_value(model):
+            return [_issue("invalid_type", f"{field}.tasks.{task}.model", "string, false, or null", model, f"{task} model must be a string, false, or null")]
         return []
     return []
 
@@ -244,13 +253,26 @@ def agent_plan_error(error: str, issues: list[DiagnosticIssue]) -> dict[str, obj
 
 def _tasks_for(config: Any, level: str) -> dict[str, dict[str, str | bool]]:
     tasks = {}
-    for task in TASKS:
+    task_names = list(REQUIRED_TASKS)
+    if _has_task_override(config, level, "retro"):
+        task_names.append("retro")
+    for task in task_names:
         primary, fallback, model = resolve_agent_for_task(config, level, task)
         entry: dict[str, str | bool] = {"primary": primary, "fallback": False if fallback == "false" else fallback}
         if model:
             entry["model"] = model
         tasks[task] = entry
     return tasks
+
+
+def _has_task_override(config: Any, level: str, task: str) -> bool:
+    per_task = getattr(config, "per_task", {})
+    if isinstance(per_task, dict) and task in per_task:
+        return True
+    complexity_overrides = getattr(config, "complexity_overrides", {})
+    if isinstance(complexity_overrides, dict) and task in complexity_overrides.get(level, {}):
+        return True
+    return False
 
 
 def _validate_task_selection(issues: list[DiagnosticIssue], selection: dict[str, Any], task_field: str, task: str) -> None:
@@ -260,6 +282,13 @@ def _validate_task_selection(issues: list[DiagnosticIssue], selection: dict[str,
     fallback = selection.get("fallback", False)
     if not (fallback is False or isinstance(fallback, str)):
         issues.append(_issue("invalid_type", f"{task_field}.fallback", "false or string", fallback, f"{task} fallback must be false or a string"))
+    model = selection.get("model")
+    if not _is_model_value(model):
+        issues.append(_issue("invalid_type", f"{task_field}.model", "string, false, or null", model, f"{task} model must be a string, false, or null"))
+
+
+def _is_model_value(raw: Any) -> bool:
+    return raw is None or raw is False or isinstance(raw, str)
 
 
 def _issue(issue_type: str, field: str, expected: Any, actual: Any, message: str) -> DiagnosticIssue:

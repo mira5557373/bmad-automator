@@ -73,18 +73,38 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     config = AgentConfigResolved()
     if "agentConfig" in data and data.get("agentConfig") not in ("", None):
         raise ValueError("unexpected nested agentConfig key; pass the inner config object directly")
-    config.default_primary = data.get("defaultPrimary") or data.get("primary") or "auto"
+    if "defaultPrimary" in data:
+        default_primary_raw = data.get("defaultPrimary")
+    elif "primary" in data:
+        default_primary_raw = data.get("primary")
+    else:
+        default_primary_raw = "auto"
+    if default_primary_raw in ("", None):
+        default_primary_raw = "auto"
+    if not _is_non_empty_string(default_primary_raw):
+        raise ValueError("agentConfig.defaultPrimary must be a non-empty string")
+    config.default_primary = str(default_primary_raw)
     if "defaultFallback" in data:
         fallback_raw = data.get("defaultFallback")
     elif "fallback" in data:
         fallback_raw = data.get("fallback")
     else:
         fallback_raw = False
+    if fallback_raw is True or not (fallback_raw is False or fallback_raw is None or _is_non_empty_string(fallback_raw)):
+        raise ValueError("agentConfig.defaultFallback must be a non-empty string or false")
     normalized_fallback = normalize_fallback_value(fallback_raw)
     config.default_fallback = normalized_fallback or "false"
+    if "defaultModel" in data and not _is_model_value(data.get("defaultModel")):
+        raise ValueError("agentConfig.defaultModel must be a string, false, or null")
     config.default_model = _normalize_model(data.get("defaultModel"))
-    config.per_task = _parse_task_map(data.get("perTask"))
+    if "perTask" in data and data.get("perTask") is not None and not isinstance(data.get("perTask"), dict):
+        raise ValueError("agentConfig.perTask must be an object")
+    config.per_task = _parse_task_map(data.get("perTask"), field="perTask", strict_entries=True, allow_null_primary=True)
     retro_task = _parse_task_entry(data.get("retro"))
+    if "retro" in data and data.get("retro") is not None:
+        if not isinstance(data.get("retro"), dict):
+            raise ValueError("agentConfig.retro must be an object")
+        _validate_task_entry(data["retro"], "agentConfig.retro")
     if retro_task is not None:
         config.per_task.setdefault("retro", retro_task)
     complexity_raw = data.get("complexityOverrides", {})
@@ -140,7 +160,7 @@ def has_agent_config_runtime_source(frontmatter: str) -> bool:
     return False
 
 
-def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False) -> dict[str, AgentTaskConfig]:
+def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False, allow_null_primary: bool = False) -> dict[str, AgentTaskConfig]:
     if not isinstance(raw, dict):
         return {}
     output: dict[str, AgentTaskConfig] = {}
@@ -150,7 +170,7 @@ def _parse_task_map(raw: Any, *, field: str = "", strict_entries: bool = False) 
         if strict_entries and not isinstance(entry, dict):
             raise ValueError(f"agentConfig.{field}.{task} must be an object")
         if strict_entries and isinstance(entry, dict):
-            _validate_task_entry(entry, f"agentConfig.{field}.{task}")
+            _validate_task_entry(entry, f"agentConfig.{field}.{task}", allow_null_primary=allow_null_primary)
         parsed = _parse_task_entry(entry)
         if parsed is None or not _task_config_has_values(parsed):
             continue
@@ -202,19 +222,25 @@ def normalize_model(raw: Any) -> str:
 _normalize_model = normalize_model
 
 
-def _validate_task_entry(raw: dict[str, Any], field: str) -> None:
+def _validate_task_entry(raw: dict[str, Any], field: str, *, allow_null_primary: bool = False) -> None:
     allowed = {"primary", "fallback", "model"}
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ValueError(f"{field}.{unknown[0]} is not supported")
-    if "primary" in raw and not _is_non_empty_string(raw["primary"]):
+    if "primary" in raw and not (_is_non_empty_string(raw["primary"]) or (allow_null_primary and raw["primary"] is None)):
         raise ValueError(f"{field}.primary must be a non-empty string")
-    if "fallback" in raw and not (raw["fallback"] is False or _is_non_empty_string(raw["fallback"])):
+    if "fallback" in raw and not (raw["fallback"] is False or raw["fallback"] is None or _is_non_empty_string(raw["fallback"])):
         raise ValueError(f"{field}.fallback must be a non-empty string or false")
+    if "model" in raw and not _is_model_value(raw["model"]):
+        raise ValueError(f"{field}.model must be a string, false, or null")
 
 
 def _is_non_empty_string(raw: Any) -> bool:
     return isinstance(raw, str) and bool(raw.strip())
+
+
+def _is_model_value(raw: Any) -> bool:
+    return raw is None or raw is False or isinstance(raw, str)
 
 
 def render_agent_config_frontmatter(raw_config: dict[str, Any]) -> str:

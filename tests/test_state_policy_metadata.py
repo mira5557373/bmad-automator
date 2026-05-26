@@ -436,6 +436,30 @@ class StatePolicyMetadataTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_agent_config")
         self.assertIn("complexityOverrides", payload["reason"])
 
+    def test_build_state_doc_redacts_invalid_agent_config_reason(self) -> None:
+        stdout = io.StringIO()
+        template = self.project_root / ".claude" / "skills" / "bmad-story-automator" / "templates" / "state-document.md"
+        config = self._config()
+        config["agentConfig"] = {"complexityOverrides": {"medium": {"dev": {"GITHUB_TOKEN=ghp_secret": "x"}}}}
+
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(config),
+                ]
+            )
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertIn("GITHUB_TOKEN=<redacted>", payload["reason"])
+        self.assertNotIn("ghp_secret", payload["reason"])
+
     def test_legacy_resolve_agent_defaults_missing_fallback_to_disabled(self) -> None:
         primary, fallback, model = resolve_agent({"defaultPrimary": "codex"}, "medium", "review")
 

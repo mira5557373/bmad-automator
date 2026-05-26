@@ -19,10 +19,19 @@ SECRET_QUOTED_ASSIGNMENT_RE = re.compile(
 SECRET_ASSIGNMENT_RE = re.compile(
     rf"(?i)(?<![A-Za-z0-9_.-])({SECRET_KEY_PATTERN})(?![A-Za-z0-9_.-])\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
+SECRET_PATH_VALUE_ASSIGNMENT_RE = re.compile(
+    rf"(?i)(?<![A-Za-z0-9_.-])({SECRET_KEY_PATTERN})(?![A-Za-z0-9_.-])\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?<path:[^>]+>"
+)
+SECRET_PATH_PLACEHOLDER_ASSIGNMENT_RE = re.compile(
+    rf"(?i)(<path:({SECRET_KEY_PATTERN})>)\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
+)
 ABSOLUTE_PATH_WITH_EXT_RE = re.compile(
     r"(?<![\w.-])(?:/(?:[^,\n;:]+/)+[^,\n;:]*?|[A-Za-z]:[\\/](?:[^,\n;:]+[\\/])+[^,\n;:]*?)\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
 )
-ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])(?:/[^\s,;:]+|[A-Za-z]:[\\/][^\s,;:]+)+")
+ABSOLUTE_PATH_RE = re.compile(
+    rf"(?<![\w.-])(?:/(?:[^,\n;:=]+/)+(?:(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+|"
+    rf"[A-Za-z]:[\\/](?:[^,\n;:=]+[\\/])+(?:(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+)"
+)
 
 
 @dataclass(frozen=True)
@@ -108,7 +117,7 @@ def issues_from_exception(exc: Exception, source: str, field: str = "") -> list[
         DiagnosticIssue(
             type=exc.__class__.__name__,
             field=field,
-            actual=str(exc),
+            actual=message,
             message=str(message) or exc.__class__.__name__,
             severity="error",
             source=source,
@@ -130,7 +139,8 @@ def redact_actual(value: Any) -> Any:
                 redacted["..."] = f"{len(value) - MAX_COLLECTION_ITEMS} more"
                 break
             key_text = str(key)
-            redacted[key_text] = "<redacted>" if SENSITIVE_KEY_RE.search(key_text) else redact_actual(item)
+            safe_key = _redact_string(key_text)
+            redacted[safe_key] = "<redacted>" if SENSITIVE_KEY_RE.search(key_text) else redact_actual(item)
         return redacted
     if isinstance(value, (list, tuple, set)):
         items = list(value)
@@ -154,10 +164,12 @@ def _json_safe(value: Any) -> Any:
 
 
 def _redact_string(value: str) -> str:
-    value = SECRET_QUOTED_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
-    value = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     value = ABSOLUTE_PATH_WITH_EXT_RE.sub(_path_placeholder, value)
     value = ABSOLUTE_PATH_RE.sub(_path_placeholder, value)
+    value = SECRET_PATH_VALUE_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
+    value = SECRET_PATH_PLACEHOLDER_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
+    value = SECRET_QUOTED_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
+    value = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     if len(value) > MAX_STRING_LENGTH:
         return f"{value[:MAX_STRING_LENGTH]}...<truncated {len(value) - MAX_STRING_LENGTH} chars>"
     return value

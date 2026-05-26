@@ -4,6 +4,7 @@ import json
 
 from ..core.agent_config import load_presets_file, save_presets_file
 from ..core.common import iso_now, print_json
+from ..core.diagnostics import redact_actual
 
 
 def cmd_agent_config(args: list[str]) -> int:
@@ -100,7 +101,7 @@ def _load_presets_or_report(file_path: str) -> dict | None:
         print_json({"ok": False, "error": "invalid_presets_json"})
         return None
     except (OSError, UnicodeDecodeError) as exc:
-        print_json({"ok": False, "error": "presets_file_error", "reason": str(exc)})
+        print_json({"ok": False, "error": "presets_file_error", "reason": str(redact_actual(str(exc)))})
         return None
     except ValueError:
         print_json({"ok": False, "error": "invalid_presets_json"})

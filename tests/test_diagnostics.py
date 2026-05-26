@@ -86,6 +86,9 @@ class DiagnosticsTests(unittest.TestCase):
 
         payload = serialize_issue(issues[0])
 
+        self.assertIn("token=<redacted>", issues[0].actual)
+        self.assertIn("<path:state.json>", issues[0].actual)
+        self.assertNotIn("abc123", issues[0].actual)
         self.assertIn("token=<redacted>", payload["message"])
         self.assertIn("<path:state.json>", payload["message"])
         self.assertNotIn("abc123", payload["message"])
@@ -97,6 +100,20 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["token"], "<redacted>")
         self.assertEqual(payload["safe"], "visible")
         self.assertEqual(payload["nested"]["password"], "<redacted>")
+
+    def test_redact_actual_masks_sensitive_dict_key_text(self) -> None:
+        payload = redact_actual(
+            {
+                "GITHUB_TOKEN=ghp_secret": "x",
+                "/Users/joon/My Project/private/state.md": "x",
+            }
+        )
+
+        serialized = json.dumps(payload, separators=(",", ":"))
+        self.assertIn("GITHUB_TOKEN=<redacted>", payload)
+        self.assertIn("<path:state.md>", payload)
+        self.assertNotIn("ghp_secret", serialized)
+        self.assertNotIn("My Project", serialized)
 
     def test_redact_actual_masks_secret_assignments_in_strings(self) -> None:
         redacted = redact_actual("token=abc123 password:pw keep=this")
@@ -151,6 +168,49 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(redacted, "<path:state.md> token=<redacted>")
         self.assertNotIn("My Project", redacted)
         self.assertNotIn("private/state.md", redacted)
+
+    def test_redact_actual_masks_absolute_path_filenames_with_spaces(self) -> None:
+        redacted = redact_actual("failed at /Users/joon/My Project/private/my file.md token=abc123")
+
+        self.assertEqual(redacted, "failed at <path:my file.md> token=<redacted>")
+        self.assertNotIn("My Project", redacted)
+        self.assertNotIn("private/my file.md", redacted)
+
+    def test_redact_actual_masks_extensionless_absolute_paths_with_spaces(self) -> None:
+        redacted = redact_actual("failed at /Users/joon/My Project/private token=abc123")
+
+        self.assertEqual(redacted, "failed at <path:private> token=<redacted>")
+        self.assertNotIn("My Project", redacted)
+        self.assertNotIn("private", redacted.removeprefix("failed at <path:private>"))
+
+    def test_redact_actual_masks_extensionless_absolute_paths_with_spaced_leaf(self) -> None:
+        redacted = redact_actual("failed at /Users/joon/My Project/private folder token=abc123")
+
+        self.assertEqual(redacted, "failed at <path:private folder> token=<redacted>")
+        self.assertNotIn("My Project", redacted)
+        self.assertNotIn("private folder", redacted.removeprefix("failed at <path:private folder>"))
+
+    def test_redact_actual_masks_secret_values_in_path_segments(self) -> None:
+        for raw in ("/tmp/token=abc123", "/tmp/foo/GITHUB_TOKEN=ghp_secret/bar"):
+            with self.subTest(raw=raw):
+                redacted = redact_actual(raw)
+
+                self.assertNotIn("abc123", redacted)
+                self.assertNotIn("ghp_secret", redacted)
+                self.assertIn("<redacted>", redacted)
+
+    def test_redact_actual_masks_path_values_in_secret_assignments(self) -> None:
+        for raw in (
+            "token=/Users/joon/My Project/private/my file.md",
+            "Authorization: Bearer /Users/joon/My Project/private/token file.txt",
+        ):
+            with self.subTest(raw=raw):
+                redacted = redact_actual(raw)
+
+                self.assertIn("<redacted>", redacted)
+                self.assertNotIn("My Project", redacted)
+                self.assertNotIn("file.md", redacted)
+                self.assertNotIn("file.txt", redacted)
 
     def test_redact_actual_masks_windows_absolute_paths(self) -> None:
         redacted = redact_actual(r"C:\Users\joon\private\state.md token=abc123")

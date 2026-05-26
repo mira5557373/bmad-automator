@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.agent_config import render_agent_config_frontmatter
+from ..core.diagnostics import redact_actual
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
 from ..core.runtime_policy import PolicyError, snapshot_effective_policy
 from ..core.state_validation import state_validation_payload, validate_state_fields
@@ -84,7 +85,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
         try:
             block = render_agent_config_frontmatter(agent_config)
         except ValueError as exc:
-            write_json({"ok": False, "error": "invalid_agent_config", "reason": str(exc)})
+            write_json({"ok": False, "error": "invalid_agent_config", "reason": str(redact_actual(str(exc)))})
             return 1
         text = re.sub(r"(?m)^agentConfig:\n(?:(?:\s{2}.*\n)*)", block, text)
     for key, value in replacements.items():

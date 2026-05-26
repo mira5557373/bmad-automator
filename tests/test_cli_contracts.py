@@ -74,13 +74,14 @@ class CliParserContractTests(unittest.TestCase):
         rules = self.root / "rules.json"
         rules.write_text("{}", encoding="utf-8")
 
-        with mock.patch("story_automator.cli.parse_story", side_effect=OSError("permission denied")):
+        with mock.patch("story_automator.cli.parse_story", side_effect=OSError(f"permission denied: {self.root / 'rules.json'}")):
             code, payload = self._main_json(["parse-story", "--epic", str(epic), "--story", "1.1", "--rules", str(rules)])
 
         self.assertEqual(code, 1)
         self.assertEqual(payload["ok"], False)
         self.assertEqual(payload["error"], "file_read_failed")
         self.assertIn("permission denied", payload["reason"])
+        self.assertNotIn(str(self.root), payload["reason"])
 
     def test_module_subprocess_preserves_json_error_contract(self) -> None:
         result = self._subprocess([sys.executable, "-m", "story_automator", "parse-story-range", "--input", "all", "--total", "abc"])
@@ -169,6 +170,15 @@ class AgentConfigCommandContractTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "presets_file_error")
+
+    def test_presets_file_error_redacts_paths(self) -> None:
+        with mock.patch("story_automator.commands.agent_config_cmd.load_presets_file", side_effect=OSError(f"permission denied: {self.presets}")):
+            code, payload = self._agent(["list", "--file", str(self.presets)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "presets_file_error")
+        self.assertIn("permission denied", payload["reason"])
+        self.assertNotIn(str(self.presets.parent), payload["reason"])
 
     def test_presets_wrong_shape_returns_stable_error(self) -> None:
         for payload_text in ("[]", '"bad"', '{"presets": {}}', '{"presets":[{}]}', '{"presets":["bad"]}'):
@@ -260,6 +270,46 @@ class TmuxCommandContractTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(sessions, [own, legacy_own])
+
+    def test_project_only_session_filter_keeps_live_current_project_legacy_session_by_cwd(self) -> None:
+        legacy_own = f"sa-{project_slug(str(self.root))}-260521-101012-e5-s5-3-review"
+
+        def fake_run_cmd(*args: str) -> tuple[str, int]:
+            if args[:2] == ("tmux", "list-sessions"):
+                return (legacy_own, 0)
+            if args[:2] == ("tmux", "display-message"):
+                return (str(self.root), 0)
+            return ("", 1)
+
+        with (
+            mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}),
+            mock.patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
+            mock.patch("story_automator.core.tmux_runtime.run_cmd", side_effect=fake_run_cmd),
+        ):
+            sessions, code = tmux_list_sessions(project_only=True)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sessions, [legacy_own])
+
+    def test_project_only_session_filter_rejects_legacy_session_with_empty_cwd(self) -> None:
+        legacy_own = f"sa-{project_slug(str(self.root))}-260521-101012-e5-s5-3-review"
+
+        def fake_run_cmd(*args: str) -> tuple[str, int]:
+            if args[:2] == ("tmux", "list-sessions"):
+                return (legacy_own, 0)
+            if args[:2] == ("tmux", "display-message"):
+                return ("", 0)
+            return ("", 1)
+
+        with (
+            mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}),
+            mock.patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
+            mock.patch("story_automator.core.tmux_runtime.run_cmd", side_effect=fake_run_cmd),
+        ):
+            sessions, code = tmux_list_sessions(project_only=True)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sessions, [])
 
     def test_project_only_session_filter_ignores_invalid_same_slug_sessions(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"

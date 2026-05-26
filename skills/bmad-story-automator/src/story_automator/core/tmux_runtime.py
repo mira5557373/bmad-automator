@@ -160,7 +160,22 @@ def _matches_current_project_session(session: str) -> bool:
         paths = session_paths(session)
     except ValueError:
         return False
-    return any(path.exists() for path in (paths.state, paths.command, paths.runner, paths.output))
+    if any(path.exists() for path in (paths.state, paths.command, paths.runner, paths.output)):
+        return True
+    return _legacy_session_cwd_matches_current_project(session)
+
+
+def _legacy_session_cwd_matches_current_project(session: str) -> bool:
+    output, code = run_cmd("tmux", "display-message", "-t", session, "-p", "#{pane_current_path}")
+    if code != 0:
+        return False
+    pane_path = output.strip()
+    if not pane_path:
+        return False
+    try:
+        return Path(pane_path).resolve() == Path(get_project_root()).resolve()
+    except OSError:
+        return False
 
 
 def monitor_session_state_issue(session: str, project_root: str) -> object | None:
@@ -521,6 +536,7 @@ def _spawn_legacy(session: str, command: str, selected_agent: str, project_root:
     )
     if code != 0:
         return (output, code)
+    _save_legacy_state(paths.state, poll_count=0, has_active=False, done=0, total=0, status_time="")
     if len(command) > 500:
         _write_private_text(paths.command, "#!/bin/bash\n" + command + "\n", 0o700)
         run_cmd("tmux", "send-keys", "-t", session, f"bash {paths.command}", "Enter")
@@ -962,7 +978,11 @@ def _status_mode(session: str, project_root: str | None, mode: str | None) -> st
     if configured in {"legacy", "runner"}:
         return configured
     state = load_session_state(session_paths(session, project_root).state)
-    if int(state.get("schemaVersion") or 0) == STATE_SCHEMA_VERSION:
+    try:
+        schema_version = int(state.get("schemaVersion") or 0)
+    except (TypeError, ValueError):
+        return "legacy"
+    if schema_version == STATE_SCHEMA_VERSION:
         return "runner"
     return "legacy"
 

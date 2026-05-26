@@ -279,6 +279,29 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(payload["fallback"], "false")
         self.assertEqual(payload["complexity"], "high")
 
+    def test_agents_build_omits_retro_task_without_retro_config(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+
+        code, payload = self._helper(
+            [
+                "agents-build",
+                "--state-file",
+                str(self.state_file),
+                "--complexity-file",
+                str(self.complexity_file),
+                "--output",
+                str(self.agents_file),
+                "--config-json",
+                json.dumps({"defaultPrimary": "codex", "defaultFallback": False}),
+            ]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["stories"], 1)
+        agents_payload, issues = load_agents_plan(str(self.agents_file))
+        self.assertEqual(issues, [])
+        self.assertNotIn("retro", agents_payload["stories"][0]["tasks"])
+
     def test_agents_build_preserves_missing_title_as_empty_string(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "complexity": {"level": "medium"}}]}), encoding="utf-8")
 
@@ -324,6 +347,34 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["primary"], "codex")
 
+    def test_agents_build_rejects_malformed_top_level_per_task_entries(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+
+        for config in (
+            {"defaultPrimary": False},
+            {"primary": 0},
+            {"perTask": {"dev": {"primary": ["codex"]}}},
+            {"perTask": {"dev": {"fallback": True}}},
+            {"perTask": {"dev": {"model": ["bad"]}}},
+        ):
+            with self.subTest(config=config):
+                code, payload = self._helper(
+                    [
+                        "agents-build",
+                        "--state-file",
+                        str(self.state_file),
+                        "--complexity-file",
+                        str(self.complexity_file),
+                        "--output",
+                        str(self.agents_file),
+                        "--config-json",
+                        json.dumps(config),
+                    ]
+                )
+
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"], "invalid_agent_config")
+
     def test_agents_resolve_allows_partial_direct_agents_file(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
 
@@ -332,6 +383,18 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["primary"], "codex")
         self.assertEqual(payload["fallback"], "false")
+
+    def test_agents_resolve_rejects_malformed_model_value(self) -> None:
+        self.agents_file.write_text(
+            '```json\n{"stories":[{"storyId":"1.1","tasks":{"dev":{"primary":"codex","fallback":false,"model":["bad"]}}}]}\n```\n',
+            encoding="utf-8",
+        )
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "dev"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agents_json")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "stories[0].tasks.dev.model")
 
     def test_agents_resolve_rejects_malformed_requested_task_with_structured_issues(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": ""}}}]}), encoding="utf-8")
