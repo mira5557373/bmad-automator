@@ -861,7 +861,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
 
     def test_monitor_dispatch_rejects_resolver_value_error(self) -> None:
-        with patch("story_automator.commands.tmux.resolve_success_contract", side_effect=ValueError("invalid verifier config")):
+        with patch("story_automator.commands.tmux_monitor.resolve_success_contract", side_effect=ValueError("invalid verifier config")):
             result = _verify_monitor_completion(
                 "review",
                 project_root=str(self.project_root),
@@ -899,7 +899,7 @@ class SuccessVerifierTests(unittest.TestCase):
         ]
         with patch_env(self.project_root), patch("story_automator.commands.tmux.time.sleep"), patch(
             "story_automator.commands.tmux.session_status", side_effect=statuses
-        ), patch("story_automator.commands.tmux.resolve_success_contract", side_effect=ValueError("invalid verifier config")), redirect_stdout(stdout):
+        ), patch("story_automator.commands.tmux_monitor.resolve_success_contract", side_effect=ValueError("invalid verifier config")), redirect_stdout(stdout):
             code = cmd_monitor_session(["fake-session", "--json", "--workflow", "review", "--story-key", "1.2"])
         self.assertEqual(code, 0)
         payload = json.loads(stdout.getvalue())
@@ -922,7 +922,7 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
 
     def test_monitor_dispatch_rejects_verifier_value_error(self) -> None:
-        with patch("story_automator.commands.tmux.run_success_verifier", side_effect=ValueError("invalid artifacts config")):
+        with patch("story_automator.commands.tmux_monitor.run_success_verifier", side_effect=ValueError("invalid artifacts config")):
             result = _verify_monitor_completion(
                 "review",
                 project_root=str(self.project_root),
@@ -959,7 +959,7 @@ class SuccessVerifierTests(unittest.TestCase):
         ]
         with patch_env(self.project_root), patch("story_automator.commands.tmux.time.sleep"), patch(
             "story_automator.commands.tmux.session_status", side_effect=statuses
-        ), patch("story_automator.commands.tmux.run_success_verifier", side_effect=ValueError("invalid artifacts config")), redirect_stdout(stdout):
+        ), patch("story_automator.commands.tmux_monitor.run_success_verifier", side_effect=ValueError("invalid artifacts config")), redirect_stdout(stdout):
             code = cmd_monitor_session(["fake-session", "--json", "--workflow", "review", "--story-key", "1.2"])
         self.assertEqual(code, 0)
         payload = json.loads(stdout.getvalue())
@@ -970,9 +970,12 @@ class SuccessVerifierTests(unittest.TestCase):
     def test_monitor_session_timeout_keeps_output_unverified_without_verifier_result(self) -> None:
         stdout = io.StringIO()
         with patch_env(self.project_root), patch(
-            "story_automator.commands.tmux.session_status", return_value={"active_task": "/tmp/session.txt"}
+            "story_automator.commands.tmux.session_status",
+            return_value={"active_task": "/tmp/session.txt", "todos_done": 0, "todos_total": 0, "session_state": "running", "wait_estimate": 0},
+        ), patch(
+            "story_automator.commands.tmux.time.sleep"
         ), redirect_stdout(stdout):
-            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "0"])
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "1", "--initial-wait", "0"])
         self.assertEqual(code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["final_state"], "timeout")
@@ -983,6 +986,16 @@ class SuccessVerifierTests(unittest.TestCase):
         stdout = io.StringIO()
         with patch_env(self.project_root), redirect_stdout(stdout):
             code = cmd_monitor_session(["fake-session", "--max-polls", "abc", "--json"])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"], "invalid_numeric_option")
+        self.assertEqual(payload["flag"], "--max-polls")
+
+    def test_monitor_session_rejects_zero_max_polls(self) -> None:
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "0"])
 
         self.assertEqual(code, 1)
         payload = json.loads(stdout.getvalue())
@@ -1044,13 +1057,13 @@ class SuccessVerifierTests(unittest.TestCase):
 
         def fake_session_status(*args: object, **kwargs: object) -> dict[str, object]:
             calls.append({"args": args, **kwargs})
-            return {"active_task": "/tmp/session.txt"}
+            return {"active_task": "/tmp/session.txt", "todos_done": 0, "todos_total": 0, "session_state": "running", "wait_estimate": 0}
 
         stdout = io.StringIO()
         with patch_env(self.project_root), patch("story_automator.commands.tmux.runtime_provider", return_value="codex"), patch(
             "story_automator.commands.tmux.session_status", side_effect=fake_session_status
-        ), redirect_stdout(stdout):
-            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "0", "--agent", "runtime"])
+        ), patch("story_automator.commands.tmux.time.sleep"), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "1", "--initial-wait", "0", "--agent", "runtime"])
 
         self.assertEqual(code, 0)
         self.assertTrue(calls)

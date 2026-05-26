@@ -26,11 +26,14 @@ SECRET_PATH_PLACEHOLDER_ASSIGNMENT_RE = re.compile(
     rf"(?i)(<path:({SECRET_KEY_PATTERN})>)\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?[^\s,;]+"
 )
 ABSOLUTE_PATH_WITH_EXT_RE = re.compile(
-    r"(?<![\w.-])(?:/(?:[^,\n;:]+/)+[^,\n;:]*?|[A-Za-z]:[\\/](?:[^,\n;:]+[\\/])+[^,\n;:]*?)\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
+    r"(?<![\w.-])(?:/(?:[^/,\n;:]+/)+[^,\n;:]*?|[A-Za-z]:[\\/](?:[^\\/,\n;:]+[\\/])+[^,\n;:]*?)\.[A-Za-z0-9][A-Za-z0-9._-]*(?=$|[\s,;:)\]}\"'])"
+)
+ABSOLUTE_PATH_BEFORE_SECRET_RE = re.compile(
+    rf"(?<![\w.-])(?:/(?:[^/,\n;:=]+/)+(?:(?!\s+(?:and\s+)?(?:/|[A-Za-z]:[\\/]))(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+|"
+    rf"[A-Za-z]:[\\/](?:[^\\/,\n;:=]+[\\/])+(?:(?!\s+(?:and\s+)?(?:/|[A-Za-z]:[\\/]))(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+)(?=\s+{SECRET_KEY_PATTERN}\s*[:=])"
 )
 ABSOLUTE_PATH_RE = re.compile(
-    rf"(?<![\w.-])(?:/(?:[^,\n;:=]+/)+(?:(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+|"
-    rf"[A-Za-z]:[\\/](?:[^,\n;:=]+[\\/])+(?:(?!\s+{SECRET_KEY_PATTERN}\s*[:=])[^,\n;:=])+)"
+    r"(?<![\w.-])(?:/(?:[^/\s,\n;:=]+/)+[^/\s,\n;:=]+|[A-Za-z]:[\\/](?:[^\\/\s,\n;:=]+[\\/])+[^\\/\s,\n;:=]+)"
 )
 
 
@@ -165,6 +168,7 @@ def _json_safe(value: Any) -> Any:
 
 def _redact_string(value: str) -> str:
     value = ABSOLUTE_PATH_WITH_EXT_RE.sub(_path_placeholder, value)
+    value = ABSOLUTE_PATH_BEFORE_SECRET_RE.sub(_path_before_secret_placeholder, value)
     value = ABSOLUTE_PATH_RE.sub(_path_placeholder, value)
     value = SECRET_PATH_VALUE_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
     value = SECRET_PATH_PLACEHOLDER_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", value)
@@ -179,3 +183,10 @@ def _path_placeholder(match: re.Match[str]) -> str:
     path = match.group(0)
     name = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     return f"<path:{name}>" if name else "<path>"
+
+
+def _path_before_secret_placeholder(match: re.Match[str]) -> str:
+    value = match.group(0)
+    if len(list(ABSOLUTE_PATH_RE.finditer(value))) > 1:
+        return ABSOLUTE_PATH_RE.sub(_path_placeholder, value)
+    return _path_placeholder(match)

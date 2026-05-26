@@ -309,7 +309,7 @@ def cmd_monitor_session(args: list[str]) -> int:
     while idx < len(args):
         arg = args[idx]
         if arg == "--max-polls":
-            parsed = _parse_positive_int_option("--max-polls", args[idx + 1] if idx + 1 < len(args) else "", json_output, minimum=0)
+            parsed = _parse_positive_int_option("--max-polls", args[idx + 1] if idx + 1 < len(args) else "", json_output)
             if parsed is None:
                 return 1
             max_polls = parsed

@@ -190,6 +190,18 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("My Project", redacted)
         self.assertNotIn("private folder", redacted.removeprefix("failed at <path:private folder>"))
 
+    def test_redact_actual_keeps_distinct_extensionless_paths_separate(self) -> None:
+        posix = redact_actual("failed at /tmp/foo and /tmp/bar")
+        windows = redact_actual(r"C:\tmp\foo and C:\tmp\bar")
+
+        self.assertEqual(posix, "failed at <path:foo> and <path:bar>")
+        self.assertEqual(windows, r"<path:foo> and <path:bar>")
+
+    def test_redact_actual_keeps_distinct_extensionless_paths_before_secret_separate(self) -> None:
+        redacted = redact_actual("failed at /tmp/foo and /tmp/bar token=abc123")
+
+        self.assertEqual(redacted, "failed at <path:foo> and <path:bar> token=<redacted>")
+
     def test_redact_actual_masks_secret_values_in_path_segments(self) -> None:
         for raw in ("/tmp/token=abc123", "/tmp/foo/GITHUB_TOKEN=ghp_secret/bar"):
             with self.subTest(raw=raw):

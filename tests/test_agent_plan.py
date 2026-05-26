@@ -347,11 +347,37 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["primary"], "codex")
 
+    def test_agents_build_preserves_legacy_primary_when_default_primary_empty(self) -> None:
+        self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
+
+        for default_primary in (None, ""):
+            with self.subTest(defaultPrimary=default_primary):
+                code, _ = self._helper(
+                    [
+                        "agents-build",
+                        "--state-file",
+                        str(self.state_file),
+                        "--complexity-file",
+                        str(self.complexity_file),
+                        "--output",
+                        str(self.agents_file),
+                        "--config-json",
+                        json.dumps({"defaultPrimary": default_primary, "primary": "codex"}),
+                    ]
+                )
+
+                self.assertEqual(code, 0)
+                code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "dev"])
+                self.assertEqual(code, 0)
+                self.assertEqual(payload["primary"], "codex")
+
     def test_agents_build_rejects_malformed_top_level_per_task_entries(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")
 
         for config in (
             {"defaultPrimary": False},
+            {"defaultPrimary": "", "primary": ""},
+            {"defaultPrimary": None, "primary": None},
             {"primary": 0},
             {"perTask": {"dev": {"primary": ["codex"]}}},
             {"perTask": {"dev": {"fallback": True}}},

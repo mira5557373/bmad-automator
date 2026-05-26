@@ -73,13 +73,19 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     config = AgentConfigResolved()
     if "agentConfig" in data and data.get("agentConfig") not in ("", None):
         raise ValueError("unexpected nested agentConfig key; pass the inner config object directly")
+    used_legacy_primary_fallback = False
     if "defaultPrimary" in data:
         default_primary_raw = data.get("defaultPrimary")
+        if default_primary_raw in ("", None) and "primary" in data:
+            default_primary_raw = data.get("primary")
+            used_legacy_primary_fallback = True
     elif "primary" in data:
         default_primary_raw = data.get("primary")
     else:
         default_primary_raw = "auto"
     if default_primary_raw in ("", None):
+        if used_legacy_primary_fallback:
+            raise ValueError("agentConfig.defaultPrimary must be a non-empty string")
         default_primary_raw = "auto"
     if not _is_non_empty_string(default_primary_raw):
         raise ValueError("agentConfig.defaultPrimary must be a non-empty string")

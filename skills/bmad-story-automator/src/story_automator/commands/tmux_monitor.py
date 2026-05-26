@@ -34,7 +34,7 @@ def verify_monitor_completion(
 ) -> tuple[dict[str, object], str] | None:
     try:
         contract = resolve_success_contract(project_root, workflow, state_file=state_file)
-    except (FileNotFoundError, PolicyError):
+    except (FileNotFoundError, OSError, PolicyError, ValueError):
         return ({"verified": False, "reason": "verifier_contract_invalid"}, "")
     verifier_name = str(contract.get("verifier") or "").strip()
     if not verifier_name:
@@ -49,7 +49,7 @@ def verify_monitor_completion(
             output_file=output_file,
             contract=contract,
         )
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PolicyError):
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, OSError, PolicyError, ValueError):
         return ({"verified": False, "reason": "verifier_contract_invalid"}, verifier_name)
     return (result, verifier_name)
 
