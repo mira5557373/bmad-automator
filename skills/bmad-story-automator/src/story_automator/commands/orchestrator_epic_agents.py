@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from story_automator.core.artifact_paths import implementation_artifacts_dir
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
@@ -192,11 +193,14 @@ def retro_agent_action(args: list[str]) -> int:
 
 
 def find_epic_file(epic: str) -> str:
+    artifacts = implementation_artifacts_dir(get_project_root())
+    matches = sorted(artifacts.glob(f"epic-{epic}-*.md"))
+    if matches:
+        return str(matches[0])
     root = Path(get_project_root())
-    for pattern in (f"_bmad-output/implementation-artifacts/epic-{epic}-*.md", f"docs/epics/epic-{epic}-*.md"):
-        matches = sorted(root.glob(pattern))
-        if matches:
-            return str(matches[0])
+    matches = sorted(root.glob(f"docs/epics/epic-{epic}-*.md"))
+    if matches:
+        return str(matches[0])
     return ""
 
 

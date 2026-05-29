@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
-from story_automator.commands.state import cmd_build_state_doc
+from story_automator.commands.state import cmd_build_state_doc, cmd_sprint_compare
 from story_automator.commands.tmux import _build_cmd, _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
 from story_automator.commands.validate_story_creation import cmd_validate_story_creation
 from story_automator.core.review_verify import verify_code_review_completion
@@ -268,6 +268,55 @@ class SuccessVerifierTests(unittest.TestCase):
             prompt = _render_step_prompt({"prompt": {"templatePath": str(template)}, "assets": {"files": {}}}, "1.2", "1-2", "")
         self.assertIn("docs/bmad/implementation-artifacts/1-2-*.md", prompt)
         self.assertNotIn("_bmad-output/implementation-artifacts", prompt)
+
+    def test_resume_step_uses_configured_sprint_status_path(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        state_file = self._build_state()
+        self._write_docs_sprint_status("1.2: done\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_sprint_compare(["--state", str(state_file), "--sprint", str(self.docs_artifacts_dir / "sprint-status.yaml")])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["incomplete"], [])
+
+    def test_monitoring_fallback_uses_implementation_artifacts_placeholder(self) -> None:
+        fallback = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "monitoring-fallback.md").read_text(encoding="utf-8")
+        self.assertIn("ls {{implementation_artifacts}}/{story_prefix}-*.md", fallback)
+        self.assertNotIn("ls _bmad-output/implementation-artifacts/{story_prefix}-*.md", fallback)
+
+    def test_check_blocking_uses_configured_artifacts_epic_file(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self.docs_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (self.docs_artifacts_dir / "epic-1-docs.md").write_text(
+            "### Story 1.1:\n**Dependencies**: none\n\n### Story 1.2:\n**Dependencies**: none\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["check-blocking", "1.1"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["blocking"])
+        self.assertEqual(payload["reason"], "no_dependents_found")
+        self.assertEqual(payload["source"], "epic_file")
+
+    def test_get_epic_stories_uses_configured_artifacts_epic_file(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self.docs_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (self.docs_artifacts_dir / "epic-1-docs.md").write_text(
+            "### Story 1.1:\n\n### Story 1.2:\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["get-epic-stories", "1"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["stories"], ["1.1", "1.2"])
+        self.assertEqual(payload["source"], "epic_file")
 
     def test_build_cmd_returns_controlled_error_for_invalid_artifacts_config(self) -> None:
         self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
