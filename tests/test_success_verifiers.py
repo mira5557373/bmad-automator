@@ -203,6 +203,24 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(Path(sprint_status_file(str(self.project_root))), legacy)
         self.assertEqual(normalize_story_key(str(self.project_root), "1.2").key, "1-2-legacy")
 
+    def test_configured_sprint_status_does_not_fallback_to_legacy_root(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-2-docs", status="review")
+        legacy = self.project_root / "_bmad-output" / "sprint-status.yaml"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("1-2-docs: done\n", encoding="utf-8")
+
+        self.assertEqual(Path(sprint_status_file(str(self.project_root))), self.docs_artifacts_dir / "sprint-status.yaml")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="1.2",
+            contract={"doneValues": ["done"], "sourceOrder": ["sprint-status.yaml", "story-file"], "syncSprintStatus": False},
+        )
+
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story_file_status"], "review")
+        self.assertEqual(payload["sprint_status"], "unknown")
+
     def test_story_file_status_uses_resolved_artifacts_dir(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
         story = self._write_docs_story("1-2-docs", status="ready")
@@ -299,6 +317,29 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("BMAD config implementation_artifacts", stderr.getvalue())
 
+    def test_validate_story_creation_handles_unreadable_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        with patch("story_automator.core.artifact_paths.read_text", side_effect=PermissionError("config unreadable")):
+            stderr = io.StringIO()
+            with patch_env(self.project_root), redirect_stderr(stderr):
+                count_code = cmd_validate_story_creation(["count", "1.2"])
+            self.assertEqual(count_code, 1)
+            self.assertIn("config unreadable", stderr.getvalue())
+
+            stdout = io.StringIO()
+            with patch_env(self.project_root), redirect_stdout(stdout):
+                check_code = cmd_validate_story_creation(["check", "1.2"])
+            self.assertEqual(check_code, 1)
+            check_payload = json.loads(stdout.getvalue())
+            self.assertFalse(check_payload["valid"])
+            self.assertIn("config unreadable", check_payload["reason"])
+
+            stderr = io.StringIO()
+            with patch_env(self.project_root), redirect_stderr(stderr):
+                list_code = cmd_validate_story_creation(["list", "1.2"])
+            self.assertEqual(list_code, 1)
+            self.assertIn("config unreadable", stderr.getvalue())
+
     def test_step_prompt_uses_resolved_artifacts_dir(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
         template = self.project_root / "prompt.md"
@@ -320,16 +361,59 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["incomplete"], [])
 
-    def test_monitoring_fallback_uses_implementation_artifacts_placeholder(self) -> None:
+    def test_monitoring_fallback_resolves_implementation_artifacts_from_helper(self) -> None:
         fallback = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "monitoring-fallback.md").read_text(encoding="utf-8")
-        self.assertIn('find "{{implementation_artifacts}}" -maxdepth 1 -type f -name "{story_prefix}-*.md"', fallback)
+        self.assertIn('orchestrator-helper sprint-status path', fallback)
+        self.assertIn("jq -er 'select(.ok == true) | .path'", fallback)
+        self.assertIn('find "$implementation_artifacts_dir" -maxdepth 1 -type f -name "{story_prefix}-*.md"', fallback)
+        self.assertIn('story_file=""', fallback)
+        self.assertNotIn("{{implementation_artifacts}}", fallback)
         self.assertNotIn("ls {{implementation_artifacts}}/{story_prefix}-*.md", fallback)
         self.assertNotIn("ls _bmad-output/implementation-artifacts/{story_prefix}-*.md", fallback)
 
-    def test_resume_step_uses_implementation_artifacts_sprint_status_placeholder(self) -> None:
+    def test_resume_step_resolves_sprint_status_path_from_helper(self) -> None:
         step = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "steps-c" / "step-01b-continue.md").read_text(encoding="utf-8")
-        self.assertIn('defaultSprintStatusFile: "{implementation_artifacts}/sprint-status.yaml"', step)
+        self.assertIn('defaultSprintStatusFile: ""', step)
+        self.assertIn('orchestrator-helper sprint-status path', step)
+        self.assertIn("jq -er 'select(.ok == true) | .path'", step)
+        self.assertIn("HALT", step)
+        self.assertIn('--sprint "$defaultSprintStatusFile"', step)
+        self.assertNotIn("{implementation_artifacts}/sprint-status.yaml", step)
         self.assertNotIn('defaultSprintStatusFile: "{output_folder}/implementation-artifacts/sprint-status.yaml"', step)
+
+    def test_sprint_status_helpers_return_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        for args in (["sprint-status", "path"], ["sprint-status", "get", "1.2"], ["sprint-status", "exists"], ["sprint-status", "check-epic", "1"]):
+            with self.subTest(args=args):
+                stdout = io.StringIO()
+                with patch_env(self.project_root), redirect_stdout(stdout):
+                    code = cmd_orchestrator_helper(args)
+                self.assertEqual(code, 1)
+                payload = json.loads(stdout.getvalue())
+                self.assertFalse(payload["ok"])
+                self.assertIn("BMAD config implementation_artifacts", payload["error"])
+
+    def test_commit_ready_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["commit-ready", "1.2"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ready"])
+        self.assertEqual(payload["story"], "1.2")
+        self.assertIn("BMAD config implementation_artifacts", payload["reason"])
+
+    def test_normalize_key_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["normalize-key", "1.2"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["input"], "1.2")
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
 
     def test_check_blocking_uses_configured_artifacts_epic_file(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")

@@ -3,7 +3,7 @@ name: "step-01b-continue"
 description: "Handle workflow continuation from previous session"
 outputFolder: "{output_folder}/story-automator"
 outputFile: "{outputFolder}/orchestration-{epic_id}-{timestamp}.md"
-defaultSprintStatusFile: "{implementation_artifacts}/sprint-status.yaml"
+defaultSprintStatusFile: ""
 preflightStep: "./step-02-preflight.md"
 preflightConfigStep: "./step-02a-preflight-config.md"
 preflightFinalizeStep: "./step-02b-preflight-finalize.md"
@@ -61,7 +61,15 @@ summary=$("{stateHelper}" orchestrator-helper state-summary "$state_file")
 
 ### 2. Verify Against Sprint Status
 
-Load `{defaultSprintStatusFile}`.
+Resolve and load the configured sprint-status path:
+
+```bash
+sprint_status=$("{stateHelper}" orchestrator-helper sprint-status path)
+if ! defaultSprintStatusFile=$(echo "$sprint_status" | jq -er 'select(.ok == true) | .path'); then
+  echo "$sprint_status"
+  HALT
+fi
+```
 
 **Compare with state document (run in parallel with session inventory):**
 
@@ -85,7 +93,7 @@ Use deterministic parallel baseline:
 tmp_compare=$(mktemp)
 tmp_sessions=$(mktemp)
 
-("{sprintCompare}" sprint-compare --state "$state_file" --sprint "{defaultSprintStatusFile}" > "$tmp_compare") &
+("{sprintCompare}" sprint-compare --state "$state_file" --sprint "$defaultSprintStatusFile" > "$tmp_compare") &
 compare_pid=$!
 
 project_slug=$(echo "$("{deriveProjectSlug}" derive-project-slug --project-root "{project-root}")" | jq -r '.slug')

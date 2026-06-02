@@ -23,11 +23,15 @@ def implementation_artifacts_dir(project_root: str | Path) -> Path:
 
 
 def sprint_status_path(project_root: str | Path) -> Path:
-    artifacts = implementation_artifacts_dir(project_root)
+    root = Path(project_root)
+    configured = _configured_artifacts_dir(root)
+    if configured is not None:
+        return configured / "sprint-status.yaml"
+    artifacts = implementation_artifacts_dir(root)
     preferred = artifacts / "sprint-status.yaml"
     if preferred.is_file():
         return preferred
-    legacy = Path(project_root) / DEFAULT_OUTPUT_FOLDER / "sprint-status.yaml"
+    legacy = root / DEFAULT_OUTPUT_FOLDER / "sprint-status.yaml"
     if legacy.is_file():
         return legacy
     return preferred

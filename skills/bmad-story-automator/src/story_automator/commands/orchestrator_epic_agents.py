@@ -23,27 +23,31 @@ def check_epic_complete_action(args: list[str]) -> int:
     for idx, arg in enumerate(tail):
         if arg == "--state-file" and idx + 1 < len(tail):
             state_file = tail[idx + 1]
-    story_norm = normalize_story_key_for_epic(project_root, epic, story)
-    story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
-    epic_value = _epic_json_value(epic)
-    if story_epic != epic:
-        print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "story_not_in_epic"})
+    try:
+        story_norm = normalize_story_key_for_epic(project_root, epic, story)
+        story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
+        epic_value = _epic_json_value(epic)
+        if story_epic != epic:
+            print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "story_not_in_epic"})
+            return 0
+        stories: list[str] = []
+        if state_file and file_exists(state_file):
+            story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
+            stories = [sid for sid in story_range if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
+            source = "state_file"
+        else:
+            stories, _ = sprint_status_epic(project_root, epic)
+            source = "sprint_status"
+        if stories:
+            stories = sorted(_dedupe_stories_for_epic(project_root, epic, stories), key=lambda item: _story_sort_key(project_root, item, epic))
+            last = stories[-1]
+            print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
+            return 0
+        print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
         return 0
-    stories: list[str] = []
-    if state_file and file_exists(state_file):
-        story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
-        stories = [sid for sid in story_range if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
-        source = "state_file"
-    else:
-        stories, _ = sprint_status_epic(project_root, epic)
-        source = "sprint_status"
-    if stories:
-        stories = sorted(_dedupe_stories_for_epic(project_root, epic, stories), key=lambda item: _story_sort_key(project_root, item, epic))
-        last = stories[-1]
-        print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
-        return 0
-    print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
-    return 0
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "epic": epic, "storyId": story, "error": str(exc)})
+        return 1
 
 
 def get_epic_stories_action(args: list[str]) -> int:

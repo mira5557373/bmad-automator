@@ -87,6 +87,7 @@ def _usage(code: int) -> int:
     print("Usage: orchestrator-helper <action> [args]", file=target)
     print("", file=target)
     print("Actions:", file=target)
+    print("  sprint-status path", file=target)
     print("  sprint-status get <story_key>", file=target)
     print("  sprint-status exists", file=target)
     print("  sprint-status check-epic <epic>", file=target)
@@ -118,36 +119,43 @@ def _usage(code: int) -> int:
 
 def _sprint_status(args: list[str]) -> int:
     if not args:
-        print("Usage: orchestrator-helper sprint-status <get|exists|check-epic> [args]", file=__import__("sys").stderr)
+        print("Usage: orchestrator-helper sprint-status <path|get|exists|check-epic> [args]", file=__import__("sys").stderr)
         return 1
     project_root = get_project_root()
-    if args[0] == "get":
-        if len(args) < 2:
-            print("Usage: orchestrator-helper sprint-status get <story_key>", file=__import__("sys").stderr)
-            return 1
-        status = sprint_status_get(project_root, args[1])
-        if not status.found and status.reason:
-            print_json({"found": False, "status": status.status, "reason": status.reason})
+    try:
+        if args[0] == "path":
+            print_json({"ok": True, "path": sprint_status_file(project_root)})
             return 0
-        if not status.found:
-            print_json({"found": False, "story": args[1], "status": "not_found"})
+        if args[0] == "get":
+            if len(args) < 2:
+                print("Usage: orchestrator-helper sprint-status get <story_key>", file=__import__("sys").stderr)
+                return 1
+            status = sprint_status_get(project_root, args[1])
+            if not status.found and status.reason:
+                print_json({"found": False, "status": status.status, "reason": status.reason})
+                return 0
+            if not status.found:
+                print_json({"found": False, "story": args[1], "status": "not_found"})
+                return 0
+            print_json({"found": True, "story": status.story, "status": status.status, "done": status.done})
             return 0
-        print_json({"found": True, "story": status.story, "status": status.status, "done": status.done})
-        return 0
-    if args[0] == "exists":
-        print("true" if file_exists(sprint_status_file(project_root)) else "false")
-        return 0
-    if args[0] == "check-epic":
-        if len(args) < 2:
-            print("Usage: orchestrator-helper sprint-status check-epic <epic>", file=__import__("sys").stderr)
-            return 1
-        stories, done = sprint_status_epic(project_root, args[1])
-        if not stories:
-            print_json({"ok": False, "epic": args[1], "allStoriesDone": False, "reason": "no_stories_found", "count": 0})
+        if args[0] == "exists":
+            print("true" if file_exists(sprint_status_file(project_root)) else "false")
             return 0
-        print_json({"ok": True, "epic": args[1], "allStoriesDone": done == len(stories), "total": len(stories), "done": done, "count": len(stories), "stories": stories})
-        return 0
-    print("Usage: orchestrator-helper sprint-status <get|exists|check-epic> [args]", file=__import__("sys").stderr)
+        if args[0] == "check-epic":
+            if len(args) < 2:
+                print("Usage: orchestrator-helper sprint-status check-epic <epic>", file=__import__("sys").stderr)
+                return 1
+            stories, done = sprint_status_epic(project_root, args[1])
+            if not stories:
+                print_json({"ok": False, "epic": args[1], "allStoriesDone": False, "reason": "no_stories_found", "count": 0})
+                return 0
+            print_json({"ok": True, "epic": args[1], "allStoriesDone": done == len(stories), "total": len(stories), "done": done, "count": len(stories), "stories": stories})
+            return 0
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "error": str(exc)})
+        return 1
+    print("Usage: orchestrator-helper sprint-status <path|get|exists|check-epic> [args]", file=__import__("sys").stderr)
     return 1
 
 
@@ -363,7 +371,11 @@ def _commit_ready(args: list[str]) -> int:
         print_json({"ready": False, "reason": "story_id required"})
         return 1
     project_root = get_project_root()
-    status = sprint_status_get(project_root, args[0])
+    try:
+        status = sprint_status_get(project_root, args[0])
+    except (OSError, ValueError) as exc:
+        print_json({"ready": False, "reason": str(exc), "story": args[0]})
+        return 1
     if status.done:
         out, _ = run_cmd("git", "-C", project_root, "status", "--porcelain")
         if out.strip():
@@ -382,7 +394,11 @@ def _normalize_key(args: list[str]) -> int:
     fmt = "json"
     if len(args) >= 3 and args[1] == "--to":
         fmt = args[2]
-    result = normalize_story_key(get_project_root(), args[0])
+    try:
+        result = normalize_story_key(get_project_root(), args[0])
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "error": str(exc), "input": args[0]})
+        return 1
     if result is None:
         print_json({"ok": False, "error": "unrecognized format", "input": args[0]})
         return 1

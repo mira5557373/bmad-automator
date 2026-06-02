@@ -36,7 +36,13 @@ fi
 
 # STEP 3: ALWAYS verify source of truth regardless of session status
 # Story file check:
-story_file=$(find "{{implementation_artifacts}}" -maxdepth 1 -type f -name "{story_prefix}-*.md" 2>/dev/null | head -1)
+sprint_status=$("$scripts" orchestrator-helper sprint-status path)
+if implementation_artifacts_path=$(echo "$sprint_status" | jq -er 'select(.ok == true) | .path'); then
+    implementation_artifacts_dir=$(dirname "$implementation_artifacts_path")
+    story_file=$(find "$implementation_artifacts_dir" -maxdepth 1 -type f -name "{story_prefix}-*.md" 2>/dev/null | head -1)
+else
+    story_file=""
+fi
 if [ -f "$story_file" ]; then
     # Story file exists - check its status field
 fi

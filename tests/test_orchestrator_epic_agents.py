@@ -123,6 +123,17 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertFalse(payload["isLastStory"])
         self.assertEqual(payload["reason"], "story_not_in_epic")
 
+    def test_check_epic_complete_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+
+        exit_code, payload = self._run_action(check_epic_complete_action, ["1", "1.1"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["epic"], "1")
+        self.assertEqual(payload["storyId"], "1.1")
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
+
     def test_check_blocking_accepts_non_numeric_story_headers(self) -> None:
         self._write_epic_file(
             """
@@ -425,6 +436,11 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
 
     def _write_sprint_status(self, content: str) -> None:
         path = self.project_root / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+
+    def _write_bmad_config(self, content: str) -> None:
+        path = self.project_root / "_bmad" / "bmm" / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(content), encoding="utf-8")
 
     def _write_state(self, content: str) -> Path:

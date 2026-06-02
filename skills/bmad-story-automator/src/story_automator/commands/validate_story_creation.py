@@ -136,7 +136,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                 artifacts_dir = resolve_default_artifacts_dir()
             print(count_files(story_id, artifacts_dir))
             return 0
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(str(exc), file=os.sys.stderr)
             return 1
 
@@ -195,7 +195,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
                 return print_check_error(story_id, reason="before/after must be integers")
         try:
             default_artifacts_dir = resolve_default_artifacts_dir()
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             return print_check_error(story_id, reason=str(exc), before_count=before_count, after_count=after_count)
         if artifacts_dir is not None and artifacts_dir != default_artifacts_dir:
             return print_check_error(
@@ -219,7 +219,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
         story_id = rest[0]
         try:
             artifacts_dir = resolve_default_artifacts_dir()
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(str(exc), file=os.sys.stderr)
             return 1
         print(f"Story files matching {story_prefix(story_id)}-*.md:")
