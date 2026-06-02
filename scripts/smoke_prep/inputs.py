@@ -26,7 +26,7 @@ def _resolve_bmad_method(env: dict[str, str] | None = None) -> dict[str, str]:
         text=True,
         check=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
     )
     metadata = json.loads(result.stdout)
     version = metadata.get("version")

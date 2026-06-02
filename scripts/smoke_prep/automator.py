@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .package_contracts import pack_project
 from .process import SmokeError, run, step
 
 
@@ -29,29 +30,15 @@ def install_bmad(gunz_dir: Path, env: dict[str, str], bmad_method_spec: str) -> 
     )
 
 
-def pack_project_automator(root: Path, workspace: Path, env: dict[str, str]) -> Path:
+def pack_project_automator(root: Path, workspace: Path, env: dict[str, str]) -> dict:
     step("Pack project-local automator")
     pack_dir = workspace / "packages"
-    pack_dir.mkdir(parents=True, exist_ok=True)
-    for tarball in pack_dir.glob("*.tgz"):
-        tarball.unlink()
-
-    result = run(
-        ["npm", "pack", "--silent", "--pack-destination", str(pack_dir)],
-        cwd=root,
-        env=env,
-        capture=True,
-    )
-    tarball_name = result.stdout.strip().splitlines()[-1]
-    tarball = pack_dir / tarball_name
-    if not tarball.is_file():
-        raise SmokeError(f"missing packed tarball: {tarball}")
-    return tarball
+    return pack_project(root, pack_dir, env)
 
 
 def install_project_automator(
     gunz_dir: Path,
-    tarball: Path,
+    package_identity: dict,
     env: dict[str, str],
 ) -> None:
     step("Install project-local automator into smoke project")
@@ -60,7 +47,7 @@ def install_project_automator(
             "npx",
             "--yes",
             "--package",
-            f"file:{tarball}",
+            f"file:{package_identity['tarball']}",
             "bmad-story-automator",
             str(gunz_dir),
         ],

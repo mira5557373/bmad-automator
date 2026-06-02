@@ -28,6 +28,25 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 02 package and prepared repo contracts
+
+### Context
+
+- Phase 02 required package tarball identity and prepared-repo installed-file proof.
+
+### Decision, Change, Or Tradeoff
+
+- Added `npm run pack:assert` using `npm pack --dry-run --json` plus `npm pack --json --pack-destination <tmp>`.
+- `pack:assert` now checks required package files, executable modes, forbidden generated/cache files, package identity, tarball SHA256, and selected tarball member checksums.
+- `smoke:prepare` now writes `.smoke/PACKAGE_IDENTITY.json` and `.smoke/INSTALLED_AUTOMATOR_MANIFEST.json`.
+- Prepared `.smoke/gunz` install verification compares selected installed `.claude/skills` files against the current tarball checksums.
+- `.agents/skills` and `.codex/skills` are classified as `spec-only` for prepared gunz because BMAD prep uses `--tools claude-code`, which only creates complete `.claude/skills` dependency entrypoints.
+
+### User Impact
+
+- Prepared smoke runs now fail if `.smoke/gunz` is still using a stale same-version tarball.
+- The Phase 02 verification caught and replaced a stale installed workflow (`1.12.0`) with the current `1.15.0` tarball install.
+
 ## 2026-06-02 - phase 01 baseline and version inputs
 
 ### Context

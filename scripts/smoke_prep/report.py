@@ -33,6 +33,8 @@ def write_next_steps(workspace: Path, gunz_dir: Path) -> Path:
                 f"- branch: `{BRANCH}`",
                 f"- commit: `{PINNED_COMMIT}`",
                 f"- deterministic input manifest: `{workspace / 'SMOKE_INPUTS.json'}`",
+                f"- package identity: `{workspace / 'PACKAGE_IDENTITY.json'}`",
+                f"- installed manifest: `{workspace / 'INSTALLED_AUTOMATOR_MANIFEST.json'}`",
                 "",
                 "Installed pieces:",
                 "",

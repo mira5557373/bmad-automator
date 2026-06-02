@@ -24,6 +24,7 @@
     "version:check": "python3 scripts/check-version-alignment.py",
     "smoke:input-check": "PYTHONPATH=scripts python3 scripts/check-smoke-inputs.py",
     "test:cli": "PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator --help >/dev/null && skills/bmad-story-automator/scripts/story-automator --help >/dev/null",
+    "pack:assert": "PYTHONPATH=scripts python3 scripts/assert-package-contracts.py",
     "pack:dry-run": "npm pack --dry-run",
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",

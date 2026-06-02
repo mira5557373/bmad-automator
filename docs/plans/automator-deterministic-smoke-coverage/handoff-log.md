@@ -226,3 +226,57 @@ wc -l scripts/check-version-alignment.py scripts/check-smoke-inputs.py scripts/s
 - Start Phase 02 with `02-package-and-prepared-repo-contracts.md` and `TODO/phase-02.md`.
 - Preserve the resolved-install behavior when adding package identity checks.
 - Recommended next command: `npm pack --dry-run --json` as the first input to `pack:assert`.
+
+## Phase 02 - 2026-06-02 - Codex
+
+### Summary
+
+- Added `pack:assert` with JSON package content, executable mode, forbidden generated-file, tarball identity, SHA256, and selected checksum assertions.
+- Added shared package contract helpers in `scripts/smoke_prep/package_contracts.py`.
+- Updated `smoke:prepare` to write `.smoke/PACKAGE_IDENTITY.json` and `.smoke/INSTALLED_AUTOMATOR_MANIFEST.json`.
+- Installed-file verification now compares selected copied skill files in prepared `.smoke/gunz` against the current packed tarball.
+- Classified prepared root support: `.claude/skills` is verified fact; `.agents/skills` and `.codex/skills` are spec-only for the current `--tools claude-code` smoke prep.
+
+### Commands Run
+
+```bash
+npm run pack:assert
+npm run smoke:prepare -- --reset
+npm run smoke:run
+npm run smoke:dev-loop
+npm run smoke:dev-loop
+npm run version:check
+npm run smoke:input-check
+npm run test:cli
+npm run test:python
+git diff --check
+```
+
+### Results
+
+- `npm run pack:assert`: pass. Tarball `bmad-story-automator-1.15.0.tgz`; integrity `sha512-rlnPSIrZqXA76GLR7GHWKsKKW1bVHfGSVSQhdjBPwbAiufHynFtADAC51p9if6r6JBlA1PmPdZSc7ez1G9RAkw==`; shasum `8883e0199744c914f941de51af26a4b690a1c048`; SHA256 `b4c228d8441cebcea7d041f89bb46d5498953111c6c3a1441ee5c1dbd821b5ae`; entry count `195`; selected checksum count `115`.
+- `npm run smoke:prepare -- --reset`: pass. Reinstalled current tarball and wrote package/installed manifests.
+- Installed workflow proof: `.smoke/gunz/.claude/skills/bmad-story-automator/workflow.md` reports `1.15.0`.
+- `npm run smoke:run`: pass; created story `1.1` smoke state and report.
+- `npm run smoke:dev-loop`: ran twice. First run failed on an `agents_file_not_found` state left by the just-created partial dev-loop attempt; second run reset artifacts and passed both stories.
+- `npm run version:check`: pass.
+- `npm run smoke:input-check`: pass; BMAD Method resolved to `6.8.1-next.0`.
+- `npm run test:cli`: pass.
+- `npm run test:python`: pass, 537 tests.
+- `git diff --check`: pass.
+
+### Decisions And Assumptions
+
+- `pack:assert` is fast and temp-dir only, so it is suitable for future default `verify`.
+- Prepared repo install checks remain tied to `smoke:prepare -- --reset` because they require network/cache-heavy BMAD prep.
+- The installed manifest reports roots without required dependency skill entrypoints as `unsupported`; the plan taxonomy records these prepared-gunz roots as `spec-only`.
+
+### Blockers Or Risks
+
+- No Phase 02 blocker.
+- Phase 03 should reuse `package_contracts.py` style: narrow fixtures, JSON assertions, no terminal-output-only success.
+
+### Next Phase Notes
+
+- Start Phase 03 with `03-runtime-helper-contract-smokes.md` and `TODO/phase-03.md`.
+- Recommended first command: inspect existing unit coverage around `parse-output`, `monitor-session`, `tmux-wrapper build-cmd`, and runtime policy helpers before designing `smoke:contracts`.
