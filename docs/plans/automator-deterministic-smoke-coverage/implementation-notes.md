@@ -28,6 +28,25 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 04 mode coverage
+
+### Context
+
+- Phase 04 required deterministic coverage for create startup, resume, validate, edit, marker lifecycle, and direct state/artifact assertions.
+
+### Decision, Change, Or Tradeoff
+
+- Added `npm run smoke:modes` using `scripts/run-smoke-modes.py` and a temp BMAD-style `.agents` fixture.
+- The mode smoke asserts invalid range empty-selection behavior, stop-hook configured/pending-trust/failure states, sprint-status present/missing preconditions, state discovery, explicit path resume summary, no-incomplete fresh-create fallback, workflow-derived resume/edit menus and route hints, resume branch-equivalent helper checks, marker path/heartbeat/block/allow behavior, state validation, structure issue reporting, source-of-truth mismatch surfacing through the shared review verifier, and helper-backed edit save/discard/edit-more contracts.
+- State/artifact assertions include rendered agent config, progress row metrics, action-log deltas, complexity/agents artifact paths, edit-time artifact path updates, simulated child dev log, compact mode report, parsed marker JSON, heartbeat mutation, and dynamic `.gitignore` entries.
+- Fixture writes to story files and `sprint-status.yaml` are simulated child workflow output for source-of-truth checks; they are not treated as orchestrator-owned mutations.
+- Fully interactive edit menu prompts and docs-path prompt behavior remain workflow-only because no deterministic helper exists for them yet. Phase 04 covers deterministic helper-backed branches and records route hints instead of trying to automate conversational waits.
+
+### User Impact
+
+- Resume/validate/edit now have fast local deterministic coverage suitable for future `verify` promotion.
+- Prepared `.smoke/gunz` create/dev checks remain explicit external-flow gates and are not required by `smoke:modes`.
+
 ## 2026-06-02 - phase 03 runtime helper contracts
 
 ### Context

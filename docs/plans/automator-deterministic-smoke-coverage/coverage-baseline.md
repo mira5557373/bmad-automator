@@ -9,12 +9,12 @@ Phase 01 source-of-truth baseline for deterministic smoke coverage. Status value
 
 | Surface | Source | Current deterministic gate | Status | Notes |
 | --- | --- | --- | --- | --- |
-| create mode route | `workflow.md`, `steps-c/` | `npm run smoke:run` | fact | Prepared `.smoke/gunz` create smoke verifies state creation and story `1.1` creation. |
-| resume mode route | `workflow.md`, `steps-c/step-01b-continue.md` | none | gap | Planned for `smoke:modes`; no deterministic route fixture yet. |
-| validate mode route | `workflow.md`, `steps-v/` | none | gap | Public mode exists but has no deterministic report/helper smoke. |
-| edit mode route | `workflow.md`, `steps-e/` | none | gap | Public mode exists but has no deterministic save/discard/edit-more smoke. |
+| create mode route | `workflow.md`, `steps-c/` | `npm run smoke:run`; `npm run smoke:modes` | fact | Prepared `.smoke/gunz` create smoke verifies story `1.1`; Phase 04 mode smoke adds multi-story temp state setup, sprint-status present/missing checks, stop-hook guard states, and init-log proof. |
+| resume mode route | `workflow.md`, `steps-c/step-01b-continue.md` | `npm run smoke:modes` | fact | Phase 04 temp fixture covers explicit path summary, latest incomplete discovery, no-incomplete fresh-create fallback, sprint compare, workflow-derived menu branch names/route hints, view action-log summary, start-over backup simulation, abort state update, and marker creation timing. |
+| validate mode route | `workflow.md`, `steps-v/` | `npm run smoke:modes` | fact | Phase 04 covers helper help contracts, happy-path state validation, structure issue reporting, session inventory, sprint compare, progress-row metrics, and compact mode report output. |
+| edit mode route | `workflow.md`, `steps-e/` | `npm run smoke:modes` | fact | Phase 04 covers workflow-derived menu names/post-edit route hints plus helper-backed status/range/current-story/AI-command/artifact-path/text saves, discard rollback, and edit-more state update. Interactive prompts remain workflow-only. |
 | create-story policy step | `orchestration-policy.json` step `create` | `npm run smoke:run` | fact | Existing smoke asserts generated story artifact for one story. |
-| dev-story policy step | `orchestration-policy.json` step `dev` | `npm run smoke:dev-loop` | fact | Existing dev-loop smoke covers two-story transition with parsed fixture output. |
+| dev-story policy step | `orchestration-policy.json` step `dev` | `npm run smoke:dev-loop`; `npm run smoke:modes` | fact | Dev-loop smoke covers two-story transition with parsed fixture output; Phase 04 mode smoke adds complexity-file persistence and richer per-task agent-config state coverage. |
 | automate policy step | `orchestration-policy.json` step `auto` | none | gap | No deterministic automate success/skip coverage yet. |
 | review policy step | `orchestration-policy.json` step `review` | partial helper tests | gap | Unit tests cover verifier pieces; no full review completion/incomplete smoke yet. |
 | commit/finalize | `steps-c/step-03b-finalize.md` | none | gap | No smoke-repo-only commit/finalize sentinel yet. |

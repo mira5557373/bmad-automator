@@ -324,3 +324,57 @@ wc -l tests/test_runtime_helper_contracts.py scripts/smoke_prep/package_contract
 
 - Start Phase 04 with `04-create-dev-resume-validate-edit-coverage.md` and `TODO/phase-04.md`.
 - Preserve the split: Phase 04 should use temp BMAD-style fixtures for resume/validate/edit mode smokes and keep prepared `.smoke/gunz` for realistic external flow only.
+
+## Phase 04 - 2026-06-02 - Codex
+
+### Summary
+
+- Added `npm run smoke:modes` backed by `scripts/run-smoke-modes.py`.
+- The new mode smoke uses a temp BMAD-style `.agents` fixture and asserts create startup guards, preflight selection breadth, resume discovery/routes/fallback, marker JSON lifecycle, validation/source mismatch, artifact outputs, and edit helper branch contracts.
+- Prepared `.smoke/gunz` create/dev checks remain explicit through `smoke:run` and `smoke:dev-loop`.
+- Updated `coverage-baseline.md`, `gate-map.md`, `implementation-notes.md`, and Phase 04 TODO status.
+
+### Commands Run
+
+```bash
+npm run smoke:modes
+npm run smoke:run
+npm run smoke:dev-loop
+npm run test:python
+git diff --check
+wc -l scripts/run-smoke-modes.py
+```
+
+### Results
+
+- `npm run smoke:modes`: pass; wrote `.smoke/MODE_SMOKE_REPORT.json`.
+- `npm run smoke:run`: pass; created story `1.1` smoke state and report in prepared `.smoke/gunz`.
+- `npm run smoke:dev-loop`: pass; simulated dev completion for stories `1.1` and `1.2` in prepared `.smoke/gunz`.
+- `npm run test:python`: pass, 544 tests.
+- `git diff --check`: pass.
+- `scripts/run-smoke-modes.py` is under the 500 LOC repo limit.
+- Seeded temp fixture state fields: `storyRange=["1.1","1.2"]`, `status=IN_PROGRESS`, `currentStory=1.1`, `currentStep=step-03-execute`, `complexityFile=_bmad-output/story-automator/complexity-smoke.json`, `agentsFile=_bmad-output/story-automator/agents-smoke.md`, and a policy snapshot path/hash.
+- Seeded simulated child outputs: `_bmad-output/implementation-artifacts/sprint-status.yaml`, `_bmad-output/implementation-artifacts/1-1-first.md`, `_bmad-output/story-automator/dev-log-smoke.md`, and `_bmad-output/story-automator/mode-report-smoke.json`.
+- Preflight proof: multi-story selection, explicit story IDs, reversed numeric ranges, invalid range empty-selection behavior, and rendered `review=claude` agent config.
+- Resume proof: explicit state summary, latest incomplete discovery, no-incomplete fresh-create fallback, workflow-derived menu labels/route hint, view action-log extraction, start-over backup simulation, and abort state update.
+- Marker path proof: helper resolved `.agents/.story-automator-active`; `.gitignore` entry was added dynamically from helper output; marker JSON shape and heartbeat mutation were parsed from the marker file.
+- Source mismatch proof: shared review verifier returned `note=sprint_status_not_updated` when story-file status was `done` but sprint status remained `ready-for-dev`.
+- Startup precondition proof: helper checked sprint-status present and missing states; there is no standalone startup CLI, so abort wording remains a workflow precondition rather than an executed branch.
+- Validation/edit boundary: validation helper contracts include happy path, structure issue reporting, progress-row metrics, exact-ID done branch, and compact report output; edit menu prompts remain interactive-only, while workflow-derived menu labels/route hints plus status/range/current-story/AI-command/artifact-path/text save, discard rollback, and edit-more state update are covered through asserted state helper mutations.
+
+### Decisions And Assumptions
+
+- Mode fixtures write story files and `sprint-status.yaml` as simulated child workflow output, not as orchestrator-owned mutation.
+- Edit mode remains interactive in the workflow. Phase 04 asserts deterministic helper-backed save/discard/edit-more route contracts and post-edit route hints.
+- Marker assertions resolve the active marker path through helper output and verify `.agents/.story-automator-active`; no hard-coded `.claude` path is used.
+
+### Blockers Or Risks
+
+- No Phase 04 blocker.
+- Phase 06 should decide whether to promote `smoke:modes` into `npm run verify`; prepared `.smoke/gunz` checks remain explicit.
+
+### Next Phase Notes
+
+- Start Phase 05 with `05-automate-review-finish-retro-coverage.md` and `TODO/phase-05.md`.
+- Preserve the host mutation isolation requirement for finish-loop work.
+- Recommended next command: inspect commit/finalize helpers and host HEAD/status sentinel surfaces before implementing `smoke:finish-loop`.
