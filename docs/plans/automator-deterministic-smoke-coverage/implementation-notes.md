@@ -28,6 +28,25 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 05 finish-loop coverage
+
+### Context
+
+- Phase 05 required deterministic coverage for automate, review, commit/finalize, retrospective, execution-complete, wrapup, and host commit isolation.
+
+### Decision, Change, Or Tradeoff
+
+- Added `npm run smoke:finish-loop` using `scripts/run-smoke-finish-loop.py` and a temp git-backed BMAD-style fixture.
+- The runner seeds a three-story, two-epic state and proves automate `done` plus non-blocking `skip`, incomplete review diagnostics, review completion, smoke-repo-only commits, sprint/story source-of-truth finalization, epic completion helpers, retro-agent and retro build-cmd coverage, state-recorded skipped retrospective semantics, continuation into a later epic, execution-complete/wrapup transitions, final metrics, learnings output, and marker removal.
+- Commit isolation is enforced by a runner target guard that rejects the host repo before `commit-story`, then host HEAD/status is compared before and after the smoke. The runner also supports an explicit `--allow-unsafe-repo` manual override for debugging.
+- The report keeps durable diagnostics under `.smoke/finish-loop-diagnostics/`, including a state document copy and temp smoke repo `git-log.txt`, because the working temp repo is deleted after command exit.
+- Retrospective execution remains simulated as skipped deterministic output; no live retrospective agent is spawned. This matches the deterministic boundary while proving the non-blocking state/log contract.
+
+### User Impact
+
+- Finish-loop readiness now has a fast local gate that can prove commit safety without mutating the host checkout.
+- Phase 06 can promote `smoke:finish-loop` into the deterministic full smoke or verify gates.
+
 ## 2026-06-02 - phase 04 mode coverage
 
 ### Context

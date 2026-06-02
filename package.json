@@ -27,6 +27,7 @@
     "pack:assert": "PYTHONPATH=scripts python3 scripts/assert-package-contracts.py",
     "smoke:contracts": "PYTHONPATH=skills/bmad-story-automator/src python3 scripts/run-smoke-contracts.py",
     "smoke:modes": "PYTHONPATH=skills/bmad-story-automator/src python3 scripts/run-smoke-modes.py",
+    "smoke:finish-loop": "PYTHONPATH=skills/bmad-story-automator/src python3 scripts/run-smoke-finish-loop.py",
     "pack:dry-run": "npm pack --dry-run",
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",

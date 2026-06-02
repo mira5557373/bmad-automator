@@ -378,3 +378,52 @@ wc -l scripts/run-smoke-modes.py
 - Start Phase 05 with `05-automate-review-finish-retro-coverage.md` and `TODO/phase-05.md`.
 - Preserve the host mutation isolation requirement for finish-loop work.
 - Recommended next command: inspect commit/finalize helpers and host HEAD/status sentinel surfaces before implementing `smoke:finish-loop`.
+
+## Phase 05 - 2026-06-02 - Codex
+
+### Summary
+
+- Added `npm run smoke:finish-loop` backed by `scripts/run-smoke-finish-loop.py`.
+- The new finish-loop smoke uses a temp git-backed BMAD-style fixture and asserts automate done/skip, review incomplete/completed, commit/finalize, multi-epic retrospective skip, execution-complete, wrapup, marker removal, and host commit isolation.
+- Updated `coverage-baseline.md`, `gate-map.md`, `implementation-notes.md`, and Phase 05 TODO status.
+
+### Commands Run
+
+```bash
+npm run smoke:finish-loop
+PYTHONPATH=skills/bmad-story-automator/src python3 scripts/run-smoke-finish-loop.py --target-repo /Users/joon/.codex/worktrees/9b27/bmad-story-automator
+npm run smoke:dev-loop
+npm run test:python
+git diff --check
+wc -l scripts/run-smoke-finish-loop.py
+```
+
+### Results
+
+- `npm run smoke:finish-loop`: pass; wrote `.smoke/FINISH_LOOP_SMOKE_REPORT.json`.
+- Unsafe host-target guard command: failed as expected with `unsafe commit repo outside smoke workspace`.
+- `npm run smoke:dev-loop`: pass; prepared `.smoke/gunz` dev-loop remains green.
+- `npm run test:python`: pass, 544 tests.
+- `git diff --check`: pass.
+- `scripts/run-smoke-finish-loop.py` is under the 500 LOC repo limit.
+- Smoke repo commits: controlled commits were created for stories `1.1`, `1.2`, and `2.1` inside the temp smoke repo only; `git log` was persisted to `.smoke/finish-loop-diagnostics/git-log.txt`.
+- Host isolation proof: host HEAD/status was captured before and after finish-loop and remained unchanged; runner target guard rejected the host repo before `commit-story`.
+- Review proof: story `1.2` first produced `workflow_not_complete`, then all three stories verified complete through review/source-of-truth helpers.
+- Retrospective proof: Epic 1 retrospective was recorded as `skipped` before Epic 2 completion; Epic 2 continued to completion and recorded its own skipped retro entry; state copy persisted these entries under `retrospectives.epic-*`.
+- Wrapup proof: state transitioned through `EXECUTION_COMPLETE` to `COMPLETE`; metrics reported 3/3 stories complete; learnings file was written; marker was removed.
+
+### Decisions And Assumptions
+
+- The finish-loop smoke uses a temp git repo instead of prepared `.smoke/gunz` so commit isolation can be proven without network/reset dependency; durable diagnostics are copied to `.smoke/finish-loop-diagnostics/` before temp cleanup.
+- Retrospective agent execution is simulated as skipped deterministic output; the smoke asserts retro-agent resolution and retro build-cmd generation, then verifies non-blocking continuation.
+- Finish-loop target safety is enforced in the runner before invoking `commit-story`; `commit-story` itself remains unchanged. An explicit `--allow-unsafe-repo` override exists only for manual debugging.
+
+### Blockers Or Risks
+
+- No Phase 05 blocker.
+- Phase 06 still owns promotion of `smoke:finish-loop` into `verify` or `smoke:deterministic-full`.
+
+### Next Phase Notes
+
+- Start Phase 06 with `06-gate-integration-and-readiness-review.md` and `TODO/phase-06.md`.
+- Recommended first command: run all fast deterministic gates together and update `npm run verify` only after the command set is stable.
