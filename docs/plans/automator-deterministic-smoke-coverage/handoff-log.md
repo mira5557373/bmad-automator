@@ -427,3 +427,46 @@ wc -l scripts/run-smoke-finish-loop.py
 
 - Start Phase 06 with `06-gate-integration-and-readiness-review.md` and `TODO/phase-06.md`.
 - Recommended first command: run all fast deterministic gates together and update `npm run verify` only after the command set is stable.
+
+## Phase 06 - 2026-06-02 - Codex
+
+### Summary
+
+- Updated `npm run verify` to run fast local deterministic gates.
+- Added `npm run smoke:deterministic-full` as the explicit prepared/reset pre-release smoke wrapper.
+- Updated `gate-map.md`, `implementation-notes.md`, and Phase 06 TODO status.
+
+### Commands Run
+
+```bash
+npm run verify
+npm run smoke:deterministic-full
+git diff --check
+```
+
+### Results
+
+- `npm run verify`: pass. Ran Python tests, version alignment, package assertions, CLI smoke, helper contracts, mode smoke, and shell smoke.
+- `npm run smoke:deterministic-full`: pass. Ran smoke prepare reset, prepared create smoke, prepared dev-loop smoke, and finish-loop smoke.
+- `git diff --check`: pass.
+
+### Decisions And Assumptions
+
+- Default `verify` stays reset-free and network-free by excluding `smoke:prepare`, prepared create/dev-loop, and full finish-loop wrapper.
+- `smoke:deterministic-full` remains explicit because it reclones/resets `.smoke/gunz` and depends on the npm/git/network/cache surfaces used by `smoke:prepare`.
+- Live provider/auth, semantic output quality, and interactive conversational UX remain outside deterministic readiness.
+
+### Reviewer Results
+
+- Workflow lifecycle/gate truthfulness reviewer: no actionable findings. Verified `npm run verify`, `npm run smoke:finish-loop`, and unsafe host-target failure.
+- Package/install determinism and runtime/helper boundary reviewer: no actionable findings. Verified `npm run pack:assert` and `npm run smoke:contracts`.
+
+### Blockers Or Risks
+
+- No Phase 06 blocker.
+- `smoke:deterministic-full` remains reset/network/cache-heavy and should stay explicit until CI proves stable runtime and cache budget.
+- Deterministic readiness does not cover live provider auth/outages, trust prompts, rate limits, semantic generated output quality, or interactive UX beyond helper-backed contracts.
+
+### Final Recommendation
+
+- Ready for local deterministic smoke readiness review. Use `npm run verify` as the default fast gate and `npm run smoke:deterministic-full` as the explicit pre-release gate.

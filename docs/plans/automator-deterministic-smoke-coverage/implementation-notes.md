@@ -28,6 +28,24 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 06 gate integration
+
+### Context
+
+- Phase 06 required final gate wiring, explicit heavy-smoke separation, and readiness review.
+
+### Decision, Change, Or Tradeoff
+
+- Updated `npm run verify` to run the fast deterministic local gate set: `test:python`, `version:check`, `pack:assert`, `test:cli`, `smoke:contracts`, `smoke:modes`, and `test:smoke`.
+- Added `npm run smoke:deterministic-full` as the explicit reset/network-heavy pre-release gate: `smoke:prepare -- --reset`, `smoke:run`, `smoke:dev-loop`, and `smoke:finish-loop`.
+- Kept `smoke:finish-loop` out of default `verify` even though it is local, because Phase 06 target verify was already broad and the release-wrapper gate captures finish-loop readiness explicitly.
+- Deterministic readiness still excludes live provider/auth behavior, rate limits, trust prompts, outages, semantic quality of generated implementation/reviews/retrospectives, and interactive UX beyond helper-backed effects.
+
+### User Impact
+
+- `npm run verify` is now the default fast confidence gate.
+- `npm run smoke:deterministic-full` is the fuller pre-release smoke with prepared repo reset and package/install identity proof.
+
 ## 2026-06-02 - phase 05 finish-loop coverage
 
 ### Context

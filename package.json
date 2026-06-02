@@ -34,9 +34,10 @@
     "smoke:prepare": "python3 scripts/prepare-smoke-test.py",
     "smoke:run": "python3 scripts/run-smoke-automator.py",
     "smoke:dev-loop": "python3 scripts/run-smoke-dev-loop.py",
+    "smoke:deterministic-full": "npm run smoke:prepare -- --reset && npm run smoke:run && npm run smoke:dev-loop && npm run smoke:finish-loop",
     "smoke:auto": "npm run smoke:prepare -- --reset && npm run smoke:run",
     "smoke:dev-auto": "npm run smoke:prepare -- --reset && npm run smoke:dev-loop",
-    "verify": "npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
+    "verify": "npm run test:python && npm run version:check && npm run pack:assert && npm run test:cli && npm run smoke:contracts && npm run smoke:modes && npm run test:smoke"
   },
   "engines": {
     "node": ">=18"
