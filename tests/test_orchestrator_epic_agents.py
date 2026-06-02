@@ -101,6 +101,28 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertTrue(payload["isLastStory"])
         self.assertEqual(payload["epicStoryCount"], 2)
 
+    def test_check_epic_complete_does_not_satisfy_missing_full_key_with_sibling(self) -> None:
+        self._write_sprint_status("multi-leg-3-old: done\n")
+        exit_code, payload = self._run_action(check_epic_complete_action, ["multi-leg", "multi-leg-3-new"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["isLastStory"])
+        self.assertEqual(payload["lastInEpic"], "multi-leg-3-old")
+
+    def test_check_epic_complete_rejects_story_prefix_as_epic_hint(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              multi-leg-3-42-release: ready-for-dev
+              multi-leg-4-next: done
+            """
+        )
+        exit_code, payload = self._run_action(check_epic_complete_action, ["multi-leg-3", "multi-leg-3-42-release"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["isLastStory"])
+        self.assertEqual(payload["reason"], "story_not_in_epic")
+
     def test_check_blocking_accepts_non_numeric_story_headers(self) -> None:
         self._write_epic_file(
             """

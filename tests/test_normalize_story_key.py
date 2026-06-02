@@ -115,6 +115,33 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         self.assertEqual(result.prefix, "multi-leg-2026")
         self.assertEqual(result.key, "multi-leg-2026-3-release")
 
+    def test_single_row_compound_numeric_epic_with_two_digit_story_number(self) -> None:
+        self._write_sprint_status("release-2026-42-ship: done\n")
+        result = normalize_story_key(str(self.project_root), "release-2026-42-ship")
+        assert result is not None
+        self.assertEqual(result.id, "release-2026.42")
+        self.assertEqual(result.prefix, "release-2026-42")
+        self.assertEqual(result.key, "release-2026-42-ship")
+        status = sprint_status_get(str(self.project_root), "release-2026.42")
+        self.assertTrue(status.found)
+        self.assertEqual(status.story, "release-2026-42-ship")
+
+    def test_year_like_compound_numeric_epic_without_status(self) -> None:
+        result = normalize_story_key(str(self.project_root), "release-2026-42-ship")
+        assert result is not None
+        self.assertEqual(result.id, "release-2026.42")
+        self.assertEqual(result.prefix, "release-2026-42")
+        self.assertEqual(result.key, "release-2026-42-ship")
+
+    def test_year_like_compound_numeric_epic_from_artifact_only(self) -> None:
+        artifacts = self.project_root / "_bmad-output" / "implementation-artifacts"
+        (artifacts / "release-2026-42-ship.md").write_text("", encoding="utf-8")
+        result = normalize_story_key(str(self.project_root), "release-2026-42-ship")
+        assert result is not None
+        self.assertEqual(result.id, "release-2026.42")
+        self.assertEqual(result.prefix, "release-2026-42")
+        self.assertEqual(result.key, "release-2026-42-ship")
+
     def test_numeric_leading_title_full_key_treats_year_as_title_segment(self) -> None:
         result = normalize_story_key(str(self.project_root), "multi-leg-3-2026-release")
         assert result is not None
@@ -569,6 +596,34 @@ class NormalizeStoryKeyTests(unittest.TestCase):
         stories, done = sprint_status_epic(str(self.project_root), "multi-leg")
         self.assertEqual(stories, ["multi-leg-3-part-1-fix", "multi-leg-4-next"])
         self.assertEqual(done, 1)
+
+    def test_sprint_status_epic_keeps_short_numeric_title_with_exact_status_row(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              multi-leg-3-42-release: ready-for-dev
+              multi-leg-4-next: done
+            """
+        )
+        result = normalize_story_key(str(self.project_root), "multi-leg-3-42-release")
+        assert result is not None
+        self.assertEqual(result.id, "multi-leg.3")
+        stories, done = sprint_status_epic(str(self.project_root), "multi-leg")
+        self.assertEqual(stories, ["multi-leg-3-42-release", "multi-leg-4-next"])
+        self.assertEqual(done, 1)
+
+    def test_epic_hint_rejects_story_prefix_under_known_parent_epic(self) -> None:
+        self._write_sprint_status(
+            """
+            development_status:
+              multi-leg-3-42-release: ready-for-dev
+              multi-leg-4-next: done
+            """
+        )
+        self.assertIsNone(normalize_story_key_for_epic(str(self.project_root), "multi-leg-3", "multi-leg-3-42-release"))
+        stories, done = sprint_status_epic(str(self.project_root), "multi-leg-3")
+        self.assertEqual(stories, [])
+        self.assertEqual(done, 0)
 
     def test_sprint_status_epic_deduplicates_normalized_story_ids(self) -> None:
         self._write_sprint_status(

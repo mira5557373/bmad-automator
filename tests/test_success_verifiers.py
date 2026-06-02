@@ -55,6 +55,17 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["story"], "phase-2-1-title")
         self.assertEqual(payload["actualMatches"], 1)
 
+    def test_create_story_artifact_rejects_missing_explicit_full_key_sibling_file(self) -> None:
+        self._write_story("multi-leg-3-old", status="draft")
+        payload = create_story_artifact(
+            project_root=str(self.project_root),
+            story_key="multi-leg-3-new",
+            contract={"config": {"expectedMatches": 1}},
+        )
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-3-new")
+        self.assertEqual(payload["actualMatches"], 0)
+
     def test_create_story_artifact_rejects_glob_that_escapes_project_root(self) -> None:
         with self.assertRaisesRegex(PolicyError, "success.config.glob escapes project root"):
             create_story_artifact(
@@ -248,6 +259,28 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["story"], "multi-leg-3-new")
         self.assertEqual(payload["story_file_status"], "unknown")
 
+    def test_review_completion_uses_story_file_only_for_compound_numeric_epic(self) -> None:
+        self._write_story("phase-2-1-title", status="done")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="phase-2.1",
+            contract={"sourceOrder": ["story-file"], "syncSprintStatus": False},
+        )
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["story"], "phase-2-1-title")
+        self.assertEqual(payload["story_file_status"], "done")
+
+    def test_review_completion_rejects_missing_explicit_full_key_sibling_file(self) -> None:
+        self._write_story("multi-leg-3-old", status="done")
+        payload = review_completion(
+            project_root=str(self.project_root),
+            story_key="multi-leg-3-new",
+            contract={"sourceOrder": ["story-file"], "syncSprintStatus": False},
+        )
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["story"], "multi-leg-3-new")
+        self.assertEqual(payload["story_file_status"], "unknown")
+
     def test_review_completion_reports_story_file_selected_by_sprint_status(self) -> None:
         self._write_story("multi-leg-3-a-old", status="ready-for-dev")
         self._write_story("multi-leg-3-z-new", status="done")
@@ -370,6 +403,21 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["epic"], "multi-leg")
         self.assertEqual(payload["totalStories"], 2)
         self.assertEqual(payload["doneStories"], 1)
+
+    def test_epic_complete_normalizes_dashed_story_prefix_before_bare_epic(self) -> None:
+        self._write_sprint_status("multi-leg-3-2026-release: done\nmulti-leg-4-next: ready-for-dev\n")
+        payload = epic_complete(project_root=str(self.project_root), story_key="multi-leg-3")
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["epic"], "multi-leg")
+        self.assertEqual(payload["totalStories"], 2)
+        self.assertEqual(payload["doneStories"], 1)
+
+    def test_epic_complete_rejects_missing_explicit_full_key_sibling(self) -> None:
+        self._write_sprint_status("multi-leg-3-old: done\n")
+        payload = epic_complete(project_root=str(self.project_root), story_key="multi-leg-3-new")
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["epic"], "multi-leg")
+        self.assertEqual(payload["sprint_status"], "not_found")
 
     def test_epic_complete_handles_single_story_compound_epic_key(self) -> None:
         self._write_sprint_status("phase-2-1-title: done\n")

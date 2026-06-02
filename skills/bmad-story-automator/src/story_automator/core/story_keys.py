@@ -75,7 +75,7 @@ def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> St
 
     dashed = re.fullmatch(rf"{re.escape(epic)}-(\d+)(?:-.+)?", value)
     if dashed:
-        if _has_known_longer_epic(project_root, epic, value):
+        if _has_known_longer_epic(project_root, epic, value) or _story_prefix_claimed_by_parent_epic(project_root, epic, value):
             return None
         story_num = dashed.group(1)
         prefix = f"{epic}-{story_num}"
@@ -120,7 +120,7 @@ def _split_non_numeric_full_key(project_root: str, value: str) -> tuple[str, str
     if known:
         match = max(known, key=lambda item: item.start())
         return value[: match.start()], match.group(1)
-    match = _numeric_epic_segment_match(matches) or _single_story_epic_match(project_root, value, matches)
+    match = _numeric_epic_segment_match(matches) or _default_story_epic_match(value, matches)
     return value[: match.start()], match.group(1)
 
 
@@ -184,23 +184,30 @@ def _epic_exists(project_root: str, epic: str) -> bool:
 
 
 def _is_single_story_key(project_root: str, value: str, match: re.Match[str]) -> bool:
-    status_file = sprint_status_file(project_root)
     candidate_epic = value[: match.start()]
+    story_num = match.group(1)
+    if story_num != "1" and _known_parent_epic(project_root, candidate_epic):
+        return False
     return (
-        match.group(1) == "1"
+        _has_exact_story_key(project_root, value)
         and _last_epic_segment_is_numeric(candidate_epic)
         and _single_story_numeric_epic(candidate_epic)
-        and file_exists(status_file)
-        and re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)) is not None
+        and (
+            story_num == "1"
+            or (
+                story_num.isdigit()
+                and 10 <= int(story_num) <= 99
+                and _year_like_numeric_suffix_epic(candidate_epic)
+            )
+        )
     )
 
 
-def _single_story_epic_match(project_root: str, value: str, matches: list[re.Match[str]]) -> re.Match[str]:
-    status_file = sprint_status_file(project_root)
-    if not file_exists(status_file) or not re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)):
-        return matches[0]
+def _default_story_epic_match(value: str, matches: list[re.Match[str]]) -> re.Match[str]:
     for match in reversed(matches[1:]):
-        if _is_single_story_key(project_root, value, match):
+        candidate_epic = value[: match.start()]
+        story_num = match.group(1)
+        if story_num.isdigit() and 10 <= int(story_num) <= 99 and _year_like_numeric_suffix_epic(candidate_epic):
             return match
     return matches[0]
 
@@ -211,8 +218,36 @@ def _numeric_epic_segment_match(matches: list[re.Match[str]]) -> re.Match[str] |
     return matches[1]
 
 
+def _has_exact_story_key(project_root: str, value: str) -> bool:
+    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    if (artifacts / f"{value}.md").is_file():
+        return True
+    status_file = sprint_status_file(project_root)
+    return file_exists(status_file) and re.search(rf"(?m)^\s*{re.escape(value)}\s*:", read_text(status_file)) is not None
+
+
+def _known_parent_epic(project_root: str, candidate_epic: str) -> bool:
+    parent_epic, _, story_num = candidate_epic.rpartition("-")
+    return bool(parent_epic and story_num.isdigit() and _epic_exists(project_root, parent_epic))
+
+
+def _story_prefix_claimed_by_parent_epic(project_root: str, epic: str, value: str) -> bool:
+    parent_epic, _, story_num = epic.rpartition("-")
+    return bool(
+        parent_epic
+        and story_num.isdigit()
+        and not _epic_exists(project_root, epic)
+        and normalize_story_key_for_epic(project_root, parent_epic, value) is not None
+    )
+
+
 def _last_epic_segment_is_numeric(epic: str) -> bool:
     return epic.rsplit("-", 1)[-1].isdigit()
+
+
+def _year_like_numeric_suffix_epic(epic: str) -> bool:
+    segment = epic.rsplit("-", 1)[-1]
+    return segment.isdigit() and int(segment) >= 1000
 
 
 def _single_story_numeric_epic(epic: str) -> bool:

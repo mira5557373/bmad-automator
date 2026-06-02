@@ -49,6 +49,34 @@ Acceptance Criteria
         self.assertEqual(payload["storyId"], "multi-leg.3")
         self.assertEqual(payload["title"], "Quantity precision")
 
+    def test_parse_epic_file_accepts_full_key_story_headers(self) -> None:
+        self.epic_file.write_text(
+            """# Epic Multi Leg
+## Epic multi-leg: Multi Leg
+### Story multi-leg-3-old: Old
+""",
+            encoding="utf-8",
+        )
+        payload = parse_epic_file(self.epic_file)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["stories"][0]["storyId"], "multi-leg.3")
+
+    def test_parse_story_accepts_canonical_id_for_full_key_header(self) -> None:
+        self.epic_file.write_text(
+            """# Epic Multi Leg
+## Epic multi-leg: Multi Leg
+### Story multi-leg-3-old: Old
+Acceptance Criteria
+- Works
+""",
+            encoding="utf-8",
+        )
+        payload = parse_story(self.epic_file, "multi-leg.3", self.rules_file)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["storyId"], "multi-leg.3")
+        self.assertEqual(payload["title"], "Old")
+
     def test_epic_complete_accepts_non_numeric_story_ids(self) -> None:
         self.epic_file.write_text(
             """# Epic Multi Leg
@@ -76,6 +104,32 @@ Acceptance Criteria
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["epicComplete"])
         self.assertEqual(payload["maxEpicStory"], "multi-leg.4")
+
+    def test_epic_complete_rejects_missing_explicit_full_key_sibling(self) -> None:
+        self.epic_file.write_text(
+            """# Epic Multi Leg
+## Epic multi-leg: Multi Leg
+### Story multi-leg-3-old: Old
+""",
+            encoding="utf-8",
+        )
+        payload = epic_complete(self.epic_file, "multi-leg-3-new")
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["epicComplete"])
+        self.assertEqual(payload["maxEpicStory"], "multi-leg.3")
+
+    def test_epic_complete_accepts_exact_full_key_header(self) -> None:
+        self.epic_file.write_text(
+            """# Epic Multi Leg
+## Epic multi-leg: Multi Leg
+### Story multi-leg-3-old: Old
+""",
+            encoding="utf-8",
+        )
+        payload = epic_complete(self.epic_file, "multi-leg-3-old")
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["epicComplete"])
+        self.assertEqual(payload["maxEpicStory"], "multi-leg.3")
 
     def test_epic_complete_sorts_numeric_epics_numerically(self) -> None:
         self.epic_file.write_text(

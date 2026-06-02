@@ -237,12 +237,13 @@ def _story_ids_from_epic_file(epic_file: str, epic: str) -> list[str]:
     story_re = re.compile(r"^###\s+Story\s+([^:]+):")
     stories: list[str] = []
     seen_ids: set[str] = set()
+    project_root = get_project_root()
     for line in trim_lines(read_text(epic_file)):
         match = story_re.match(line)
         if not match:
             continue
         story = match.group(1).strip()
-        norm = normalize_story_key_for_epic(get_project_root(), epic, story)
+        norm = normalize_story_key_for_epic(project_root, epic, story)
         if norm is None or norm.id.rsplit(".", 1)[0] != epic or norm.id in seen_ids:
             continue
         stories.append(story)
@@ -270,6 +271,8 @@ def _same_story(project_root: str, epic: str, left: str, right: str) -> bool:
     left_norm = normalize_story_key_for_epic(project_root, epic, left)
     right_norm = normalize_story_key_for_epic(project_root, epic, right)
     if left_norm is not None and right_norm is not None:
+        if _is_explicit_full_key(left, left_norm):
+            return left == right
         return left_norm.id == right_norm.id
     return left == right
 
