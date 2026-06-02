@@ -29,6 +29,21 @@ The smoke suite validates:
 - installed runtime policy, prompt templates, and parse contracts
 - prompt-building behavior for Claude and Codex child sessions
 
+## External Automator Smoke Prep
+
+Prepare the pinned `bma-d/gunz` smoke project in the ignored `.smoke/`
+workspace:
+
+```bash
+npm run smoke:prepare -- --reset
+```
+
+This clones only the `bmad-smoke-test` branch, checks out
+`fca6470d329668019dace305b5f0f3c9b62cb113`, installs BMAD core and BMM with
+`bmad-method@next`, then installs the project-local automator into that target
+project. The script leaves `.smoke/SMOKE_NEXT_STEPS.md` with the exact manual
+Claude Code entrypoint for the semi-automated smoke run.
+
 ## Repo Verification Flow
 
 ```mermaid
