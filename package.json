@@ -27,7 +27,9 @@
     "test:smoke": "bash scripts/smoke-test.sh",
     "smoke:prepare": "python3 scripts/prepare-smoke-test.py",
     "smoke:run": "python3 scripts/run-smoke-automator.py",
+    "smoke:dev-loop": "python3 scripts/run-smoke-dev-loop.py",
     "smoke:auto": "npm run smoke:prepare -- --reset && npm run smoke:run",
+    "smoke:dev-auto": "npm run smoke:prepare -- --reset && npm run smoke:dev-loop",
     "verify": "npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
   },
   "engines": {
