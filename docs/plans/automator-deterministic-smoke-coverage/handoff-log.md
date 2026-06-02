@@ -280,3 +280,47 @@ git diff --check
 
 - Start Phase 03 with `03-runtime-helper-contract-smokes.md` and `TODO/phase-03.md`.
 - Recommended first command: inspect existing unit coverage around `parse-output`, `monitor-session`, `tmux-wrapper build-cmd`, and runtime policy helpers before designing `smoke:contracts`.
+
+## Phase 03 - 2026-06-02 - Codex
+
+### Summary
+
+- Added `npm run smoke:contracts` as the Phase 03 fast helper-contract gate, backed by `scripts/run-smoke-contracts.py`.
+- Added `tests/test_runtime_helper_contracts.py` for missing parser subprocess, monitor terminal-state, build-cmd, runner edge-state, and `tmux-wrapper spawn` runner-mode assertions.
+- Reused existing focused suites for state-update no-mutation, runtime-policy snapshots, state metadata, marker/root resolution, success verifiers, and status/source-of-truth helper behavior.
+- Updated `coverage-baseline.md`, `gate-map.md`, `implementation-notes.md`, and Phase 03 TODO status.
+
+### Commands Run
+
+```bash
+npm run smoke:contracts
+npm run test:python
+npm run test:cli
+git diff --check
+wc -l tests/test_runtime_helper_contracts.py scripts/smoke_prep/package_contracts.py
+```
+
+### Results
+
+- `npm run smoke:contracts`: pass, 296 tests.
+- `npm run test:python`: pass, 544 tests.
+- `npm run test:cli`: pass.
+- `git diff --check`: pass.
+- File size check: `tests/test_runtime_helper_contracts.py` is 280 LOC; Phase 02 `package_contracts.py` remains 329 LOC.
+
+### Decisions And Assumptions
+
+- `smoke:contracts` intentionally composes focused unittest modules instead of adding a large shell runner, and fails if any selected contract test is skipped.
+- `monitor-session` remains a JSON-contract command: crashed, timeout, incomplete, and not_found states can return process exit code `0`.
+- `parse-output` JSON-decode handling is defensive because `extract_json_line` returns only JSON-valid candidate lines; no-json and schema-invalid payloads are the deterministic failure cases.
+- `tmux-wrapper spawn` success/crash coverage runs in `SA_TMUX_RUNTIME=runner`; tmux must be available because skipped contract tests fail the gate.
+
+### Blockers Or Risks
+
+- No Phase 03 blocker.
+- `smoke:contracts` is not wired into `npm run verify` yet; Phase 06 owns verify promotion after Phase 04 creates `smoke:modes`.
+
+### Next Phase Notes
+
+- Start Phase 04 with `04-create-dev-resume-validate-edit-coverage.md` and `TODO/phase-04.md`.
+- Preserve the split: Phase 04 should use temp BMAD-style fixtures for resume/validate/edit mode smokes and keep prepared `.smoke/gunz` for realistic external flow only.

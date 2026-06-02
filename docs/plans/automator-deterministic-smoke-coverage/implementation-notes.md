@@ -28,6 +28,24 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 03 runtime helper contracts
+
+### Context
+
+- Phase 03 required deterministic helper contract coverage before broader lifecycle smokes.
+
+### Decision, Change, Or Tradeoff
+
+- Added `npm run smoke:contracts` as a focused unittest gate over parser, monitor, runner, build-cmd, state-update, runtime-policy, state metadata, marker/root, and success-verifier contract suites.
+- Added `tests/test_runtime_helper_contracts.py` for missing parser subprocess, monitor terminal-state, build-cmd branch, runner edge-state, and `tmux-wrapper spawn` runner-mode coverage.
+- Kept production helper code unchanged; the phase exposed assertion wording drift only (`state file unreadable` for missing state files).
+- `parse-output`'s JSON decode branch is defensive because `extract_json_line` already filters invalid JSON before returning a candidate line; the enforced contract is no-json or schema-invalid failure payloads.
+
+### User Impact
+
+- Helper drift now fails through a named fast gate instead of being hidden behind broad smoke success.
+- `monitor-session` terminal failures still usually exit `0`; callers must read JSON `final_state`, `exit_reason`, and `output_verified`.
+
 ## 2026-06-02 - phase 02 package and prepared repo contracts
 
 ### Context

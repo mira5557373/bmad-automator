@@ -20,8 +20,9 @@ Phase 01 source-of-truth baseline for deterministic smoke coverage. Status value
 | commit/finalize | `steps-c/step-03b-finalize.md` | none | gap | No smoke-repo-only commit/finalize sentinel yet. |
 | retrospective policy step | `orchestration-policy.json` step `retro` | partial unit tests | gap | Unit tests cover retro agent logic; no single/multi-epic route smoke yet. |
 | wrapup | `steps-c/step-04-wrapup.md`, `data/wrapup-templates.md` | none | gap | No execution-complete or wrapup smoke yet. |
-| parser subprocess contracts | `data/parse/*.json`, helper CLI | unit tests only | gap | Needs fake-subprocess fail-closed matrix under `smoke:contracts`. |
-| monitor terminal states | helper CLI, tmux runtime | unit tests only | gap | Needs terminal-state JSON matrix under `smoke:contracts`. |
+| parser subprocess contracts | `data/parse/*.json`, helper CLI | `npm run smoke:contracts` | fact | Phase 03 covers success, missing/empty output, state flag/policy/contract failures, subprocess timeout/nonzero/no-json, and schema-invalid JSON. |
+| monitor terminal states | helper CLI, tmux runtime | `npm run smoke:contracts` | fact | Phase 03 covers completed, incomplete, crashed, stuck, timeout, invalid persisted session-state diagnostics on not_found, invalid options, and runner success/crash/edge mapping. |
+| build-cmd helper branches | `tmux-wrapper build-cmd` | `npm run smoke:contracts` | fact | Phase 03 covers Codex safety flags, `AI_COMMAND`, Claude/model quoting, unknown step, state-file, and invalid policy branches. |
 | marker/root resolution | runtime layout helper | `npm run test:python` | fact | Existing unit tests cover runtime-layout helper behavior. |
 | package version surfaces | package/plugin/module/Python/workflow metadata | `npm run version:check` | fact | Workflow frontmatter was stale at `1.12.0`; Phase 01 aligned it to `1.15.0`. |
 | smoke repo input | `scripts/smoke_prep/config.py`, `gunz.py` | `npm run smoke:input-check` | fact | `gunz` repo is pinned by full SHA; command resolves `bmad-method@next` version/integrity. |
