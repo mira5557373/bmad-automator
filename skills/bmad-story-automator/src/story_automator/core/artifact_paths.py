@@ -36,7 +36,10 @@ def sprint_status_path(project_root: str | Path) -> Path:
 def implementation_artifacts_relpath(project_root: str | Path) -> str:
     root = Path(project_root)
     artifacts = implementation_artifacts_dir(root)
-    return artifacts.relative_to(root).as_posix()
+    try:
+        return artifacts.relative_to(root).as_posix()
+    except ValueError:
+        return artifacts.resolve().relative_to(root.resolve()).as_posix()
 
 
 def implementation_artifacts_glob(project_root: str | Path, pattern: str) -> str:
@@ -113,8 +116,9 @@ def _project_relative_path(project_root: Path, value: str) -> Path | None:
     if raw.is_absolute():
         return None
     resolved = (project_root / raw).resolve()
+    project_root_resolved = project_root.resolve()
     try:
-        resolved.relative_to(project_root.resolve())
+        relative = resolved.relative_to(project_root_resolved)
     except ValueError:
         return None
-    return project_root / raw
+    return project_root / relative

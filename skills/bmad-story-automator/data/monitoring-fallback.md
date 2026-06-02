@@ -36,7 +36,7 @@ fi
 
 # STEP 3: ALWAYS verify source of truth regardless of session status
 # Story file check:
-story_file=$(ls {{implementation_artifacts}}/{story_prefix}-*.md 2>/dev/null | head -1)
+story_file=$(find "{{implementation_artifacts}}" -maxdepth 1 -type f -name "{story_prefix}-*.md" 2>/dev/null | head -1)
 if [ -f "$story_file" ]; then
     # Story file exists - check its status field
 fi

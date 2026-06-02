@@ -13,6 +13,7 @@ from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_build_state_doc, cmd_sprint_compare
 from story_automator.commands.tmux import _build_cmd, _render_step_prompt, _verify_monitor_completion, cmd_monitor_session
 from story_automator.commands.validate_story_creation import cmd_validate_story_creation
+from story_automator.core.artifact_paths import implementation_artifacts_relpath
 from story_automator.core.review_verify import verify_code_review_completion
 from story_automator.core.runtime_policy import PolicyError
 from story_automator.core.sprint import sprint_status_get
@@ -145,6 +146,10 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["file"], str(story))
         self.assertEqual(payload["status"], "ready")
+
+    def test_config_artifacts_relpath_is_canonical(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/../docs/bmad/implementation-artifacts\n")
+        self.assertEqual(implementation_artifacts_relpath(self.project_root), "docs/bmad/implementation-artifacts")
 
     def test_docs_bmad_detected_without_config(self) -> None:
         self._write_docs_story("1-2-docs", status="draft")
@@ -306,8 +311,14 @@ class SuccessVerifierTests(unittest.TestCase):
 
     def test_monitoring_fallback_uses_implementation_artifacts_placeholder(self) -> None:
         fallback = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "monitoring-fallback.md").read_text(encoding="utf-8")
-        self.assertIn("ls {{implementation_artifacts}}/{story_prefix}-*.md", fallback)
+        self.assertIn('find "{{implementation_artifacts}}" -maxdepth 1 -type f -name "{story_prefix}-*.md"', fallback)
+        self.assertNotIn("ls {{implementation_artifacts}}/{story_prefix}-*.md", fallback)
         self.assertNotIn("ls _bmad-output/implementation-artifacts/{story_prefix}-*.md", fallback)
+
+    def test_resume_step_uses_implementation_artifacts_sprint_status_placeholder(self) -> None:
+        step = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "steps-c" / "step-01b-continue.md").read_text(encoding="utf-8")
+        self.assertIn('defaultSprintStatusFile: "{implementation_artifacts}/sprint-status.yaml"', step)
+        self.assertNotIn('defaultSprintStatusFile: "{output_folder}/implementation-artifacts/sprint-status.yaml"', step)
 
     def test_check_blocking_uses_configured_artifacts_epic_file(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
