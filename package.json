@@ -26,6 +26,8 @@
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",
     "smoke:prepare": "python3 scripts/prepare-smoke-test.py",
+    "smoke:run": "python3 scripts/run-smoke-automator.py",
+    "smoke:auto": "npm run smoke:prepare -- --reset && npm run smoke:run",
     "verify": "npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
   },
   "engines": {
