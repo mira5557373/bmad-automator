@@ -173,3 +173,56 @@ git status --short --branch
 
 - Start Phase 01 implementation.
 - Preserve the P0/P1/P2-clean review baseline when later phases change the gate map.
+
+## Phase 01 - 2026-06-02 - Codex
+
+### Summary
+
+- Added the Phase 01 coverage baseline at `coverage-baseline.md`.
+- Added `npm run version:check` for package/plugin/module/Python/runtime/workflow version alignment.
+- Fixed stale `skills/bmad-story-automator/workflow.md` frontmatter from `1.12.0` to `1.15.0`.
+- Added `npm run smoke:input-check` and `.smoke/SMOKE_INPUTS.json` manifest recording for deterministic smoke inputs.
+- Changed `smoke:prepare` to resolve `bmad-method@next` once, record version/integrity, and install the resolved `bmad-method@<version>` package.
+- Updated `gate-map.md`, `implementation-notes.md`, `docs/versioning.md`, and Phase 01 TODO status.
+- Ran two clean-context review agents; fixed all P2 findings.
+
+### Commands Run
+
+```bash
+npm run version:check
+npm run smoke:input-check
+npm run test:cli
+npm run smoke:prepare -- --skip-bmad-install --skip-automator-install
+npm run test:python
+git diff --check
+wc -l scripts/check-version-alignment.py scripts/check-smoke-inputs.py scripts/smoke_prep/*.py docs/plans/automator-deterministic-smoke-coverage/*.md docs/plans/automator-deterministic-smoke-coverage/TODO/*.md docs/versioning.md
+```
+
+### Results
+
+- `npm run version:check`: pass; all checked surfaces report `1.15.0`.
+- `npm run smoke:input-check`: pass; resolved `bmad-method@next` to `6.8.1-next.0` with integrity `sha512-r8lDToLh57N0BiNsBOcD5wV+JWrR87rvdU2oKm3bhOGykHiCkj3f6BB96ymgftuTDdeK5OMr3AiQNKAsk6/I0A==`.
+- `npm run test:cli`: pass.
+- `npm run smoke:prepare -- --skip-bmad-install --skip-automator-install`: pass; wrote ignored `.smoke/SMOKE_INPUTS.json`; reused prepared `.smoke/gunz` at commit `fca6470d329668019dace305b5f0f3c9b62cb113`.
+- `npm run test:python`: pass, 537 tests.
+- `git diff --check`: pass.
+- File size check: all touched files remain below 500 LOC.
+
+### Decisions And Assumptions
+
+- `package.json.version` remains the canonical stable release version for metadata alignment.
+- Alias names are intentionally different by channel: npm `bmad-story-automator`, plugin `bmad-automator`, BMAD module `automator`, Python/workflow `story-automator`.
+- `bmad-method@next` remains the requested installer input for now, but prep installs the resolved version recorded in `SMOKE_INPUTS.json`, avoiding a second dist-tag resolution.
+- No Phase 01 deferred-work items remain. Remaining `gap` and `blocked` baseline rows are already owned by Phase 02-06 TODOs.
+
+### Blockers Or Risks
+
+- No Phase 01 blocker.
+- Phase 02 still needs package tarball identity and prepared-repo installed manifest assertions.
+- The prepared `.smoke/gunz` checkout was already dirty in ignored smoke artifacts during prep; this did not affect host repo status.
+
+### Next Phase Notes
+
+- Start Phase 02 with `02-package-and-prepared-repo-contracts.md` and `TODO/phase-02.md`.
+- Preserve the resolved-install behavior when adding package identity checks.
+- Recommended next command: `npm pack --dry-run --json` as the first input to `pack:assert`.

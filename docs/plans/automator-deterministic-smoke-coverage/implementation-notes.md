@@ -28,6 +28,26 @@ This is separate from [handoff-log.md](./handoff-log.md). Use the handoff log fo
 
 ## Notes
 
+## 2026-06-02 - phase 01 baseline and version inputs
+
+### Context
+
+- Phase 01 required a coverage baseline plus deterministic metadata and smoke input checks.
+
+### Decision, Change, Or Tradeoff
+
+- Added `coverage-baseline.md` as the source-of-truth Phase 01 inventory for current deterministic smoke facts and gaps.
+- Fixed stale `skills/bmad-story-automator/workflow.md` frontmatter from `1.12.0` to `1.15.0`.
+- Added `npm run version:check` to compare package, plugin, marketplace, module, Python, runtime, and workflow versions.
+- Kept `bmad-method@next` as the BMAD installer input for now, but made it explicit through `npm run smoke:input-check` and `.smoke/SMOKE_INPUTS.json` recording during `smoke:prepare`.
+- `smoke:prepare` now installs the resolved `bmad-method@<version>` from that manifest instead of resolving the moving dist-tag twice.
+
+### User Impact
+
+- Release metadata drift is now caught before smoke runs.
+- Prepared smoke runs still start from the moving BMAD Method npm `next` dist-tag, but each run records the resolved version/integrity and installs that resolved version.
+  Phase 02 can decide whether to replace that with a pinned installer version.
+
 ## 2026-06-02 - plan creation
 
 ### Context

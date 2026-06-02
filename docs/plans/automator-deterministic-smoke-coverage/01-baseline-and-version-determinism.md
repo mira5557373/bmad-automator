@@ -32,6 +32,7 @@ Create a source-of-truth coverage baseline for the automator workflow and add de
 ## Verification
 
 - Run the new or updated metadata/version command.
+- Run the new or updated smoke input command.
 - Run `npm run test:cli`.
 - Run `git diff --check`.
 - Confirm [gate-map.md](./gate-map.md) has entries for version alignment and smoke input determinism.

@@ -6,13 +6,13 @@ from pathlib import Path
 from .process import SmokeError, run, step
 
 
-def install_bmad(gunz_dir: Path, env: dict[str, str]) -> None:
+def install_bmad(gunz_dir: Path, env: dict[str, str], bmad_method_spec: str) -> None:
     step("Install BMAD core and BMM")
     run(
         [
             "npx",
             "--yes",
-            "bmad-method@next",
+            bmad_method_spec,
             "install",
             "--tools",
             "claude-code",

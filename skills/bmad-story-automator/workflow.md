@@ -1,6 +1,6 @@
 ---
 name: story-automator
-version: "1.12.0"
+version: "1.15.0"
 description: "Automate the build cycle for stories in an epic using T-Mux sessions with full resumability, smart parallelism, decision escalation, and automated retrospectives (tri-modal: create, validate, edit)"
 web_bundle: true
 configPath: '{project-root}/_bmad/bmm/config.yaml'

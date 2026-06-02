@@ -79,6 +79,7 @@ Keep these out of deterministic `verify`:
 
 ## Supporting Files
 
+- [Coverage baseline](./coverage-baseline.md)
 - [TODO index](./TODO.md)
 - [Gate map](./gate-map.md)
 - [Implementation notes](./implementation-notes.md)

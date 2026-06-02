@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from .config import BRANCH, PINNED_COMMIT, REPO_URL
+from .config import BMAD_METHOD_NPM_SPEC, BRANCH, PINNED_COMMIT, REPO_URL
 
 
 def write_next_steps(workspace: Path, gunz_dir: Path) -> Path:
@@ -32,10 +32,11 @@ def write_next_steps(workspace: Path, gunz_dir: Path) -> Path:
                 f"- repo: `{REPO_URL}`",
                 f"- branch: `{BRANCH}`",
                 f"- commit: `{PINNED_COMMIT}`",
+                f"- deterministic input manifest: `{workspace / 'SMOKE_INPUTS.json'}`",
                 "",
                 "Installed pieces:",
                 "",
-                "- BMAD core and BMM via `bmad-method@next`",
+                f"- BMAD core and BMM via `{BMAD_METHOD_NPM_SPEC}`",
                 "- project-local `bmad-story-automator` packed from this checkout",
                 "",
                 "Manual smoke start:",

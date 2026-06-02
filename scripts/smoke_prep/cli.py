@@ -13,6 +13,7 @@ from .automator import (
 )
 from .config import repo_root
 from .gunz import prepare_gunz
+from .inputs import smoke_inputs, write_smoke_inputs
 from .process import SmokeError, ensure_tool
 from .report import write_next_steps
 from .workspace import reset_dir, resolve_workspace
@@ -63,8 +64,10 @@ def main(argv: list[str] | None = None) -> int:
 
         env = smoke_env(workspace)
         prepare_gunz(workspace, gunz_dir)
+        inputs = smoke_inputs(env)
+        write_smoke_inputs(workspace, inputs)
         if not args.skip_bmad_install:
-            install_bmad(gunz_dir, env)
+            install_bmad(gunz_dir, env, inputs["bmadMethod"]["installSpec"])
         if not args.skip_automator_install:
             tarball = pack_project_automator(root, workspace, env)
             install_project_automator(gunz_dir, tarball, env)

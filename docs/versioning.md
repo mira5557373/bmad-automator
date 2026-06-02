@@ -148,6 +148,7 @@ For a release version `X.Y.Z`, update these files:
 - `skills/module.yaml`: `module_version`
 - `skills/bmad-story-automator/pyproject.toml`: Python package version
 - `skills/bmad-story-automator/src/story_automator/__init__.py`: runtime version
+- `skills/bmad-story-automator/workflow.md`: workflow frontmatter version
 - docs or changelog entries that mention the shipped version
 
 For preview versions, use semver in Node/plugin/module metadata and PEP 440 in
