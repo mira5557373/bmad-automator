@@ -407,7 +407,7 @@ def _story_file_status(args: list[str]) -> int:
             print_json({"ok": False, "error": "could not normalize story key", "input": args[0]})
             return 1
         matches = sorted(implementation_artifacts_dir(get_project_root()).glob(f"{norm.prefix}-*.md"))
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print_json({"ok": False, "error": str(exc), "input": args[0]})
         return 1
     if not matches:

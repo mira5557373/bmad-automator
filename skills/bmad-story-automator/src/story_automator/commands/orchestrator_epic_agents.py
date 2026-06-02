@@ -63,13 +63,21 @@ def get_epic_stories_action(args: list[str]) -> int:
             stories = _dedupe_stories_for_epic(project_root, epic, stories)
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
             return 0
-    stories, _ = sprint_status_epic(get_project_root(), epic)
+    project_root = get_project_root()
+    try:
+        stories, _ = sprint_status_epic(project_root, epic)
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "epic": epic, "error": str(exc)})
+        return 1
     if stories:
         print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "sprint_status"})
         return 0
-    epic_file = find_epic_file(epic)
+    try:
+        epic_file = find_epic_file(epic)
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "epic": epic, "error": str(exc)})
+        return 1
     if epic_file:
-        project_root = get_project_root()
         stories = sorted(_story_ids_from_epic_file(epic_file, epic), key=lambda item: _story_sort_key(project_root, item, epic))
         if stories:
             print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
@@ -83,12 +91,20 @@ def check_blocking_action(args: list[str]) -> int:
         print_json({"ok": False, "error": "story_id_required"})
         return 1
     project_root = get_project_root()
-    norm = normalize_story_key(project_root, args[0])
+    try:
+        norm = normalize_story_key(project_root, args[0])
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "error": str(exc), "input": args[0]})
+        return 1
     if norm is None:
         print_json({"ok": False, "error": "could_not_normalize_key", "input": args[0]})
         return 1
     epic = norm.id.split(".", 1)[0]
-    epic_file = find_epic_file(epic)
+    try:
+        epic_file = find_epic_file(epic)
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "error": str(exc), "input": args[0], "epic": epic})
+        return 1
     if not epic_file:
         print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": [], "reason": "epic_file_not_found", "source": "unknown"})
         return 0

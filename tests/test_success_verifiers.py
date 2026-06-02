@@ -225,6 +225,17 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertIn("BMAD config implementation_artifacts", payload["error"])
 
+    def test_story_file_status_returns_json_error_for_unreadable_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch("story_automator.core.artifact_paths.read_text", side_effect=PermissionError("config unreadable")):
+            with patch_env(self.project_root), redirect_stdout(stdout):
+                code = cmd_orchestrator_helper(["story-file-status", "1.2"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("config unreadable", payload["error"])
+
     def test_validate_story_creation_count_uses_resolved_artifacts_dir(self) -> None:
         self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
         self._write_docs_story("1-2-docs", status="draft")
@@ -351,6 +362,26 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["stories"], ["1.1", "1.2"])
         self.assertEqual(payload["source"], "epic_file")
+
+    def test_check_blocking_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["check-blocking", "1.1"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
+
+    def test_get_epic_stories_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_orchestrator_helper(["get-epic-stories", "1"])
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
 
     def test_build_cmd_returns_controlled_error_for_invalid_artifacts_config(self) -> None:
         self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
