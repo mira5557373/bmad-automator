@@ -497,11 +497,12 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertTrue(callable(resolve_agents_payload))
         self.assertEqual(extract_json_block("```json\n{\"ok\":true}\n```"), '{"ok":true}')
 
-    def test_check_epic_complete_rejects_non_numeric_epic(self) -> None:
+    def test_check_epic_complete_accepts_non_numeric_epic(self) -> None:
         code, payload = self._helper(["check-epic-complete", "abc", "abc.1"])
 
-        self.assertEqual(code, 1)
-        self.assertEqual(payload["error"], "invalid_epic_number")
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["epic"], "abc")
 
     def _agents_payload(self) -> dict[str, object]:
         tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review", "retro")}
