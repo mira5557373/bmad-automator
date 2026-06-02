@@ -43,6 +43,28 @@ def implementation_artifacts_glob(project_root: str | Path, pattern: str) -> str
     return f"{implementation_artifacts_relpath(project_root)}/{pattern}"
 
 
+def resolve_artifact_glob(project_root: str | Path, pattern: str) -> tuple[Path, str]:
+    root = Path(project_root)
+    root_resolved = root.resolve()
+    artifacts_root = implementation_artifacts_dir(root)
+    legacy_artifacts_root = root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS
+    raw = Path(pattern)
+    if raw.is_absolute():
+        raise ValueError("success.config.glob must be relative to implementation artifacts")
+    resolved = (root / raw).resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError("success.config.glob escapes project root") from exc
+    for allowed_root in (artifacts_root, legacy_artifacts_root):
+        try:
+            relative = resolved.relative_to(allowed_root.resolve())
+        except ValueError:
+            continue
+        return allowed_root, str(relative)
+    raise ValueError("success.config.glob must stay within _bmad-output/implementation-artifacts or resolved implementation artifacts")
+
+
 def _configured_artifacts_dir(project_root: Path) -> Path | None:
     config = _read_bmad_config(project_root / "_bmad" / "bmm" / "config.yaml")
     output_folder = config.get("output_folder") or DEFAULT_OUTPUT_FOLDER

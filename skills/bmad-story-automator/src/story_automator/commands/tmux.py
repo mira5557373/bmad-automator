@@ -5,7 +5,7 @@ import shlex
 import time
 from pathlib import Path
 
-from story_automator.core.artifact_paths import implementation_artifacts_relpath
+from story_automator.core.prompt_rendering import render_step_prompt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
@@ -27,7 +27,6 @@ from story_automator.core.utils import (
     print_json,
     project_hash,
     project_slug,
-    read_text,
 )
 
 
@@ -225,36 +224,16 @@ def _build_cmd(args: list[str]) -> int:
 
 
 def _render_step_prompt(contract: dict[str, object], story_id: str, story_prefix: str, extra_instruction: str) -> str:
-    prompt_obj = contract.get("prompt")
-    prompt_cfg: dict[str, object] = prompt_obj if isinstance(prompt_obj, dict) else {}
-    assets_obj = contract.get("assets")
-    assets_cfg: dict[str, object] = assets_obj if isinstance(assets_obj, dict) else {}
-    files_obj = assets_cfg.get("files")
-    assets: dict[str, object] = files_obj if isinstance(files_obj, dict) else {}
-    template = read_text(str(prompt_cfg.get("templatePath") or ""))
     try:
-        artifacts_relpath = implementation_artifacts_relpath(get_project_root())
+        return render_step_prompt(
+            contract,
+            project_root=get_project_root(),
+            story_id=story_id,
+            story_prefix=story_prefix,
+            extra_instruction=extra_instruction,
+        )
     except (OSError, ValueError) as exc:
         raise PolicyError(str(exc)) from exc
-    replacements = {
-        "{{story_id}}": story_id,
-        "{{story_prefix}}": story_prefix,
-        "{{label}}": str(contract.get("label") or ""),
-        "{{implementation_artifacts}}": artifacts_relpath,
-        "{{skill_line}}": _prompt_line("READ this skill first", str(assets.get("skill") or "")),
-        "{{workflow_line}}": _prompt_line("READ this workflow file next", str(assets.get("workflow") or "")),
-        "{{instructions_line}}": _prompt_line("Then read", str(assets.get("instructions") or "")),
-        "{{checklist_line}}": _prompt_line("Validate with", str(assets.get("checklist") or "")),
-        "{{template_line}}": _prompt_line("Use template", str(assets.get("template") or "")),
-        "{{extra_instruction}}": extra_instruction.strip() or str(prompt_cfg.get("defaultExtraInstruction") or ""),
-    }
-    for key, value in replacements.items():
-        template = template.replace(key, value)
-    return template
-
-
-def _prompt_line(prefix: str, value: str) -> str:
-    return f"{prefix}: {value}\n" if value else ""
 
 
 def cmd_heartbeat_check(args: list[str]) -> int:

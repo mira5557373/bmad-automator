@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .artifact_paths import DEFAULT_OUTPUT_FOLDER, IMPLEMENTATION_ARTIFACTS, implementation_artifacts_dir, implementation_artifacts_glob
+from .artifact_paths import implementation_artifacts_dir, implementation_artifacts_glob, resolve_artifact_glob
 from .frontmatter import find_frontmatter_value_case
 from .runtime_policy import PolicyError, load_runtime_policy, step_contract
 from .sprint import sprint_status_epic, sprint_status_get
@@ -74,7 +74,10 @@ def create_story_artifact(
     raw_glob = str(config.get("glob") or implementation_artifacts_glob(project_root, "{story_prefix}-*.md"))
     expected = _parse_int(config.get("expectedMatches", 1), "success.config.expectedMatches", minimum=0)
     pattern = _format_story_pattern(raw_glob, norm)
-    root, safe_pattern = _resolve_artifact_glob(project_root, pattern)
+    try:
+        root, safe_pattern = resolve_artifact_glob(project_root, pattern)
+    except ValueError as exc:
+        raise PolicyError(str(exc)) from exc
     matches = sorted(root.glob(safe_pattern))
     if _is_explicit_full_key(story_key, norm):
         matches = [match for match in matches if match.stem == norm.key]
@@ -215,30 +218,6 @@ def _selected_review_story(sprint_story: str, norm) -> str:
     if sprint_story in {norm.id, norm.prefix}:
         return norm.key
     return sprint_story
-
-
-def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:
-    root = Path(project_root)
-    root_resolved = root.resolve()
-    artifacts_root = implementation_artifacts_dir(project_root)
-    legacy_artifacts_root = root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS
-    raw = Path(pattern)
-    if raw.is_absolute():
-        raise PolicyError("success.config.glob must be relative to implementation artifacts")
-    candidate = root / raw
-    resolved = candidate.resolve()
-    try:
-        resolved.relative_to(root_resolved)
-    except ValueError as exc:
-        raise PolicyError("success.config.glob escapes project root") from exc
-    for allowed_root in (artifacts_root, legacy_artifacts_root):
-        try:
-            relative = resolved.relative_to(allowed_root.resolve())
-        except ValueError:
-            continue
-        return allowed_root, str(relative)
-    raise PolicyError("success.config.glob must stay within _bmad-output/implementation-artifacts or resolved implementation artifacts")
-
 
 def _load_review_contract(project_root: str, contract: dict[str, Any]) -> dict[str, Any]:
     merged = dict(DEFAULT_REVIEW_CONTRACT)
