@@ -59,7 +59,7 @@ class StopHookTests(unittest.TestCase):
         self.assertEqual(hook["timeout"], 10)
         self.assertEqual(hook["statusMessage"], "Checking story automator state")
         config = tomllib.loads((self.project_root / ".codex" / "config.toml").read_text(encoding="utf-8"))
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
 
     def test_ensure_stop_hook_accepts_unquoted_command_value(self) -> None:
         self._install_bundle(".agents")
@@ -92,7 +92,7 @@ class StopHookTests(unittest.TestCase):
         self.assertEqual(hook["timeout"], 10)
         self.assertEqual(hook["statusMessage"], "Checking story automator state")
         config = tomllib.loads((self.project_root / ".codex" / "config.toml").read_text(encoding="utf-8"))
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
 
     def test_ensure_stop_hook_codex_is_idempotent(self) -> None:
         self._install_bundle(".agents")
@@ -108,6 +108,54 @@ class StopHookTests(unittest.TestCase):
         self.assertTrue(second["trusted"])
         self.assertEqual(second["hooksReason"], "already_configured")
         self.assertEqual(second["configReason"], "already_enabled")
+
+    def test_ensure_stop_hook_codex_uses_global_project_trust(self) -> None:
+        self._install_bundle(".agents")
+        global_config = self._write_global_codex_config(self._trusted_entry())
+
+        with patch("story_automator.core.stop_hooks._codex_global_config_path", return_value=global_config):
+            first = self._run_ensure_stop_hook("codex")
+            second = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(first["changed"])
+        self.assertTrue(first["trusted"])
+        self.assertEqual(first["verificationState"], "configured")
+        self.assertFalse(second["changed"])
+        self.assertEqual(second["reason"], "already_configured")
+        self.assertTrue(second["trusted"])
+        self.assertEqual(second["verificationState"], "verified")
+
+    def test_ensure_stop_hook_codex_ignores_missing_global_config(self) -> None:
+        self._install_bundle(".agents")
+        global_config = self.project_root / "missing-home" / ".codex" / "config.toml"
+
+        with patch("story_automator.core.stop_hooks._codex_global_config_path", return_value=global_config):
+            first = self._run_ensure_stop_hook("codex")
+            second = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(first["changed"])
+        self.assertFalse(first["trusted"])
+        self.assertEqual(first["verificationState"], "configured")
+        self.assertFalse(second["changed"])
+        self.assertEqual(second["reason"], "pending_trust")
+        self.assertFalse(second["trusted"])
+        self.assertEqual(second["verificationState"], "pending_trust")
+
+    def test_ensure_stop_hook_codex_ignores_invalid_global_config(self) -> None:
+        self._install_bundle(".agents")
+        global_config = self._write_global_codex_config("[projects\n")
+
+        with patch("story_automator.core.stop_hooks._codex_global_config_path", return_value=global_config):
+            first = self._run_ensure_stop_hook("codex")
+            second = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(first["changed"])
+        self.assertFalse(first["trusted"])
+        self.assertEqual(first["verificationState"], "configured")
+        self.assertFalse(second["changed"])
+        self.assertEqual(second["reason"], "pending_trust")
+        self.assertFalse(second["trusted"])
+        self.assertEqual(second["verificationState"], "pending_trust")
 
     def test_ensure_stop_hook_codex_preserves_existing_config(self) -> None:
         self._install_bundle(".agents")
@@ -141,7 +189,7 @@ class StopHookTests(unittest.TestCase):
         config = tomllib.loads((codex_dir / "config.toml").read_text(encoding="utf-8"))
         self.assertEqual(config["model"], "gpt-5.2")
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
         hooks = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
         self.assertIn("PreToolUse", hooks["hooks"])
         self.assertIn("Stop", hooks["hooks"])
@@ -151,7 +199,7 @@ class StopHookTests(unittest.TestCase):
         codex_dir = self.project_root / ".codex"
         codex_dir.mkdir(parents=True, exist_ok=True)
         (codex_dir / "config.toml").write_text(
-            f'[features]\ncodex_hooks = true\n\n[projects.{json.dumps(str(self.project_root.resolve()))}]\ntrust_level = "trusted"\n',
+            f'[features]\nhooks = true\n\n[projects.{json.dumps(str(self.project_root.resolve()))}]\ntrust_level = "trusted"\n',
             encoding="utf-8",
         )
         (codex_dir / "hooks.json").write_text(
@@ -193,7 +241,7 @@ class StopHookTests(unittest.TestCase):
         codex_dir = self.project_root / ".codex"
         codex_dir.mkdir(parents=True, exist_ok=True)
         existing_command = "story-automator derive-project-slug"
-        (codex_dir / "config.toml").write_text("[features]\ncodex_hooks = true\n", encoding="utf-8")
+        (codex_dir / "config.toml").write_text("[features]\nhooks = true\n", encoding="utf-8")
         (codex_dir / "hooks.json").write_text(
             json.dumps(
                 {
@@ -239,7 +287,7 @@ class StopHookTests(unittest.TestCase):
         self._install_bundle(".agents")
         codex_dir = self.project_root / ".codex"
         codex_dir.mkdir(parents=True, exist_ok=True)
-        (codex_dir / "config.toml").write_text("[features]\ncodex_hooks = true\n", encoding="utf-8")
+        (codex_dir / "config.toml").write_text("[features]\nhooks = true\n", encoding="utf-8")
         (codex_dir / "hooks.json").write_text(
             json.dumps(
                 {
@@ -379,9 +427,11 @@ class StopHookTests(unittest.TestCase):
         self.assertTrue(payload["changed"])
         text = (codex_dir / "config.toml").read_text(encoding="utf-8")
         self.assertNotIn("[features]", text)
+        self.assertNotIn("codex_hooks", text)
         config = tomllib.loads(text)
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
+        self.assertNotIn("codex_hooks", config["features"])
 
     def test_ensure_stop_hook_codex_updates_dotted_features_toml_with_comment(self) -> None:
         self._install_bundle(".agents")
@@ -396,10 +446,12 @@ class StopHookTests(unittest.TestCase):
 
         self.assertTrue(payload["changed"])
         text = (codex_dir / "config.toml").read_text(encoding="utf-8")
-        self.assertIn("features.codex_hooks = true", text)
+        self.assertIn("features.hooks = true", text)
+        self.assertNotIn("codex_hooks", text)
         config = tomllib.loads(text)
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
+        self.assertNotIn("codex_hooks", config["features"])
 
     def test_ensure_stop_hook_codex_updates_commented_features_table(self) -> None:
         self._install_bundle(".agents")
@@ -414,10 +466,10 @@ class StopHookTests(unittest.TestCase):
 
         self.assertTrue(payload["changed"])
         text = (codex_dir / "config.toml").read_text(encoding="utf-8")
-        self.assertIn("[features] # runtime feature flags\ncodex_hooks = true\nexperimental_resume = true", text)
+        self.assertIn("[features] # runtime feature flags\nhooks = true\nexperimental_resume = true", text)
         config = tomllib.loads(text)
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
         self.assertEqual(config["projects"]["/tmp/example"]["trust_level"], "trusted")
 
     def test_ensure_stop_hook_codex_updates_inline_features_toml(self) -> None:
@@ -431,7 +483,7 @@ class StopHookTests(unittest.TestCase):
         self.assertTrue(payload["changed"])
         config = tomllib.loads((codex_dir / "config.toml").read_text(encoding="utf-8"))
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
 
     def test_ensure_stop_hook_codex_updates_inline_features_toml_with_comment(self) -> None:
         self._install_bundle(".agents")
@@ -447,9 +499,76 @@ class StopHookTests(unittest.TestCase):
         self.assertTrue(payload["changed"])
         text = (codex_dir / "config.toml").read_text(encoding="utf-8")
         self.assertIn("# keep inline", text)
+        self.assertNotIn("codex_hooks", text)
         config = tomllib.loads(text)
         self.assertIs(config["features"]["experimental_resume"], True)
-        self.assertIs(config["features"]["codex_hooks"], True)
+        self.assertIs(config["features"]["hooks"], True)
+        self.assertNotIn("codex_hooks", config["features"])
+
+    def test_ensure_stop_hook_codex_migrates_legacy_codex_hooks_table(self) -> None:
+        self._install_bundle(".agents")
+        codex_dir = self.project_root / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        (codex_dir / "config.toml").write_text(
+            'model = "gpt-5.2"\n\n[features]\ncodex_hooks = true\n',
+            encoding="utf-8",
+        )
+
+        payload = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(payload["configChanged"])
+        self.assertEqual(payload["configReason"], "hooks_enabled")
+        text = (codex_dir / "config.toml").read_text(encoding="utf-8")
+        self.assertNotIn("codex_hooks", text)
+        config = tomllib.loads(text)
+        self.assertEqual(config["model"], "gpt-5.2")
+        self.assertIs(config["features"]["hooks"], True)
+        self.assertNotIn("codex_hooks", config["features"])
+
+    def test_ensure_stop_hook_codex_leaves_correct_hooks_flag_untouched(self) -> None:
+        self._install_bundle(".agents")
+        codex_dir = self.project_root / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        config_path = codex_dir / "config.toml"
+        config_path.write_text("[features]\nhooks = true\n", encoding="utf-8")
+
+        payload = self._run_ensure_stop_hook("codex")
+
+        self.assertFalse(payload["configChanged"])
+        self.assertEqual(payload["configReason"], "already_enabled")
+        self.assertEqual(config_path.read_text(encoding="utf-8"), "[features]\nhooks = true\n")
+
+    def test_ensure_stop_hook_codex_enables_disabled_hooks_flag(self) -> None:
+        self._install_bundle(".agents")
+        codex_dir = self.project_root / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        (codex_dir / "config.toml").write_text("[features]\nhooks = false\n", encoding="utf-8")
+
+        payload = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(payload["configChanged"])
+        self.assertEqual(payload["configReason"], "hooks_enabled")
+        config = tomllib.loads((codex_dir / "config.toml").read_text(encoding="utf-8"))
+        self.assertIs(config["features"]["hooks"], True)
+
+    def test_ensure_stop_hook_codex_drops_legacy_key_when_current_key_present(self) -> None:
+        self._install_bundle(".agents")
+        codex_dir = self.project_root / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        (codex_dir / "config.toml").write_text(
+            "[features]\ncodex_hooks = true\nhooks = true\n",
+            encoding="utf-8",
+        )
+
+        payload = self._run_ensure_stop_hook("codex")
+
+        self.assertTrue(payload["configChanged"])
+        self.assertEqual(payload["configReason"], "hooks_enabled")
+        text = (codex_dir / "config.toml").read_text(encoding="utf-8")
+        self.assertNotIn("codex_hooks", text)
+        config = tomllib.loads(text)
+        self.assertIs(config["features"]["hooks"], True)
+        self.assertNotIn("codex_hooks", config["features"])
 
     def test_ensure_stop_hook_codex_reports_invalid_hooks_json(self) -> None:
         self._install_bundle(".agents")
@@ -508,17 +627,26 @@ class StopHookTests(unittest.TestCase):
         self.assertEqual(code, expected_code)
         return json.loads(stdout.getvalue())
 
+    def _trusted_entry(self) -> str:
+        return f'[projects.{json.dumps(str(self.project_root.resolve()))}]\ntrust_level = "trusted"\n'
+
     def _write_codex_trust_level(self, trust_level: str) -> None:
         codex_dir = self.project_root / ".codex"
         codex_dir.mkdir(parents=True, exist_ok=True)
         config_path = codex_dir / "config.toml"
-        prefix = config_path.read_text(encoding="utf-8") if config_path.exists() else "[features]\ncodex_hooks = true\n"
+        prefix = config_path.read_text(encoding="utf-8") if config_path.exists() else "[features]\nhooks = true\n"
         if not prefix.endswith("\n"):
             prefix += "\n"
         config_path.write_text(
             prefix + f'\n[projects.{json.dumps(str(self.project_root.resolve()))}]\ntrust_level = "{trust_level}"\n',
             encoding="utf-8",
         )
+
+    def _write_global_codex_config(self, body: str) -> Path:
+        global_config = self.project_root / "global-home" / ".codex" / "config.toml"
+        global_config.parent.mkdir(parents=True, exist_ok=True)
+        global_config.write_text(body, encoding="utf-8")
+        return global_config
 
 
 if __name__ == "__main__":

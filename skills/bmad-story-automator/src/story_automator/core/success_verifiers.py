@@ -76,6 +76,8 @@ def create_story_artifact(
     pattern = _format_story_pattern(raw_glob, norm)
     root, safe_pattern = _resolve_artifact_glob(project_root, pattern)
     matches = sorted(root.glob(safe_pattern))
+    if _is_explicit_full_key(story_key, norm):
+        matches = [match for match in matches if match.stem == norm.key]
     payload: dict[str, object] = {
         "verified": len(matches) == expected,
         "story": norm.key,
@@ -102,14 +104,20 @@ def review_completion(
         return {"verified": False, "reason": "could_not_normalize_key", "input": story_key}
     review_contract = _load_review_contract(project_root, contract or {})
     done_values = {value.lower() for value in review_contract["doneValues"]}
-    sprint = sprint_status_get(project_root, norm.id)
-    story_file = _story_artifact_path(project_root, norm.prefix)
+    sprint = sprint_status_get(project_root, story_key)
+    selected_story = _selected_review_story(sprint.story, norm) if sprint.found else norm.key
+    story_file = _story_artifact_path(
+        project_root,
+        norm.prefix,
+        selected_story,
+        allow_prefix_fallback=False,
+    )
     story_status = find_frontmatter_value_case(story_file, "Status") if story_file else ""
     for source in review_contract["sourceOrder"]:
         if source == "sprint-status.yaml" and sprint.status.lower() in done_values:
             return {
                 "verified": True,
-                "story": norm.key,
+                "story": selected_story,
                 "sprint_status": sprint.status,
                 "story_file_status": story_status or "unknown",
                 "source": "sprint-status.yaml",
@@ -117,7 +125,7 @@ def review_completion(
         if source == "story-file" and story_status.lower() in done_values:
             payload: dict[str, object] = {
                 "verified": True,
-                "story": norm.key,
+                "story": selected_story,
                 "sprint_status": sprint.status,
                 "story_file_status": story_status,
                 "source": "story-file",
@@ -127,7 +135,7 @@ def review_completion(
             return payload
     return {
         "verified": False,
-        "story": norm.key,
+        "story": selected_story,
         "sprint_status": sprint.status,
         "story_file_status": story_status or "unknown",
         "reason": "workflow_not_complete",
@@ -144,6 +152,18 @@ def epic_complete(
     epic = _epic_identifier(project_root, story_key)
     if not epic:
         return {"verified": False, "reason": "could_not_normalize_key", "input": story_key}
+    norm = normalize_story_key(project_root, story_key)
+    if norm is not None and _is_explicit_full_key(story_key, norm):
+        sprint = sprint_status_get(project_root, story_key)
+        if not sprint.found or not sprint.done:
+            return {
+                "verified": False,
+                "epic": epic,
+                "story": story_key,
+                "sprint_status": sprint.status,
+                "source": "sprint-status.yaml",
+                "reason": "story_not_done",
+            }
     stories, done = sprint_status_epic(project_root, epic)
     if not stories:
         return {"verified": False, "epic": epic, "reason": "no_stories_found", "source": "sprint-status.yaml"}
@@ -173,26 +193,47 @@ def _format_story_pattern(pattern: str, story) -> str:
     )
 
 
-def _story_artifact_path(project_root: str, story_prefix: str) -> Path | None:
-    matches = sorted(implementation_artifacts_dir(project_root).glob(f"{story_prefix}-*.md"))
+def _story_artifact_path(
+    project_root: str,
+    story_prefix: str,
+    preferred_story: str = "",
+    *,
+    allow_prefix_fallback: bool = True,
+) -> Path | None:
+    artifacts = implementation_artifacts_dir(project_root)
+    if preferred_story:
+        preferred = artifacts / f"{preferred_story}.md"
+        if preferred.is_file():
+            return preferred
+        if not allow_prefix_fallback:
+            return None
+    matches = sorted(artifacts.glob(f"{story_prefix}-*.md"))
     return matches[0] if matches else None
 
 
+def _selected_review_story(sprint_story: str, norm) -> str:
+    if sprint_story in {norm.id, norm.prefix}:
+        return norm.key
+    return sprint_story
+
+
 def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:
-    root = Path(project_root).resolve()
-    artifacts_root = implementation_artifacts_dir(project_root).resolve()
-    legacy_artifacts_root = (root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS).resolve()
+    root = Path(project_root)
+    root_resolved = root.resolve()
+    artifacts_root = implementation_artifacts_dir(project_root)
+    legacy_artifacts_root = root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS
     raw = Path(pattern)
     if raw.is_absolute():
         raise PolicyError("success.config.glob must be relative to implementation artifacts")
-    resolved = (root / raw).resolve()
+    candidate = root / raw
+    resolved = candidate.resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(root_resolved)
     except ValueError as exc:
         raise PolicyError("success.config.glob escapes project root") from exc
     for allowed_root in (artifacts_root, legacy_artifacts_root):
         try:
-            relative = resolved.relative_to(allowed_root)
+            relative = resolved.relative_to(allowed_root.resolve())
         except ValueError:
             continue
         return allowed_root, str(relative)
@@ -268,9 +309,15 @@ def _epic_identifier(project_root: str, story_key: str) -> str:
     if re.fullmatch(r"\d+", story_key):
         return story_key
     norm = normalize_story_key(project_root, story_key)
-    if norm is None:
-        return ""
-    return norm.id.split(".", 1)[0]
+    if norm is not None:
+        return norm.id.split(".", 1)[0]
+    if re.fullmatch(r"[A-Za-z][\w-]*", story_key) and sprint_status_epic(project_root, story_key)[0]:
+        return story_key
+    return ""
+
+
+def _is_explicit_full_key(value: str, norm) -> bool:
+    return value == norm.key and value not in {norm.id, norm.prefix}
 
 
 def _sanitize_review_contract(contract: dict[str, Any]) -> dict[str, Any]:
