@@ -69,6 +69,47 @@ class CliParserContractTests(unittest.TestCase):
         self.assertEqual(payload["complexity"]["score"], 3)
         self.assertEqual(payload["complexity"]["level"], "Medium")
 
+    def test_parse_story_accepts_bmad_numbered_headers(self) -> None:
+        epic = self.root / "epic.md"
+        epic.write_text(
+            "# Product Epic\n\n## EPIC 1: Platform\n\n### 1.1: Add database sync\nDescription line.\n\nAcceptance Criteria\n- Works reliably\n\n### 1.2: Next story\n",
+            encoding="utf-8",
+        )
+        rules = self.root / "rules.json"
+        rules.write_text(
+            json.dumps({"rules": [{"pattern": "database", "score": 3, "label": "Touches DB"}], "thresholds": {"low_max": 1, "medium_max": 3}}),
+            encoding="utf-8",
+        )
+
+        code, payload = self._main_json(["parse-story", "--epic", str(epic), "--story", "1.1", "--rules", str(rules)])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["storyId"], "1.1")
+        self.assertEqual(payload["title"], "Add database sync")
+        self.assertEqual(payload["complexity"]["level"], "Medium")
+
+    def test_parse_epic_accepts_bmad_numbered_headers(self) -> None:
+        epic = self.root / "epic.md"
+        epic.write_text(
+            "# Product Epic\n\n## EPIC 1: Platform\n\n### 1.1: Add database sync\n\n## Epic 2: Browse\n\n### Story 2.1: Search listings\n",
+            encoding="utf-8",
+        )
+
+        code, payload = self._main_json(["parse-epic", "--file", str(epic)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual([story["storyId"] for story in payload["stories"]], ["1.1", "2.1"])
+        self.assertEqual(payload["stories"][0]["epicTitle"], "Platform")
+
+    def test_parse_story_range_accepts_explicit_story_ids(self) -> None:
+        code, payload = self._main_json(["parse-story-range", "--input", "1.1", "--total", "3", "--ids", "1.1,1.2,2.1"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["indices"], [1])
+        self.assertEqual(payload["storyIds"], ["1.1"])
+
     def test_parse_story_read_failure_returns_json_error(self) -> None:
         epic = self._epic_file()
         rules = self.root / "rules.json"

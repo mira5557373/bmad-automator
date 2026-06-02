@@ -18,8 +18,8 @@ def parse_epic_file(epic_file: str | Path) -> dict[str, Any]:
         if line.startswith("# "):
             epic_title = line.removeprefix("# ").strip()
             break
-    story_re = re.compile(r"^###\s+Story\s+([^:]+):\s*(.*)$")
-    epic_re = re.compile(r"^##\s+Epic\s+([A-Za-z][\w-]*|\d+):\s*(.*)$")
+    story_re = re.compile(r"^###\s+(?:(?:Story\s+)?(\d+\.\d+)|Story\s+([^:]+)):\s*(.*)$", re.IGNORECASE)
+    epic_re = re.compile(r"^##\s+Epic\s+([A-Za-z][\w-]*|\d+):\s*(.*)$", re.IGNORECASE)
     current_epic = ""
     current_epic_title = ""
     stories: list[dict[str, str]] = []
@@ -31,7 +31,8 @@ def parse_epic_file(epic_file: str | Path) -> dict[str, Any]:
             continue
         story_match = story_re.match(line)
         if story_match:
-            raw_story, title = story_match.groups()
+            numeric_story, named_story, title = story_match.groups()
+            raw_story = numeric_story or named_story or ""
             story_key = _normalize_header_story(project_root, current_epic, raw_story.strip())
             if story_key is None:
                 continue
@@ -55,8 +56,9 @@ def parse_story(epic_file: str | Path, story_id: str, rules_file: str | Path) ->
     content = read_text(epic_file)
     lines = trim_lines(content)
     project_root = _project_root_for_epic_file(epic_file)
-    epic_re = re.compile(r"^##\s+Epic\s+([A-Za-z][\w-]*|\d+):")
-    header_re = re.compile(r"^###\s+Story\s+([^:]+):\s*(.*)$")
+    epic_re = re.compile(r"^##\s+Epic\s+([A-Za-z][\w-]*|\d+):", re.IGNORECASE)
+    header_re = re.compile(r"^###\s+(?:(?:Story\s+)?(\d+\.\d+)|Story\s+([^:]+)):\s*(.*)$", re.IGNORECASE)
+    boundary_re = re.compile(r"^(?:###\s+(?:Story\s+[^:]+|\d+\.\d+):|##\s+Epic\s+(?:[A-Za-z][\w-]*|\d+):)", re.IGNORECASE)
     target_id = story_id
     start_index = -1
     title = ""
@@ -68,7 +70,8 @@ def parse_story(epic_file: str | Path, story_id: str, rules_file: str | Path) ->
             continue
         match = header_re.match(line)
         if match:
-            raw_story, raw_title = match.groups()
+            numeric_story, named_story, raw_title = match.groups()
+            raw_story = numeric_story or named_story or ""
             story_key = _normalize_header_story(project_root, current_epic, raw_story.strip())
             if story_key is None:
                 continue
@@ -85,7 +88,7 @@ def parse_story(epic_file: str | Path, story_id: str, rules_file: str | Path) ->
     dependencies = ""
     in_ac = False
     for line in lines[start_index + 1 :]:
-        if line.startswith("### Story ") or line.startswith("## Epic "):
+        if boundary_re.match(line):
             break
         if "Acceptance Criteria" in line:
             in_ac = True
@@ -170,6 +173,7 @@ def parse_story_range(user_input: str, total: int, ids_csv: str = "") -> dict[st
     ids = [part.strip() for part in ids_csv.split(",")] if ids_csv else []
     selected: set[int] = set()
     normalized = user_input.lower().replace(" ", "")
+    id_index = {story_id.lower(): index + 1 for index, story_id in enumerate(ids)}
     if normalized == "all":
         selected = set(range(1, total + 1))
     else:
@@ -183,8 +187,15 @@ def parse_story_range(user_input: str, total: int, ids_csv: str = "") -> dict[st
                     end = int(end_raw)
                     low, high = sorted((start, end))
                     selected.update(range(low, high + 1))
+                elif start_raw in id_index and end_raw in id_index:
+                    start = id_index[start_raw]
+                    end = id_index[end_raw]
+                    low, high = sorted((start, end))
+                    selected.update(range(low, high + 1))
             elif part.isdigit():
                 selected.add(int(part))
+            elif part in id_index:
+                selected.add(id_index[part])
     indices = sorted(index for index in selected if 1 <= index <= total)
     story_ids = [ids[index - 1] for index in indices if index - 1 < len(ids)]
     return {"ok": True, "indices": indices, "storyIds": story_ids, "count": len(indices)}
