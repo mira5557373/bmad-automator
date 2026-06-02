@@ -302,6 +302,25 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload, {"ok": True, "updated": ["status"]})
         self.assertIn("status: IN_PROGRESS", state_file.read_text(encoding="utf-8"))
 
+    def test_state_update_preserves_non_status_value_whitespace(self) -> None:
+        state_file = self._build_state_config(status="READY")
+
+        code, payload = self._state_update(state_file, " currentStep =  step-next  ")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "updated": ["currentStep"]})
+        self.assertIn("currentStep:   step-next  ", state_file.read_text(encoding="utf-8"))
+
+    def test_state_update_uses_frontmatter_status_for_transition(self) -> None:
+        state_file = self._build_state_config(status="COMPLETE")
+        state_file.write_text(state_file.read_text(encoding="utf-8") + "\nstatus: READY\n", encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "status=IN_PROGRESS")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_status_transition")
+        self.assertEqual(payload["currentStatus"], "COMPLETE")
+
     def _validate_state(self, state_file: Path) -> dict[str, object]:
         stdout = io.StringIO()
         with patch_env(self.project_root), redirect_stdout(stdout):

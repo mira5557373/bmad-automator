@@ -14,7 +14,8 @@ def state_update_action(args: list[str]) -> int:
         print_json({"ok": False, "error": "file_not_found"})
         return 1
     text = read_text(args[0])
-    fields = parse_simple_frontmatter(text)
+    frontmatter, body = _split_frontmatter(text)
+    fields = parse_simple_frontmatter(frontmatter)
     updates = _parse_updates(args[1:])
     if isinstance(updates, dict):
         print_json(updates)
@@ -34,7 +35,6 @@ def state_update_action(args: list[str]) -> int:
         pending_status = value
         final_status = value
 
-    frontmatter, body = _split_frontmatter(text)
     frontmatter, updated = _replace_frontmatter_values(frontmatter, updates)
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
@@ -42,9 +42,10 @@ def state_update_action(args: list[str]) -> int:
     Path(args[0]).write_text(frontmatter + body, encoding="utf-8")
     if final_status:
         emit_state_transition(args[0], result="applied", new_status=final_status)
-    event_fields = [key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}]
+    event_fields = list(dict.fromkeys(key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}))
     if event_fields:
-        emit_state_fields_updated(args[0], event_fields, {key: value for key, value in updates if key in event_fields})
+        updated_fields = parse_simple_frontmatter(frontmatter)
+        emit_state_fields_updated(args[0], event_fields, {key: updated_fields.get(key, "") for key in event_fields})
     print_json({"ok": True, "updated": updated})
     return 0
 

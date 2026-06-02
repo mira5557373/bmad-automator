@@ -107,6 +107,29 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertEqual(event["context"]["updatedFields"], ["currentStory", "currentStep"])
         self.assertEqual(event["context"]["values"], {"currentStory": "1.2", "currentStep": "dev"})
 
+    def test_duplicate_state_updates_emit_final_frontmatter_value_once(self) -> None:
+        state_file = self.project_root / "state.md"
+        state_file.write_text('---\ncurrentStory: ""\n---\n', encoding="utf-8")
+        events_file = self.project_root / "events.jsonl"
+
+        code, payload = self._helper(
+            [
+                "state-update",
+                str(state_file),
+                "--set",
+                "currentStory=1.1",
+                "--set",
+                "currentStory=1.2",
+            ],
+            events_file=events_file,
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["updated"], ["currentStory", "currentStory"])
+        event = json.loads(events_file.read_text(encoding="utf-8"))
+        self.assertEqual(event["context"]["updatedFields"], ["currentStory"])
+        self.assertEqual(event["context"]["values"], {"currentStory": "1.2"})
+
     def test_monitor_result_emits_session_lifecycle_event(self) -> None:
         events_file = self.project_root / "events.jsonl"
         stdout = io.StringIO()

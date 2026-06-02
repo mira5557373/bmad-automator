@@ -145,7 +145,8 @@ def parse_state_update_argument(raw: str) -> tuple[str, str] | dict[str, Any]:
     key, value = raw.split("=", 1)
     if not key.strip():
         return state_update_argument_error_payload(raw)
-    return key.strip(), value.strip()
+    key = key.strip()
+    return key, value.strip() if key == "status" else value
 
 
 def state_validation_payload(issues: list[DiagnosticIssue]) -> dict[str, Any]:

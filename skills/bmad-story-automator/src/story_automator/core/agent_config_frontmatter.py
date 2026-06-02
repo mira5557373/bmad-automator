@@ -19,7 +19,9 @@ def _extract_agent_config_block(lines: list[str], header_index: int) -> dict[str
     raw_value = _strip_inline_yaml_comment(raw_value)
     if raw_value:
         parsed = _parse_scalar(raw_value)
-        return parsed if isinstance(parsed, dict) else {"agentConfig": parsed}
+        if not isinstance(parsed, dict):
+            raise ValueError("agentConfig inline value must be an object/map")
+        return parsed
 
     block: list[str] = []
     for raw_line in lines[header_index + 1 :]:

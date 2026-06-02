@@ -17,6 +17,7 @@ from story_automator.core.agent_config import (
     resolve_agent_for_task,
     resolve_agents,
 )
+from story_automator.core.agent_config_frontmatter import extract_agent_config_frontmatter
 from story_automator.core.tmux_runtime import agent_cli
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.orchestrator_epic_agents import (
@@ -63,6 +64,10 @@ class CoreAgentConfigModelTests(unittest.TestCase):
     def test_parse_agent_config_json_rejects_nested_agent_config_with_clear_message(self) -> None:
         with self.assertRaisesRegex(ValueError, "unexpected nested agentConfig key"):
             parse_agent_config_json(json.dumps({"agentConfig": {"defaultPrimary": "codex"}}))
+
+    def test_agent_config_frontmatter_rejects_scalar_inline_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "agentConfig inline value must be an object/map"):
+            extract_agent_config_frontmatter('agentConfig: bad\n')
 
     def test_per_task_model_is_resolved(self) -> None:
         config = parse_agent_config_json(

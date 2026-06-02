@@ -40,7 +40,10 @@ def validate_complexity_payload(payload: object) -> list[DiagnosticIssue]:
         if issue:
             issues.append(issue)
             continue
-        level = str(complexity.get("level") or "medium").strip().lower()
+        level, level_issue = _complexity_level(complexity, f"{field}.complexity.level")
+        if level_issue:
+            issues.append(level_issue)
+            continue
         if level not in COMPLEXITY_LEVELS:
             issues.append(_issue("invalid_value", f"{field}.complexity.level", sorted(COMPLEXITY_LEVELS), level, "Complexity level must be low, medium, or high"))
     return issues
@@ -215,7 +218,22 @@ def _story_complexity_level(story: dict[str, Any], field: str) -> str:
     complexity, issue = _story_complexity(story, field)
     if issue:
         raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(issue)))
-    return str(complexity.get("level") or "medium").strip().lower() or "medium"
+    level, level_issue = _complexity_level(complexity, f"{field}.complexity.level")
+    if level_issue:
+        raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(level_issue)))
+    if level not in COMPLEXITY_LEVELS:
+        issue = _issue("invalid_value", f"{field}.complexity.level", sorted(COMPLEXITY_LEVELS), level, "Complexity level must be low, medium, or high")
+        raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(issue)))
+    return level
+
+
+def _complexity_level(complexity: dict[str, Any], field: str) -> tuple[str, DiagnosticIssue | None]:
+    if "level" not in complexity or complexity.get("level") is None:
+        return "medium", None
+    raw = complexity.get("level")
+    if not isinstance(raw, str) or not raw.strip():
+        return "", _issue("invalid_value", field, sorted(COMPLEXITY_LEVELS), raw, "Complexity level must be low, medium, or high")
+    return raw.strip().lower(), None
 
 
 def _validate_agents_plan_resolution(payload: dict[str, Any], story_id: str, task: str) -> list[DiagnosticIssue]:

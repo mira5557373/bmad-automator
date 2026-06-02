@@ -1399,6 +1399,21 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(payload["token"], "<redacted>")
         self.assertEqual(payload["api_key"], "<redacted>")
 
+    def test_verifier_exception_payload_keeps_reserved_fields_authoritative(self) -> None:
+        payload = verifier_exception_payload(
+            "verifier_contract_invalid",
+            ValueError("--state-file requires a value"),
+            source="verify-step",
+            verified=True,
+            error="caller-error",
+            structuredIssues=[],
+        )
+
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["reason"], "verifier_contract_invalid")
+        self.assertEqual(payload["error"], "--state-file requires a value")
+        self.assertEqual(payload["structuredIssues"][0]["type"], "ValueError")
+
     def test_validate_story_creation_reason_redacts_sensitive_context(self) -> None:
         stdout = io.StringIO()
         missing = self.project_root / "token=abc123" / "missing-state.md"
