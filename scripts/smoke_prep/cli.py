@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 
@@ -78,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             verify_installed_package(gunz_dir, package_identity, workspace)
         next_steps = write_next_steps(workspace, gunz_dir)
 
-    except (OSError, subprocess.CalledProcessError, SmokeError) as exc:
+    except (OSError, subprocess.CalledProcessError, SmokeError, ValueError, json.JSONDecodeError) as exc:
         print(f"smoke prep failed: {exc}", file=sys.stderr)
         return 1
 

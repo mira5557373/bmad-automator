@@ -53,7 +53,7 @@ class FinishLoopSmokeRunner:
             self._maybe_run_retro(state_file, story_id)
         self._complete_and_wrap(state_file, marker)
         self._assert_host_unchanged(host)
-        self._write_report(state_file, commits)
+        self._write_report(state_file, commits, commit_repo)
         return {"project": str(self.project), "stateFile": str(state_file), **self.results}
 
     def _install_fixture(self) -> None:
@@ -181,23 +181,36 @@ class FinishLoopSmokeRunner:
         self._expect(marker.exists(), "marker create failed")
         return marker
 
-    def _write_report(self, state: Path, commits: list[dict[str, object]]) -> None:
-        persisted = self._persist_diagnostics(state)
+    def _write_report(self, state: Path, commits: list[dict[str, object]], commit_repo: Path) -> None:
+        persisted = self._persist_diagnostics(state, commit_repo)
         report = REPO_ROOT / ".smoke" / "FINISH_LOOP_SMOKE_REPORT.json"
         report.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"createdAt": self._iso_now(), "project": str(self.project), "stateFile": str(state), "diagnostics": persisted, "commits": commits, **self.results}
+        payload = {
+            "createdAt": self._iso_now(),
+            "project": str(self.project),
+            "commitRepo": str(commit_repo),
+            "stateFile": str(state),
+            "diagnostics": persisted,
+            "commits": commits,
+            **self.results,
+        }
         report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         self.results["report"] = str(report)
 
-    def _persist_diagnostics(self, state: Path) -> dict[str, str]:
+    def _persist_diagnostics(self, state: Path, commit_repo: Path) -> dict[str, str]:
         dest = REPO_ROOT / ".smoke" / "finish-loop-diagnostics"
         shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir(parents=True)
         state_dest = dest / state.name
         state_dest.write_text(state.read_text(encoding="utf-8"), encoding="utf-8")
-        log = self._git("log", "--oneline", "-5").stdout
+        log = self._git("log", "--oneline", "-5", cwd=commit_repo).stdout
         (dest / "git-log.txt").write_text(log, encoding="utf-8")
-        return {"folder": str(dest), "stateFile": str(state_dest), "gitLog": str(dest / "git-log.txt")}
+        return {
+            "folder": str(dest),
+            "stateFile": str(state_dest),
+            "gitLog": str(dest / "git-log.txt"),
+            "gitLogRepo": str(commit_repo),
+        }
 
     def _host_sentinel(self) -> dict[str, str]:
         return {

@@ -178,7 +178,8 @@ class SmokeRunner:
 
     def _reset_generated_artifacts(self) -> None:
         shutil.rmtree(self.project / OUTPUT_FOLDER, ignore_errors=True)
-        marker = self.project / ".claude/.story-automator-active"
+        marker_info = self._marker_path_info()
+        marker = Path(str(marker_info["file"]))
         marker.unlink(missing_ok=True)
         for path in (self.project / IMPLEMENTATION_FOLDER).glob(f"{self._story_prefix()}-*.md"):
             path.unlink()
@@ -290,7 +291,8 @@ class SmokeRunner:
                 raise SmokeError(f"state-update failed for {key}: {result}")
 
     def _create_marker(self, state_path: Path) -> None:
-        self._helper_json("ensure-marker-gitignore", "--gitignore", ".gitignore", "--entry", ".claude/.story-automator-active")
+        marker_info = self._marker_path_info()
+        self._helper_json("ensure-marker-gitignore", "--gitignore", ".gitignore", "--entry", str(marker_info["entry"]))
         slug = self._helper_json("derive-project-slug").get("slug") or "gunz"
         result = self._run(
             str(self.helper),
@@ -314,6 +316,15 @@ class SmokeRunner:
         )
         if "Marker created:" not in result.stdout:
             raise SmokeError(f"marker create failed: {result.stdout}")
+        marker = Path(str(marker_info["file"]))
+        if not marker.is_file():
+            raise SmokeError(f"marker was not created at active path: {marker}")
+
+    def _marker_path_info(self) -> dict[str, Any]:
+        marker_info = self._helper_json("orchestrator-helper", "marker", "path")
+        if not marker_info.get("file") or not marker_info.get("entry"):
+            raise SmokeError(f"marker path helper returned incomplete payload: {marker_info}")
+        return marker_info
 
     def _write_story_artifact(self, story: dict[str, Any]) -> Path:
         folder = self.project / IMPLEMENTATION_FOLDER

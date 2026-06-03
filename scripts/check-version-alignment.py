@@ -33,6 +33,13 @@ def workflow_frontmatter_version(text: str) -> str:
     return yaml_scalar(match.group(1), "version")
 
 
+def python_version(text: str, path: str) -> str:
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', text)
+    if not match:
+        raise ValueError(f"missing Python __version__ assignment: {path}")
+    return match.group(1)
+
+
 def main() -> int:
     package = read_json("package.json")
     plugin = read_json(".claude-plugin/plugin.json")
@@ -46,10 +53,10 @@ def main() -> int:
         ".claude-plugin/marketplace.json": marketplace["plugins"][0]["version"],
         "skills/module.yaml": yaml_scalar(read_text("skills/module.yaml"), "module_version"),
         "skills/bmad-story-automator/pyproject.toml": pyproject["project"]["version"],
-        "skills/bmad-story-automator/src/story_automator/__init__.py": re.search(
-            r'__version__\s*=\s*"([^"]+)"',
+        "skills/bmad-story-automator/src/story_automator/__init__.py": python_version(
             init_text,
-        ).group(1),
+            "skills/bmad-story-automator/src/story_automator/__init__.py",
+        ),
         "skills/bmad-story-automator/workflow.md": workflow_frontmatter_version(
             read_text("skills/bmad-story-automator/workflow.md")
         ),
@@ -72,4 +79,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (KeyError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
+        print(f"version alignment failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)

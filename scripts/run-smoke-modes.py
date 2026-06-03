@@ -254,9 +254,14 @@ class ModeSmokeRunner:
             f"marker JSON shape failed: {marker_payload}",
         )
         code, raw = self._call(cmd_orchestrator_helper, ["marker", "check"])
-        self._expect('"exists":true' in raw and '"storiesRemaining": 2' in raw, "marker check failed")
+        marker_check, checked_marker = self._json_objects(code, raw)
+        self._expect(
+            marker_check["exists"] is True and checked_marker["storiesRemaining"] == 2,
+            f"marker check failed: {raw}",
+        )
         blocked_code, blocked = self._call(cmd_stop_hook, [])
-        self._expect(blocked_code == 0 and '"decision": "block"' in blocked, "stop-hook did not block active marker")
+        blocked_payload = self._json(blocked_code, blocked)
+        self._expect(blocked_payload["decision"] == "block", f"stop-hook did not block active marker: {blocked_payload}")
         old_heartbeat = marker_payload["heartbeat"]
         code, _ = self._call(cmd_orchestrator_helper, ["marker", "heartbeat"])
         self._expect(code == 0, "marker heartbeat failed")
@@ -443,6 +448,25 @@ class ModeSmokeRunner:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise SmokeModesError(f"expected JSON, got {raw!r}") from exc
+
+    def _json_objects(self, code: int, raw: str) -> list[dict[str, object]]:
+        self._expect(code in {0, 1}, f"unexpected exit code {code}: {raw}")
+        decoder = json.JSONDecoder()
+        objects: list[dict[str, object]] = []
+        index = 0
+        while index < len(raw):
+            while index < len(raw) and raw[index].isspace():
+                index += 1
+            if index >= len(raw):
+                break
+            try:
+                payload, index = decoder.raw_decode(raw, index)
+            except json.JSONDecodeError as exc:
+                raise SmokeModesError(f"expected JSON object stream, got {raw!r}") from exc
+            self._expect(isinstance(payload, dict), f"expected JSON object in output: {raw}")
+            objects.append(payload)
+        self._expect(objects, f"no JSON objects in output: {raw}")
+        return objects
 
     def _expect(self, condition: bool, message: str) -> None:
         if not condition:
