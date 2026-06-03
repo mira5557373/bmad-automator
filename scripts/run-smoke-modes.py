@@ -54,6 +54,43 @@ class ModeSmokeRunner:
         self._assert_edit_route_contracts(state_file)
         return {"project": str(self.project), **self.results}
 
+    def write_report(self, summary: dict[str, object]) -> tuple[Path, dict[str, object]]:
+        report = REPO_ROOT / ".smoke" / "MODE_SMOKE_REPORT.json"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        payload = self._report_payload(summary)
+        report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return report, payload
+
+    def _report_payload(self, summary: dict[str, object]) -> dict[str, object]:
+        payload = dict(summary)
+        project = str(payload.get("project", self.project))
+        payload["project"] = {"kind": "ephemeral", "path": project}
+        payload["createdAt"] = datetime.now(timezone.utc).isoformat()
+
+        diagnostics = self._persist_diagnostics(payload)
+        if diagnostics:
+            payload["diagnostics"] = diagnostics
+            resume = payload.get("resume")
+            if isinstance(resume, dict) and "latestIncomplete" in diagnostics:
+                payload["resume"] = {**resume, "latestIncomplete": diagnostics["latestIncomplete"]}
+        return payload
+
+    def _persist_diagnostics(self, payload: dict[str, object]) -> dict[str, str]:
+        dest = REPO_ROOT / ".smoke" / "mode-diagnostics"
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True)
+        diagnostics: dict[str, str] = {"folder": str(dest)}
+
+        resume = payload.get("resume")
+        latest = resume.get("latestIncomplete") if isinstance(resume, dict) else None
+        if isinstance(latest, str):
+            latest_path = Path(latest)
+            if latest_path.exists():
+                latest_dest = dest / latest_path.name
+                latest_dest.write_text(latest_path.read_text(encoding="utf-8"), encoding="utf-8")
+                diagnostics["latestIncomplete"] = str(latest_dest)
+        return diagnostics
+
     def _install_fixture(self) -> None:
         skills = self.project / ".agents" / "skills"
         skills.mkdir(parents=True)
@@ -477,16 +514,14 @@ def main() -> int:
     runner = ModeSmokeRunner()
     try:
         summary = runner.run()
+        report, payload = runner.write_report(summary)
     except (OSError, SmokeModesError, ValueError) as exc:
         print(f"smoke:modes failed: {exc}", file=sys.stderr)
         return 1
     finally:
         runner.close()
-    report = REPO_ROOT / ".smoke" / "MODE_SMOKE_REPORT.json"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps({"createdAt": datetime.now(timezone.utc).isoformat(), **summary}, indent=2) + "\n", encoding="utf-8")
     print("mode smoke ok")
-    print(json.dumps({"report": str(report), **summary}, indent=2))
+    print(json.dumps({"report": str(report), **payload}, indent=2))
     return 0
 
 

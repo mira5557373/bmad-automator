@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -18,9 +19,23 @@ TEST_MODULES = [
     "tests.test_agent_config_model",
 ]
 
+REQUIRED_TOOLS = ("tmux",)
+
+
+def missing_required_tools() -> list[str]:
+    return [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
+
 
 def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    missing = missing_required_tools()
+    if missing:
+        print(
+            "smoke:contracts requires these tools before tests run: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        return 1
     suite = unittest.defaultTestLoader.loadTestsFromNames(TEST_MODULES)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     if result.skipped:

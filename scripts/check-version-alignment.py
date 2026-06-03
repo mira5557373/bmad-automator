@@ -40,6 +40,27 @@ def python_version(text: str, path: str) -> str:
     return match.group(1)
 
 
+def marketplace_plugin_version(marketplace: dict, plugin: dict) -> str:
+    plugin_name = plugin.get("name")
+    if not isinstance(plugin_name, str) or not plugin_name:
+        raise ValueError(".claude-plugin/plugin.json missing non-empty name")
+
+    entries = marketplace.get("plugins")
+    if not isinstance(entries, list):
+        raise ValueError(".claude-plugin/marketplace.json missing plugins list")
+
+    matches = [entry for entry in entries if isinstance(entry, dict) and entry.get("name") == plugin_name]
+    if not matches:
+        raise ValueError(f".claude-plugin/marketplace.json missing plugin: {plugin_name}")
+    if len(matches) > 1:
+        raise ValueError(f".claude-plugin/marketplace.json has duplicate plugin: {plugin_name}")
+
+    version = matches[0].get("version")
+    if not isinstance(version, str) or not version:
+        raise ValueError(f".claude-plugin/marketplace.json plugin {plugin_name} missing non-empty version")
+    return version
+
+
 def main() -> int:
     package = read_json("package.json")
     plugin = read_json(".claude-plugin/plugin.json")
@@ -50,7 +71,7 @@ def main() -> int:
     surfaces = {
         "package.json": package["version"],
         ".claude-plugin/plugin.json": plugin["version"],
-        ".claude-plugin/marketplace.json": marketplace["plugins"][0]["version"],
+        ".claude-plugin/marketplace.json": marketplace_plugin_version(marketplace, plugin),
         "skills/module.yaml": yaml_scalar(read_text("skills/module.yaml"), "module_version"),
         "skills/bmad-story-automator/pyproject.toml": pyproject["project"]["version"],
         "skills/bmad-story-automator/src/story_automator/__init__.py": python_version(

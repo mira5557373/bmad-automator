@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,44 @@ class VersionAlignmentScriptTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "missing Python __version__ assignment"):
             module.python_version("# no version here\n", "pkg/__init__.py")
+
+    def test_marketplace_plugin_version_uses_stable_plugin_name(self) -> None:
+        module = load_script_module("check_version_alignment", SCRIPTS / "check-version-alignment.py")
+
+        version = module.marketplace_plugin_version(
+            {
+                "plugins": [
+                    {"name": "other-plugin", "version": "9.9.9"},
+                    {"name": "bmad-automator", "version": "1.15.0"},
+                ]
+            },
+            {"name": "bmad-automator"},
+        )
+
+        self.assertEqual(version, "1.15.0")
+
+    def test_marketplace_plugin_version_requires_match(self) -> None:
+        module = load_script_module("check_version_alignment", SCRIPTS / "check-version-alignment.py")
+
+        with self.assertRaisesRegex(ValueError, "missing plugin: bmad-automator"):
+            module.marketplace_plugin_version({"plugins": []}, {"name": "bmad-automator"})
+
+
+class SmokeContractsScriptTests(unittest.TestCase):
+    def test_missing_tmux_fails_before_unittest_loader(self) -> None:
+        module = load_script_module("run_smoke_contracts", SCRIPTS / "run-smoke-contracts.py")
+        stderr = io.StringIO()
+
+        with (
+            patch.object(module.shutil, "which", return_value=None),
+            patch.object(module.unittest.defaultTestLoader, "loadTestsFromNames") as load_tests,
+            redirect_stderr(stderr),
+        ):
+            code = module.main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("smoke:contracts requires these tools before tests run: tmux", stderr.getvalue())
+        load_tests.assert_not_called()
 
 
 class SmokePrepCliTests(unittest.TestCase):
@@ -65,6 +104,29 @@ class SmokeModesScriptTests(unittest.TestCase):
 
         self.assertEqual(payloads[0]["exists"], True)
         self.assertEqual(payloads[1]["storiesRemaining"], 2)
+
+    def test_report_payload_persists_latest_incomplete_state(self) -> None:
+        module = load_script_module("run_smoke_modes", SCRIPTS / "run-smoke-modes.py")
+        runner = module.ModeSmokeRunner()
+        state_file = runner.output / "orchestration-smoke.md"
+        try:
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text('status: "IN_PROGRESS"\n', encoding="utf-8")
+
+            report, payload = runner.write_report(
+                {
+                    "project": str(runner.project),
+                    "resume": {"latestIncomplete": str(state_file)},
+                }
+            )
+            persisted = Path(payload["resume"]["latestIncomplete"])
+        finally:
+            runner.close()
+
+        self.assertEqual(payload["project"]["kind"], "ephemeral")
+        self.assertTrue(persisted.exists())
+        self.assertEqual(persisted.read_text(encoding="utf-8"), 'status: "IN_PROGRESS"\n')
+        self.assertEqual(json.loads(report.read_text(encoding="utf-8")), payload)
 
 
 if __name__ == "__main__":
