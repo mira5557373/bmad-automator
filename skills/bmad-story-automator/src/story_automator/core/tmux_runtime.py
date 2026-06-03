@@ -839,8 +839,12 @@ def _legacy_claude_session_status(
     state_path = session_paths(session, root).state
 
     if not tmux_has_session(session):
+        issue = serialized_session_state_issue(state_path)
         state_path.unlink(missing_ok=True)
-        return _not_found_status()
+        status = _not_found_status()
+        if issue is not None:
+            status["session_state_issue"] = issue
+        return status
 
     current_pane_state = pane_status(session)
     if current_pane_state.startswith("crashed:"):

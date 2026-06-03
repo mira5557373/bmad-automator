@@ -1124,7 +1124,7 @@ class SuccessVerifierTests(unittest.TestCase):
             code = cmd_monitor_session([session, "--json", "--max-polls", "3"])
 
         self.assertEqual(code, 0)
-        self.assertEqual(state_issue_mock.call_count, 2)
+        self.assertEqual(state_issue_mock.call_count, 1)
 
     def test_monitor_session_csv_does_not_include_structured_issues(self) -> None:
         session = "sa-test-session"
