@@ -124,9 +124,73 @@ class SmokeModesScriptTests(unittest.TestCase):
             runner.close()
 
         self.assertEqual(payload["project"]["kind"], "ephemeral")
+        self.assertNotIn("path", payload["project"])
         self.assertTrue(persisted.exists())
         self.assertEqual(persisted.read_text(encoding="utf-8"), 'status: "IN_PROGRESS"\n')
         self.assertEqual(json.loads(report.read_text(encoding="utf-8")), payload)
+
+    def test_report_payload_fails_closed_when_latest_incomplete_cannot_be_persisted(self) -> None:
+        module = load_script_module("run_smoke_modes", SCRIPTS / "run-smoke-modes.py")
+        runner = module.ModeSmokeRunner()
+        try:
+            missing = runner.output / "missing-state.md"
+            with self.assertRaisesRegex(module.SmokeModesError, "failed to persist latest incomplete state"):
+                runner._report_payload(
+                    {
+                        "project": str(runner.project),
+                        "resume": {"latestIncomplete": str(missing)},
+                    }
+                )
+        finally:
+            runner.close()
+
+
+class FinishLoopSmokeScriptTests(unittest.TestCase):
+    def test_ephemeral_descriptors_do_not_expose_cleaned_paths(self) -> None:
+        module = load_script_module("run_smoke_finish_loop", SCRIPTS / "run-smoke-finish-loop.py")
+        runner = module.FinishLoopSmokeRunner()
+        try:
+            project_descriptor = runner._ephemeral_project_descriptor()
+            repo_descriptor = runner._repo_descriptor(runner.project)
+        finally:
+            runner.close()
+
+        self.assertEqual(project_descriptor["kind"], "ephemeral")
+        self.assertFalse(project_descriptor["retained"])
+        self.assertNotIn("path", project_descriptor)
+        self.assertEqual(repo_descriptor["kind"], "ephemeral")
+        self.assertFalse(repo_descriptor["retained"])
+        self.assertNotIn("path", repo_descriptor)
+
+    def test_write_report_returns_persisted_payload_without_temp_paths(self) -> None:
+        module = load_script_module("run_smoke_finish_loop", SCRIPTS / "run-smoke-finish-loop.py")
+        runner = module.FinishLoopSmokeRunner()
+        try:
+            runner.project.mkdir(parents=True)
+            runner._init_git()
+            state = runner.project / "orchestration-smoke.md"
+            state.write_text('status: "COMPLETE"\n', encoding="utf-8")
+            payload = runner._write_report(state, [{"story": "1.1", "commit": "abc123"}], runner.project)
+            report = Path(payload["report"])
+            temp_root = runner.tmp.name
+        finally:
+            runner.close()
+
+        persisted = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(persisted, payload)
+        self.assertTrue(Path(payload["diagnostics"]["stateFile"]).exists())
+        self.assertTrue(Path(payload["diagnostics"]["gitLog"]).exists())
+        self.assert_no_temp_path(payload, temp_root)
+
+    def assert_no_temp_path(self, value: object, temp_root: str) -> None:
+        if isinstance(value, dict):
+            for child in value.values():
+                self.assert_no_temp_path(child, temp_root)
+        elif isinstance(value, list):
+            for child in value:
+                self.assert_no_temp_path(child, temp_root)
+        elif isinstance(value, str):
+            self.assertNotIn(temp_root, value)
 
 
 if __name__ == "__main__":

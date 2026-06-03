@@ -63,15 +63,20 @@ class ModeSmokeRunner:
 
     def _report_payload(self, summary: dict[str, object]) -> dict[str, object]:
         payload = dict(summary)
-        project = str(payload.get("project", self.project))
-        payload["project"] = {"kind": "ephemeral", "path": project}
+        payload["project"] = {
+            "kind": "ephemeral",
+            "name": "mode smoke fixture",
+            "retained": False,
+        }
         payload["createdAt"] = datetime.now(timezone.utc).isoformat()
 
         diagnostics = self._persist_diagnostics(payload)
         if diagnostics:
             payload["diagnostics"] = diagnostics
             resume = payload.get("resume")
-            if isinstance(resume, dict) and "latestIncomplete" in diagnostics:
+            if isinstance(resume, dict) and isinstance(resume.get("latestIncomplete"), str):
+                if "latestIncomplete" not in diagnostics:
+                    raise SmokeModesError(f"failed to persist latest incomplete state: {resume['latestIncomplete']}")
                 payload["resume"] = {**resume, "latestIncomplete": diagnostics["latestIncomplete"]}
         return payload
 

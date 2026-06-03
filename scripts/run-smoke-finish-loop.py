@@ -53,12 +53,7 @@ class FinishLoopSmokeRunner:
             self._maybe_run_retro(state_file, story_id)
         self._complete_and_wrap(state_file, marker)
         self._assert_host_unchanged(host)
-        self._write_report(state_file, commits, commit_repo)
-        return {
-            "project": {"kind": "ephemeral", "path": str(self.project)},
-            "stateFile": self.results["diagnostics"]["stateFile"],
-            **self.results,
-        }
+        return self._write_report(state_file, commits, commit_repo)
 
     def _install_fixture(self) -> None:
         skills = self.project / ".agents" / "skills"
@@ -164,10 +159,13 @@ class FinishLoopSmokeRunner:
     def _resolve_commit_repo(self) -> Path:
         target = (self.target_repo or self.project).resolve()
         if self._repo_allowed(target):
-            self.results["targetGuard"] = {"unsafeHostRejected": self._guard_rejects(REPO_ROOT), "target": str(target)}
+            self.results["targetGuard"] = {
+                "unsafeHostRejected": self._guard_rejects(REPO_ROOT),
+                "target": self._repo_descriptor(target),
+            }
             return target
         if self.allow_unsafe_repo:
-            self.results["targetGuard"] = {"unsafeOverrideUsed": True, "target": str(target)}
+            self.results["targetGuard"] = {"unsafeOverrideUsed": True, "target": self._repo_descriptor(target)}
             return target
         raise FinishSmokeError(f"unsafe commit repo outside smoke workspace: {target}")
 
@@ -185,22 +183,24 @@ class FinishLoopSmokeRunner:
         self._expect(marker.exists(), "marker create failed")
         return marker
 
-    def _write_report(self, state: Path, commits: list[dict[str, object]], commit_repo: Path) -> None:
+    def _write_report(self, state: Path, commits: list[dict[str, object]], commit_repo: Path) -> dict[str, object]:
         persisted = self._persist_diagnostics(state, commit_repo)
         report = REPO_ROOT / ".smoke" / "FINISH_LOOP_SMOKE_REPORT.json"
         report.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "createdAt": self._iso_now(),
-            "project": {"kind": "ephemeral", "path": str(self.project)},
-            "commitRepo": {"kind": "ephemeral", "path": str(commit_repo)},
+            "project": self._ephemeral_project_descriptor(),
+            "commitRepo": self._repo_descriptor(commit_repo),
             "stateFile": persisted["stateFile"],
             "diagnostics": persisted,
             "commits": commits,
             **self.results,
+            "report": str(report),
         }
         report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         self.results["diagnostics"] = persisted
         self.results["report"] = str(report)
+        return payload
 
     def _persist_diagnostics(self, state: Path, commit_repo: Path) -> dict[str, object]:
         dest = REPO_ROOT / ".smoke" / "finish-loop-diagnostics"
@@ -214,8 +214,25 @@ class FinishLoopSmokeRunner:
             "folder": str(dest),
             "stateFile": str(state_dest),
             "gitLog": str(dest / "git-log.txt"),
-            "gitLogRepo": {"kind": "ephemeral", "path": str(commit_repo)},
+            "gitLogRepo": self._repo_descriptor(commit_repo),
         }
+
+    def _ephemeral_project_descriptor(self) -> dict[str, object]:
+        return {
+            "kind": "ephemeral",
+            "name": "finish-loop smoke fixture",
+            "retained": False,
+        }
+
+    def _repo_descriptor(self, repo: Path) -> dict[str, object]:
+        resolved = repo.resolve()
+        if self._repo_allowed(resolved):
+            return {
+                "kind": "ephemeral",
+                "name": "finish-loop commit repo",
+                "retained": False,
+            }
+        return {"kind": "external", "path": str(resolved)}
 
     def _host_sentinel(self) -> dict[str, str]:
         return {
