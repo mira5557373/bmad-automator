@@ -111,6 +111,22 @@ class MonitorReviewCompletionTests(SuccessVerifierCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
 
+    def test_monitor_dispatch_rejects_invalid_artifact_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+
+        result = _verify_monitor_completion(
+            "review",
+            project_root=str(self.project_root),
+            story_key="1.2",
+            output_file="/tmp/session.txt",
+        )
+
+        self.assertIsNotNone(result)
+        payload, verifier = result or ({}, "")
+        self.assertEqual(verifier, "review_completion")
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["reason"], "verifier_contract_invalid")
+
     def test_monitor_session_reports_incomplete_when_verifier_raises_file_error(self) -> None:
         stdout = io.StringIO()
         statuses = [

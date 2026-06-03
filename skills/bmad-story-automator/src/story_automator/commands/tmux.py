@@ -457,7 +457,7 @@ def _verify_monitor_completion(
             output_file=output_file,
             contract=contract,
         )
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PolicyError):
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PolicyError, ValueError):
         return ({"verified": False, "reason": "verifier_contract_invalid"}, verifier_name)
     return (result, verifier_name)
 
