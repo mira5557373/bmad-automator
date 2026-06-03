@@ -36,10 +36,12 @@ fi
 
 # STEP 3: ALWAYS verify source of truth regardless of session status
 # Story file check:
-sprint_status=$("$scripts" orchestrator-helper sprint-status path)
-if implementation_artifacts_path=$(echo "$sprint_status" | jq -er 'select(.ok == true) | .path'); then
-    implementation_artifacts_dir=$(dirname "$implementation_artifacts_path")
-    story_file=$(find "$implementation_artifacts_dir" -maxdepth 1 -type f -name "{story_prefix}-*.md" 2>/dev/null | head -1)
+if story_status=$("$scripts" orchestrator-helper story-file-status "{story_key}"); then
+    if story_file=$(echo "$story_status" | jq -er 'select(.ok == true) | .file'); then
+        :
+    else
+        story_file=""
+    fi
 else
     story_file=""
 fi
@@ -48,8 +50,11 @@ if [ -f "$story_file" ]; then
 fi
 
 # Sprint-status check:
-status=$("$scripts" orchestrator-helper sprint-status get "{story_key}")
-is_done=$(echo "$status" | jq -r '.done')
+if status=$("$scripts" orchestrator-helper sprint-status get "{story_key}"); then
+    is_done=$(echo "$status" | jq -r '.done')
+else
+    is_done=false
+fi
 ```
 
 ---

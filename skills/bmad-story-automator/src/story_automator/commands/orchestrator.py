@@ -422,7 +422,14 @@ def _story_file_status(args: list[str]) -> int:
         if norm is None:
             print_json({"ok": False, "error": "could not normalize story key", "input": args[0]})
             return 1
-        matches = sorted(implementation_artifacts_dir(get_project_root()).glob(f"{norm.prefix}-*.md"))
+        artifacts = implementation_artifacts_dir(get_project_root())
+        exact = artifacts / f"{norm.key}.md" if norm.key else None
+        if exact is not None and exact.is_file():
+            matches = [exact]
+        elif args[0] == norm.key:
+            matches = []
+        else:
+            matches = sorted(artifacts.glob(f"{norm.prefix}-*.md"))
     except (OSError, ValueError) as exc:
         print_json({"ok": False, "error": str(exc), "input": args[0]})
         return 1

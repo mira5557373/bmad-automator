@@ -102,6 +102,8 @@ def _read_bmad_config(path: Path) -> dict[str, str]:
         return {}
     values: dict[str, str] = {}
     for raw_line in read_text(path).splitlines():
+        if raw_line[:1].isspace():
+            continue
         line = strip_inline_yaml_comment(raw_line)
         if not line or ":" not in line:
             continue
