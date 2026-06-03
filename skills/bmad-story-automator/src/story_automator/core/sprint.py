@@ -20,8 +20,14 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
     status_file = sprint_status_file(project_root)
     if not file_exists(status_file):
         return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
-    content = read_text(status_file)
-    norm = normalize_story_key(project_root, story_key)
+    return sprint_status_from_text(project_root, story_key, read_text(status_file))
+
+
+def sprint_status_from_text(project_root: str, story_key: str, content: str) -> SprintStatus:
+    try:
+        norm = normalize_story_key(project_root, story_key)
+    except (OSError, ValueError):
+        norm = None
     if norm is not None:
         result = _best_status_match(project_root, content, story_key, norm)
         if result is not None:

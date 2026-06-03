@@ -341,6 +341,43 @@ class ArtifactPathTests(SuccessVerifierCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["incomplete"], [])
 
+    def test_resume_step_compares_normalized_configured_sprint_keys(self) -> None:
+        self._write_bmad_config("implementation_artifacts: docs/bmad/implementation-artifacts\n")
+        self._write_docs_story("1-1-docs", status="done")
+        self._write_docs_sprint_status("1-1-docs: done\n1-2-docs: ready\n")
+        state_file = self.project_root / "state.md"
+        state_file.write_text(
+            '---\nepic: "1"\nepicName: "Epic 1"\nstoryRange: ["1.1", "1.2"]\ncurrentStory: "1.2"\nstatus: "READY"\n---\n',
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_sprint_compare(["--state", str(state_file), "--sprint", str(self.docs_artifacts_dir / "sprint-status.yaml")])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["checked"], ["1.1"])
+        self.assertEqual(payload["incomplete"], [])
+
+    def test_resume_step_preserves_explicit_sprint_compare_when_config_invalid(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        state_file = self.project_root / "state.md"
+        sprint_file = self.docs_artifacts_dir / "sprint-status.yaml"
+        self.docs_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(
+            '---\nstoryRange: ["1.1", "1.2"]\ncurrentStory: "1.2"\n---\n',
+            encoding="utf-8",
+        )
+        sprint_file.write_text("1.1: done\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with patch_env(self.project_root), redirect_stdout(stdout):
+            code = cmd_sprint_compare(["--state", str(state_file), "--sprint", str(sprint_file)])
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["checked"], ["1.1"])
+        self.assertEqual(payload["incomplete"], [])
+
     def test_monitoring_fallback_resolves_story_file_from_helper(self) -> None:
         fallback = (self.project_root / ".claude" / "skills" / "bmad-story-automator" / "data" / "monitoring-fallback.md").read_text(encoding="utf-8")
         self.assertIn('if story_status=$("$scripts" orchestrator-helper story-file-status "{story_key}"); then', fallback)
