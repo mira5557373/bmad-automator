@@ -67,7 +67,7 @@ Resolve and load the configured sprint-status path:
 sprint_status=$("{stateHelper}" orchestrator-helper sprint-status path)
 if ! defaultSprintStatusFile=$(echo "$sprint_status" | jq -er 'select(.ok == true) | .path'); then
   echo "$sprint_status"
-  HALT
+  exit 1
 fi
 ```
 

@@ -60,15 +60,14 @@ def get_epic_stories_action(args: list[str]) -> int:
     for idx, arg in enumerate(tail):
         if arg == "--state-file" and idx + 1 < len(tail):
             state_file = tail[idx + 1]
-    if state_file and file_exists(state_file):
-        project_root = get_project_root()
-        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
-        if stories:
-            stories = _dedupe_stories_for_epic(project_root, epic, stories)
-            print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
-            return 0
     project_root = get_project_root()
     try:
+        if state_file and file_exists(state_file):
+            stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
+            if stories:
+                stories = _dedupe_stories_for_epic(project_root, epic, stories)
+                print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
+                return 0
         stories, _ = sprint_status_epic(project_root, epic)
     except (OSError, ValueError) as exc:
         print_json({"ok": False, "epic": epic, "error": str(exc)})

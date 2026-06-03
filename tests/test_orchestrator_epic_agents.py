@@ -134,6 +134,22 @@ class OrchestratorEpicAgentsTests(unittest.TestCase):
         self.assertEqual(payload["storyId"], "1.1")
         self.assertIn("BMAD config implementation_artifacts", payload["error"])
 
+    def test_get_epic_stories_state_file_returns_json_error_for_invalid_artifacts_config(self) -> None:
+        self._write_bmad_config("implementation_artifacts: ../outside/implementation-artifacts\n")
+        state_file = self._write_state(
+            """
+            storyRange:
+              - 1.1
+            """
+        )
+
+        exit_code, payload = self._run_action(get_epic_stories_action, ["1", "--state-file", str(state_file)])
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["epic"], "1")
+        self.assertIn("BMAD config implementation_artifacts", payload["error"])
+
     def test_check_blocking_accepts_non_numeric_story_headers(self) -> None:
         self._write_epic_file(
             """
