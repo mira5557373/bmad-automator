@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from smoke_prep.config import repo_root
-from smoke_prep.process import SmokeError, ensure_tool
+from smoke_prep.process import SmokeError, deterministic_smoke_env, ensure_tool
 from smoke_prep.workspace import resolve_workspace
 
 
@@ -82,7 +82,7 @@ class SmokeRunner:
         self.project = project
         self.story_id = story_id
         self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.env = {**os.environ, "PROJECT_ROOT": str(project)}
+        self.env = deterministic_smoke_env(project)
         self.helper = project / HELPER
 
     def run(self, *, reset_artifacts: bool) -> dict[str, Any]:

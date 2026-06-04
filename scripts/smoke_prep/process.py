@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,6 +8,21 @@ from pathlib import Path
 
 class SmokeError(RuntimeError):
     pass
+
+
+MARKER_OVERRIDE_ENV = (
+    "BMAD_STORY_AUTOMATOR_ACTIVE_MARKER",
+    "STORY_AUTOMATOR_ACTIVE_MARKER",
+)
+
+
+def deterministic_smoke_env(project: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    for name in MARKER_OVERRIDE_ENV:
+        env.pop(name, None)
+    env["PROJECT_ROOT"] = str(project)
+    env.update(extra or {})
+    return env
 
 
 def step(name: str) -> None:

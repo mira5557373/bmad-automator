@@ -21,6 +21,7 @@ from story_automator.commands.basic import cmd_commit_story  # noqa: E402
 from story_automator.commands.orchestrator import cmd_orchestrator_helper  # noqa: E402
 from story_automator.commands.state import cmd_build_state_doc, cmd_state_metrics, cmd_validate_state  # noqa: E402
 from story_automator.commands.tmux import cmd_tmux_wrapper  # noqa: E402
+from smoke_prep.process import deterministic_smoke_env  # noqa: E402
 
 
 class FinishSmokeError(Exception):
@@ -302,10 +303,11 @@ class FinishLoopSmokeRunner:
 
     def _call(self, fn, args: list[str]) -> tuple[int, str]:
         old_env = os.environ.copy()
-        os.environ["PROJECT_ROOT"] = str(self.project)
-        os.environ["BMAD_RUNTIME_PROVIDER"] = "codex"
+        env = deterministic_smoke_env(self.project, {"BMAD_RUNTIME_PROVIDER": "codex"})
         out = io.StringIO()
         try:
+            os.environ.clear()
+            os.environ.update(env)
             with redirect_stdout(out):
                 code = fn(args)
             return code, out.getvalue()

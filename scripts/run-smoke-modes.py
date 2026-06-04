@@ -25,6 +25,7 @@ from story_automator.commands.orchestrator import cmd_orchestrator_helper  # noq
 from story_automator.commands.state import cmd_build_state_doc, cmd_sprint_compare, cmd_state_metrics, cmd_validate_state  # noqa: E402
 from story_automator.core.agent_config import load_agent_config_from_state  # noqa: E402
 from story_automator.core.epic_parser import parse_story_range  # noqa: E402
+from smoke_prep.process import deterministic_smoke_env  # noqa: E402
 
 
 class SmokeModesError(Exception):
@@ -471,10 +472,11 @@ class ModeSmokeRunner:
     def _call(self, fn, args: list[str]) -> tuple[int, str]:
         old_env = os.environ.copy()
         old_stdin = sys.stdin
-        os.environ["PROJECT_ROOT"] = str(self.project)
-        os.environ["BMAD_RUNTIME_PROVIDER"] = "codex"
+        env = deterministic_smoke_env(self.project, {"BMAD_RUNTIME_PROVIDER": "codex"})
         stdout = io.StringIO()
         try:
+            os.environ.clear()
+            os.environ.update(env)
             sys.stdin = io.StringIO("")
             with redirect_stdout(stdout):
                 code = fn(args)

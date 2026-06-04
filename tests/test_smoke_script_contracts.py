@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -55,20 +57,120 @@ class VersionAlignmentScriptTests(unittest.TestCase):
 
 
 class SmokeContractsScriptTests(unittest.TestCase):
-    def test_missing_tmux_fails_before_unittest_loader(self) -> None:
+    def test_allowed_environment_skips_do_not_fail_default_contract_gate(self) -> None:
         module = load_script_module("run_smoke_contracts", SCRIPTS / "run-smoke-contracts.py")
         stderr = io.StringIO()
 
+        class Result:
+            skipped = [("tmux test", "tmux not available")]
+
+            def wasSuccessful(self) -> bool:
+                return True
+
+        class Runner:
+            def __init__(self, *, verbosity: int) -> None:
+                self.verbosity = verbosity
+
+            def run(self, suite):
+                return Result()
+
         with (
-            patch.object(module.shutil, "which", return_value=None),
-            patch.object(module.unittest.defaultTestLoader, "loadTestsFromNames") as load_tests,
+            patch.object(module.unittest.defaultTestLoader, "loadTestsFromNames", return_value=object()) as load_tests,
+            patch.object(module.unittest, "TextTestRunner", Runner),
+            redirect_stderr(stderr),
+        ):
+            code = module.main()
+
+        self.assertEqual(code, 0)
+        self.assertIn("smoke:contracts skipped 1 allowed environment-dependent tests", stderr.getvalue())
+        load_tests.assert_called_once_with(module.TEST_MODULES)
+
+    def test_unexpected_skips_fail_default_contract_gate(self) -> None:
+        module = load_script_module("run_smoke_contracts", SCRIPTS / "run-smoke-contracts.py")
+        stderr = io.StringIO()
+
+        class Result:
+            skipped = [("feature test", "temporarily disabled")]
+
+            def wasSuccessful(self) -> bool:
+                return True
+
+        class Runner:
+            def __init__(self, *, verbosity: int) -> None:
+                self.verbosity = verbosity
+
+            def run(self, suite):
+                return Result()
+
+        with (
+            patch.object(module.unittest.defaultTestLoader, "loadTestsFromNames", return_value=object()),
+            patch.object(module.unittest, "TextTestRunner", Runner),
             redirect_stderr(stderr),
         ):
             code = module.main()
 
         self.assertEqual(code, 1)
-        self.assertIn("smoke:contracts requires these tools before tests run: tmux", stderr.getvalue())
-        load_tests.assert_not_called()
+        self.assertIn("smoke:contracts got 1 unexpected skipped tests", stderr.getvalue())
+
+
+class DeterministicSmokeEnvTests(unittest.TestCase):
+    def test_subprocess_runners_clear_marker_override_env(self) -> None:
+        automator = load_script_module("run_smoke_automator", SCRIPTS / "run-smoke-automator.py")
+        dev_loop = load_script_module("run_smoke_dev_loop", SCRIPTS / "run-smoke-dev-loop.py")
+
+        with patch.dict(
+            os.environ,
+            {
+                "BMAD_STORY_AUTOMATOR_ACTIVE_MARKER": "/tmp/outside-a",
+                "STORY_AUTOMATOR_ACTIVE_MARKER": "/tmp/outside-b",
+            },
+            clear=False,
+        ):
+            runner = automator.SmokeRunner(
+                root=REPO_ROOT,
+                workspace=REPO_ROOT / ".smoke",
+                project=REPO_ROOT / ".smoke" / "gunz",
+                story_id="1.1",
+            )
+            dev = dev_loop.DevLoopSmokeRunner(
+                root=REPO_ROOT,
+                workspace=REPO_ROOT / ".smoke",
+                project=REPO_ROOT / ".smoke" / "gunz",
+                story_ids=["1.1"],
+            )
+
+        for env in (runner.env, dev.env):
+            self.assertNotIn("BMAD_STORY_AUTOMATOR_ACTIVE_MARKER", env)
+            self.assertNotIn("STORY_AUTOMATOR_ACTIVE_MARKER", env)
+
+    def test_in_process_runners_clear_marker_override_env_during_calls(self) -> None:
+        modes = load_script_module("run_smoke_modes", SCRIPTS / "run-smoke-modes.py")
+        finish = load_script_module("run_smoke_finish_loop", SCRIPTS / "run-smoke-finish-loop.py")
+
+        def assert_clean_env(args):
+            self.assertNotIn("BMAD_STORY_AUTOMATOR_ACTIVE_MARKER", os.environ)
+            self.assertNotIn("STORY_AUTOMATOR_ACTIVE_MARKER", os.environ)
+            return 0
+
+        with patch.dict(
+            os.environ,
+            {
+                "BMAD_STORY_AUTOMATOR_ACTIVE_MARKER": "/tmp/outside-a",
+                "STORY_AUTOMATOR_ACTIVE_MARKER": "/tmp/outside-b",
+            },
+            clear=False,
+        ):
+            mode_runner = modes.ModeSmokeRunner()
+            finish_runner = finish.FinishLoopSmokeRunner()
+            try:
+                self.assertEqual(mode_runner._call(assert_clean_env, [])[0], 0)
+                self.assertEqual(finish_runner._call(assert_clean_env, [])[0], 0)
+            finally:
+                mode_runner.close()
+                finish_runner.close()
+
+            self.assertEqual(os.environ["BMAD_STORY_AUTOMATOR_ACTIVE_MARKER"], "/tmp/outside-a")
+            self.assertEqual(os.environ["STORY_AUTOMATOR_ACTIVE_MARKER"], "/tmp/outside-b")
 
 
 class SmokePrepCliTests(unittest.TestCase):
@@ -207,6 +309,8 @@ class FinishLoopSmokeScriptTests(unittest.TestCase):
         self.assertNotIn("path", repo_descriptor)
 
     def test_write_report_returns_persisted_payload_without_temp_paths(self) -> None:
+        if shutil.which("git") is None:
+            self.skipTest("git not available")
         module = load_script_module("run_smoke_finish_loop", SCRIPTS / "run-smoke-finish-loop.py")
         runner = module.FinishLoopSmokeRunner()
         try:
