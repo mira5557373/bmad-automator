@@ -99,6 +99,18 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertEqual(payload["stories"][0]["storyId"], "1.1")
 
+    def test_complexity_loader_does_not_swallow_programmer_errors(self) -> None:
+        with patch("story_automator.core.agent_plan.read_text", side_effect=TypeError("bad mock")):
+            with self.assertRaises(TypeError):
+                load_complexity_payload(str(self.complexity_file))
+
+    def test_agents_plan_loader_does_not_swallow_programmer_errors(self) -> None:
+        self.agents_file.write_text("```json\n{}\n```\n", encoding="utf-8")
+
+        with patch("story_automator.core.agent_plan.extract_json_block", side_effect=TypeError("bad mock")):
+            with self.assertRaises(TypeError):
+                load_agents_plan(str(self.agents_file))
+
     def test_agents_plan_resolution_loader_accepts_partial_requested_task(self) -> None:
         self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "codex", "fallback": False}}}]}), encoding="utf-8")
 

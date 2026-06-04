@@ -4,6 +4,12 @@ import json
 import re
 
 from story_automator.core.frontmatter import parse_simple_frontmatter
+from story_automator.core.diagnostics import (
+    issues_from_exception,
+    legacy_issue_message,
+    redact_actual,
+    serialize_issues,
+)
 from story_automator.core.orchestration_events import emit_state_fields_updated, emit_state_transition
 from story_automator.core.state_validation import parse_state_update_argument, status_transition_error_payload, validate_status_transition
 from story_automator.core.utils import file_exists, print_json, read_text, write_atomic
@@ -39,7 +45,19 @@ def state_update_action(args: list[str]) -> int:
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
-    write_atomic(args[0], frontmatter + body)
+    try:
+        write_atomic(args[0], frontmatter + body)
+    except OSError as exc:
+        issues = issues_from_exception(exc, source="state-update", field="state-file")
+        print_json(
+            {
+                "ok": False,
+                "error": "write_failed",
+                "issues": [str(redact_actual(legacy_issue_message(issue))) for issue in issues],
+                "structuredIssues": serialize_issues(issues),
+            }
+        )
+        return 1
     if final_status:
         emit_state_transition(args[0], result="applied", new_status=final_status)
     event_fields = list(dict.fromkeys(key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}))

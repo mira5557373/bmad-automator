@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -262,12 +263,16 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         state_file = self._build_state_config(status="READY")
         before = state_file.read_text(encoding="utf-8")
 
-        with self.assertRaises(OSError), unittest.mock.patch(
+        with unittest.mock.patch(
             "story_automator.commands.orchestrator_state.write_atomic",
             side_effect=OSError("disk full"),
         ):
-            self._state_update(state_file, "status=IN_PROGRESS")
+            code, payload = self._state_update(state_file, "status=IN_PROGRESS")
 
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "write_failed")
+        self.assertEqual(payload["structuredIssues"][0]["type"], "OSError")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "state-file")
         self.assertEqual(state_file.read_text(encoding="utf-8"), before)
 
     def test_state_update_quotes_yaml_like_frontmatter_values(self) -> None:

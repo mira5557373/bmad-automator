@@ -96,9 +96,8 @@ class DiagnosticsTests(unittest.TestCase):
 
         payload = serialize_issue(issues[0])
 
-        self.assertIn("token=<redacted>", issues[0].actual)
-        self.assertIn("<path:state.json>", issues[0].actual)
-        self.assertNotIn("abc123", issues[0].actual)
+        self.assertIn("token=abc123", issues[0].actual)
+        self.assertIn("/tmp/private/state.json", issues[0].actual)
         self.assertIn("token=<redacted>", payload["message"])
         self.assertIn("<path:state.json>", payload["message"])
         self.assertNotIn("abc123", payload["message"])

@@ -95,7 +95,7 @@ def validate_agents_plan_payload(payload: object) -> list[DiagnosticIssue]:
 def load_complexity_payload(path: str) -> tuple[dict[str, Any], list[DiagnosticIssue]]:
     try:
         payload = json.loads(read_text(path))
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return {}, issues_from_exception(exc, source="agent-plan", field="complexityFile")
     issues = validate_complexity_payload(payload)
     return payload if isinstance(payload, dict) else {}, issues
@@ -205,7 +205,7 @@ def _load_agents_plan_payload(path: str) -> tuple[dict[str, Any], list[Diagnosti
         if not block:
             return {}, [_issue("missing_field", "agentsFile", "json object", "", "Agents file must contain a JSON object")]
         payload = json.loads(block)
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return {}, issues_from_exception(exc, source="agent-plan", field="agentsFile")
     if not isinstance(payload, dict):
         return {}, [_issue("invalid_type", "payload", "object", payload, "Agents plan must be an object")]

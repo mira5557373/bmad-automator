@@ -147,9 +147,6 @@ def agents_build_action(args: list[str]) -> int:
         cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
         print_json(agent_plan_error("invalid_agent_config", issues_from_exception(cause, source="agent-plan", field=exc.field)))
         return 1
-    except (json.JSONDecodeError, OSError, ValueError) as exc:
-        print_json(agent_plan_error("invalid_agent_config", issues_from_exception(exc, source="agent-plan", field="config-json")))
-        return 1
     print_json(payload)
     return 0
 
