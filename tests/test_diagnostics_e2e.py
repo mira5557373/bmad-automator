@@ -149,6 +149,18 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertIn("stories[0].tasks.create.primary", fields)
         self.assertIn("stories[0].tasks.dev", fields)
 
+    def test_parse_payload_dedupes_top_level_missing_required_keys(self) -> None:
+        issues = validate_payload({}, {"requiredKeys": ["status"], "schema": {"status": "done|error"}})
+
+        self.assertEqual([(issue.type, issue.field) for issue in issues], [("missing_required_key", "status")])
+
+    def test_parse_payload_splits_non_string_from_blank_string(self) -> None:
+        typed = validate_payload({"status": 123}, {"schema": {"status": "non-empty string"}})
+        blank = validate_payload({"status": "   "}, {"schema": {"status": "non-empty string"}})
+
+        self.assertEqual(typed[0].type, "invalid_type")
+        self.assertEqual(blank[0].type, "empty_string")
+
     def test_monitor_json_keeps_malformed_session_state_when_legacy_status_deletes_file(self) -> None:
         session = "sa-test-session"
         paths = session_paths(session, self.project_root)

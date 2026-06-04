@@ -177,6 +177,9 @@ def agents_resolve_action(args: list[str]) -> int:
         return 1
     agents_plan, issues = load_agents_plan_for_resolution(agents_path, options["story"], options["task"])
     if issues:
+        if len(issues) == 1 and issues[0].type == "missing_field" and issues[0].field == "agentsFile":
+            print_json({"ok": False, "error": "agents_json_missing"})
+            return 1
         print_json(agent_plan_error("invalid_agents_json", issues))
         return 1
     payload = resolve_agents_payload(agents_plan, options["story"], options["task"])

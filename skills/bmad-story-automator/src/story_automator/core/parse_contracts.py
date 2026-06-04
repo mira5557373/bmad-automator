@@ -55,13 +55,15 @@ def validate_payload(payload: object, parse_contract: dict[str, object]) -> list
     issues: list[DiagnosticIssue] = []
     required_keys = parse_contract.get("requiredKeys") or []
     schema = parse_contract.get("schema") or {}
+    reported_missing: set[str] = set()
     if not isinstance(payload, dict):
         return [_issue("invalid_type", "payload", "object", payload, "Sub-agent output must be a JSON object")]
     for key in required_keys:
         if isinstance(key, str) and key not in payload:
             issues.append(_issue("missing_required_key", key, "present", None, f"Missing required key {key}"))
+            reported_missing.add(key)
     if isinstance(schema, dict):
-        _validate_schema(payload, schema, "", issues)
+        _validate_schema(payload, schema, "", issues, reported_missing)
     return issues
 
 
@@ -75,7 +77,8 @@ def verifier_exception_payload(reason: str, exc: Exception, *, source: str, fiel
     return {**redacted_extra, "verified": False, "reason": reason, "error": redact_actual(str(exc)), "structuredIssues": serialize_issues(issues)}
 
 
-def _validate_schema(payload: object, schema: object, path: str, issues: list[DiagnosticIssue]) -> None:
+def _validate_schema(payload: object, schema: object, path: str, issues: list[DiagnosticIssue], reported_missing: set[str] | None = None) -> None:
+    reported_missing = reported_missing or set()
     if isinstance(schema, dict):
         if not isinstance(payload, dict):
             issues.append(_issue("invalid_type", path or "payload", "object", payload, "Expected object"))
@@ -83,9 +86,10 @@ def _validate_schema(payload: object, schema: object, path: str, issues: list[Di
         for key, child_schema in schema.items():
             child_path = f"{path}.{key}" if path else str(key)
             if key not in payload:
-                issues.append(_issue("missing_required_key", child_path, "present", None, f"Missing required key {child_path}"))
+                if child_path not in reported_missing:
+                    issues.append(_issue("missing_required_key", child_path, "present", None, f"Missing required key {child_path}"))
                 continue
-            _validate_schema(payload[key], child_schema, child_path, issues)
+            _validate_schema(payload[key], child_schema, child_path, issues, reported_missing)
         return
     if not isinstance(schema, str):
         issues.append(_issue("invalid_type", path, "schema rule string", schema, "Parse schema rule must be a string"))
@@ -108,7 +112,10 @@ def _validate_schema(payload: object, schema: object, path: str, issues: list[Di
         if not isinstance(payload, str) or payload not in allowed:
             issues.append(_issue("invalid_enum", path, allowed, payload, f"{path} must be one of {', '.join(allowed)}"))
         return
-    if not isinstance(payload, str) or not payload.strip():
+    if not isinstance(payload, str):
+        issues.append(_issue("invalid_type", path, "string", payload, f"{path} must be a string"))
+        return
+    if not payload.strip():
         issues.append(_issue("empty_string", path, "non-empty string", payload, f"{path} must be a non-empty string"))
 
 

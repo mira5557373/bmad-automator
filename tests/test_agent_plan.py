@@ -72,6 +72,16 @@ class AgentPlanValidationTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_agents_plan_payload_rejects_unknown_task_keys(self) -> None:
+        tasks = {task: {"primary": "claude", "fallback": False} for task in ("create", "dev", "auto", "review")}
+        tasks["reivew"] = {"primary": "claude", "fallback": False}
+
+        issues = validate_agents_plan_payload({"version": "1.0.0", "stories": [{"storyId": "1.1", "tasks": tasks}]})
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].type, "unsupported_task")
+        self.assertEqual(issues[0].field, "stories[0].tasks.reivew")
+
     def test_agents_plan_loader_extracts_markdown_json_block(self) -> None:
         self.agents_file.write_text("```json\n" + json.dumps(self._agents_payload()) + "\n```\n", encoding="utf-8")
 
@@ -450,6 +460,45 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_agents_json")
         fields = [issue["field"] for issue in payload["structuredIssues"]]
         self.assertIn("stories[0].tasks.create.primary", fields)
+
+    def test_agents_resolve_rejects_malformed_embedded_json_with_structured_issues(self) -> None:
+        self.agents_file.write_text("```json\n{\"stories\":[}\n```\n", encoding="utf-8")
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "create"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agents_json")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "agentsFile")
+
+    def test_agents_resolve_preserves_missing_json_block_error(self) -> None:
+        self.agents_file.write_text("# Agents Plan\n", encoding="utf-8")
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "create"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "agents_json_missing")
+
+    def test_agents_resolve_rejects_empty_requested_task_with_structured_issues(self) -> None:
+        self.agents_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "tasks": {"create": {}}}]}), encoding="utf-8")
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "create"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agents_json")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "stories[0].tasks.create.primary")
+
+    def test_agents_resolve_rejects_unsupported_requested_task(self) -> None:
+        self.agents_file.write_text(
+            json.dumps({"stories": [{"storyId": "1.1", "tasks": {"reivew": {"primary": "claude", "fallback": False}}}]}),
+            encoding="utf-8",
+        )
+
+        code, payload = self._helper(["agents-resolve", "--agents-file", str(self.agents_file), "--story", "1.1", "--task", "reivew"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "invalid_agents_json")
+        self.assertEqual(payload["structuredIssues"][0]["type"], "unsupported_task")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "task")
 
     def test_agents_resolve_state_file_directory_reports_json_error(self) -> None:
         state_dir = self.project_root / "state-dir"

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
-from pathlib import Path
 
 from story_automator.core.frontmatter import parse_simple_frontmatter
 from story_automator.core.orchestration_events import emit_state_fields_updated, emit_state_transition
 from story_automator.core.state_validation import parse_state_update_argument, status_transition_error_payload, validate_status_transition
-from story_automator.core.utils import file_exists, print_json, read_text
+from story_automator.core.utils import file_exists, print_json, read_text, write_atomic
 
 
 def state_update_action(args: list[str]) -> int:
@@ -39,7 +39,7 @@ def state_update_action(args: list[str]) -> int:
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
-    Path(args[0]).write_text(frontmatter + body, encoding="utf-8")
+    write_atomic(args[0], frontmatter + body)
     if final_status:
         emit_state_transition(args[0], result="applied", new_status=final_status)
     event_fields = list(dict.fromkeys(key for key in updated if key in {"epic", "currentStory", "currentStep", "lastUpdated"}))
@@ -66,13 +66,37 @@ def _parse_updates(args: list[str]) -> list[tuple[str, str]] | dict[str, object]
 
 
 def _replace_frontmatter_values(frontmatter: str, updates: list[tuple[str, str]]) -> tuple[str, list[str]]:
+    found = {
+        key
+        for key, _value in updates
+        if re.search(rf"(?m)^{re.escape(key)}:.*$", frontmatter)
+    }
+    if len(found) != len({key for key, _value in updates}):
+        return frontmatter, []
+
     updated: list[str] = []
     for key, value in updates:
-        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", frontmatter)
+        rendered = _render_frontmatter_value(value)
+        replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=rendered: f"{k}: {v}", frontmatter)
         if count:
             frontmatter = replaced
             updated.append(key)
     return frontmatter, updated
+
+
+def _render_frontmatter_value(value: str) -> str:
+    stripped = value.strip()
+    lower = stripped.lower()
+    if (
+        value != stripped
+        or lower in {"true", "false", "null"}
+        or re.fullmatch(r"0[0-9]+", stripped)
+        or "# " in stripped
+        or stripped.startswith("#")
+        or ": " in stripped
+    ):
+        return json.dumps(stripped)
+    return value
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

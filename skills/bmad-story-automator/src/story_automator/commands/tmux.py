@@ -426,7 +426,7 @@ def cmd_monitor_session(args: list[str]) -> int:
             )
         if state == "stuck":
             output = session_status(session, full=True, codex=agent == "codex", project_root=project_root, mode=runtime_mode())["active_task"]
-            return emit_monitor_result(json_output, "stuck", 0, 0, str(output), "never_active")
+            return emit_monitor_result(json_output, "stuck", last_done, last_total, str(output), "never_active")
         if state == "not_found":
             issue = status.get("session_state_issue") if json_output else None
             if issue is None and json_output:

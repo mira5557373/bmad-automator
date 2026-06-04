@@ -136,11 +136,15 @@ def _split_top_level(raw: str, separator: str, *, maxsplit: int = 0) -> list[str
             continue
         if char == "}":
             depth -= 1
+            if depth < 0:
+                raise ValueError("agentConfig inline maps must have balanced braces")
             continue
         if char == separator and depth == 0 and (not maxsplit or len(parts) < maxsplit):
             parts.append(raw[start:idx].strip())
             start = idx + 1
     parts.append(raw[start:].strip())
+    if depth != 0:
+        raise ValueError("agentConfig inline maps must have balanced braces")
     return parts
 
 

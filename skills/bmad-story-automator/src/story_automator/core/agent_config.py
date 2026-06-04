@@ -156,11 +156,11 @@ def has_agent_config_runtime_source(frontmatter: str) -> bool:
         config = extract_agent_config_frontmatter(frontmatter)
     except ValueError:
         return False
-    for key in ("defaultPrimary", "primary", "defaultFallback", "fallback"):
+    for key in ("defaultPrimary", "primary", "defaultFallback", "fallback", "defaultModel"):
         value = config.get(key)
         if value not in ("", [], {}, None):
             return True
-    for key in ("perTask", "complexityOverrides", "retro"):
+    for key in ("perTask", "complexityOverrides", "retro", "low", "medium", "high"):
         if key in config:
             return True
     return False

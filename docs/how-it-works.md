@@ -107,9 +107,9 @@ sequenceDiagram
 
 The helper CLI exists so the skill does not need to do everything through raw shell parsing or manual markdown edits.
 
-For observability, helper failures preserve legacy fields such as `reason`,
-`error`, and `issues`, then add `structuredIssues` where a field-specific
-diagnostic is available. Successful parse payloads stay unchanged.
+For observability, helper failures preserve their legacy result fields and add
+`structuredIssues` where a field-specific diagnostic is available. Parse failure
+payloads keep `status` and `reason`; successful parse payloads stay unchanged.
 
 ## Why The State Document Matters
 

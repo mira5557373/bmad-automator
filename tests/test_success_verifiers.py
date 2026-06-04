@@ -935,6 +935,20 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertFalse(payload["verified"])
         self.assertEqual(payload["reason"], "verifier_contract_invalid")
 
+    def test_monitor_dispatch_rejects_verifier_permission_error(self) -> None:
+        with patch("story_automator.commands.tmux_monitor.run_success_verifier", side_effect=PermissionError("denied")):
+            result = _verify_monitor_completion(
+                "review",
+                project_root=str(self.project_root),
+                story_key="1.2",
+                output_file="/tmp/session.txt",
+            )
+        self.assertIsNotNone(result)
+        payload, verifier = result or ({}, "")
+        self.assertEqual(verifier, "review_completion")
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["reason"], "verifier_contract_invalid")
+
     def test_monitor_session_reports_incomplete_when_verifier_raises_file_error(self) -> None:
         stdout = io.StringIO()
         statuses = [
@@ -1126,6 +1140,25 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(state_issue_mock.call_count, 1)
 
+    def test_monitor_session_stuck_preserves_last_known_progress(self) -> None:
+        statuses = [
+            {"active_task": "", "todos_done": 2, "todos_total": 4, "wait_estimate": 0, "session_state": "running"},
+            {"active_task": "/tmp/session.txt", "todos_done": 2, "todos_total": 4, "wait_estimate": 0, "session_state": "stuck"},
+            {"active_task": "/tmp/session.txt"},
+        ]
+        stdout = io.StringIO()
+        with patch_env(self.project_root), patch("story_automator.commands.tmux.time.sleep"), patch(
+            "story_automator.commands.tmux.session_status",
+            side_effect=statuses,
+        ), redirect_stdout(stdout):
+            code = cmd_monitor_session(["fake-session", "--json", "--max-polls", "2", "--initial-wait", "0"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["final_state"], "stuck")
+        self.assertEqual(payload["todos_done"], 2)
+        self.assertEqual(payload["todos_total"], 4)
+
     def test_monitor_session_csv_does_not_include_structured_issues(self) -> None:
         session = "sa-test-session"
         paths = session_paths(session, self.project_root)
@@ -1281,7 +1314,7 @@ class SuccessVerifierTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertFalse(payload["valid"])
         self.assertIn("missing-state.md", payload["reason"])
-        self.assertEqual(payload["structuredIssues"][0]["field"], "state_file")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--state-file")
         self.assertEqual(payload["structuredIssues"][0]["source"], "validate-story-creation")
 
     def test_validate_story_creation_bad_counts_include_structured_issues(self) -> None:

@@ -227,7 +227,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             payload = create_check_payload(story_id, state_file)
             response = build_check_response(story_id, payload, before_count=before_count, after_count=after_count)
         except (FileNotFoundError, PolicyError, OSError, ValueError) as exc:
-            return print_check_error(story_id, reason=str(exc), field="state_file" if state_file else "policy", before_count=before_count, after_count=after_count)
+            return print_check_error(story_id, reason=str(exc), field="--state-file" if state_file else "policy", before_count=before_count, after_count=after_count)
         print(json.dumps(response, separators=(",", ":")))
         return 0
 

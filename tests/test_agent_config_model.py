@@ -13,6 +13,7 @@ from unittest.mock import patch
 from story_automator.core.agent_config import (
     AgentTaskConfig,
     build_agents_file,
+    has_agent_config_runtime_source,
     parse_agent_config_json,
     resolve_agent_for_task,
     resolve_agents,
@@ -68,6 +69,23 @@ class CoreAgentConfigModelTests(unittest.TestCase):
     def test_agent_config_frontmatter_rejects_scalar_inline_value(self) -> None:
         with self.assertRaisesRegex(ValueError, "agentConfig inline value must be an object/map"):
             extract_agent_config_frontmatter('agentConfig: bad\n')
+
+    def test_agent_config_frontmatter_rejects_unbalanced_inline_map_braces(self) -> None:
+        with self.assertRaisesRegex(ValueError, "balanced braces"):
+            extract_agent_config_frontmatter("agentConfig: {defaultPrimary: claude}}\n")
+
+    def test_has_agent_config_runtime_source_counts_default_model(self) -> None:
+        self.assertTrue(has_agent_config_runtime_source('---\nagentConfig:\n  defaultModel: "claude-opus"\n---\n'))
+
+    def test_has_agent_config_runtime_source_ignores_unsupported_top_level_model(self) -> None:
+        self.assertFalse(has_agent_config_runtime_source('---\nagentConfig:\n  model: "claude-opus"\n---\n'))
+
+    def test_has_agent_config_runtime_source_counts_legacy_level_overrides(self) -> None:
+        self.assertTrue(
+            has_agent_config_runtime_source(
+                '---\nagentConfig:\n  low:\n    review:\n      primary: codex\n---\n'
+            )
+        )
 
     def test_per_task_model_is_resolved(self) -> None:
         config = parse_agent_config_json(

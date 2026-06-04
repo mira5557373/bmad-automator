@@ -105,7 +105,7 @@ def emit_diagnostic_event(event: DiagnosticEvent, path: str | Path | None = None
 
 def legacy_issue_message(issue: DiagnosticIssue) -> str:
     if issue.message:
-        return issue.message
+        return str(redact_actual(issue.message))
     if issue.field and issue.expected:
         return f"{issue.field}: expected {issue.expected}"
     if issue.field:

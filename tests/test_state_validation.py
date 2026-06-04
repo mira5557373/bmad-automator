@@ -248,6 +248,45 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload, {"ok": True, "updated": ["aiCommand"]})
         self.assertIn("aiCommand: claude --resume", state_file.read_text(encoding="utf-8"))
 
+    def test_state_update_rejects_mixed_missing_key_without_partial_write(self) -> None:
+        state_file = self._build_state_config(status="COMPLETE")
+        before = state_file.read_text(encoding="utf-8")
+
+        code, payload = self._state_update_args(state_file, ["--set", "aiCommand=codex exec", "--set", "bogus=value"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload, {"ok": False, "error": "keys_not_found", "updated": []})
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
+
+    def test_state_update_write_failure_leaves_file_unchanged(self) -> None:
+        state_file = self._build_state_config(status="READY")
+        before = state_file.read_text(encoding="utf-8")
+
+        with self.assertRaises(OSError), unittest.mock.patch(
+            "story_automator.commands.orchestrator_state.write_atomic",
+            side_effect=OSError("disk full"),
+        ):
+            self._state_update(state_file, "status=IN_PROGRESS")
+
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
+
+    def test_state_update_quotes_yaml_like_frontmatter_values(self) -> None:
+        state_file = self._build_state_config(status="COMPLETE")
+
+        for raw, rendered in (
+            ("currentStep=false", 'currentStep: "false"'),
+            ("currentStep=null", 'currentStep: "null"'),
+            ("currentStep=01", 'currentStep: "01"'),
+            ("currentStep=value: detail", 'currentStep: "value: detail"'),
+            ("currentStep=value # detail", 'currentStep: "value # detail"'),
+        ):
+            with self.subTest(raw=raw):
+                code, payload = self._state_update(state_file, raw)
+
+                self.assertEqual(code, 0)
+                self.assertEqual(payload, {"ok": True, "updated": ["currentStep"]})
+                self.assertIn(rendered, state_file.read_text(encoding="utf-8"))
+
     def test_state_update_only_rewrites_frontmatter(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")
         text = state_file.read_text(encoding="utf-8").replace("currentStep: null\n", "currentStep: step-old\n", 1)
@@ -309,7 +348,7 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(payload, {"ok": True, "updated": ["currentStep"]})
-        self.assertIn("currentStep:   step-next  ", state_file.read_text(encoding="utf-8"))
+        self.assertIn('currentStep: "step-next"', state_file.read_text(encoding="utf-8"))
 
     def test_state_update_uses_frontmatter_status_for_transition(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")

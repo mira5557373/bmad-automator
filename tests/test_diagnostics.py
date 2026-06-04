@@ -18,6 +18,7 @@ from story_automator.core.diagnostics import (
     serialize_issue,
     serialize_issues,
 )
+from story_automator.core.orchestration_events import emit_policy_decision
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -65,6 +66,15 @@ class DiagnosticsTests(unittest.TestCase):
         issue = DiagnosticIssue(type="invalid_type", field="count", expected="integer", message="count must be integer")
 
         self.assertEqual(legacy_issue_message(issue), "count must be integer")
+
+    def test_legacy_issue_message_redacts_message(self) -> None:
+        issue = DiagnosticIssue(type="ValueError", message="token=abc123 failed at /tmp/private/state.md")
+
+        message = legacy_issue_message(issue)
+
+        self.assertIn("token=<redacted>", message)
+        self.assertIn("<path:state.md>", message)
+        self.assertNotIn("abc123", message)
 
     def test_legacy_issue_message_falls_back_to_field_and_expected(self) -> None:
         issue = DiagnosticIssue(type="invalid_type", field="count", expected="integer")
@@ -264,6 +274,20 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["issues"][0]["field"], "status")
         self.assertEqual(payload["context"]["path"], "<path:state.md>")
         self.assertEqual(payload["context"]["apiKey"], "<redacted>")
+
+    def test_policy_decision_keeps_canonical_trigger_and_escalate(self) -> None:
+        captured: list[DiagnosticEvent] = []
+
+        def capture(event: DiagnosticEvent) -> bool:
+            captured.append(event)
+            return True
+
+        with unittest.mock.patch("story_automator.core.orchestration_events.emit_diagnostic_event", side_effect=capture):
+            emit_policy_decision("real-trigger", True, {"trigger": "fake-trigger", "escalate": False, "stateFile": "state.md"})
+
+        self.assertEqual(captured[0].context["trigger"], "real-trigger")
+        self.assertTrue(captured[0].context["escalate"])
+        self.assertEqual(captured[0].context["stateFile"], "state.md")
 
     def test_emit_diagnostic_event_appends_jsonl_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

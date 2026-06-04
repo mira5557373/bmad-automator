@@ -78,7 +78,8 @@ def validate_agents_plan_payload(payload: object) -> list[DiagnosticIssue]:
         for task, selection in tasks.items():
             if task in REQUIRED_TASKS:
                 continue
-            if task != "retro":
+            if task not in TASKS:
+                issues.append(_issue("unsupported_task", f"{field}.tasks.{task}", sorted(TASKS), task, f"{task} task is not supported"))
                 continue
             task_field = f"{field}.tasks.{task}"
             if isinstance(selection, dict):
@@ -154,12 +155,18 @@ def build_agents_file(
 
 
 def resolve_agents(agents_file: str | Path, story_id: str, task: str) -> dict[str, Any]:
-    text = read_text(agents_file)
-    block = extract_json_block(text)
-    if not block:
+    payload, issues = load_agents_plan_for_resolution(str(agents_file), story_id, task)
+    if _agents_json_missing(issues):
         return {"ok": False, "error": "agents_json_missing"}
-    payload = json.loads(block)
+    if issues:
+        return agent_plan_error("invalid_agents_json", issues)
+    if not payload:
+        return {"ok": False, "error": "agents_json_missing"}
     return resolve_agents_payload(payload, story_id, task)
+
+
+def _agents_json_missing(issues: list[DiagnosticIssue]) -> bool:
+    return len(issues) == 1 and issues[0].type == "missing_field" and issues[0].field == "agentsFile"
 
 
 def resolve_agents_payload(payload: dict[str, Any], story_id: str, task: str) -> dict[str, Any]:
@@ -237,6 +244,8 @@ def _complexity_level(complexity: dict[str, Any], field: str) -> tuple[str, Diag
 
 
 def _validate_agents_plan_resolution(payload: dict[str, Any], story_id: str, task: str) -> list[DiagnosticIssue]:
+    if task not in TASKS:
+        return [_issue("unsupported_task", "task", sorted(TASKS), task, f"{task} task is not supported")]
     stories = payload.get("stories") or []
     for index, story in enumerate(stories):
         field = f"stories[{index}]"

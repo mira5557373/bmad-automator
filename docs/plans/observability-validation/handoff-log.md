@@ -178,7 +178,7 @@ npm run verify
 
 ```bash
 sed -n '1,260p' docs/plans/observability-validation/07-review-remediation.md
-sed -n '1,260p' /Users/joon/projects/twoj/tools/_shared/bmad-latest/.claude/skills/bmad-quick-dev/SKILL.md
+sed -n '1,260p' "$BMAD_QUICK_DEV_SKILL/SKILL.md"
 PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_diagnostics tests.test_orchestrator_parse tests.test_agent_plan tests.test_cli_contracts tests.test_diagnostics_e2e
 PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests
 git diff --check
