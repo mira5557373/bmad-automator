@@ -145,6 +145,50 @@ class SmokeModesScriptTests(unittest.TestCase):
             runner.close()
 
 
+class SmokeStorySlugTests(unittest.TestCase):
+    def test_automator_story_slug_ignores_unfound_sprint_status_story_echo(self) -> None:
+        module = load_script_module("run_smoke_automator", SCRIPTS / "run-smoke-automator.py")
+        runner = module.SmokeRunner(
+            root=REPO_ROOT,
+            workspace=REPO_ROOT / ".smoke",
+            project=REPO_ROOT / ".smoke" / "gunz",
+            story_id="1.1",
+        )
+
+        with patch.object(
+            runner,
+            "_helper_json",
+            side_effect=[
+                {"found": False, "story": "1.1", "status": "not_found"},
+                {"title": "First Story"},
+            ],
+        ):
+            slug = runner._story_slug()
+
+        self.assertEqual(slug, "1-1-first-story")
+
+    def test_dev_loop_story_slug_ignores_unfound_sprint_status_story_echo(self) -> None:
+        module = load_script_module("run_smoke_dev_loop", SCRIPTS / "run-smoke-dev-loop.py")
+        runner = module.DevLoopSmokeRunner(
+            root=REPO_ROOT,
+            workspace=REPO_ROOT / ".smoke",
+            project=REPO_ROOT / ".smoke" / "gunz",
+            story_ids=["1.1"],
+        )
+
+        with patch.object(
+            runner,
+            "_helper_json",
+            side_effect=[
+                {"found": False, "story": "1.1", "status": "not_found"},
+                {"title": "First Story"},
+            ],
+        ):
+            slug = runner._story_slug("1.1")
+
+        self.assertEqual(slug, "1-1-first-story")
+
+
 class FinishLoopSmokeScriptTests(unittest.TestCase):
     def test_ephemeral_descriptors_do_not_expose_cleaned_paths(self) -> None:
         module = load_script_module("run_smoke_finish_loop", SCRIPTS / "run-smoke-finish-loop.py")

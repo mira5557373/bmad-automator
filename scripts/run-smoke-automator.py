@@ -425,7 +425,7 @@ class SmokeRunner:
     def _story_slug(self) -> str:
         status = self._helper_json("orchestrator-helper", "sprint-status", "get", self.story_id)
         story_key = str(status.get("story") or "")
-        if story_key:
+        if status.get("found") is True and story_key:
             return story_key
         parsed = self._helper_json("parse-story", "--epic", str(EPIC_FILE), "--story", self.story_id, "--rules", str(RULES))
         return f"{self._story_prefix()}-{_slugify(str(parsed.get('title') or 'story'))}"
