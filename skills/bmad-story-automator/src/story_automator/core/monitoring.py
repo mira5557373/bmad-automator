@@ -15,8 +15,10 @@ def emit_monitor_result(
     reason: str,
     *,
     output_verified: bool | None = None,
-    structured_issue: object | None = None,
+    structured_issue: dict[str, Any] | None = None,
 ) -> int:
+    if structured_issue is not None and not isinstance(structured_issue, dict):
+        raise TypeError("structured_issue must be a serialized issue object")
     emit_diagnostic_event(
         DiagnosticEvent(
             name="session.lifecycle.result",

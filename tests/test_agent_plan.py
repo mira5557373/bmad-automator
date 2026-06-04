@@ -56,6 +56,15 @@ class AgentPlanValidationTests(unittest.TestCase):
                 self.assertEqual(issues[0].type, "invalid_value")
                 self.assertEqual(issues[0].field, "stories[0].complexity.level")
 
+    def test_complexity_payload_rejects_non_string_titles(self) -> None:
+        for title in (123, ["a"], {"name": "Story"}, True):
+            with self.subTest(title=title):
+                issues = validate_complexity_payload({"stories": [{"storyId": "1.1", "title": title, "complexity": {"level": "medium"}}]})
+
+                self.assertEqual(len(issues), 1)
+                self.assertEqual(issues[0].type, "invalid_type")
+                self.assertEqual(issues[0].field, "stories[0].title")
+
     def test_agents_plan_payload_requires_all_task_selections(self) -> None:
         issues = validate_agents_plan_payload({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": "claude"}}}]})
 
@@ -146,6 +155,16 @@ class AgentPlanValidationTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.field, "complexity-file")
         self.assertIn("Complexity level must be low, medium, or high", str(ctx.exception))
+
+    def test_build_agents_file_build_loop_rejects_non_string_title(self) -> None:
+        payload = {"stories": [{"storyId": "1.1", "title": 123, "complexity": {"level": "medium"}}]}
+
+        with patch("story_automator.core.agent_plan.validate_complexity_payload", return_value=[]):
+            with self.assertRaises(AgentPlanInputError) as ctx:
+                build_agents_file(self.state_file, self.complexity_file, self.agents_file, "{}", complexity_payload=payload)
+
+        self.assertEqual(ctx.exception.field, "complexity-file")
+        self.assertIn("Complexity story title must be a string", str(ctx.exception))
 
     def test_agents_build_uses_validated_complexity_payload_without_rereading(self) -> None:
         self.complexity_file.write_text(json.dumps({"stories": [{"storyId": "1.1", "title": "Story", "complexity": {"level": "medium"}}]}), encoding="utf-8")

@@ -36,6 +36,9 @@ def validate_complexity_payload(payload: object) -> list[DiagnosticIssue]:
         story_id = story.get("storyId")
         if not isinstance(story_id, str) or not story_id.strip():
             issues.append(_issue("missing_field", f"{field}.storyId", "non-empty string", story_id, "Complexity storyId must be a non-empty string"))
+        title = story.get("title")
+        if title is not None and not isinstance(title, str):
+            issues.append(_issue("invalid_type", f"{field}.title", "string", title, "Complexity story title must be a string when provided"))
         complexity, issue = _story_complexity(story, field)
         if issue:
             issues.append(issue)
@@ -136,7 +139,7 @@ def build_agents_file(
     stories = []
     for index, story in enumerate(complexity_payload.get("stories", [])):
         level = _story_complexity_level(story, f"stories[{index}]")
-        stories.append({"storyId": story.get("storyId"), "title": str(story.get("title") or ""), "complexity": level, "tasks": _tasks_for(config, level)})
+        stories.append({"storyId": story.get("storyId"), "title": _story_title(story, f"stories[{index}]"), "complexity": level, "tasks": _tasks_for(config, level)})
     try:
         epic = find_frontmatter_value(state_file, "epic")
         epic_name = find_frontmatter_value(state_file, "epicName")
@@ -232,6 +235,16 @@ def _story_complexity_level(story: dict[str, Any], field: str) -> str:
         issue = _issue("invalid_value", f"{field}.complexity.level", sorted(COMPLEXITY_LEVELS), level, "Complexity level must be low, medium, or high")
         raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(issue)))
     return level
+
+
+def _story_title(story: dict[str, Any], field: str) -> str:
+    title = story.get("title")
+    if title is None:
+        return ""
+    if not isinstance(title, str):
+        issue = _issue("invalid_type", f"{field}.title", "string", title, "Complexity story title must be a string when provided")
+        raise AgentPlanInputError("complexity-file", ValueError(legacy_issue_message(issue)))
+    return title
 
 
 def _complexity_level(complexity: dict[str, Any], field: str) -> tuple[str, DiagnosticIssue | None]:

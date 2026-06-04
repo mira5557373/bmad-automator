@@ -142,6 +142,14 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertEqual(event["name"], "session.lifecycle.result")
         self.assertEqual(event["context"]["outputFile"], "<path:out.txt>")
 
+    def test_monitor_result_rejects_non_object_structured_issue(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            with self.assertRaisesRegex(TypeError, "structured_issue must be a serialized issue object"):
+                emit_monitor_result(True, "not_found", 0, 0, "", "session_gone", structured_issue=[{"type": "session_state.invalid_json"}])  # type: ignore[arg-type]
+
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_malformed_agent_plan_reports_task_field_paths(self) -> None:
         issues = validate_agents_plan_payload({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": ""}}}]})
 
