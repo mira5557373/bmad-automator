@@ -353,7 +353,7 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(payload, {"ok": True, "updated": ["currentStep"]})
-        self.assertIn('currentStep: "step-next"', state_file.read_text(encoding="utf-8"))
+        self.assertIn('currentStep: "  step-next  "', state_file.read_text(encoding="utf-8"))
 
     def test_state_update_uses_frontmatter_status_for_transition(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")

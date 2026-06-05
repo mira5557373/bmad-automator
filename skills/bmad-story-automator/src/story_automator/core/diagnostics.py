@@ -115,13 +115,13 @@ def legacy_issue_message(issue: DiagnosticIssue) -> str:
 
 def issues_from_exception(exc: Exception, source: str, field: str = "") -> list[DiagnosticIssue]:
     raw_message = str(exc)
-    message = raw_message if raw_message else exc.__class__.__name__
+    message = str(redact_actual(raw_message if raw_message else exc.__class__.__name__))
     return [
         DiagnosticIssue(
             type=exc.__class__.__name__,
             field=field,
             actual=message,
-            message=str(message) or exc.__class__.__name__,
+            message=message,
             severity="error",
             source=source,
         )

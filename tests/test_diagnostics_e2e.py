@@ -125,7 +125,7 @@ class DiagnosticsE2ETests(unittest.TestCase):
         )
 
         self.assertEqual(code, 0)
-        self.assertEqual(payload["updated"], ["currentStory", "currentStory"])
+        self.assertEqual(payload["updated"], ["currentStory"])
         event = json.loads(events_file.read_text(encoding="utf-8"))
         self.assertEqual(event["context"]["updatedFields"], ["currentStory"])
         self.assertEqual(event["context"]["values"], {"currentStory": "1.2"})

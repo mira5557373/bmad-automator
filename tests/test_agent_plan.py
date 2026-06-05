@@ -166,6 +166,7 @@ class AgentPlanValidationTests(unittest.TestCase):
                 build_agents_file(self.state_file, self.complexity_file, self.agents_file, "{}", complexity_payload=payload)
 
         self.assertEqual(ctx.exception.field, "complexity-file")
+        self.assertEqual(ctx.exception.original.__class__.__name__, "ValueError")
         self.assertIn("Complexity level must be low, medium, or high", str(ctx.exception))
 
     def test_build_agents_file_build_loop_rejects_non_string_title(self) -> None:

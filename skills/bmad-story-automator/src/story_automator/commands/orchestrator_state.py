@@ -64,7 +64,7 @@ def state_update_action(args: list[str]) -> int:
     if event_fields:
         updated_fields = parse_simple_frontmatter(frontmatter)
         emit_state_fields_updated(args[0], event_fields, {key: updated_fields.get(key, "") for key in event_fields})
-    print_json({"ok": True, "updated": updated})
+    print_json({"ok": True, "updated": list(dict.fromkeys(updated))})
     return 0
 
 
@@ -94,7 +94,7 @@ def _replace_frontmatter_values(frontmatter: str, updates: list[tuple[str, str]]
 
     updated: list[str] = []
     for key, value in updates:
-        rendered = _render_frontmatter_value(value)
+        rendered = _render_frontmatter_value(key, value)
         replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=rendered: f"{k}: {v}", frontmatter)
         if count:
             frontmatter = replaced
@@ -102,8 +102,10 @@ def _replace_frontmatter_values(frontmatter: str, updates: list[tuple[str, str]]
     return frontmatter, updated
 
 
-def _render_frontmatter_value(value: str) -> str:
+def _render_frontmatter_value(key: str, value: str) -> str:
     stripped = value.strip()
+    if key == "status":
+        return stripped
     lower = stripped.lower()
     if (
         value != stripped
@@ -113,7 +115,7 @@ def _render_frontmatter_value(value: str) -> str:
         or stripped.startswith("#")
         or ": " in stripped
     ):
-        return json.dumps(stripped)
+        return json.dumps(value if value != stripped else stripped)
     return value
 
 

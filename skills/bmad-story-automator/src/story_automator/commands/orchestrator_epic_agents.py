@@ -144,7 +144,7 @@ def agents_build_action(args: list[str]) -> int:
     try:
         payload = build_agents_file(options["state-file"], options["complexity-file"], options["output"], options["config-json"], complexity_payload=complexity_payload)
     except AgentPlanInputError as exc:
-        cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+        cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc.original
         print_json(agent_plan_error("invalid_agent_config", issues_from_exception(cause, source="agent-plan", field=exc.field)))
         return 1
     print_json(payload)

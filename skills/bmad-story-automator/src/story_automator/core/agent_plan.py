@@ -19,6 +19,7 @@ class AgentPlanInputError(ValueError):
     def __init__(self, field: str, exc: Exception) -> None:
         super().__init__(str(exc) or exc.__class__.__name__)
         self.field = field
+        self.original = exc
 
 
 def validate_complexity_payload(payload: object) -> list[DiagnosticIssue]:
