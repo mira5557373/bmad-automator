@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .artifact_paths import implementation_artifacts_dir, implementation_artifacts_glob, resolve_artifact_glob
 from .frontmatter import find_frontmatter_value_case
 from .runtime_policy import PolicyError, load_runtime_policy, step_contract
 from .sprint import sprint_status_epic, sprint_status_get
@@ -70,10 +71,13 @@ def create_story_artifact(
     if norm is None:
         return {"verified": False, "reason": "could_not_normalize_key", "input": story_key}
     config = _success_config(contract)
-    raw_glob = str(config.get("glob") or "_bmad-output/implementation-artifacts/{story_prefix}-*.md")
+    raw_glob = str(config.get("glob") or implementation_artifacts_glob(project_root, "{story_prefix}-*.md"))
     expected = _parse_int(config.get("expectedMatches", 1), "success.config.expectedMatches", minimum=0)
     pattern = _format_story_pattern(raw_glob, norm)
-    root, safe_pattern = _resolve_artifact_glob(project_root, pattern)
+    try:
+        root, safe_pattern = resolve_artifact_glob(project_root, pattern)
+    except ValueError as exc:
+        raise PolicyError(str(exc)) from exc
     matches = sorted(root.glob(safe_pattern))
     if _is_explicit_full_key(story_key, norm):
         matches = [match for match in matches if match.stem == norm.key]
@@ -199,14 +203,14 @@ def _story_artifact_path(
     *,
     allow_prefix_fallback: bool = True,
 ) -> Path | None:
-    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    artifacts = implementation_artifacts_dir(project_root)
     if preferred_story:
         preferred = artifacts / f"{preferred_story}.md"
         if preferred.is_file():
             return preferred
         if not allow_prefix_fallback:
             return None
-    matches = sorted((Path(project_root) / "_bmad-output" / "implementation-artifacts").glob(f"{story_prefix}-*.md"))
+    matches = sorted(artifacts.glob(f"{story_prefix}-*.md"))
     return matches[0] if matches else None
 
 
@@ -214,25 +218,6 @@ def _selected_review_story(sprint_story: str, norm) -> str:
     if sprint_story in {norm.id, norm.prefix}:
         return norm.key
     return sprint_story
-
-
-def _resolve_artifact_glob(project_root: str, pattern: str) -> tuple[Path, str]:
-    root = Path(project_root).resolve()
-    artifacts_root = (root / "_bmad-output" / "implementation-artifacts").resolve()
-    raw = Path(pattern)
-    if raw.is_absolute():
-        raise PolicyError("success.config.glob must be relative to _bmad-output/implementation-artifacts")
-    resolved = (root / raw).resolve()
-    try:
-        relative = resolved.relative_to(root)
-    except ValueError as exc:
-        raise PolicyError("success.config.glob escapes project root") from exc
-    try:
-        resolved.relative_to(artifacts_root)
-    except ValueError as exc:
-        raise PolicyError("success.config.glob must stay within _bmad-output/implementation-artifacts") from exc
-    return root, str(relative)
-
 
 def _load_review_contract(project_root: str, contract: dict[str, Any]) -> dict[str, Any]:
     merged = dict(DEFAULT_REVIEW_CONTRACT)

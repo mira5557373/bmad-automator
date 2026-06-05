@@ -4,109 +4,122 @@ import json
 import re
 from pathlib import Path
 
+from story_automator.core.artifact_paths import implementation_artifacts_dir
 from story_automator.core.frontmatter import extract_frontmatter, find_frontmatter_value, parse_frontmatter
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
-from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, trim_lines, unquote_scalar
+from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
 
 
 def check_epic_complete_action(args: list[str]) -> int:
-    if len(args) < 2:
-        print_json({"ok": False, "error": "epic_number and story_id required"})
+    try:
+        if len(args) < 2:
+            print_json({"ok": False, "error": "epic_number and story_id required"})
+            return 1
+        epic, story = args[0], args[1]
+        project_root = get_project_root()
+        state_file = ""
+        tail = args[2:]
+        for idx, arg in enumerate(tail):
+            if arg == "--state-file" and idx + 1 < len(tail):
+                state_file = tail[idx + 1]
+        story_norm = normalize_story_key_for_epic(project_root, epic, story)
+        story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
+        epic_value = _epic_json_value(epic)
+        if story_epic != epic:
+            print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "story_not_in_epic"})
+            return 0
+        stories: list[str] = []
+        if state_file and file_exists(state_file):
+            story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
+            stories = [sid for sid in story_range if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
+            source = "state_file"
+        else:
+            stories, _ = sprint_status_epic(project_root, epic)
+            source = "sprint_status"
+        if stories:
+            stories = sorted(_dedupe_stories_for_epic(project_root, epic, stories), key=lambda item: _story_sort_key(project_root, item, epic))
+            last = stories[-1]
+            print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
+            return 0
+        print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
+        return 0
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "isLastStory": False, "epic": _epic_json_value(args[0]) if args else "", "storyId": args[1] if len(args) > 1 else "", "reason": str(exc), "source": "unknown"})
         return 1
-    epic, story = args[0], args[1]
-    project_root = get_project_root()
-    state_file = ""
-    tail = args[2:]
-    for idx, arg in enumerate(tail):
-        if arg == "--state-file" and idx + 1 < len(tail):
-            state_file = tail[idx + 1]
-    story_norm = normalize_story_key_for_epic(project_root, epic, story)
-    story_epic = story_norm.id.rsplit(".", 1)[0] if story_norm is not None else story.split(".", 1)[0]
-    epic_value = _epic_json_value(epic)
-    if story_epic != epic:
-        print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "story_not_in_epic"})
-        return 0
-    stories: list[str] = []
-    if state_file and file_exists(state_file):
-        story_range = parse_frontmatter(read_text(state_file)).get("storyRange", [])
-        stories = [sid for sid in story_range if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
-        source = "state_file"
-    else:
-        stories, _ = sprint_status_epic(project_root, epic)
-        source = "sprint_status"
-    if stories:
-        stories = sorted(_dedupe_stories_for_epic(project_root, epic, stories), key=lambda item: _story_sort_key(project_root, item, epic))
-        last = stories[-1]
-        print_json({"ok": True, "isLastStory": _same_story(project_root, epic, story, last), "epic": epic_value, "storyId": story, "lastInEpic": last, "epicStoryCount": len(stories), "source": source})
-        return 0
-    print_json({"ok": True, "isLastStory": False, "epic": epic_value, "storyId": story, "reason": "could_not_determine", "source": "fallback"})
-    return 0
 
 
 def get_epic_stories_action(args: list[str]) -> int:
-    if not args:
-        print_json({"ok": False, "error": "epic_number_required"})
-        return 1
-    epic = args[0]
-    state_file = ""
-    tail = args[1:]
-    for idx, arg in enumerate(tail):
-        if arg == "--state-file" and idx + 1 < len(tail):
-            state_file = tail[idx + 1]
-    if state_file and file_exists(state_file):
-        project_root = get_project_root()
-        stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
+    try:
+        if not args:
+            print_json({"ok": False, "error": "epic_number_required"})
+            return 1
+        epic = args[0]
+        state_file = ""
+        tail = args[1:]
+        for idx, arg in enumerate(tail):
+            if arg == "--state-file" and idx + 1 < len(tail):
+                state_file = tail[idx + 1]
+        if state_file and file_exists(state_file):
+            project_root = get_project_root()
+            stories = [sid for sid in parse_frontmatter(read_text(state_file)).get("storyRange", []) if isinstance(sid, str) and _story_matches_epic(project_root, epic, sid)]
+            if stories:
+                stories = _dedupe_stories_for_epic(project_root, epic, stories)
+                print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
+                return 0
+        stories, _ = sprint_status_epic(get_project_root(), epic)
         if stories:
-            stories = _dedupe_stories_for_epic(project_root, epic, stories)
-            print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "state_file"})
+            print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "sprint_status"})
             return 0
-    stories, _ = sprint_status_epic(get_project_root(), epic)
-    if stories:
-        print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "sprint_status"})
+        epic_file = find_epic_file(epic)
+        if epic_file:
+            project_root = get_project_root()
+            stories = sorted(_story_ids_from_epic_file(epic_file, epic), key=lambda item: _story_sort_key(project_root, item, epic))
+            if stories:
+                print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
+                return 0
+        print_json({"ok": False, "epic": epic, "error": "no_stories_found", "count": 0})
         return 0
-    epic_file = find_epic_file(epic)
-    if epic_file:
-        project_root = get_project_root()
-        stories = sorted(_story_ids_from_epic_file(epic_file, epic), key=lambda item: _story_sort_key(project_root, item, epic))
-        if stories:
-            print_json({"ok": True, "epic": epic, "stories": stories, "count": len(stories), "source": "epic_file"})
-            return 0
-    print_json({"ok": False, "epic": epic, "error": "no_stories_found", "count": 0})
-    return 0
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "epic": args[0] if args else "", "error": str(exc), "count": 0})
+        return 1
 
 
 def check_blocking_action(args: list[str]) -> int:
-    if not args:
-        print_json({"ok": False, "error": "story_id_required"})
-        return 1
-    project_root = get_project_root()
-    norm = normalize_story_key(project_root, args[0])
-    if norm is None:
-        print_json({"ok": False, "error": "could_not_normalize_key", "input": args[0]})
-        return 1
-    epic = norm.id.split(".", 1)[0]
-    epic_file = find_epic_file(epic)
-    if not epic_file:
-        print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": [], "reason": "epic_file_not_found", "source": "unknown"})
+    try:
+        if not args:
+            print_json({"ok": False, "error": "story_id_required"})
+            return 1
+        project_root = get_project_root()
+        norm = normalize_story_key(project_root, args[0])
+        if norm is None:
+            print_json({"ok": False, "error": "could_not_normalize_key", "input": args[0]})
+            return 1
+        epic = norm.id.split(".", 1)[0]
+        epic_file = find_epic_file(epic)
+        if not epic_file:
+            print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": [], "reason": "epic_file_not_found", "source": "unknown"})
+            return 0
+        dependents: list[str] = []
+        current_story = ""
+        for line in trim_lines(read_text(epic_file)):
+            match = re.match(r"^###\s+Story\s+([^:]+):", line)
+            if match:
+                candidate_story = match.group(1).strip()
+                current_story = candidate_story if _story_matches_epic(project_root, epic, candidate_story) else ""
+                continue
+            if current_story and re.search(r"(?i)Dependencies:|\*\*Dependencies\*\*:", line):
+                if _line_references_story(project_root, epic, norm, args[0], line):
+                    dependents.append(current_story)
+        if dependents:
+            print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents), key=lambda item: _story_sort_key(project_root, item, epic)), "reason": "dependent_stories", "source": "epic_file"})
+            return 0
+        print_json({"ok": True, "blocking": False, "story": norm.id, "epic": epic, "dependents": [], "reason": "no_dependents_found", "source": "epic_file"})
         return 0
-    dependents: list[str] = []
-    current_story = ""
-    for line in trim_lines(read_text(epic_file)):
-        match = re.match(r"^###\s+Story\s+([^:]+):", line)
-        if match:
-            candidate_story = match.group(1).strip()
-            current_story = candidate_story if _story_matches_epic(project_root, epic, candidate_story) else ""
-            continue
-        if current_story and re.search(r"(?i)Dependencies:|\*\*Dependencies\*\*:", line):
-            if _line_references_story(project_root, epic, norm, args[0], line):
-                dependents.append(current_story)
-    if dependents:
-        print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents), key=lambda item: _story_sort_key(project_root, item, epic)), "reason": "dependent_stories", "source": "epic_file"})
-        return 0
-    print_json({"ok": True, "blocking": False, "story": norm.id, "epic": epic, "dependents": [], "reason": "no_dependents_found", "source": "epic_file"})
-    return 0
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "blocking": True, "story": args[0] if args else "", "error": str(exc), "dependents": [], "source": "unknown"})
+        return 1
 
 
 def agents_build_action(args: list[str]) -> int:
@@ -209,7 +222,7 @@ def retro_agent_action(args: list[str]) -> int:
 
 def find_epic_file(epic: str) -> str:
     root = Path(get_project_root())
-    for base in (root / "_bmad-output" / "implementation-artifacts", root / "docs" / "epics"):
+    for base in (implementation_artifacts_dir(root), root / "docs" / "epics"):
         exact = base / f"epic-{epic}.md"
         if exact.is_file() and _epic_file_has_story(exact, epic, project_root=str(root)):
             return str(exact)
@@ -491,32 +504,10 @@ def _load_agent_config_from_state(state_file: str) -> dict:
 
 
 def _parse_scalar(raw: str) -> object:
-    value = unquote_scalar(_strip_inline_yaml_comment(raw))
+    value = unquote_scalar(strip_inline_yaml_comment(raw))
     lower = value.lower()
     if lower == "false":
         return False
     if lower == "true":
         return True
     return value
-
-
-def _strip_inline_yaml_comment(raw: str) -> str:
-    text = raw.strip()
-    in_quote = ""
-    escaped = False
-    for idx, char in enumerate(text):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\" and in_quote == '"':
-            escaped = True
-            continue
-        if char in {'"', "'"}:
-            if in_quote == char:
-                in_quote = ""
-            elif not in_quote:
-                in_quote = char
-            continue
-        if char == "#" and not in_quote and (idx == 0 or text[idx - 1].isspace()):
-            return text[:idx].rstrip()
-    return text

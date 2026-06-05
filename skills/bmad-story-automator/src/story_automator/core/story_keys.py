@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .artifact_paths import implementation_artifacts_dir, sprint_status_path
 from .utils import file_exists, read_text
 
 
@@ -15,13 +16,7 @@ class StoryKey:
 
 
 def sprint_status_file(project_root: str) -> str:
-    preferred = Path(project_root) / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
-    if preferred.is_file():
-        return str(preferred)
-    legacy = Path(project_root) / "_bmad-output" / "sprint-status.yaml"
-    if legacy.is_file():
-        return str(legacy)
-    return str(preferred)
+    return str(sprint_status_path(project_root))
 
 
 def normalize_story_key(project_root: str, value: str) -> StoryKey | None:
@@ -86,7 +81,7 @@ def normalize_story_key_for_epic(project_root: str, epic: str, value: str) -> St
 
 
 def _complete_story_key(project_root: str, story_id: str, prefix: str, key: str) -> StoryKey:
-    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    artifacts = implementation_artifacts_dir(project_root)
     if not key:
         for match in sorted(artifacts.glob(f"{prefix}-*.md")):
             if _full_key_matches_story(project_root, match.stem, story_id, allow_ambiguous_same_id=False):
@@ -219,7 +214,7 @@ def _numeric_epic_segment_match(matches: list[re.Match[str]]) -> re.Match[str] |
 
 
 def _has_exact_story_key(project_root: str, value: str) -> bool:
-    artifacts = Path(project_root) / "_bmad-output" / "implementation-artifacts"
+    artifacts = implementation_artifacts_dir(project_root)
     if (artifacts / f"{value}.md").is_file():
         return True
     status_file = sprint_status_file(project_root)
@@ -263,7 +258,7 @@ def _single_story_numeric_epic(epic: str) -> bool:
 
 def _epic_file_exists(project_root: str, epic: str) -> bool:
     root = Path(project_root)
-    for base in (root / "_bmad-output" / "implementation-artifacts", root / "docs" / "epics"):
+    for base in (implementation_artifacts_dir(root), root / "docs" / "epics"):
         if (base / f"epic-{epic}.md").is_file() or next(base.glob(f"epic-{epic}-*.md"), None) is not None:
             return True
     return False

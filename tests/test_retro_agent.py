@@ -34,7 +34,8 @@ class RetroAgentTests(unittest.TestCase):
             code = _build_cmd(["retro", "2", "--agent", "codex"])
         self.assertEqual(code, 0)
         rendered = stdout.getvalue()
-        self.assertIn('CODEX_HOME="/tmp/sa-codex-home-', rendered)
+        self.assertIn('codex_home=$(mktemp -d "${TMPDIR:-/tmp}/sa-codex-home-', rendered)
+        self.assertIn('CODEX_HOME="$codex_home"', rendered)
         self.assertIn("codex exec -s workspace-write", rendered)
         self.assertIn("Execute the BMAD retrospective workflow for epic 2.", rendered)
 
