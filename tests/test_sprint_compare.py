@@ -44,6 +44,27 @@ class SprintStatusDoneInTextTests(unittest.TestCase):
     def test_missing_story_is_false(self) -> None:
         self.assertFalse(sprint_status_done_in_text(SPRINT_STATUS, "9.9"))
 
+    def test_descriptive_slug_wins_over_bare_prefix_regardless_of_order(self) -> None:
+        # When both a bare prefix key and a descriptive slug key exist for the
+        # same story, the descriptive slug must win deterministically (matching
+        # `_best_status_match` / `sprint_status_get`), not whichever comes first.
+        prefix_first = textwrap.dedent(
+            """\
+            development_status:
+              1-1: in-progress
+              1-1-host-feasibility-probe: done
+            """
+        )
+        slug_first = textwrap.dedent(
+            """\
+            development_status:
+              1-1-host-feasibility-probe: done
+              1-1: in-progress
+            """
+        )
+        self.assertTrue(sprint_status_done_in_text(prefix_first, "1.1"))
+        self.assertTrue(sprint_status_done_in_text(slug_first, "1.1"))
+
 
 class SprintCompareCommandTests(unittest.TestCase):
     """End-to-end regression for the false-positive `incomplete` bug: dotted
