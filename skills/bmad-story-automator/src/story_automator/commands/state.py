@@ -267,7 +267,8 @@ def cmd_sprint_compare(args: list[str]) -> int:
     if isinstance(current_story, str) and current_story in story_range:
         before = story_range[: story_range.index(current_story)]
     sprint_text = read_text(sprint)
-    incomplete = [sid for sid in before if not sprint_status_done_in_text(sprint_text, sid)]
+    project_root = get_project_root()
+    incomplete = [sid for sid in before if not sprint_status_done_in_text(sprint_text, sid, project_root)]
     write_json({"ok": True, "incomplete": incomplete, "checked": before})
     return 0
 

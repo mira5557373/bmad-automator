@@ -16,11 +16,13 @@ class SprintStatus:
     reason: str = ""
 
 
-def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
-    status_file = sprint_status_file(project_root)
-    if not file_exists(status_file):
-        return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
-    content = read_text(status_file)
+def _status_from_content(project_root: str, content: str, story_key: str) -> SprintStatus:
+    """Resolve a story's sprint status from already-read sprint-status *content*.
+
+    Shared resolver: exact key, else `_best_status_match` ranking
+    (dotted ``1.1`` -> dashed ``1-1`` -> descriptive slug
+    ``1-1-host-feasibility-probe``, preferring the descriptive slug).
+    """
     norm = normalize_story_key(project_root, story_key)
     if norm is not None:
         result = _best_status_match(project_root, content, story_key, norm)
@@ -33,24 +35,21 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
     return SprintStatus(False, story_key, "not_found", False)
 
 
-def sprint_status_done_in_text(content: str, story_id: str, project_root: str = "") -> bool:
-    """Return True iff ``story_id`` is marked ``done`` in sprint-status *content*.
+def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
+    status_file = sprint_status_file(project_root)
+    if not file_exists(status_file):
+        return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
+    return _status_from_content(project_root, read_text(status_file), story_key)
 
-    Applies the same key-format fallback as :func:`sprint_status_get` (dotted
-    ``1.1`` -> dashed ``1-1`` -> descriptive slug ``1-1-host-feasibility-probe``)
-    but operates on already-read text, so callers that hold an explicit
-    sprint-status path can reuse the resolver instead of re-implementing a
-    weaker exact-match regex.
+
+def sprint_status_done_in_text(content: str, story_id: str, project_root: str = "") -> bool:
+    """True iff ``story_id`` is marked ``done`` in sprint-status *content*.
+
+    Thin wrapper over the same resolver as :func:`sprint_status_get` (dotted ->
+    dashed -> descriptive slug, with `_best_status_match` ranking) for callers
+    that already hold the sprint-status text and an explicit path.
     """
-    match = _exact_status_match(content, story_id)
-    if match:
-        return match.group(1).strip() == "done"
-    norm = normalize_story_key(project_root, story_id)
-    target = norm.id if norm is not None else story_id
-    for key, status in _status_rows(content):
-        if _status_key_matches_story(project_root, key, target):
-            return status == "done"
-    return False
+    return _status_from_content(project_root, content, story_id).done
 
 
 def sprint_status_epic(project_root: str, epic: str) -> tuple[list[str], int]:
