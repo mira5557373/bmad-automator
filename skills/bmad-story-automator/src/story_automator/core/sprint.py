@@ -17,12 +17,6 @@ class SprintStatus:
 
 
 def _status_from_content(project_root: str, content: str, story_key: str) -> SprintStatus:
-    """Resolve a story's sprint status from already-read sprint-status *content*.
-
-    Shared resolver: exact key, else `_best_status_match` ranking
-    (dotted ``1.1`` -> dashed ``1-1`` -> descriptive slug
-    ``1-1-host-feasibility-probe``, preferring the descriptive slug).
-    """
     norm = normalize_story_key(project_root, story_key)
     if norm is not None:
         result = _best_status_match(project_root, content, story_key, norm)
@@ -43,12 +37,8 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
 
 
 def sprint_status_done_in_text(content: str, story_id: str, project_root: str = "") -> bool:
-    """True iff ``story_id`` is marked ``done`` in sprint-status *content*.
-
-    Thin wrapper over the same resolver as :func:`sprint_status_get` (dotted ->
-    dashed -> descriptive slug, with `_best_status_match` ranking) for callers
-    that already hold the sprint-status text and an explicit path.
-    """
+    # Text-based variant of sprint_status_get for callers that already hold the
+    # sprint-status content and an explicit path (e.g. sprint-compare).
     return _status_from_content(project_root, content, story_id).done
 
 
