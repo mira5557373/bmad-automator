@@ -135,7 +135,9 @@ def get_project_root() -> str:
 
 
 def get_project_slug(project_root: str | None = None) -> str:
-    root = Path(project_root or get_project_root())
+    # Resolve before .name so a relative root like "." (whose Path(".").name is "")
+    # doesn't collapse to the generic "project" fallback. Mirrors get_project_hash().
+    root = Path(project_root or get_project_root()).resolve()
     value = re.sub(r"[^a-z0-9]", "", root.name.lower())[:8]
     return value or "project"
 
