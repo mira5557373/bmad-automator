@@ -13,6 +13,7 @@ from ..core.runtime_policy import (
     snapshot_effective_policy,
 )
 from ..core.agent_config import normalize_model as _model_or_none
+from ..core.sprint import sprint_status_done_in_text
 from ..core.utils import (
     count_matches,
     ensure_dir,
@@ -266,11 +267,7 @@ def cmd_sprint_compare(args: list[str]) -> int:
     if isinstance(current_story, str) and current_story in story_range:
         before = story_range[: story_range.index(current_story)]
     sprint_text = read_text(sprint)
-    incomplete = []
-    for story_id in before:
-        match = re.search(rf"(?m)^\s*{re.escape(story_id)}:\s*(\S+)", sprint_text)
-        if not match or match.group(1) != "done":
-            incomplete.append(story_id)
+    incomplete = [sid for sid in before if not sprint_status_done_in_text(sprint_text, sid)]
     write_json({"ok": True, "incomplete": incomplete, "checked": before})
     return 0
 
