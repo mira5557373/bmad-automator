@@ -125,6 +125,64 @@ class ReconcileStoryTests(unittest.TestCase):
         self.assertIn("### File List", text)
         self.assertIn("- src/a.py", text)
 
+    def test_configured_artifacts_dir_excluded(self) -> None:
+        # When artifacts live under docs/bmad/... (not _bmad-output/), the story file
+        # and its siblings must still be excluded from the reconciled File List.
+        bmm = self.repo / "_bmad" / "bmm"
+        bmm.mkdir(parents=True)
+        (bmm / "config.yaml").write_text(
+            "implementation_artifacts: docs/bmad/implementation-artifacts\n", encoding="utf-8"
+        )
+        art = self.repo / "docs" / "bmad" / "implementation-artifacts"
+        art.mkdir(parents=True)
+        (art / "1-2-example.md").write_text("# Story 1.2\n\n### File List\n", encoding="utf-8")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "a.py").write_text("a\n", encoding="utf-8")
+
+        payload = self._run("--write")
+        self.assertEqual(payload["git_files"], ["src/a.py"])
+        self.assertTrue(payload["story_file"].endswith("docs/bmad/implementation-artifacts/1-2-example.md"))
+
+    def test_non_ascii_path_captured_verbatim(self) -> None:
+        self._write_story("# Story 1.2\n\n### File List\n")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "café.py").write_text("x\n", encoding="utf-8")
+        payload = self._run("--write")
+        self.assertIn("src/café.py", payload["git_files"])
+
+    def test_filename_with_parens_not_mangled(self) -> None:
+        self._write_story("# Story 1.2\n\n### File List\n\n- src/foo(bar).py\n")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "foo(bar).py").write_text("x\n", encoding="utf-8")
+        payload = self._run()
+        self.assertEqual(payload["git_files"], ["src/foo(bar).py"])
+        self.assertEqual(payload["stale_in_story"], [])
+        self.assertEqual(payload["missing_from_story"], [])
+        self.assertTrue(payload["in_sync"])
+
+    def test_disambiguates_by_resolved_key(self) -> None:
+        for name in ("1-2-foo.md", "1-2-bar.md"):
+            (self.artifacts / name).write_text("# s\n\n### File List\n", encoding="utf-8")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "a.py").write_text("a\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = cmd_reconcile_story(["--repo", str(self.repo), "--story", "1-2-foo", "--write"])
+        self.assertEqual(code, 0, stdout.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["story_file"].endswith("1-2-foo.md"))
+
+    def test_file_list_last_section_idempotent(self) -> None:
+        story = self._write_story("# Story 1.2\n\n### File List\n\n- src/old.py\n")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "a.py").write_text("a\n", encoding="utf-8")
+        self.assertTrue(self._run("--write")["wrote"])
+        text = story.read_text(encoding="utf-8")
+        self.assertFalse(text.endswith("\n\n"))  # no extra trailing blank when File List is last
+        second = self._run("--write")
+        self.assertFalse(second["wrote"])  # already in sync, no churn
+        self.assertEqual(story.read_text(encoding="utf-8"), text)
+
     def test_rename_keeps_destination_path(self) -> None:
         (self.repo / "src").mkdir()
         (self.repo / "src" / "old.py").write_text("x\n", encoding="utf-8")

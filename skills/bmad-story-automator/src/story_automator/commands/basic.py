@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from ..core.artifact_paths import implementation_artifacts_dir
+from ..core.artifact_paths import implementation_artifacts_dir, implementation_artifacts_relpath
 from ..core.run_liveness import run_is_stale
 from ..core.runtime_layout import active_marker_path, runtime_provider
 from ..core.stop_hooks import HookConfigError, ensure_stop_hook
@@ -237,25 +237,30 @@ def cmd_commit_story(args: list[str]) -> int:
     return 0
 
 
-def _git_changed_files(repo: str) -> list[str] | None:
-    # `git status --porcelain` is the superset of `git diff --name-only` +
-    # `--cached --name-only` (staged, unstaged, AND untracked). Same ground truth
-    # the review step trusts. `--untracked-files=all` is required: without it git
-    # collapses a new untracked dir to "src/" instead of listing its files.
-    status = run_cmd("git", "-C", repo, "status", "--porcelain", "--untracked-files=all")
+def _git_changed_files(repo: str, extra_excludes: tuple[str, ...] = ()) -> list[str] | None:
+    # `-z` gives NUL-separated, verbatim paths — no C-quoting/escaping of spaces or
+    # non-ASCII, which `git status --porcelain` would otherwise apply. Superset of
+    # staged+unstaged+untracked; `--untracked-files=all` lists files inside new dirs
+    # instead of collapsing them to "src/".
+    status = run_cmd("git", "-C", repo, "status", "--porcelain", "--untracked-files=all", "-z")
     if status.exit_code != 0:
         return None
+    excludes = FILE_LIST_EXCLUDE_PREFIXES + extra_excludes
+    fields = status.output.split("\0")
     files: set[str] = set()
-    for line in status.output.splitlines():
-        if not line.strip():
+    idx = 0
+    while idx < len(fields):
+        entry = fields[idx]
+        if len(entry) < 3:  # empty trailing field or malformed line
+            idx += 1
             continue
-        path = line[3:]  # strip the 2-char XY status code + separator space
-        if " -> " in path:  # rename/copy entries read "old -> new"; keep destination
-            path = path.split(" -> ", 1)[1]
-        path = path.strip().strip('"')
-        if not path or any(path.startswith(prefix) for prefix in FILE_LIST_EXCLUDE_PREFIXES):
-            continue
-        files.add(path)
+        xy, path = entry[:2], entry[3:]
+        if "R" in xy or "C" in xy:  # rename/copy: path is the destination; next field is the source
+            idx += 2
+        else:
+            idx += 1
+        if path and not any(path.startswith(prefix) for prefix in excludes):
+            files.add(path)
     return sorted(files)
 
 
@@ -269,10 +274,15 @@ def _file_list_bounds(lines: list[str]) -> tuple[int, int] | None:
         return None
     end = len(lines)
     for idx in range(start + 1, len(lines)):
-        if lines[idx].lstrip().startswith("#"):
+        if lines[idx].startswith("#"):  # column-0 heading only (ignore indented '#' in code blocks)
             end = idx
             break
     return start, end
+
+
+# Known dev-record status annotations to strip when parsing a hand-written File
+# List — a closed set, so we never mangle a real filename that ends in ")".
+_FILE_LIST_ANNOTATIONS = ("(new)", "(modified)", "(deleted)", "(added)", "(renamed)", "(updated)")
 
 
 def _paths_from_block(block: list[str]) -> list[str]:
@@ -282,9 +292,11 @@ def _paths_from_block(block: list[str]) -> list[str]:
         if not cleaned:
             continue
         cleaned = cleaned.lstrip("-*").strip().strip("`").strip()
-        # drop trailing "(new)" / "(modified)" style annotations
-        if cleaned.endswith(")") and "(" in cleaned:
-            cleaned = cleaned[: cleaned.rfind("(")].strip().strip("`").strip()
+        low = cleaned.lower()
+        for annotation in _FILE_LIST_ANNOTATIONS:
+            if low.endswith(annotation):
+                cleaned = cleaned[: -len(annotation)].strip().strip("`").strip()
+                break
         if cleaned and not cleaned.startswith("("):
             paths.append(cleaned)
     return paths
@@ -302,7 +314,11 @@ def _reconcile_section(text: str, git_files: list[str]) -> tuple[str, list[str]]
         return "\n".join(new_lines) + suffix, []
     start, end = bounds
     current = _paths_from_block(lines[start + 1 : end])
-    new_lines = [*lines[: start + 1], "", *rendered, "", *lines[end:]]
+    tail = lines[end:]
+    block = ["", *rendered]
+    if tail:  # blank separator only when another section follows — avoids an extra EOF newline
+        block.append("")
+    new_lines = [*lines[: start + 1], *block, *tail]
     return "\n".join(new_lines) + suffix, current
 
 
@@ -327,12 +343,19 @@ def cmd_reconcile_story(args: list[str]) -> int:
     if norm is None:
         write_json({"ok": False, "error": "story_key_invalid", "input": story})
         return 1
-    matches = sorted(implementation_artifacts_dir(repo).glob(f"{norm.prefix}-*.md"))
-    if not matches:
-        write_json({"ok": False, "error": "story_file_not_found", "prefix": norm.prefix})
-        return 1
-    story_file = matches[0]
-    git_files = _git_changed_files(repo)
+    artifacts = implementation_artifacts_dir(repo)
+    exact = artifacts / f"{norm.key}.md"
+    if norm.key and exact.is_file():  # disambiguate via the resolved key before falling back to prefix glob
+        story_file = exact
+    else:
+        matches = sorted(artifacts.glob(f"{norm.prefix}-*.md"))
+        if not matches:
+            write_json({"ok": False, "error": "story_file_not_found", "prefix": norm.prefix})
+            return 1
+        story_file = matches[0]
+    # Exclude the resolved artifacts dir (may be _bmad-output/ OR docs/bmad/...) so the
+    # story file and its siblings never pollute the reconciled File List.
+    git_files = _git_changed_files(repo, (implementation_artifacts_relpath(repo) + "/",))
     if git_files is None:
         write_json({"ok": False, "error": "git_status_failed"})
         return 1

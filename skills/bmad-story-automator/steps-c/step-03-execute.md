@@ -220,7 +220,11 @@ reasons=$(echo "$parsed" | jq -c '.reasons // []')
 
   # Sync File List to git truth before review (deterministic; ends doc-drift).
   reconcile=$("$scripts" reconcile-story --repo "{project-root}" --story {story_id} --write)
-  echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** File List reconciled: $(printf '%s' "$reconcile" | jq -c '{missing_from_story, stale_in_story, wrote}')" >> "$state_file"
+  if [ "$(printf '%s' "$reconcile" | jq -r '.ok')" = "true" ]; then
+    echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** File List reconciled: $(printf '%s' "$reconcile" | jq -c '{missing_from_story, stale_in_story, wrote}')" >> "$state_file"
+  else
+    echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** WARNING: File List reconcile failed: $(printf '%s' "$reconcile" | jq -c '.error // .')" >> "$state_file"
+  fi
   ```
   → proceed to C (next step)
 - If `next_action == "retry"` OR `result.final_state == "crashed"`:
