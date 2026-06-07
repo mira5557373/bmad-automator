@@ -19,6 +19,7 @@ from pathlib import Path
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper
 from story_automator.commands.state import cmd_build_state_doc
+from story_automator.core.frontmatter import parse_simple_frontmatter
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,39 @@ class StateBuildUnicodeTests(_FixtureMixin, unittest.TestCase):
         state_file = self._build_state(config)
         text = state_file.read_text(encoding="utf-8")
         self.assertIn(r"\to", text)
+
+    def test_frontmatter_scalars_round_trip_non_ascii(self) -> None:
+        # Regression: scalars must survive a write->parse cycle. The frontmatter
+        # reader (unquote_scalar) strips quotes without JSON-decoding, so values
+        # have to be written as raw UTF-8 — an ensure_ascii "\uXXXX" escape would
+        # read back as literal "\uXXXX" text. assertIn on the whole document does
+        # NOT catch this because the body {{token}} carries the real char.
+        config = self._default_config()
+        config["epicName"] = "upmon — Epic 3 obsłuż"
+        config["aiCommand"] = "claude — go"
+        config["customInstructions"] = "run probe — ciężki ż"
+        fields = parse_simple_frontmatter(self._build_state(config).read_text(encoding="utf-8"))
+        self.assertEqual(fields.get("epicName"), "upmon — Epic 3 obsłuż")
+        self.assertEqual(fields.get("aiCommand"), "claude — go")
+        self.assertEqual(fields.get("customInstructions"), "run probe — ciężki ż")
+
+    def test_agent_config_special_chars_do_not_break_resub(self) -> None:
+        # The agentConfig block is spliced in with re.sub too. A non-ASCII model
+        # id is unlikely, but a backslash in a model/agent string is realistic
+        # (e.g. a "\g"- or "\b"-looking token) — as a raw repl it would raise
+        # re.error: bad escape or corrupt "\b" into a backspace. Both must
+        # survive verbatim and never become a "\uXXXX" escape.
+        config = self._default_config()
+        config["agentConfig"] = {
+            "defaultPrimary": "claude",
+            "defaultFallback": "codex",
+            "perTask": {"dev": {"primary": r"agent\g<0>", "model": "opus — żółw"}},
+        }
+        # _build_state returning a path at all proves the agentConfig re.sub did
+        # not raise re.error on the "\g<0>" backslash content.
+        text = self._build_state(config).read_text(encoding="utf-8")
+        self.assertIn("opus — żółw", text)
+        self.assertNotIn(r"\u", text)
 
 
 class StateUpdateUnicodeTests(_FixtureMixin, unittest.TestCase):
