@@ -14,6 +14,7 @@ from .commands.basic import (
     cmd_list_sessions,
     cmd_reconcile_story,
     cmd_stop_hook,
+    cmd_test_counts,
 )
 from .commands.ceiling_check import cmd_ceiling_check
 from .commands.doctor import cmd_doctor
@@ -113,6 +114,7 @@ def _command_registry() -> dict[str, Command]:
         "build-state-doc": cmd_build_state_doc,
         "commit-story": cmd_commit_story,
         "reconcile-story": cmd_reconcile_story,
+        "test-counts": cmd_test_counts,
         "parse-epic": _cmd_parse_epic,
         "parse-story": _cmd_parse_story,
         "parse-story-range": _cmd_parse_story_range,

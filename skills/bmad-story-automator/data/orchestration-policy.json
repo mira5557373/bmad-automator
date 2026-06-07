@@ -17,6 +17,10 @@
       "arrays": "replace"
     }
   },
+  "test": {
+    "command": "",
+    "junitPath": ""
+  },
   "workflow": {
     "sequence": ["create", "dev", "auto", "review", "retro"],
     "repeat": {

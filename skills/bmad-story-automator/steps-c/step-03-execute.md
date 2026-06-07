@@ -192,6 +192,9 @@ if should_apply_primary_model "$current_agent"; then
 else
   built_cmd=$("$scripts" tmux-wrapper build-cmd dev {story_id} --agent "$current_agent" --state-file "$state_file")
 fi
+# Mark dev start so test-counts can tell a JUnit artifact from THIS run (Tier-1
+# capture) apart from a stale one left by an earlier story.
+dev_started=$(date -u +%s)
 session=$("$scripts" tmux-wrapper spawn dev {epic} {story_id} \
   --agent "$current_agent" \
   --command "$built_cmd")

@@ -15,9 +15,12 @@ VALID_TOP_LEVEL_KEYS = {
     "runtime",
     "workflow",
     "steps",
+    # Our gate subsystem additions (must be preserved — guarded by integration tests).
     "security",
     "profile",
     "gate",
+    # Upstream test-counts addition (675ce7c) — union-merged, not chosen.
+    "test",
 }
 VALID_STEP_NAMES = {"create", "dev", "auto", "review", "retro"}
 VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete", "production_ready_gate", "readiness_gate"}
@@ -54,6 +57,22 @@ def load_effective_policy(project_root: str | None = None, *, resolve_assets: bo
         _resolve_policy_paths(policy, project_root=root, bundle_root=bundled_skill_root(root))
     else:
         _resolve_success_paths(policy, project_root=root, bundle_root=bundled_skill_root(root))
+    return policy
+
+
+# Effective policy (bundled + override, deep-merged and validated) WITHOUT
+# resolving step assets/success contracts: reading a project-wide block like
+# `test` must not require sibling skills to be installed, which full resolution
+# would otherwise demand.
+def load_policy_unresolved(project_root: str | None = None) -> dict[str, Any]:
+    root = Path(project_root or get_project_root()).resolve()
+    bundle_root = bundled_skill_root(root)
+    bundled = _read_json(bundle_root / "data" / "orchestration-policy.json")
+    override_path = root / "_bmad" / "bmm" / "story-automator.policy.json"
+    override = _read_json(override_path) if override_path.is_file() else {}
+    policy = _deep_merge(bundled, override)
+    _apply_legacy_env(policy)
+    _validate_policy_shape(policy)
     return policy
 
 
@@ -217,6 +236,14 @@ def parser_runtime_config(policy: dict[str, Any]) -> dict[str, object]:
     return {"provider": provider, "model": model, "timeoutSeconds": timeout}
 
 
+def test_config(policy: dict[str, Any]) -> dict[str, str]:
+    test = _expect_optional_dict(policy, "test")
+    return {
+        "command": str(test.get("command") or "").strip(),
+        "junitPath": str(test.get("junitPath") or "").strip(),
+    }
+
+
 def bundled_skill_root(project_root: str | Path | None = None) -> Path:
     root = Path(project_root or get_project_root()).resolve()
     try:
@@ -322,6 +349,10 @@ def _validate_policy_shape(policy: dict[str, Any]) -> None:
     runtime = _expect_optional_dict(policy, "runtime")
     _expect_optional_nested_dict(runtime, "merge", "runtime")
     parser_runtime_config(policy)
+    test = _expect_optional_dict(policy, "test")
+    for key in ("command", "junitPath"):
+        if key in test and not isinstance(test.get(key), str):
+            raise PolicyError(f"test.{key} must be a string")
     workflow = _expect_optional_dict(policy, "workflow")
     repeat = _expect_optional_nested_dict(workflow, "repeat", "workflow")
     review = _expect_optional_nested_dict(repeat, "review", "workflow.repeat")

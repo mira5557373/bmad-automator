@@ -8,11 +8,14 @@ import sys
 from pathlib import Path
 
 from ..core.artifact_paths import implementation_artifacts_dir, implementation_artifacts_relpath
+from ..core.junit import parse_junit
 from ..core.run_liveness import run_is_stale
 from ..core.runtime_layout import active_marker_path, runtime_provider
+from ..core.runtime_policy import PolicyError, load_policy_unresolved, test_config
 from ..core.stop_hooks import HookConfigError, ensure_stop_hook
 from ..core.story_keys import normalize_story_key
 from ..core.utils import (
+    ensure_dir,
     get_project_slug,
     run_cmd,
     write_json,
@@ -264,10 +267,11 @@ def _git_changed_files(repo: str, extra_excludes: tuple[str, ...] = ()) -> list[
     return sorted(files)
 
 
-def _file_list_bounds(lines: list[str]) -> tuple[int, int] | None:
+def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
+    target = heading.strip().lower()
     start = None
     for idx, line in enumerate(lines):
-        if line.strip().lower() == "### file list":
+        if line.strip().lower() == target:
             start = idx
             break
     if start is None:
@@ -278,6 +282,10 @@ def _file_list_bounds(lines: list[str]) -> tuple[int, int] | None:
             end = idx
             break
     return start, end
+
+
+def _file_list_bounds(lines: list[str]) -> tuple[int, int] | None:
+    return _section_bounds(lines, "### File List")
 
 
 # Known dev-record status annotations to strip when parsing a hand-written File
@@ -322,6 +330,23 @@ def _reconcile_section(text: str, git_files: list[str]) -> tuple[str, list[str]]
     return "\n".join(new_lines) + suffix, current
 
 
+# Map a story id to its artifact file (resolved key first, prefix glob fallback).
+# Returns (story_file, None) on success or (None, error_payload) so callers can
+# emit the error verbatim and bail.
+def _resolve_story_file(repo: str, story: str) -> tuple[Path | None, dict | None]:
+    norm = normalize_story_key(repo, story)
+    if norm is None:
+        return None, {"ok": False, "error": "story_key_invalid", "input": story}
+    artifacts = implementation_artifacts_dir(repo)
+    exact = artifacts / f"{norm.key}.md"
+    if norm.key and exact.is_file():  # disambiguate via the resolved key before falling back to prefix glob
+        return exact, None
+    matches = sorted(artifacts.glob(f"{norm.prefix}-*.md"))
+    if not matches:
+        return None, {"ok": False, "error": "story_file_not_found", "prefix": norm.prefix}
+    return matches[0], None
+
+
 def cmd_reconcile_story(args: list[str]) -> int:
     repo = ""
     story = ""
@@ -339,20 +364,10 @@ def cmd_reconcile_story(args: list[str]) -> int:
     if not Path(repo).is_dir():
         write_json({"ok": False, "error": "repo_not_found"})
         return 1
-    norm = normalize_story_key(repo, story)
-    if norm is None:
-        write_json({"ok": False, "error": "story_key_invalid", "input": story})
+    story_file, err = _resolve_story_file(repo, story)
+    if story_file is None:
+        write_json(err)
         return 1
-    artifacts = implementation_artifacts_dir(repo)
-    exact = artifacts / f"{norm.key}.md"
-    if norm.key and exact.is_file():  # disambiguate via the resolved key before falling back to prefix glob
-        story_file = exact
-    else:
-        matches = sorted(artifacts.glob(f"{norm.prefix}-*.md"))
-        if not matches:
-            write_json({"ok": False, "error": "story_file_not_found", "prefix": norm.prefix})
-            return 1
-        story_file = matches[0]
     # Exclude the resolved artifacts dir (may be _bmad-output/ OR docs/bmad/...) so the
     # story file and its siblings never pollute the reconciled File List.
     git_files = _git_changed_files(repo, (implementation_artifacts_relpath(repo) + "/",))
@@ -379,6 +394,134 @@ def cmd_reconcile_story(args: list[str]) -> int:
             "wrote": wrote,
         }
     )
+    return 0
+
+
+TEST_COUNTS_HEADING = "### Test Counts"
+
+
+def _render_test_counts(counts: dict) -> list[str]:
+    body = [
+        f"- Tests: {counts['tests']}",
+        f"- Failures: {counts['failures']}",
+        f"- Errors: {counts['errors']}",
+        f"- Skipped: {counts['skipped']}",
+    ]
+    if counts.get("assertions") is not None:  # PHPUnit-only; omit the line entirely otherwise
+        body.append(f"- Assertions: {counts['assertions']}")
+    return body
+
+
+# Rewrite `heading`'s body deterministically (leaving other sections untouched),
+# appending the section at EOF when absent. Mirrors the File List reconcile so a
+# re-run with identical counts is a byte-for-byte no-op.
+def _replace_or_append_section(text: str, heading: str, body: list[str]) -> str:
+    lines = text.splitlines()
+    suffix = "\n" if text.endswith("\n") else ""
+    bounds = _section_bounds(lines, heading)
+    if bounds is None:
+        tail = ["", heading, "", *body]
+        new_lines = [*lines, *tail] if lines else [heading, "", *body]
+        return "\n".join(new_lines) + suffix
+    start, end = bounds
+    rest = lines[end:]
+    block = ["", *body]
+    if rest:  # blank separator only when another section follows
+        block.append("")
+    new_lines = [*lines[: start + 1], *block, *rest]
+    return "\n".join(new_lines) + suffix
+
+
+def cmd_test_counts(args: list[str]) -> int:
+    if args and args[0] in {"--help", "-h"}:
+        print("Usage: test-counts --repo PATH --story KEY [--since EPOCH] [--write]")
+        return 0
+    repo = ""
+    story = ""
+    since: float | None = None
+    do_write = False
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg == "--repo" and idx + 1 < len(args):
+            repo = args[idx + 1]
+            idx += 2
+        elif arg == "--story" and idx + 1 < len(args):
+            story = args[idx + 1]
+            idx += 2
+        elif arg == "--since" and idx + 1 < len(args):
+            try:
+                since = float(args[idx + 1])
+            except ValueError:
+                since = None
+            idx += 2
+        elif arg == "--write":
+            do_write = True
+            idx += 1
+        else:
+            idx += 1
+    if not repo or not story:
+        write_json({"ok": False, "error": "missing_args"})
+        return 1
+    if not Path(repo).is_dir():
+        write_json({"ok": False, "error": "repo_not_found"})
+        return 1
+    story_file, err = _resolve_story_file(repo, story)
+    if story_file is None:
+        write_json(err)
+        return 1
+    try:
+        cfg = test_config(load_policy_unresolved(repo))
+    except PolicyError:
+        write_json({"ok": False, "error": "policy_invalid"})
+        return 1
+    junit_rel = cfg["junitPath"]
+    command = cfg["command"]
+    if not junit_rel:  # Tier 3: nothing configured — File List reconcile still ran independently
+        write_json({"ok": True, "skipped": True, "reason": "test_not_configured", "test_counts": None, "wrote": False})
+        return 0
+    junit_path = Path(repo) / junit_rel.replace("{story}", story_file.stem)
+    fresh = junit_path.is_file() and (since is None or junit_path.stat().st_mtime >= since)
+    rerun_exit: int | None = None
+    if fresh:  # Tier 1: trust the artifact emitted by this dev run
+        source = "capture"
+    elif command:  # Tier 2: deterministic floor — re-run and parse what it emits
+        resolved = command.replace("{junit}", str(junit_path)).replace("{story}", story_file.stem)
+        ensure_dir(junit_path.parent)
+        rerun_exit = run_cmd("bash", "-c", resolved, cwd=repo).exit_code  # non-zero is expected when tests fail
+        if not junit_path.is_file():
+            write_json(
+                {"ok": True, "skipped": True, "reason": "test_artifact_not_emitted", "command_exit": rerun_exit, "test_counts": None, "wrote": False}
+            )
+            return 0
+        source = "rerun"
+    else:  # Tier 3: stale/missing artifact and no runner to fall back on
+        reason = "test_artifact_stale" if junit_path.is_file() else "test_artifact_missing"
+        write_json({"ok": True, "skipped": True, "reason": reason, "test_counts": None, "wrote": False})
+        return 0
+    try:
+        counts = parse_junit(junit_path)
+    except ValueError:
+        write_json({"ok": False, "error": "junit_parse_failed", "junit_path": str(junit_path)})
+        return 1
+    text = story_file.read_text(encoding="utf-8")
+    new_text = _replace_or_append_section(text, TEST_COUNTS_HEADING, _render_test_counts(counts))
+    wrote = False
+    if do_write and new_text != text:
+        story_file.write_text(new_text, encoding="utf-8")
+        wrote = True
+    payload = {
+        "ok": True,
+        "skipped": False,
+        "story_file": str(story_file),
+        "source": source,
+        "junit_path": str(junit_path),
+        "test_counts": counts,
+        "wrote": wrote,
+    }
+    if rerun_exit is not None:
+        payload["command_exit"] = rerun_exit
+    write_json(payload)
     return 0
 
 

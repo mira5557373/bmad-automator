@@ -15,15 +15,15 @@ outputFile: '{output_folder}/story-automator/orchestration-{epic_id}-{timestamp}
 
 ## Story Loop (Continue from Step 3)
 
-### E. Reconcile File List + Git Commit
+### E. Reconcile Story Record + Git Commit
 
 **Required:** Commit after every story (do not skip).
 
-First, sync the story's File List to git truth. This is the **last** point the File List
-can change: the `auto` step (§C) and the review loop (§D) have finished adding/removing
-files, and the commit below is about to snapshot the record. Reconciling here — not at
-dev-close — is what actually ends doc-drift (a dev-close reconcile goes stale the moment
-`auto` adds tests).
+First, sync the story's record to machine truth — both the File List (vs git) and the test
+counts (vs JUnit). This is the **last** point either can change: the `auto` step (§C) and the
+review loop (§D) have finished adding/removing files and tests, and the commit below is about
+to snapshot the record. Reconciling here — not at dev-close — is what actually ends doc-drift
+(a dev-close reconcile goes stale the moment `auto` adds tests).
 
 ```bash
 # Done-close gate: reconcile File List against git truth before the commit snapshots it.
@@ -32,6 +32,16 @@ if [ "$(printf '%s' "$reconcile" | jq -r '.ok')" = "true" ]; then
   echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** File List reconciled: $(printf '%s' "$reconcile" | jq -c '{missing_from_story, stale_in_story, wrote}')" >> "{outputFile}"
 else
   echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** WARNING: File List reconcile failed: $(printf '%s' "$reconcile" | jq -c '.error // .')" >> "{outputFile}"
+fi
+
+# Sync test counts from JUnit truth (machine-computed; ends count drift). --since "$dev_started"
+# (set in step-03 §B) trusts the artifact left by the latest run for THIS story — after `auto`
+# re-ran the suite — or re-runs the configured command as a deterministic floor, else skips.
+test_counts=$("{scriptsDir}" test-counts --repo "{project-root}" --story {story_id} --since "$dev_started" --write)
+if [ "$(printf '%s' "$test_counts" | jq -r '.ok')" = "true" ]; then
+  echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** Test counts: $(printf '%s' "$test_counts" | jq -c '{source, skipped, reason, test_counts, wrote}')" >> "{outputFile}"
+else
+  echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** WARNING: test-counts failed: $(printf '%s' "$test_counts" | jq -c '.error // .')" >> "{outputFile}"
 fi
 
 commit=$("{scriptsDir}" commit-story --repo "{project-root}" --story {story_id} --title "{title}")
