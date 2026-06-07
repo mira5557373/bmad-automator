@@ -12,6 +12,7 @@ from .commands.basic import (
     cmd_ensure_marker_gitignore,
     cmd_ensure_stop_hook,
     cmd_list_sessions,
+    cmd_reconcile_story,
     cmd_stop_hook,
 )
 from .commands.ceiling_check import cmd_ceiling_check
@@ -111,6 +112,7 @@ def _command_registry() -> dict[str, Command]:
         "stop-hook": cmd_stop_hook,
         "build-state-doc": cmd_build_state_doc,
         "commit-story": cmd_commit_story,
+        "reconcile-story": cmd_reconcile_story,
         "parse-epic": _cmd_parse_epic,
         "parse-story": _cmd_parse_story,
         "parse-story-range": _cmd_parse_story_range,
@@ -144,6 +146,9 @@ def _usage(stream: object) -> None:
     print("story-automator <command> [args]", file=stream)
     print("", file=stream)
     print("Commands:", file=stream)
+    # Keep our programmatic iteration over _command_registry() — it
+    # automatically picks up new commands (incl. the upstream-added
+    # reconcile-story / test-counts) without duplicating the list.
     for name in _command_registry():
         print(f"  {name}", file=stream)
 
