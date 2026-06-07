@@ -15,11 +15,25 @@ outputFile: '{output_folder}/story-automator/orchestration-{epic_id}-{timestamp}
 
 ## Story Loop (Continue from Step 3)
 
-### E. Git Commit
+### E. Reconcile File List + Git Commit
 
 **Required:** Commit after every story (do not skip).
 
+First, sync the story's File List to git truth. This is the **last** point the File List
+can change: the `auto` step (§C) and the review loop (§D) have finished adding/removing
+files, and the commit below is about to snapshot the record. Reconciling here — not at
+dev-close — is what actually ends doc-drift (a dev-close reconcile goes stale the moment
+`auto` adds tests).
+
 ```bash
+# Done-close gate: reconcile File List against git truth before the commit snapshots it.
+reconcile=$("{scriptsDir}" reconcile-story --repo "{project-root}" --story {story_id} --write)
+if [ "$(printf '%s' "$reconcile" | jq -r '.ok')" = "true" ]; then
+  echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** File List reconciled: $(printf '%s' "$reconcile" | jq -c '{missing_from_story, stale_in_story, wrote}')" >> "{outputFile}"
+else
+  echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** WARNING: File List reconcile failed: $(printf '%s' "$reconcile" | jq -c '.error // .')" >> "{outputFile}"
+fi
+
 commit=$("{scriptsDir}" commit-story --repo "{project-root}" --story {story_id} --title "{title}")
 ok=$(echo "$commit" | jq -r '.ok')
 ```
