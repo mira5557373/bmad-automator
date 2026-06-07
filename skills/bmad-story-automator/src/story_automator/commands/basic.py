@@ -7,12 +7,29 @@ import shutil
 import sys
 from pathlib import Path
 
+from ..core.artifact_paths import implementation_artifacts_dir
 from ..core.runtime_layout import active_marker_path, runtime_provider
 from ..core.stop_hooks import HookConfigError, ensure_stop_hook
+from ..core.story_keys import normalize_story_key
 from ..core.utils import (
     get_project_slug,
     run_cmd,
     write_json,
+)
+
+# `git status --porcelain` already respects .gitignore, so build/dependency/cache
+# junk (node_modules/, .venv/, dist/, __pycache__/, ...) never reaches us — we do
+# NOT maintain a denylist of those (it could only ever be incomplete). What git
+# *does* surface and we must still drop is the tracked-but-not-source set: the
+# BMAD orchestration artifacts (the story file itself lives under _bmad-output/)
+# and agent/IDE config dirs. That set is bounded, and these prefixes mirror the
+# exclusions the review skill applies (bmad-story-automator-review/instructions.xml).
+FILE_LIST_EXCLUDE_PREFIXES = (
+    "_bmad/",
+    "_bmad-output/",
+    ".claude/",
+    ".cursor/",
+    ".windsurf/",
 )
 
 
@@ -200,6 +217,128 @@ def cmd_commit_story(args: list[str]) -> int:
         return 1
     sha = run_cmd("git", "-C", repo, "rev-parse", "HEAD").output.strip()
     write_json({"ok": True, "commit": sha})
+    return 0
+
+
+def _git_changed_files(repo: str) -> list[str] | None:
+    # `git status --porcelain` is the superset of `git diff --name-only` +
+    # `--cached --name-only` (staged, unstaged, AND untracked). Same ground truth
+    # the review step trusts. `--untracked-files=all` is required: without it git
+    # collapses a new untracked dir to "src/" instead of listing its files.
+    status = run_cmd("git", "-C", repo, "status", "--porcelain", "--untracked-files=all")
+    if status.exit_code != 0:
+        return None
+    files: set[str] = set()
+    for line in status.output.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:]  # strip the 2-char XY status code + separator space
+        if " -> " in path:  # rename/copy entries read "old -> new"; keep destination
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if not path or any(path.startswith(prefix) for prefix in FILE_LIST_EXCLUDE_PREFIXES):
+            continue
+        files.add(path)
+    return sorted(files)
+
+
+def _file_list_bounds(lines: list[str]) -> tuple[int, int] | None:
+    start = None
+    for idx, line in enumerate(lines):
+        if line.strip().lower() == "### file list":
+            start = idx
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        if lines[idx].lstrip().startswith("#"):
+            end = idx
+            break
+    return start, end
+
+
+def _paths_from_block(block: list[str]) -> list[str]:
+    paths: list[str] = []
+    for raw in block:
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        cleaned = cleaned.lstrip("-*").strip().strip("`").strip()
+        # drop trailing "(new)" / "(modified)" style annotations
+        if cleaned.endswith(")") and "(" in cleaned:
+            cleaned = cleaned[: cleaned.rfind("(")].strip().strip("`").strip()
+        if cleaned and not cleaned.startswith("("):
+            paths.append(cleaned)
+    return paths
+
+
+def _reconcile_section(text: str, git_files: list[str]) -> tuple[str, list[str]]:
+    """Return (new_text, current_paths). Rewrites the `### File List` body
+    deterministically from git_files, leaving every other section untouched."""
+    lines = text.splitlines()
+    rendered = [f"- {path}" for path in git_files] if git_files else ["- (no files changed)"]
+    suffix = "\n" if text.endswith("\n") else ""
+    bounds = _file_list_bounds(lines)
+    if bounds is None:
+        new_lines = [*lines, "", "### File List", "", *rendered]
+        return "\n".join(new_lines) + suffix, []
+    start, end = bounds
+    current = _paths_from_block(lines[start + 1 : end])
+    new_lines = [*lines[: start + 1], "", *rendered, "", *lines[end:]]
+    return "\n".join(new_lines) + suffix, current
+
+
+def cmd_reconcile_story(args: list[str]) -> int:
+    repo = ""
+    story = ""
+    do_write = False
+    for idx, arg in enumerate(args):
+        if arg == "--repo" and idx + 1 < len(args):
+            repo = args[idx + 1]
+        elif arg == "--story" and idx + 1 < len(args):
+            story = args[idx + 1]
+        elif arg == "--write":
+            do_write = True
+    if not repo or not story:
+        write_json({"ok": False, "error": "missing_args"})
+        return 1
+    if not Path(repo).is_dir():
+        write_json({"ok": False, "error": "repo_not_found"})
+        return 1
+    norm = normalize_story_key(repo, story)
+    if norm is None:
+        write_json({"ok": False, "error": "story_key_invalid", "input": story})
+        return 1
+    matches = sorted(implementation_artifacts_dir(repo).glob(f"{norm.prefix}-*.md"))
+    if not matches:
+        write_json({"ok": False, "error": "story_file_not_found", "prefix": norm.prefix})
+        return 1
+    story_file = matches[0]
+    git_files = _git_changed_files(repo)
+    if git_files is None:
+        write_json({"ok": False, "error": "git_status_failed"})
+        return 1
+    text = story_file.read_text(encoding="utf-8")
+    new_text, current = _reconcile_section(text, git_files)
+    git_set, current_set = set(git_files), set(current)
+    missing = sorted(git_set - current_set)
+    stale = sorted(current_set - git_set)
+    wrote = False
+    if do_write and new_text != text:
+        story_file.write_text(new_text, encoding="utf-8")
+        wrote = True
+    write_json(
+        {
+            "ok": True,
+            "story_file": str(story_file),
+            "git_files": git_files,
+            "missing_from_story": missing,
+            "stale_in_story": stale,
+            "in_sync": not missing and not stale,
+            "wrote": wrote,
+        }
+    )
     return 0
 
 

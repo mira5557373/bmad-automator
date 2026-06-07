@@ -10,6 +10,7 @@ from .commands.basic import (
     cmd_ensure_marker_gitignore,
     cmd_ensure_stop_hook,
     cmd_list_sessions,
+    cmd_reconcile_story,
     cmd_stop_hook,
 )
 from .commands.orchestrator import cmd_orchestrator_helper
@@ -40,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         "stop-hook": cmd_stop_hook,
         "build-state-doc": cmd_build_state_doc,
         "commit-story": cmd_commit_story,
+        "reconcile-story": cmd_reconcile_story,
         "parse-epic": _cmd_parse_epic,
         "parse-story": _cmd_parse_story,
         "parse-story-range": _cmd_parse_story_range,
@@ -76,6 +78,7 @@ def _usage(stream: object) -> None:
         "stop-hook",
         "build-state-doc",
         "commit-story",
+        "reconcile-story",
         "parse-epic",
         "parse-story",
         "parse-story-range",
