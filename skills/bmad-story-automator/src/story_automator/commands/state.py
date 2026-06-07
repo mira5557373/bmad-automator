@@ -177,7 +177,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
     for key, value in body.items():
         text = text.replace(key, value)
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
-    output_path.write_text(text)
+    output_path.write_text(text, encoding="utf-8")
     write_json({"ok": True, "path": str(output_path), "createdAt": now})
     return 0
 
