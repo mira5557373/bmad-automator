@@ -242,6 +242,10 @@ def cmd_build_state_doc(args: list[str]) -> int:
     for key, value in body.items():
         text = text.replace(key, value)
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
+    # Keep our M05 atomic-locked write: write_atomic_text already defaults to
+    # encoding="utf-8" so it is strictly stronger than upstream's bare
+    # output_path.write_text(text, encoding="utf-8") fix from 605554f. The
+    # locked-atomic semantics MUST be preserved.
     lock_path = Path(output_folder).resolve() / _STATE_BUILD_LOCK_NAME
     try:
         with acquire_run_lock(lock_path, run_id=stamp, timeout=0.0):

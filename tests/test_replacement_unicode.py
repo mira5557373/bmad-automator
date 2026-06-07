@@ -143,6 +143,9 @@ class StateBuildUnicodeTests(_FixtureMixin, unittest.TestCase):
         # not raise re.error on the "\g<0>" backslash content.
         text = self._build_state(config).read_text(encoding="utf-8")
         self.assertIn("opus — żółw", text)
+        # JSON doubles the backslash, so the literal block carries "agent\\g<0>";
+        # asserting it proves the value survived the splice, not just that it ran.
+        self.assertIn(r"agent\\g<0>", text)
         self.assertNotIn(r"\u", text)
 
 
