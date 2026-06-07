@@ -450,10 +450,14 @@ def cmd_test_counts(args: list[str]) -> int:
             story = args[idx + 1]
             idx += 2
         elif arg == "--since" and idx + 1 < len(args):
+            # --since is always machine-supplied (date +%s); a non-numeric value
+            # is a contract break. Fail loud rather than silently dropping the
+            # staleness gate, which would let a stale artifact pass as fresh.
             try:
                 since = float(args[idx + 1])
             except ValueError:
-                since = None
+                write_json({"ok": False, "error": "since_invalid", "value": args[idx + 1]})
+                return 1
             idx += 2
         elif arg == "--write":
             do_write = True
@@ -486,7 +490,9 @@ def cmd_test_counts(args: list[str]) -> int:
     if fresh:  # Tier 1: trust the artifact emitted by this dev run
         source = "capture"
     elif command:  # Tier 2: deterministic floor — re-run and parse what it emits
-        resolved = command.replace("{junit}", str(junit_path)).replace("{story}", story_file.stem)
+        # Shell-quote substitutions: the placeholders must be left UNquoted in the
+        # command template (paths with spaces/metacharacters would break bash -c).
+        resolved = command.replace("{junit}", shlex.quote(str(junit_path))).replace("{story}", shlex.quote(story_file.stem))
         ensure_dir(junit_path.parent)
         rerun_exit = run_cmd("bash", "-c", resolved, cwd=repo).exit_code  # non-zero is expected when tests fail
         if not junit_path.is_file():

@@ -231,6 +231,26 @@ class TestCountsCommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"], "policy_invalid")
 
+    def test_invalid_since_is_an_error(self) -> None:
+        # A non-numeric --since must fail loud, not silently drop the staleness
+        # gate (which would let a stale artifact pass as a fresh capture).
+        self._policy(junitPath="reports/junit.xml")
+        self._artifact("reports/junit.xml")
+        code, payload = self._invoke("--since", "not-a-number")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "since_invalid")
+
+    def test_rerun_handles_spaces_in_junit_path(self) -> None:
+        # Placeholders are shell-quoted, so a junit path with a space still works.
+        self._policy(
+            junitPath="re ports/junit.xml",
+            command="printf '<testsuite tests=\"5\" failures=\"0\" errors=\"0\" skipped=\"0\"/>' > {junit}",
+        )
+        code, payload = self._invoke()
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["source"], "rerun")
+        self.assertEqual(payload["test_counts"]["tests"], 5)
+
     def test_story_not_found(self) -> None:
         code, payload = self._invoke(story="9-9")
         self.assertEqual(code, 1)
