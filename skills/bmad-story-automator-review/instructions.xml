@@ -30,7 +30,7 @@
       <action>Compile list of actually changed files from git output</action>
     </check>
 
-    <!-- Defence-in-depth: dev step already ran reconcile-story --write; expect zero drift. -->
+    <!-- Cross-reference story File List vs git reality -->
     <action>Compare story's Dev Agent Record → File List with actual git changes</action>
     <action>Note discrepancies:
       - Files in git but not in story File List

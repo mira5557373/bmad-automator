@@ -192,14 +192,6 @@ reasons=$(echo "$parsed" | jq -c '.reasons // []')
   # Update Story Progress: mark dev-story done
   tmp_state=$(mktemp)
   sed "s/^| ${story_id} |.*$/| ${story_id} | done | done | - | - | - | in-progress |/" "$state_file" > "$tmp_state" && mv "$tmp_state" "$state_file"
-
-  # Sync File List to git truth before review (deterministic; ends doc-drift).
-  reconcile=$("$scripts" reconcile-story --repo "{project-root}" --story {story_id} --write)
-  if [ "$(printf '%s' "$reconcile" | jq -r '.ok')" = "true" ]; then
-    echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** File List reconciled: $(printf '%s' "$reconcile" | jq -c '{missing_from_story, stale_in_story, wrote}')" >> "$state_file"
-  else
-    echo "- **[$(date -u +%Y-%m-%dT%H:%M:%SZ)]** WARNING: File List reconcile failed: $(printf '%s' "$reconcile" | jq -c '.error // .')" >> "$state_file"
-  fi
   ```
   → proceed to C (next step)
 - If `next_action == "retry"` OR `result.final_state == "crashed"`:
