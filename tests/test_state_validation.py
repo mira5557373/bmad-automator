@@ -240,6 +240,17 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_set_argument")
         self.assertEqual(payload["structuredIssues"][0]["actual"], "=READY")
 
+    def test_state_update_rejects_duplicate_set_key_without_write(self) -> None:
+        state_file = self._build_state_config(status="READY")
+        before = state_file.read_text(encoding="utf-8")
+
+        code, payload = self._state_update_args(state_file, ["--set", "currentStory=1.1", "--set", "currentStory=1.2"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "duplicate_set_key")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "--set.currentStory")
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
+
     def test_state_update_still_allows_non_status_updates(self) -> None:
         state_file = self._build_state_config(status="COMPLETE")
 
@@ -318,6 +329,28 @@ class StateValidationDiagnosticsTests(_FixtureMixin, unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload, {"ok": False, "error": "keys_not_found", "updated": []})
         self.assertEqual(state_file.read_text(encoding="utf-8"), "body\nstatus: body-marker\n")
+
+    def test_state_update_rejects_duplicate_frontmatter_keys_without_rewriting(self) -> None:
+        state_file = self._build_state_config(status="READY")
+        before = state_file.read_text(encoding="utf-8").replace("currentStep: null\n", "currentStep: one\ncurrentStep: two\n", 1)
+        state_file.write_text(before, encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "currentStep=three")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload, {"ok": False, "error": "duplicate_frontmatter_key", "updated": []})
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
+
+    def test_state_update_rejects_duplicate_status_before_transition_validation(self) -> None:
+        state_file = self._build_state_config(status="READY")
+        before = state_file.read_text(encoding="utf-8").replace('status: "READY"\n', 'status: "READY"\nstatus: COMPLETE\n', 1)
+        state_file.write_text(before, encoding="utf-8")
+
+        code, payload = self._state_update(state_file, "status=IN_PROGRESS")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload, {"ok": False, "error": "duplicate_frontmatter_key", "updated": []})
+        self.assertEqual(state_file.read_text(encoding="utf-8"), before)
 
     def test_state_update_rejects_unterminated_frontmatter_without_rewriting_body(self) -> None:
         state_file = self.project_root / "unterminated.md"

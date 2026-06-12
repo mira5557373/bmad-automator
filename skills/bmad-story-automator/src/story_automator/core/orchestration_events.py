@@ -56,7 +56,13 @@ def emit_policy_load_failed(trigger: str, state_file: str, error: str) -> None:
 
 def emit_policy_decision(trigger: str, escalate: bool, context: dict[str, object]) -> None:
     # trigger/escalate are canonical event fields; same-named context keys are reserved.
-    payload = dict(context)
+    payload = {key: value for key, value in context.items() if key not in {"trigger", "escalate"}}
+    reserved_context = {key: context[key] for key in ("trigger", "escalate") if key in context}
+    if reserved_context:
+        caller_reserved = payload.get("reservedContext")
+        payload["reservedContext"] = {"reservedFields": reserved_context}
+        if caller_reserved is not None:
+            payload["reservedContext"]["caller"] = caller_reserved
     payload.update({"trigger": trigger, "escalate": escalate})
     emit_diagnostic_event(
         DiagnosticEvent(

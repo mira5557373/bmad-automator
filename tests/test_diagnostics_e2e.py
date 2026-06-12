@@ -107,7 +107,19 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertEqual(event["context"]["updatedFields"], ["currentStory", "currentStep"])
         self.assertEqual(event["context"]["values"], {"currentStory": "1.2", "currentStep": "dev"})
 
-    def test_duplicate_state_updates_emit_final_frontmatter_value_once(self) -> None:
+    def test_story_step_update_event_uses_rendered_frontmatter_value(self) -> None:
+        state_file = self.project_root / "state.md"
+        state_file.write_text('---\ncurrentStep: ""\n---\n', encoding="utf-8")
+        events_file = self.project_root / "events.jsonl"
+
+        code, payload = self._helper(["state-update", str(state_file), "--set", "currentStep=false"], events_file=events_file)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["updated"], ["currentStep"])
+        event = json.loads(events_file.read_text(encoding="utf-8"))
+        self.assertEqual(event["context"]["values"], {"currentStep": '"false"'})
+
+    def test_duplicate_state_updates_fail_without_event(self) -> None:
         state_file = self.project_root / "state.md"
         state_file.write_text('---\ncurrentStory: ""\n---\n', encoding="utf-8")
         events_file = self.project_root / "events.jsonl"
@@ -124,11 +136,20 @@ class DiagnosticsE2ETests(unittest.TestCase):
             events_file=events_file,
         )
 
-        self.assertEqual(code, 0)
-        self.assertEqual(payload["updated"], ["currentStory"])
-        event = json.loads(events_file.read_text(encoding="utf-8"))
-        self.assertEqual(event["context"]["updatedFields"], ["currentStory"])
-        self.assertEqual(event["context"]["values"], {"currentStory": "1.2"})
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "duplicate_set_key")
+        self.assertFalse(events_file.exists())
+
+    def test_duplicate_status_frontmatter_fails_without_transition_event(self) -> None:
+        state_file = self.project_root / "state.md"
+        state_file.write_text("---\nstatus: READY\nstatus: COMPLETE\n---\n", encoding="utf-8")
+        events_file = self.project_root / "events.jsonl"
+
+        code, payload = self._helper(["state-update", str(state_file), "--set", "status=IN_PROGRESS"], events_file=events_file)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"], "duplicate_frontmatter_key")
+        self.assertFalse(events_file.exists())
 
     def test_monitor_result_emits_session_lifecycle_event(self) -> None:
         events_file = self.project_root / "events.jsonl"
@@ -142,13 +163,15 @@ class DiagnosticsE2ETests(unittest.TestCase):
         self.assertEqual(event["name"], "session.lifecycle.result")
         self.assertEqual(event["context"]["outputFile"], "<path:out.txt>")
 
-    def test_monitor_result_rejects_non_object_structured_issue(self) -> None:
+    def test_monitor_result_normalizes_invalid_structured_issue(self) -> None:
         stdout = io.StringIO()
         with redirect_stdout(stdout):
-            with self.assertRaisesRegex(TypeError, "structured_issue must be a serialized issue object"):
-                emit_monitor_result(True, "not_found", 0, 0, "", "session_gone", structured_issue=[{"type": "session_state.invalid_json"}])  # type: ignore[arg-type]
+            code = emit_monitor_result(True, "not_found", 0, 0, "", "session_gone", structured_issue=[{"type": "session_state.invalid_json"}])  # type: ignore[arg-type]
 
-        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["structuredIssues"][0]["type"], "invalid_type")
+        self.assertEqual(payload["structuredIssues"][0]["field"], "structured_issue")
 
     def test_malformed_agent_plan_reports_task_field_paths(self) -> None:
         issues = validate_agents_plan_payload({"stories": [{"storyId": "1.1", "tasks": {"create": {"primary": ""}}}]})

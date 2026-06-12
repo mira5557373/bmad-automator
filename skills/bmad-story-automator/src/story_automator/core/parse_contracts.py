@@ -87,7 +87,16 @@ def parse_failure_payload(reason: str, issues: list[DiagnosticIssue] | None = No
 def verifier_exception_payload(reason: str, exc: Exception, *, source: str, field: str = "", **extra: object) -> dict[str, object]:
     issues = issues_from_exception(exc, source=source, field=field)
     redacted_extra = redact_actual(extra)
-    return {**redacted_extra, "verified": False, "reason": reason, "error": redact_actual(str(exc)), "structuredIssues": serialize_issues(issues)}
+    reserved = {"verified", "reason", "error", "structuredIssues"}
+    payload = {key: value for key, value in redacted_extra.items() if key not in reserved}
+    collisions = {key: value for key, value in redacted_extra.items() if key in reserved}
+    if collisions:
+        caller_extra = payload.get("extra")
+        payload["extra"] = {"reservedFields": collisions}
+        if caller_extra is not None:
+            payload["extra"]["caller"] = caller_extra
+    payload.update({"verified": False, "reason": reason, "error": redact_actual(str(exc)), "structuredIssues": serialize_issues(issues)})
+    return payload
 
 
 def _validate_schema(payload: object, schema: object, path: str, issues: list[DiagnosticIssue], reported_missing: set[str] | None = None) -> None:

@@ -124,6 +124,7 @@ def build_agents_file(
     output_path: str | Path,
     config_json: str,
     complexity_payload: dict[str, Any] | None = None,
+    complexity_payload_validated: bool = False,
 ) -> dict[str, Any]:
     try:
         config = parse_agent_config_json(config_json)
@@ -131,6 +132,8 @@ def build_agents_file(
         raise AgentPlanInputError("config-json", exc) from exc
     if complexity_payload is None:
         complexity_payload, issues = load_complexity_payload(str(complexity_file))
+    elif complexity_payload_validated:
+        issues = []
     else:
         issues = validate_complexity_payload(complexity_payload)
     if issues:

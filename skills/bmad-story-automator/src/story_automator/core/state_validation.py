@@ -139,6 +139,25 @@ def state_update_argument_error_payload(raw: str) -> dict[str, Any]:
     }
 
 
+def state_update_duplicate_key_error_payload(key: str) -> dict[str, Any]:
+    issue = DiagnosticIssue(
+        type="invalid_value",
+        field=f"--set.{key}",
+        expected="one update per key",
+        actual=key,
+        message=f"Duplicate state update key {key}",
+        recovery="Pass each state frontmatter key at most once per state-update call.",
+        code="STATE_UPDATE_SET_DUPLICATE",
+        source="state-update",
+    )
+    return {
+        "ok": False,
+        "error": "duplicate_set_key",
+        "issues": [str(redact_actual(legacy_issue_message(issue)))],
+        "structuredIssues": serialize_issues([issue]),
+    }
+
+
 def parse_state_update_argument(raw: str) -> tuple[str, str] | dict[str, Any]:
     if not raw or raw.startswith("--") or "=" not in raw:
         return state_update_argument_error_payload(raw)

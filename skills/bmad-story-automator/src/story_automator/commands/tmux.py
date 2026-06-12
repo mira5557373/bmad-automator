@@ -450,8 +450,9 @@ def _optional_flag_value(args: list[str], flag: str, *, start: int = 0) -> str:
 
 
 def _cycle_arg(args: list[str]) -> str:
-    if "--cycle" in args:
-        return _optional_flag_value(args, "--cycle", start=4)
+    cycle = _optional_flag_value(args, "--cycle", start=4)
+    if cycle:
+        return cycle
     return args[4] if len(args) > 4 else ""
 
 

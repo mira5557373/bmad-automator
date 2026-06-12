@@ -292,11 +292,17 @@ class DiagnosticsTests(unittest.TestCase):
             return True
 
         with unittest.mock.patch("story_automator.core.orchestration_events.emit_diagnostic_event", side_effect=capture):
-            emit_policy_decision("real-trigger", True, {"trigger": "fake-trigger", "escalate": False, "stateFile": "state.md"})
+            emit_policy_decision(
+                "real-trigger",
+                True,
+                {"trigger": "fake-trigger", "escalate": False, "stateFile": "state.md", "reservedContext": {"caller": "kept"}},
+            )
 
         self.assertEqual(captured[0].context["trigger"], "real-trigger")
         self.assertTrue(captured[0].context["escalate"])
         self.assertEqual(captured[0].context["stateFile"], "state.md")
+        self.assertEqual(captured[0].context["reservedContext"]["caller"], {"caller": "kept"})
+        self.assertEqual(captured[0].context["reservedContext"]["reservedFields"], {"trigger": "fake-trigger", "escalate": False})
 
     def test_emit_diagnostic_event_appends_jsonl_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

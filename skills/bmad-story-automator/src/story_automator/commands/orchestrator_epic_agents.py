@@ -142,7 +142,14 @@ def agents_build_action(args: list[str]) -> int:
         print_json(agent_plan_error("invalid_complexity_json", issues))
         return 1
     try:
-        payload = build_agents_file(options["state-file"], options["complexity-file"], options["output"], options["config-json"], complexity_payload=complexity_payload)
+        payload = build_agents_file(
+            options["state-file"],
+            options["complexity-file"],
+            options["output"],
+            options["config-json"],
+            complexity_payload=complexity_payload,
+            complexity_payload_validated=True,
+        )
     except AgentPlanInputError as exc:
         cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc.original
         error_by_field = {

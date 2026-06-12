@@ -93,7 +93,7 @@ def cmd_validate_story_creation(args: list[str]) -> int:
             "expected": expected,
             "prefix": story_prefix(story_id),
             "action": "proceed" if valid else "escalate",
-            "reason": reason,
+            "reason": str(redact_actual(reason)),
             "source": payload.get("source", "") if payload is not None else "",
             "pattern": payload.get("pattern", "") if payload is not None else "",
             "matches": payload.get("matches", []) if payload is not None else [],

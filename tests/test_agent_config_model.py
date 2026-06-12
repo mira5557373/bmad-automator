@@ -76,6 +76,7 @@ class CoreAgentConfigModelTests(unittest.TestCase):
 
     def test_has_agent_config_runtime_source_counts_default_model(self) -> None:
         self.assertTrue(has_agent_config_runtime_source('---\nagentConfig:\n  defaultModel: "claude-opus"\n---\n'))
+        self.assertTrue(has_agent_config_runtime_source('---\nagentConfig:\n  defaultModel: ""\n---\n'))
 
     def test_has_agent_config_runtime_source_ignores_unsupported_top_level_model(self) -> None:
         self.assertFalse(has_agent_config_runtime_source('---\nagentConfig:\n  model: "claude-opus"\n---\n'))

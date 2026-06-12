@@ -30,6 +30,10 @@ def parse_simple_frontmatter(text: str) -> dict[str, Any]:
     front = extract_frontmatter(text)
     if not front:
         return {}
+    return parse_frontmatter_content(front)
+
+
+def parse_frontmatter_content(front: str) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     current_key = ""
     for line in trim_lines(front):

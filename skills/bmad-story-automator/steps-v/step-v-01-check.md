@@ -141,7 +141,7 @@ Single-pass structure issue extraction (compact output):
 field_issues=$(echo "$validation" | jq -r '
   if ((.structuredIssues // []) | length) > 0 then
     .structuredIssues[]?
-    | select(.type=="missing_field" or .type=="invalid_value" or .type=="yaml_error")
+    | select(.severity=="error" or .type=="missing_field" or .type=="invalid_value" or .type=="yaml_error" or .type=="invalid_type" or .type=="invalid_enum" or .type=="empty_string" or .type=="missing_required_key")
     | "\(.type): \(.field // .message)"
   else
     .issues[]?

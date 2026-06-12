@@ -148,6 +148,15 @@ class AgentPlanValidationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.field, "complexity-file")
         self.assertIn("Complexity must be an object", str(ctx.exception))
 
+    def test_build_agents_file_direct_supplied_payload_validates_story_shape(self) -> None:
+        payload = {"stories": [{"complexity": {"level": "medium"}}]}
+
+        with self.assertRaises(AgentPlanInputError) as ctx:
+            build_agents_file(self.state_file, self.complexity_file, self.agents_file, "{}", complexity_payload=payload)
+
+        self.assertEqual(ctx.exception.field, "complexity-file")
+        self.assertIn("Complexity storyId must be a non-empty string", str(ctx.exception))
+
     def test_build_agents_file_build_loop_rejects_falsy_non_object_complexity(self) -> None:
         payload = {"stories": [{"storyId": "1.1", "complexity": False}]}
 
