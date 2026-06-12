@@ -230,6 +230,17 @@ class OrchestratorParseTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(json.loads(stdout.getvalue())["story_created"])
 
+    def test_parse_contract_rejects_non_object_parse_section(self) -> None:
+        from story_automator.core.parse_contracts import ParseContractError, load_parse_contract
+
+        for value in ("bad", "", [], 0, False, None):
+            with self.subTest(value=value):
+                with self.assertRaises(ParseContractError) as ctx:
+                    load_parse_contract({"parse": value})
+
+                self.assertEqual(ctx.exception.issues[0].field, "parse")
+                self.assertEqual(ctx.exception.issues[0].type, "invalid_type")
+
     def test_parser_runtime_uses_policy_settings(self) -> None:
         override_dir = self.project_root / "_bmad" / "bmm"
         override_dir.mkdir(parents=True, exist_ok=True)

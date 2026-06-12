@@ -1044,6 +1044,14 @@ class SuccessVerifierTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--max-polls requires a positive integer", stderr.getvalue())
 
+    def test_monitor_session_initial_wait_uses_non_negative_error_text(self) -> None:
+        stderr = io.StringIO()
+        with patch_env(self.project_root), redirect_stderr(stderr):
+            code = cmd_monitor_session(["fake-session", "--initial-wait", "-1"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--initial-wait requires a non-negative integer", stderr.getvalue())
+
     def test_monitor_session_missing_value_option_returns_json_error(self) -> None:
         for flag in ("--agent", "--workflow", "--story-key", "--state-file", "--project-root"):
             with self.subTest(flag=flag):

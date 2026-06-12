@@ -12,9 +12,9 @@ def parse_monitor_int_option(flag: str, value: str, json_output: bool, *, minimu
     try:
         parsed = int(value)
     except ValueError:
-        return _invalid_numeric_option(flag, value, json_output)
+        return _invalid_numeric_option(flag, value, json_output, minimum=minimum)
     if parsed < minimum:
-        return _invalid_numeric_option(flag, value, json_output)
+        return _invalid_numeric_option(flag, value, json_output, minimum=minimum)
     return parsed
 
 
@@ -54,11 +54,12 @@ def verify_monitor_completion(
     return (result, verifier_name)
 
 
-def _invalid_numeric_option(flag: str, value: str, json_output: bool) -> None:
+def _invalid_numeric_option(flag: str, value: str, json_output: bool, *, minimum: int = 1) -> None:
     if json_output:
-        print_json({"ok": False, "error": "invalid_numeric_option", "flag": flag, "value": redact_actual(value)})
+        print_json({"ok": False, "error": "invalid_numeric_option", "flag": flag, "value": redact_actual(value), "minimum": minimum})
     else:
-        print(f"{flag} requires a positive integer", file=__import__("sys").stderr)
+        label = "non-negative integer" if minimum == 0 else f"integer >= {minimum}" if minimum > 1 else "positive integer"
+        print(f"{flag} requires a {label}", file=__import__("sys").stderr)
     return None
 
 

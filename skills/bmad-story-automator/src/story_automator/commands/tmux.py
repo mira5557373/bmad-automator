@@ -442,14 +442,18 @@ def _flag_value(args: list[str], idx: int, flag: str) -> str:
         raise PolicyError(f"{flag} requires a value")
     return args[idx + 1]
 
-def _optional_flag_value(args: list[str], flag: str) -> str:
-    return _flag_value(args, args.index(flag), flag) if flag in args else ""
+def _optional_flag_value(args: list[str], flag: str, *, start: int = 0) -> str:
+    for idx in range(start, len(args)):
+        if args[idx] == flag:
+            return _flag_value(args, idx, flag)
+    return ""
 
 
 def _cycle_arg(args: list[str]) -> str:
     if "--cycle" in args:
-        return _optional_flag_value(args, "--cycle")
+        return _optional_flag_value(args, "--cycle", start=4)
     return args[4] if len(args) > 4 else ""
+
 
 def _raw_agent_selection() -> str:
     value = os.environ.get("AI_AGENT", "").strip().lower()

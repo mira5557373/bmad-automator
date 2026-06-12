@@ -254,7 +254,7 @@ class AgentPlanValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(code, 1)
-        self.assertEqual(payload["error"], "invalid_agent_config")
+        self.assertEqual(payload["error"], "output_write_failed")
         self.assertEqual(payload["structuredIssues"][0]["field"], "output")
 
     def test_agents_build_rejects_non_object_complexity_overrides(self) -> None:

@@ -37,6 +37,10 @@ ABSOLUTE_PATH_RE = re.compile(
 )
 
 
+class RedactedText(str):
+    """String already passed through redact_actual; keep serialization idempotent."""
+
+
 @dataclass(frozen=True)
 class DiagnosticIssue:
     type: str
@@ -115,7 +119,7 @@ def legacy_issue_message(issue: DiagnosticIssue) -> str:
 
 def issues_from_exception(exc: Exception, source: str, field: str = "") -> list[DiagnosticIssue]:
     raw_message = str(exc)
-    message = str(redact_actual(raw_message if raw_message else exc.__class__.__name__))
+    message = RedactedText(str(redact_actual(raw_message if raw_message else exc.__class__.__name__)))
     return [
         DiagnosticIssue(
             type=exc.__class__.__name__,
@@ -130,6 +134,8 @@ def issues_from_exception(exc: Exception, source: str, field: str = "") -> list[
 
 def redact_actual(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, RedactedText):
         return value
     if isinstance(value, Path):
         return _redact_string(str(value))

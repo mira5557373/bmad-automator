@@ -105,6 +105,14 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("abc123", payload["message"])
         self.assertNotIn("/tmp/private", payload["message"])
 
+    def test_exception_issue_serialization_does_not_redact_twice(self) -> None:
+        issues = issues_from_exception(ValueError("<path:api_key>=not-secret token=abc123"), source="parse-output", field="payload")
+
+        payload = serialize_issue(issues[0])
+
+        self.assertEqual(payload["message"], issues[0].message)
+        self.assertEqual(payload["actual"], issues[0].actual)
+
     def test_redact_actual_masks_sensitive_dict_keys(self) -> None:
         payload = redact_actual({"token": "abc123", "safe": "visible", "nested": {"password": "pw"}})
 

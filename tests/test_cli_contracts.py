@@ -233,6 +233,14 @@ class TmuxCommandContractTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--cycle requires a value", stderr.getvalue())
 
+    def test_name_cycle_ignores_earlier_same_flag_tokens(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}), redirect_stdout(stdout):
+            code = cmd_tmux_wrapper(["name", "--cycle", "ignored", "5.3", "--cycle", "2"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.getvalue().strip().endswith("-cycle-r2"))
+
     def test_project_only_session_filter_rejects_legacy_slug_sessions_without_current_artifacts(self) -> None:
         own = f"sa-{project_slug(str(self.root))}-{project_hash(str(self.root))}-260521-101010-e5-s5-3-review"
         other_root = self.root.parent / "other" / self.root.name

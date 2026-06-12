@@ -14,10 +14,23 @@ class ParseContractError(ValueError):
 
 
 def load_parse_contract(contract: dict[str, object]) -> dict[str, object]:
-    parse = contract.get("parse") or {}
+    parse = contract.get("parse", {})
+    if not isinstance(parse, dict):
+        raise ParseContractError(
+            [
+                DiagnosticIssue(
+                    type="invalid_type",
+                    field="parse",
+                    expected="object",
+                    actual=parse,
+                    message="Parse contract parse section must be an object",
+                    source="parse-contract",
+                )
+            ]
+        )
     try:
         payload = json.loads(read_text(str(parse.get("schemaPath") or "")))
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ParseContractError(issues_from_exception(exc, source="parse-contract", field="parse.schemaPath")) from exc
     issues = validate_parse_contract(payload)
     if issues:

@@ -55,6 +55,7 @@ def emit_policy_load_failed(trigger: str, state_file: str, error: str) -> None:
 
 
 def emit_policy_decision(trigger: str, escalate: bool, context: dict[str, object]) -> None:
+    # trigger/escalate are canonical event fields; same-named context keys are reserved.
     payload = dict(context)
     payload.update({"trigger": trigger, "escalate": escalate})
     emit_diagnostic_event(
