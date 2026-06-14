@@ -400,5 +400,74 @@ class AppendChainTests(unittest.TestCase):
             self.assertNotIn("\n\n", text)
 
 
+class AppendFileLockContractTests(unittest.TestCase):
+    KEY = b"\x33" * 32
+
+    def _fake_event(self):
+        class FakeEvent:
+            event_name = "E"
+
+            def to_dict(self) -> dict:
+                return {}
+
+        return FakeEvent()
+
+    def test_timeout_raises_audit_lock_timeout(self) -> None:
+        import filelock
+        from story_automator.core.audit import AuditLog, AuditLockTimeout
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            held = filelock.FileLock(str(log._lock_path))
+            held.acquire(timeout=1)
+            try:
+                with self.assertRaises(AuditLockTimeout):
+                    log.append(self._fake_event())
+            finally:
+                held.release()
+
+    def test_lock_released_after_successful_append(self) -> None:
+        # After a successful append, the same FileLock instance can be
+        # acquired by an outside caller immediately (non-blocking).
+        import filelock
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event())
+            outside = filelock.FileLock(str(log._lock_path))
+            outside.acquire(timeout=0)
+            try:
+                pass
+            finally:
+                outside.release()
+
+    def test_lock_released_even_when_append_raises(self) -> None:
+        # If append raises mid-write (simulated by passing an event whose
+        # to_dict raises), the lock must be released.
+        import filelock
+        from story_automator.core.audit import AuditLog
+
+        class Boom:
+            event_name = "Boom"
+
+            def to_dict(self) -> dict:
+                raise RuntimeError("boom")
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            with self.assertRaises(RuntimeError):
+                log.append(Boom())
+            outside = filelock.FileLock(str(log._lock_path))
+            outside.acquire(timeout=0)
+            try:
+                pass
+            finally:
+                outside.release()
+
+
 if __name__ == "__main__":
     unittest.main()

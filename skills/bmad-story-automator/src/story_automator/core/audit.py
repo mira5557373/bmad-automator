@@ -16,6 +16,8 @@ import os
 import pathlib
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+import filelock
+
 from .common import compact_json, ensure_dir, iso_now
 
 
@@ -214,38 +216,52 @@ class AuditLog:
 
             {"seq": N, "ts": ISO, "event": NAME, "payload": {...}, "tag": HEX}
 
-        followed by a single ``\\n``. All filesystem mutation in M2 is the
-        single write below; M3 wraps this in a ``filelock.FileLock`` (added
-        in a later task this milestone).
+        followed by a single ``\\n``. All filesystem mutation is performed
+        under the per-log ``filelock.FileLock`` acquired with a 5-second
+        timeout — on timeout this method raises ``AuditLockTimeout``.
         """
         ensure_dir(self.path.parent)
+        ensure_dir(self._lock_path.parent)
 
-        prev = _read_last_record(self.path)
-        if prev is None:
-            seq = 1
-            prev_tag_hex: str | None = None
-        else:
-            seq = int(prev["seq"]) + 1
-            prev_tag_hex = prev["tag"]
+        lock = filelock.FileLock(str(self._lock_path))
+        try:
+            lock.acquire(timeout=5)
+        except filelock.Timeout as exc:
+            raise AuditLockTimeout(
+                f"could not acquire audit lock within 5s: {self._lock_path}"
+            ) from exc
 
-        ts = iso_now()
-        event_name = event.event_name
-        payload = event.to_dict()
-        canonical = _canonical_record_bytes(
-            seq=seq, ts=ts, event=event_name, payload=payload
-        )
-        tag = _compute_tag(key=self.key, prev_tag_hex=prev_tag_hex, canonical=canonical)
+        try:
+            prev = _read_last_record(self.path)
+            if prev is None:
+                seq = 1
+                prev_tag_hex: str | None = None
+            else:
+                seq = int(prev["seq"]) + 1
+                prev_tag_hex = prev["tag"]
 
-        record = {
-            "seq": seq,
-            "ts": ts,
-            "event": event_name,
-            "payload": payload,
-            "tag": tag,
-        }
-        line = compact_json(record) + "\n"
+            ts = iso_now()
+            event_name = event.event_name
+            payload = event.to_dict()
+            canonical = _canonical_record_bytes(
+                seq=seq, ts=ts, event=event_name, payload=payload
+            )
+            tag = _compute_tag(
+                key=self.key, prev_tag_hex=prev_tag_hex, canonical=canonical
+            )
 
-        with self.path.open("ab") as handle:
-            handle.write(line.encode("utf-8"))
-            handle.flush()
-            os.fsync(handle.fileno())
+            record = {
+                "seq": seq,
+                "ts": ts,
+                "event": event_name,
+                "payload": payload,
+                "tag": tag,
+            }
+            line = compact_json(record) + "\n"
+
+            with self.path.open("ab") as handle:
+                handle.write(line.encode("utf-8"))
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            lock.release()
