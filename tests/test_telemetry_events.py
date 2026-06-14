@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import unittest
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from story_automator.core.telemetry_events import Event
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -639,6 +642,276 @@ class ParseEventExportContractTests(unittest.TestCase):
 
         self.assertTrue(callable(parse_event))
         self.assertTrue(isinstance(UnknownEvent, type))
+
+
+class ConcreteEventRoundTripTests(unittest.TestCase):
+    """REQ-08: round-trip invariant for every concrete event class.
+
+    For each of the 13 concrete event classes the round trip
+    ``instance -> to_json_line -> parse_event`` must return an instance
+    of the same class that compares equal via dataclass ``__eq__`` and
+    whose own ``to_json_line`` output is byte-equal to the original
+    line. This catches any drift in field declaration order, in the
+    ``to_dict`` key insertion order, or in ``compact_json``'s separator
+    policy.
+    """
+
+    def _round_trip(self, event: Event) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        line = event.to_json_line()
+        parsed = parse_event(line)
+        self.assertIs(type(parsed), type(event))
+        self.assertEqual(parsed, event)
+        self.assertEqual(parsed.to_json_line(), line)
+
+    def test_story_started_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryStarted
+
+        self._round_trip(
+            StoryStarted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                agent="claude",
+                model="sonnet",
+                complexity="medium",
+            )
+        )
+
+    def test_story_completed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryCompleted
+
+        self._round_trip(
+            StoryCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                duration_s=42.5,
+                cost_usd=1.23,
+                tokens_in=1000,
+                tokens_out=500,
+                attempts=2,
+            )
+        )
+
+    def test_story_failed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryFailed
+
+        self._round_trip(
+            StoryFailed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                error_class="CRASH",
+                reason="exit code 1",
+                attempts=5,
+                final_session="sa-foo-abc123",
+            )
+        )
+
+    def test_story_deferred_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryDeferred
+
+        self._round_trip(
+            StoryDeferred(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                reason="plateau",
+                tasks_completed=4,
+            )
+        )
+
+    def test_retry_attempt_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import RetryAttempt
+
+        self._round_trip(
+            RetryAttempt(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                attempt_num=3,
+                agent="claude",
+                model="opus",
+                prev_error_class="TIMEOUT",
+            )
+        )
+
+    def test_escalation_triggered_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import EscalationTriggered
+
+        self._round_trip(
+            EscalationTriggered(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                trigger_id=4,
+                severity="CRITICAL",
+                message="story file missing",
+            )
+        )
+
+    def test_review_cycle_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import ReviewCycle
+
+        self._round_trip(
+            ReviewCycle(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                cycle_num=2,
+                issues_found=3,
+                blocking=True,
+            )
+        )
+
+    def test_retro_fired_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import RetroFired
+
+        self._round_trip(
+            RetroFired(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                stories_completed=5,
+                total_cost_usd=12.34,
+                duration_s=300.0,
+            )
+        )
+
+    def test_tmux_session_spawned_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionSpawned
+
+        self._round_trip(
+            TmuxSessionSpawned(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                pid=12345,
+                pane_geometry="200x50",
+            )
+        )
+
+    def test_tmux_session_completed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionCompleted
+
+        self._round_trip(
+            TmuxSessionCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                exit_code=0,
+                duration_s=45.0,
+            )
+        )
+
+    def test_tmux_session_crashed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionCrashed
+
+        self._round_trip(
+            TmuxSessionCrashed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                exit_code=137,
+                last_capture_chars=4096,
+            )
+        )
+
+    def test_cost_charged_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import CostCharged
+
+        self._round_trip(
+            CostCharged(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                phase="dev",
+                cost_usd=0.45,
+                tokens_in=2000,
+                tokens_out=800,
+                model="sonnet",
+            )
+        )
+
+    def test_budget_alert_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import BudgetAlert
+
+        self._round_trip(
+            BudgetAlert(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                threshold_pct=75,
+                total_cost_usd=15.0,
+                max_budget_usd=20.0,
+                epic="3",
+                story_key="3.1",
+            )
+        )
+
+
+class RegistryCompletenessTests(unittest.TestCase):
+    """REQ-06: after module import Event._REGISTRY contains exactly 13
+    entries keyed by the concrete classes' EVENT_TYPE strings; UnknownEvent
+    must NOT be present.
+
+    Uses a module-level filter that excludes leading-underscore keys so a
+    leaked ``_temp_*`` sentinel from a test that aborted before
+    ``_RegistryIsolationMixin.tearDown`` cleared it cannot mask a missing
+    production event_type.
+    """
+
+    EXPECTED_EVENT_TYPES = frozenset(
+        {
+            "story_started",
+            "story_completed",
+            "story_failed",
+            "story_deferred",
+            "retry_attempt",
+            "escalation_triggered",
+            "review_cycle",
+            "retro_fired",
+            "tmux_session_spawned",
+            "tmux_session_completed",
+            "tmux_session_crashed",
+            "cost_charged",
+            "budget_alert",
+        }
+    )
+
+    def test_registry_contains_exactly_thirteen_production_entries(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        production = {k for k in Event._REGISTRY if not k.startswith("_")}
+        self.assertEqual(len(production), 13)
+        self.assertEqual(production, self.EXPECTED_EVENT_TYPES)
+
+    def test_unknown_event_is_not_a_registered_value(self) -> None:
+        from story_automator.core.telemetry_events import Event, UnknownEvent
+
+        for cls in Event._REGISTRY.values():
+            self.assertIsNot(cls, UnknownEvent)
+
+    def test_each_registered_class_event_type_matches_its_key(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        # Guards against a future regression where the registry key drifts
+        # from the class's own EVENT_TYPE classvar (e.g., a subclass that
+        # overrides EVENT_TYPE after registration in an init hook).
+        for key, cls in Event._REGISTRY.items():
+            self.assertEqual(cls.EVENT_TYPE, key)
 
 
 if __name__ == "__main__":
