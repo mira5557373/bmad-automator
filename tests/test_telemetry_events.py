@@ -1227,5 +1227,137 @@ class UnknownEventExtendedRoundTripTests(unittest.TestCase):
         self.assertEqual(parsed.to_json_line(), original)
 
 
+class FieldTypeTests(unittest.TestCase):
+    """REQ-10 (4th design class): document M01's intentional no-type-
+    validation stance.
+
+    Python's ``@dataclass`` decorator does NOT validate field types at
+    ``__init__`` — it assigns whatever is passed. M01 intentionally
+    defers runtime type validation to M07 (failure_triage taxonomy)
+    where typed enums for ``severity`` / ``error_class`` / ``reason`` /
+    ``phase`` will be introduced alongside ``__post_init__`` validators.
+
+    These tests pin the M01 contract: types are documented (REQ-05
+    table) but not enforced. Round-trip still holds because JSON
+    serialization preserves whatever Python type was assigned. A future
+    contributor reading this class should understand that adding
+    ``__post_init__`` validation here is a SCOPE CHANGE — it belongs in
+    M07, not M01.
+    """
+
+    def test_int_field_accepts_float_silently_in_m01(self) -> None:
+        """M01 documents int fields (e.g., ``tokens_in``) without
+        enforcing the type. Passing 1.5 is silently accepted. The wire
+        form will serialize as ``1.5`` (JSON number) and parse back as
+        ``1.5`` (Python float). This is the M01 baseline; M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryCompleted,
+            parse_event,
+        )
+
+        event = StoryCompleted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            duration_s=42.5,
+            cost_usd=1.23,
+            tokens_in=1.5,  # documented as int; passed as float; not rejected
+            tokens_out=500,
+            attempts=2,
+        )
+        self.assertEqual(event.tokens_in, 1.5)
+        # Round-trip survives — the float is serialized as a JSON number
+        # and parsed back as a Python float. Equality holds.
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_float_field_accepts_int_silently_in_m01(self) -> None:
+        """M01 documents float fields (e.g., ``cost_usd``) without
+        enforcing the type. Passing the integer ``0`` is silently
+        accepted and stored as an int (NOT coerced to ``0.0`` because
+        @dataclass doesn't run converters). The wire form serializes as
+        ``0`` (JSON integer), not ``0.0`` — which is JSON-valid but a
+        type-strict downstream consumer might object. M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryCompleted,
+            parse_event,
+        )
+
+        event = StoryCompleted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            duration_s=42.5,
+            cost_usd=0,  # documented as float; passed as int; stored as int
+            tokens_in=1000,
+            tokens_out=500,
+            attempts=2,
+        )
+        self.assertEqual(event.cost_usd, 0)
+        self.assertIs(type(event.cost_usd), int)  # NOT coerced to float
+        # Round-trip still holds even though the wire form is 0 (int).
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_string_field_accepts_int_silently_in_m01(self) -> None:
+        """M01 documents string fields (e.g., ``epic``) without
+        enforcing the type. Passing ``42`` (int) is silently accepted.
+        The wire form serializes as ``42`` (JSON integer), and the
+        parsed value is an int — NOT a string. Equality holds at the
+        Python level, but downstream consumers expecting str will
+        fail. M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryStarted,
+            parse_event,
+        )
+
+        event = StoryStarted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic=42,  # documented as str; passed as int; not rejected
+            story_key="3.1",
+            agent="claude",
+            model="sonnet",
+            complexity="medium",
+        )
+        self.assertEqual(event.epic, 42)
+        self.assertIs(type(event.epic), int)
+        # Round-trip equality holds because both instances have epic=42 (int).
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_bool_field_accepts_string_silently_in_m01(self) -> None:
+        """M01 documents bool fields (``ReviewCycle.blocking``) without
+        enforcing the type. Passing ``"yes"`` is silently accepted and
+        stored as a string. The wire form serializes as ``"yes"`` (JSON
+        string), not ``true`` — round-trip equality still holds because
+        parsed value is also the string "yes". M07 may tighten via a
+        ``__post_init__`` validator.
+        """
+        from story_automator.core.telemetry_events import (
+            ReviewCycle,
+            parse_event,
+        )
+
+        event = ReviewCycle(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            cycle_num=2,
+            issues_found=3,
+            blocking="yes",  # documented as bool; passed as str; not rejected
+        )
+        self.assertEqual(event.blocking, "yes")
+        self.assertIs(type(event.blocking), str)
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+
 if __name__ == "__main__":
     unittest.main()
