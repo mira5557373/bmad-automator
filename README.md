@@ -1,1 +1,1 @@
-Updated README.md with new Overview (stats block), Architecture (module map + flow diagrams), and Contributing (workflow, conventions, guardrails) sections. Existing sections retained.
+Updated `README.md` with overview, quickstart, architecture (including m04 audit-trail notes from recent commits), and contributing sections.

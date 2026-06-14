@@ -1,5 +1,8 @@
 ### Features
 
+- feat(audit): verify recomputes chain tags streaming (c3db57b)
+- feat(audit): streaming line iterator for verify (3cb2dbf)
+- feat(audit): verify returns (True, 0) when log missing (bf847be)
 - feat(audit): hide key from AuditLog repr (1976f13)
 - feat(audit): guard append with filelock and 5s timeout (16f3b5b)
 - feat(audit): append first record to the chain (dae237e)
@@ -26,6 +29,8 @@
 
 ### Bug Fixes
 
+- fix(audit): verify catches UnicodeDecodeError on tampered bytes (a5d059d)
+- fix(audit): post-review fixes for m04-m3-verify-integrity (ec4044c)
 - fix: post-impl review fixes for m04-m2-append-chain (6ebc19e)
 - fix(story-keys): complete non-numeric epic support (#23) (51a3cbc)
 - fix(stop-hooks): resolve codex project trust from global config (#26) (417993d)
@@ -73,6 +78,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (14cbbbb)
 - docs(audit): plan M04 M2 append-chain milestone (65f2c49)
 - docs: update generated documentation (08d362e)
 - docs(plan): m04-m1-foundations TDD implementation plan (6af9258)
@@ -88,6 +94,15 @@
 
 ### Tests
 
+- test(audit): assert >=85% statement coverage via subprocess (7beadba)
+- test(audit): pin 500-line budget in M3 suite (67f7c12)
+- test(audit): structural + tracemalloc check on verify streaming (8ad6289)
+- test(audit): two-thread concurrent append verifies clean (0ea930a)
+- test(audit): malformed json / missing field / seq gap detection (7d39c82)
+- test(audit): truncation distinguishable from mutation (78f93e8)
+- test(audit): tamper detection at the mutated record's seq-1 (5c48097)
+- test(audit): verify happy path across multi-record chains (a1b9d05)
+- test(audit): pin verify (True, 0) for empty file (024b590)
 - test(audit): pin 500-line budget in M2 suite (1e9b8fb)
 - test(audit): chain three appended records and verify tag continuity (ce7aa8d)
 - test(audit): pin AuditLog in public surface (69d2fc7)
@@ -115,6 +130,7 @@
 
 ### Other
 
+- plan(m04): m3 verify-integrity implementation plan (81f4a17)
 - build: gitignore sw init outputs (a825b39)
 - spec(m04): audit-trail spec (sw lint-spec 100/100) (0f48758)
 - Resolve BMAD artifacts path from config (#18) (f332173)
