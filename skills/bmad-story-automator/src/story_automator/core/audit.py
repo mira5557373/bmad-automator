@@ -377,7 +377,10 @@ class AuditLog:
             for raw_line in _iter_record_lines(handle):
                 try:
                     record = _json.loads(raw_line.decode("utf-8"))
-                except _json.JSONDecodeError:
+                except (_json.JSONDecodeError, UnicodeDecodeError):
+                    # Tampered/corrupted lines may contain non-UTF8 bytes.
+                    # REQ-08 treats both as "malformed JSON" — return rather
+                    # than letting UnicodeDecodeError escape the contract.
                     return (False, last_valid_seq)
                 if not isinstance(record, dict):
                     return (False, last_valid_seq)

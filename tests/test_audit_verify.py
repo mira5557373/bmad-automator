@@ -381,6 +381,36 @@ class VerifyMissingFieldTests(unittest.TestCase):
             self.assertEqual(log.verify(), (False, 1))
 
 
+class VerifyNonUtf8BytesTests(unittest.TestCase):
+    KEY = b"\xaf" * 32
+
+    def test_invalid_utf8_first_line_returns_false_zero(self) -> None:
+        # Tampered logs can contain arbitrary binary. REQ-08 treats a non-
+        # decodable line as "malformed JSON" and must return
+        # (False, last_valid_seq) — never propagate UnicodeDecodeError.
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            p.write_bytes(b"\xff\xfe\xfd\xfc not utf-8 at all\n")
+            self.assertEqual(AuditLog(path=p, key=self.KEY).verify(), (False, 0))
+
+    def test_invalid_utf8_after_valid_records_returns_false_at_previous(
+        self,
+    ) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            log.append(_FakeEvent("E", {"i": 1}))
+            with p.open("ab") as handle:
+                # A continuation byte with no leading byte is invalid UTF-8.
+                handle.write(b"\xc3\x28\n")
+            self.assertEqual(log.verify(), (False, 2))
+
+
 class VerifyMalformedTagTests(unittest.TestCase):
     KEY = b"\xab" * 32
 
