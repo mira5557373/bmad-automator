@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from typing import Any
+from typing import Any, ClassVar
 
 from story_automator.core.telemetry_events import (
     Event,
@@ -44,6 +44,14 @@ class TestEventRegistry(unittest.TestCase):
         params = list(sig.parameters.keys())
         self.assertIn("timestamp", params)
         self.assertIn("run_id", params)
+
+    def test_concrete_subclass_auto_registers(self):
+        """Concrete subclass with EVENT_TYPE must auto-register."""
+        class TestEvent(Event):
+            EVENT_TYPE: ClassVar[str] = "test_event"
+
+        self.assertIn("test_event", Event._REGISTRY)
+        self.assertIs(Event._REGISTRY["test_event"], TestEvent)
 
 
 class TestEventSerialization(unittest.TestCase):
