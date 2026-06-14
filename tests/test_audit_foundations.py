@@ -148,5 +148,36 @@ class HkdfExtractTests(unittest.TestCase):
         self.assertEqual(_hkdf_extract(b"", ikm), expected)
 
 
+class HkdfExpandTests(unittest.TestCase):
+    def test_single_block_output_32_bytes(self) -> None:
+        from story_automator.core.audit import _hkdf_expand
+
+        prk = b"\x11" * 32
+        info = b"audit-chain"
+        t1 = hmac.new(prk, info + b"\x01", hashlib.sha256).digest()
+        self.assertEqual(_hkdf_expand(prk, info, 32), t1)
+
+    def test_multi_block_chains_previous_t(self) -> None:
+        from story_automator.core.audit import _hkdf_expand
+
+        prk = b"\x22" * 32
+        info = b"audit-chain"
+        t1 = hmac.new(prk, b"" + info + b"\x01", hashlib.sha256).digest()
+        t2 = hmac.new(prk, t1 + info + b"\x02", hashlib.sha256).digest()
+        self.assertEqual(_hkdf_expand(prk, info, 64), t1 + t2)
+
+    def test_truncates_to_requested_length(self) -> None:
+        from story_automator.core.audit import _hkdf_expand
+
+        prk = b"\x33" * 32
+        self.assertEqual(len(_hkdf_expand(prk, b"audit-chain", 10)), 10)
+
+    def test_rejects_length_over_8160(self) -> None:
+        from story_automator.core.audit import _hkdf_expand
+
+        with self.assertRaises(ValueError):
+            _hkdf_expand(b"\x44" * 32, b"audit-chain", 8161)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,3 +45,24 @@ def _hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
     zero-length HMAC key, matching Python's ``hmac`` semantics.
     """
     return hmac.new(salt, ikm, hashlib.sha256).digest()
+
+
+def _hkdf_expand(prk: bytes, info: bytes, length: int) -> bytes:
+    """RFC 5869 HKDF-Expand step using HMAC-SHA256.
+
+    Produces ``length`` bytes of output keying material (OKM) by chaining
+    HMAC blocks. Raises ``ValueError`` if ``length`` exceeds the RFC ceiling
+    of 255 * 32 = 8160 bytes.
+    """
+    if length > 255 * hashlib.sha256().digest_size:
+        raise ValueError("hkdf expand length exceeds 255 * hashlen")
+    out = bytearray()
+    previous = b""
+    counter = 1
+    while len(out) < length:
+        previous = hmac.new(
+            prk, previous + info + bytes([counter]), hashlib.sha256
+        ).digest()
+        out.extend(previous)
+        counter += 1
+    return bytes(out[:length])
