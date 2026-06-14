@@ -25,6 +25,17 @@ class Event:
     timestamp: str
     run_id: str
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        event_type = cls.EVENT_TYPE
+        existing = Event._REGISTRY.get(event_type)
+        if existing is not None and existing is not cls:
+            raise RuntimeError(
+                f"Duplicate EVENT_TYPE {event_type!r}: "
+                f"existing {existing.__qualname__} conflicts with {cls.__qualname__}"
+            )
+        Event._REGISTRY[event_type] = cls
+
 
 # Placeholder implementations - to be properly defined in later tasks
 @dataclass(kw_only=True)
