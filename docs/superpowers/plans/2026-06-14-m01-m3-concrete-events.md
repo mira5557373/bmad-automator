@@ -1203,6 +1203,11 @@ class ConcreteEventExportContractTests(unittest.TestCase):
     by this gate rather than at downstream call sites.
     """
 
+    # Only the 13 concrete classes. The base ``Event`` / fallback ``UnknownEvent`` /
+    # function ``parse_event`` / helpers ``iso_now`` + ``compact_json`` are pinned by
+    # m01-m1's ``EventImportContractTests`` and m01-m2's ``ParseEventExportContractTests``.
+    # This tuple is the m01-m3 delta — adding the base/fallback/parser here would
+    # double-cover them and tightly couple this test class to upstream slice contracts.
     EXPECTED_NAMES = (
         "BudgetAlert",
         "CostCharged",
@@ -1246,7 +1251,7 @@ class ConcreteEventExportContractTests(unittest.TestCase):
 PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemetry_events.ConcreteEventExportContractTests -v
 ```
 
-**Clean state expected output:** `test_all_thirteen_concrete_classes_are_in_dunder_all` FAILS for the 13 names (m01-m2's `__all__` only listed `Event`, `UnknownEvent`, `compact_json`, `iso_now`, `parse_event`). The companion `test_all_thirteen_concrete_classes_are_importable_top_level` test passes because the class names are already defined at module scope from Tasks 2–14 — they just aren't yet enumerated in `__all__`.
+**Clean state expected output:** `test_all_thirteen_concrete_classes_are_in_dunder_all` FAILS for the 13 names (m01-m2's `__all__` only listed `Event`, `UnknownEvent`, `compact_json`, `iso_now`, `parse_event`). The companion `test_all_thirteen_concrete_classes_are_importable_top_level` test passes because the class names are already defined at module scope from Tasks 2–14 — they just aren't yet enumerated in `__all__`. Treat the mixed `1 FAIL + 1 PASS` result as the canonical "Step 2 FAIL" for this task — proceed to Step 3.
 
 **Pre-existing-work state expected output:** both tests PASS on first run. The prior bundled commit (`feat(telemetry): 13 concrete event classes + round-trip + registry tests`) updated `__all__` alongside the class definitions, so the membership check is already satisfied. In this case **skip Step 3** (no `__all__` update needed) and proceed directly to Step 4 verification.
 
