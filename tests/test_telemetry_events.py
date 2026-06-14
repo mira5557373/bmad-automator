@@ -360,6 +360,18 @@ class UnknownEventTests(unittest.TestCase):
         self.assertEqual(instance.raw_event_type, "future_thing_M99")
         self.assertEqual(instance.raw_fields, {"alpha": 1, "beta": "two"})
 
+    def test_unknown_event_not_in_registry(self) -> None:
+        from story_automator.core.telemetry_events import Event, UnknownEvent
+
+        # Direct lookup by the empty-string EVENT_TYPE must not return
+        # UnknownEvent (and must not even contain the empty string as a key).
+        self.assertNotIn("", Event._REGISTRY)
+        # Defense in depth: scan all registered classes to confirm
+        # UnknownEvent is not present under any key (e.g., if a future
+        # refactor accidentally registered it under a different string).
+        for registered_cls in Event._REGISTRY.values():
+            self.assertIsNot(registered_cls, UnknownEvent)
+
 
 if __name__ == "__main__":
     unittest.main()
