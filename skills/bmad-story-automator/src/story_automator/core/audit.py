@@ -144,6 +144,22 @@ def _canonical_record_bytes(
     ).encode("utf-8")
 
 
+_ZERO_TAG = b"\x00" * 32
+
+
+def _compute_tag(*, key: bytes, prev_tag_hex: str | None, canonical: bytes) -> str:
+    """Return the lowercase hex HMAC-SHA256 chain tag for one record.
+
+    ``prev_tag_hex`` is the hex tag of the previous record, or ``None`` when
+    appending seq=1 (in which case 32 zero bytes are prepended). The HMAC
+    input is ``prev_tag_bytes + canonical_record_bytes`` per REQ-07.
+
+    The key bytes are passed straight to ``hmac.new`` and never logged.
+    """
+    prev_bytes = _ZERO_TAG if prev_tag_hex is None else bytes.fromhex(prev_tag_hex)
+    return hmac.new(key, prev_bytes + canonical, hashlib.sha256).hexdigest()
+
+
 @dataclasses.dataclass(kw_only=True)
 class AuditLog:
     """Append-only, hash-chained JSONL audit log.

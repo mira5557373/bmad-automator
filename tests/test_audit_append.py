@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import unittest
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -125,6 +127,56 @@ class CanonicalRecordBytesTests(unittest.TestCase):
         self.assertLess(i_seq, i_ts)
         self.assertLess(i_ts, i_event)
         self.assertLess(i_event, i_payload)
+
+
+class ComputeTagTests(unittest.TestCase):
+    KEY = b"\xaa" * 32
+
+    def test_seq1_uses_32_zero_bytes_as_prev_tag(self) -> None:
+        from story_automator.core.audit import (
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        canonical = _canonical_record_bytes(
+            seq=1, ts="2026-06-14T00:00:00Z", event="E", payload={}
+        )
+        expected = hmac.new(
+            self.KEY, b"\x00" * 32 + canonical, hashlib.sha256
+        ).hexdigest()
+        self.assertEqual(
+            _compute_tag(key=self.KEY, prev_tag_hex=None, canonical=canonical),
+            expected,
+        )
+
+    def test_seq_gt_1_decodes_prev_tag_hex(self) -> None:
+        from story_automator.core.audit import (
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        prev_hex = "ab" * 32  # 32 bytes
+        canonical = _canonical_record_bytes(
+            seq=2, ts="2026-06-14T00:00:01Z", event="E", payload={"x": 1}
+        )
+        expected = hmac.new(
+            self.KEY, bytes.fromhex(prev_hex) + canonical, hashlib.sha256
+        ).hexdigest()
+        self.assertEqual(
+            _compute_tag(key=self.KEY, prev_tag_hex=prev_hex, canonical=canonical),
+            expected,
+        )
+
+    def test_returns_lowercase_hex(self) -> None:
+        from story_automator.core.audit import (
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        canonical = _canonical_record_bytes(seq=1, ts="t", event="E", payload={})
+        tag = _compute_tag(key=self.KEY, prev_tag_hex=None, canonical=canonical)
+        self.assertEqual(tag, tag.lower())
+        self.assertEqual(len(tag), 64)
 
 
 if __name__ == "__main__":
