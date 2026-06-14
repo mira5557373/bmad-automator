@@ -42,3 +42,37 @@ for TAG in FULL LITE SKELETON DEFERRED; do
 done
 [ -z "$MISSING" ] || fail "REQ-13 contributor-guide: missing inline-code tags:$MISSING"
 pass "REQ-13 contributor-guide (all four tags present as inline code)"
+
+# Gate 5 — REQ-11 ordering preservation: dated-heading line numbers per file
+# must match the M1 audit's frozen signature. Format: "file:lineA,lineB,...".
+# Files under docs/changelog/ that contain zero dated headings (such as the
+# operator-facing audit-trail document added by docs-m2) are excluded from the
+# signature so the gate stays stable as adjacent docs are added.
+EXPECTED="\
+docs/changelog/260401.md:3,26,61,85
+docs/changelog/260412.md:3,34
+docs/changelog/260413.md:3,27,51,77,104,129,148,168,195,215,250,277,302,330
+docs/changelog/260414.md:3
+docs/changelog/260415.md:3,33,51
+docs/changelog/260506.md:3
+docs/changelog/260508.md:3,25,43
+docs/changelog/260517.md:3
+docs/changelog/260519.md:3"
+
+ACTUAL=$(for F in docs/changelog/*.md; do
+  LINES=$(grep -nE '^##+ [0-9]{6}' "$F" | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
+  [ -n "$LINES" ] || continue
+  printf '%s:%s\n' "$F" "$LINES"
+done)
+
+# Compare via temp files — POSIX sh has no process substitution, so <(...) is
+# avoided to keep the script runnable under dash on stock Debian/Ubuntu CI.
+TMP_EXPECTED=$(mktemp 2>/dev/null || printf '/tmp/m11_exp.%s' "$$")
+TMP_ACTUAL=$(mktemp 2>/dev/null || printf '/tmp/m11_act.%s' "$$")
+printf '%s\n' "$EXPECTED" > "$TMP_EXPECTED"
+printf '%s\n' "$ACTUAL" > "$TMP_ACTUAL"
+DIFF=$(diff "$TMP_EXPECTED" "$TMP_ACTUAL" || true)
+rm -f "$TMP_EXPECTED" "$TMP_ACTUAL"
+[ -z "$DIFF" ] || fail "REQ-11 ordering-preservation drift detected:
+$DIFF"
+pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
