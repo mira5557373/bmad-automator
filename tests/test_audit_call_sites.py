@@ -146,5 +146,63 @@ class StateAuditWrapperTests(unittest.TestCase):
                 held.release()
 
 
+class AuditHooksTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved = os.environ.pop("BMAD_AUDIT_KEY", None)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved
+
+    def test_audit_path_for_uses_bmad_audit_subdir(self) -> None:
+        from story_automator.commands._audit_hooks import _audit_path_for
+
+        path = _audit_path_for("/tmp/proj")
+        self.assertEqual(path, Path("/tmp/proj") / "_bmad" / "audit" / "audit.jsonl")
+
+    def test_maybe_audit_event_short_circuits_on_disabled(self) -> None:
+        # REQ-14: no I/O when policy gate is off.
+        from story_automator.commands._audit_hooks import _maybe_audit_event
+        from story_automator.core.telemetry_events import EscalationRaised
+
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "_bmad" / "audit" / "audit.jsonl"
+            _maybe_audit_event(
+                {},
+                target,
+                EscalationRaised(
+                    trigger="review-loop",
+                    reason="r",
+                    correlation_id="c-1",
+                ),
+            )
+            self.assertFalse(target.exists())
+            # And the parent dir was never created.
+            self.assertFalse(target.parent.exists())
+
+    def test_maybe_audit_event_writes_when_enabled(self) -> None:
+        import json
+
+        from story_automator.commands._audit_hooks import _maybe_audit_event
+        from story_automator.core.telemetry_events import EscalationRaised
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "audit.jsonl"
+            _maybe_audit_event(
+                {"security": {"audit_trail": True}},
+                target,
+                EscalationRaised(
+                    trigger="review-loop",
+                    reason="exceeded",
+                    correlation_id="c-9",
+                ),
+            )
+            rec = json.loads(target.read_text(encoding="utf-8").strip())
+            self.assertEqual(rec["event"], "EscalationRaised")
+            self.assertEqual(rec["payload"]["correlation_id"], "c-9")
+
+
 if __name__ == "__main__":
     unittest.main()
