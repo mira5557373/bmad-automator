@@ -65,6 +65,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (5fcfba8)
 - docs: CLAUDE.md project conventions and module map (fc180ae)
 - docs(m01): site inventory — no pre-existing collisions (86e5583)
 - docs: document versioning release flow (31db861)
@@ -78,6 +79,9 @@
 
 ### Tests
 
+- test: improve registry acceptance tests to handle test artifacts (bae3da9)
+- test: add registry compliance audit (REQ-06) (5e746e5)
+- test: add concrete event spec compliance audit (REQ-05) (1a8f393)
 - test: verify UnknownEvent preserves raw_fields through round-trip (eaea5f6)
 - test: add field type validation edge case tests (13078cd)
 - test: verify registry idempotence under module re-import (97ca8ca)
@@ -117,6 +121,9 @@
 
 ### Other
 
+- review: Phase C complete - post-impl and production-readiness verification (d35913a)
+- doc: acceptance report for foundation-m01-concrete-events (REQ-05, REQ-06 COMPLIANT) (acb864a)
+- plan: foundation-m01-concrete-events validation phase (REQ-05, REQ-06 acceptance audit) (f072a34)
 - milestone: foundation-m01-event-base complete (63f838b)
 - phase-a(m01): plan complete and converged (7e6d3a9)
 - plan: add tasks 25-28 for registry idempotence, type validation, and cleanup (7eff3eb)
