@@ -126,5 +126,27 @@ class AuditKeyMissingTests(unittest.TestCase):
         self.assertTrue(AuditKeyMissing.__doc__ and AuditKeyMissing.__doc__.strip())
 
 
+import hmac  # noqa: E402 - plan keeps imports adjacent to first usage
+import hashlib  # noqa: E402 - plan keeps imports adjacent to first usage
+
+
+class HkdfExtractTests(unittest.TestCase):
+    def test_matches_hmac_sha256(self) -> None:
+        from story_automator.core.audit import _hkdf_extract
+
+        salt = b"bmad-audit-v1"
+        ikm = b"test-secret"
+        expected = hmac.new(salt, ikm, hashlib.sha256).digest()
+        self.assertEqual(_hkdf_extract(salt, ikm), expected)
+        self.assertEqual(len(_hkdf_extract(salt, ikm)), 32)
+
+    def test_empty_salt_uses_zero_length_key(self) -> None:
+        from story_automator.core.audit import _hkdf_extract
+
+        ikm = b"abc"
+        expected = hmac.new(b"", ikm, hashlib.sha256).digest()
+        self.assertEqual(_hkdf_extract(b"", ikm), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

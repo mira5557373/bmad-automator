@@ -8,6 +8,9 @@ surface and module-level exception classes. The ``AuditLog`` dataclass,
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 
 __all__ = [
     "AuditKeyMissing",
@@ -33,3 +36,12 @@ class AuditKeyMissing(RuntimeError):
     ``load_key_from_env()`` returns ``None``, callers refusing to open an unkeyed
     log raise this exception. The message must not include the audit key.
     """
+
+
+def _hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
+    """RFC 5869 HKDF-Extract step using HMAC-SHA256.
+
+    Returns the 32-byte pseudo-random key (PRK). Empty salt is treated as a
+    zero-length HMAC key, matching Python's ``hmac`` semantics.
+    """
+    return hmac.new(salt, ikm, hashlib.sha256).digest()
