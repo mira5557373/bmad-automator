@@ -481,5 +481,71 @@ class RetroAgentAuditIntegrationTests(unittest.TestCase):
         self.assertEqual(rec["payload"]["correlation_id"], f"retro:{state.name}")
 
 
+class CallSiteShortCircuitContractTests(unittest.TestCase):
+    """REQ-14: when audit_for_policy returns None, no integration may touch
+    the filesystem beyond what the surrounding code already does.
+
+    We use the default (gate-off) policy explicitly via mock.patch so the
+    test does not depend on the bundled policy file resolving under the
+    temp project root.
+    """
+
+    GATE_OFF = {"security": {"audit_trail": False}}
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_no_audit_dir_created_after_default_escalate(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        with (
+            mock.patch.object(orch, "load_runtime_policy", return_value=self.GATE_OFF),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            with redirect_stdout(io.StringIO()):
+                orch._escalate(["review-loop", "cycles=0"])
+        self.assertFalse((Path(self._tmp.name) / "_bmad" / "audit").exists())
+
+    def test_no_audit_dir_created_after_default_retro_agent(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator_epic_agents as oea
+
+        state = Path(self._tmp.name) / "state.md"
+        state.write_text(
+            '---\nagentConfig:\n  defaultPrimary: "claude"\n'
+            '  defaultFallback: "false"\n---\n',
+            encoding="utf-8",
+        )
+        with (
+            mock.patch.object(oea, "load_runtime_policy", return_value=self.GATE_OFF),
+            mock.patch.object(oea, "get_project_root", return_value=self._tmp.name),
+        ):
+            oea.retro_agent_action(["--state-file", str(state)])
+        self.assertFalse((Path(self._tmp.name) / "_bmad" / "audit").exists())
+
+    def test_no_audit_dir_created_after_default_state_update(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        state = Path(self._tmp.name) / "state.md"
+        state.write_text(
+            "---\nstatus: READY\ncurrentStory: 1.2\n---\n",
+            encoding="utf-8",
+        )
+        with (
+            mock.patch.object(orch, "load_runtime_policy", return_value=self.GATE_OFF),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            orch._state_update([str(state), "--set", "status=IN_PROGRESS"])
+        self.assertFalse((Path(self._tmp.name) / "_bmad" / "audit").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
