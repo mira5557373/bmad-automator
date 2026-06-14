@@ -30,5 +30,49 @@ class VerifyMissingFileTests(unittest.TestCase):
             )
 
 
+class IterRecordLinesTests(unittest.TestCase):
+    def test_returns_empty_iterator_on_empty_file(self) -> None:
+        from story_automator.core.audit import _iter_record_lines
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "empty.jsonl"
+            p.write_text("", encoding="utf-8")
+            with p.open("rb") as handle:
+                self.assertEqual(list(_iter_record_lines(handle)), [])
+
+    def test_yields_bytes_lines_in_order(self) -> None:
+        from story_automator.core.audit import _iter_record_lines
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log.jsonl"
+            p.write_text('{"seq":1}\n{"seq":2}\n{"seq":3}\n', encoding="utf-8")
+            with p.open("rb") as handle:
+                lines = list(_iter_record_lines(handle))
+            self.assertEqual(lines, [b'{"seq":1}', b'{"seq":2}', b'{"seq":3}'])
+
+    def test_skips_blank_lines(self) -> None:
+        from story_automator.core.audit import _iter_record_lines
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log.jsonl"
+            p.write_text('{"seq":1}\n\n{"seq":2}\n\n', encoding="utf-8")
+            with p.open("rb") as handle:
+                lines = list(_iter_record_lines(handle))
+            self.assertEqual(lines, [b'{"seq":1}', b'{"seq":2}'])
+
+    def test_is_a_generator_not_a_list(self) -> None:
+        # Structural NFR check: the helper must be lazy. A list
+        # comprehension would defeat the streaming-memory invariant.
+        import types
+        from story_automator.core.audit import _iter_record_lines
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.jsonl"
+            p.write_text("{}\n", encoding="utf-8")
+            with p.open("rb") as handle:
+                result = _iter_record_lines(handle)
+                self.assertIsInstance(result, types.GeneratorType)
+
+
 if __name__ == "__main__":
     unittest.main()

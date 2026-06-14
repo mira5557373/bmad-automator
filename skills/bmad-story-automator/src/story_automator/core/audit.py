@@ -14,7 +14,7 @@ import hmac
 import json as _json
 import os
 import pathlib
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterator, Mapping, Protocol, runtime_checkable
 
 import filelock
 
@@ -214,6 +214,21 @@ def _read_last_record(path: pathlib.Path) -> dict[str, Any] | None:
     if last_line is None:
         return None
     return _json.loads(last_line.decode("utf-8"))
+
+
+def _iter_record_lines(handle: Any) -> "Iterator[bytes]":
+    """Yield each non-blank line from an open binary file handle, in order.
+
+    The handle is consumed lazily: only one line is held in memory at a
+    time. Trailing or interior blank lines are skipped. The caller is
+    responsible for keeping the handle open across iteration; closing
+    it mid-loop raises ``ValueError`` from the underlying read.
+    """
+    for raw in handle:
+        line = raw.rstrip(b"\r\n")
+        if not line:
+            continue
+        yield line
 
 
 @dataclasses.dataclass(kw_only=True)
