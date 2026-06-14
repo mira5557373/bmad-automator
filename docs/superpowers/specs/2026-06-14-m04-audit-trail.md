@@ -1,0 +1,45 @@
+## Context
+
+M04 ports the audit-trail subsystem from the upstream `bmad-automator` reference into the sw-port skill layout. The goal is a single new module, `skills/bmad-story-automator/src/story_automator/core/audit.py`, that produces an append-only, hash-chained JSONL audit log keyed by an operator-controlled secret loaded from the `BMAD_AUDIT_KEY` environment variable. The log captures three high-value operational events that today are observable only through telemetry: orchestrator escalations (raised via `commands/orchestrator.py`), story state transitions written by `commands/state.py`, and retro-agent dispatch decisions emitted by `commands/orchestrator_epic_agents.py`. Each record carries a monotonic sequence number, an ISO-8601 UTC timestamp from `core/common.iso_now`, a structured payload serialised by `core/common.compact_json`, and an HMAC-SHA256 tag computed over the previous record's tag concatenated with the canonicalised current record. A separate `verify()` entry point replays the chain from disk and returns `(ok: bool, last_valid_seq: int)` so operators and tests can detect tampering or truncation deterministically. The feature is gated behind `security.audit_trail: false` in the runtime policy block, so existing deployments observe no behaviour change until they opt in. M01 already shipped `core/telemetry_events.py`, and M04 reuses those event dataclasses as the source-of-truth payload schema rather than inventing a parallel representation.
+
+## Out of scope
+
+M04 does not touch telemetry emission or the event registry — that surface area belongs to M01 (already merged) and downstream M02/M03 work, which wire additional log sites in `core/tmux_runtime.py` and expand structured fields. M04 does not replace the regex-based frontmatter mutation in `commands/state.py`; that refactor is M05's responsibility and only the audit hook is added here. The retro-agent decision logic itself in `commands/orchestrator_epic_agents.py` is not modified beyond inserting one audit call; behavioural changes to retro selection are owned by M06. Documentation edits to `CONTRIBUTING.md` and the changelog entry at `docs/changelog/YYMMDD.md` are M11; the full operator-facing rewrite of `SECURITY.md` covering key rotation, log rotation policy, and incident response belongs to M14. Key management beyond reading `BMAD_AUDIT_KEY` (e.g., KMS integration, sealed-secret loaders, multi-tenant key namespacing) is explicitly deferred to a future milestone and must not be introduced here.
+
+## Functional requirements
+
+1. REQ-01 The module must live at `skills/bmad-story-automator/src/story_automator/core/audit.py`, begin with `from __future__ import annotations`, and import only from the standard library plus `filelock`; it must not import `psutil` or any other third-party package.
+2. REQ-02 The module must expose an `AuditLog` dataclass (`@dataclass(kw_only=True)`) with fields `path: pathlib.Path`, `key: bytes`, and an internal `_lock_path: pathlib.Path` derived as `path.with_suffix(path.suffix + ".lock")`.
+3. REQ-03 The module must expose `derive_key(secret: str, *, salt: bytes = b"bmad-audit-v1") -> bytes` that returns a 32-byte key via HKDF-SHA256 using `hashlib.pbkdf2_hmac` is forbidden; the implementation must use `hmac` plus `hashlib.sha256` to implement RFC 5869 HKDF-Extract and HKDF-Expand with `info=b"audit-chain"`.
+4. REQ-04 The module must expose `load_key_from_env(env: Mapping[str, str] | None = None) -> bytes | None` that reads `BMAD_AUDIT_KEY`, returns `None` when unset or empty, and otherwise returns `derive_key(value)`; it must never raise on a missing variable.
+5. REQ-05 `AuditLog.append(event)` must accept any `telemetry_events.Event` subclass instance, serialise it via `compact_json` from `core/common`, assign the next sequential `seq` starting at 1, stamp `ts` from `iso_now()`, and write exactly one newline-terminated JSON object to `self.path`.
+6. REQ-06 Each appended record must include the fields `seq`, `ts`, `event`, `payload`, and `tag`, where `event` is the event class name from `Event.event_name` and `payload` is the event's `to_dict()` representation.
+7. REQ-07 The `tag` field must be the lowercase hex HMAC-SHA256 of `prev_tag_bytes + canonical_record_bytes`, where `prev_tag_bytes` is the raw bytes of the previous record's hex tag decoded via `bytes.fromhex` (or 32 zero bytes for `seq == 1`) and `canonical_record_bytes` is `compact_json({"seq": ..., "ts": ..., "event": ..., "payload": ...}).encode("utf-8")`.
+8. REQ-07a All filesystem mutations performed by `append` must be guarded by a `filelock.FileLock(self._lock_path)` acquired with a 5-second timeout; on timeout the method must raise `AuditLockTimeout` (a module-level exception subclassing `RuntimeError`).
+9. REQ-08 `AuditLog.verify() -> tuple[bool, int]` must open `self.path` if it exists, walk every record in order, recompute each `tag` using the same canonicalisation as REQ-07, and return `(True, last_seq)` when the chain is intact or `(False, last_valid_seq)` on the first mismatch, missing field, malformed JSON, or non-contiguous `seq`.
+10. REQ-09 `verify()` must return `(True, 0)` when the log file does not exist or is empty, and must not create the file as a side effect.
+11. REQ-10 The module must expose a top-level helper `audit_for_policy(policy: Mapping[str, Any], path: pathlib.Path) -> AuditLog | None` that returns `None` when `policy.get("security", {}).get("audit_trail")` is falsy and otherwise returns an `AuditLog` whose key is loaded via `load_key_from_env()`; if the flag is true but no key is available the helper must raise `AuditKeyMissing` (subclassing `RuntimeError`).
+12. REQ-11 `commands/orchestrator.py` must call `audit_for_policy(...)` once during escalation handling and, when the returned log is not `None`, append a `telemetry_events.EscalationRaised` event before any user-visible escalation message is printed.
+13. REQ-12 `commands/state.py` must invoke the same helper inside its state-update path and append a `telemetry_events.StoryStateChanged` event after the frontmatter write succeeds; failures from `append` must be re-raised so the state mutation is not silently divorced from the audit record.
+14. REQ-13 `commands/orchestrator_epic_agents.py` must append a `telemetry_events.RetroAgentDispatched` event each time a retro-agent is selected, including the same correlation id used by surrounding telemetry calls.
+15. REQ-14 All three call-site integrations must short-circuit cleanly when `audit_for_policy` returns `None`, performing no filesystem I/O and adding no measurable overhead beyond a single dict lookup; the default policy fixture in tests must keep `security.audit_trail` set to `false`.
+
+## Non-functional requirements
+
+- The module must remain at or below 500 source lines including docstrings and blank lines, measured by `wc -l`, to keep the audit surface readable for security review.
+- Append latency must stay under 5 ms median on a warm filesystem for payloads up to 4 KiB, measured by a `unittest` micro-benchmark that asserts a 100-record batch completes in under 500 ms wall time.
+- Verification must stream records line-by-line and must not hold more than one record plus the running tag in memory simultaneously, so a 1 GiB log can be verified without OOM on a 512 MiB worker.
+- All public functions and dataclasses must carry concise docstrings describing inputs, outputs, raised exceptions, and the canonicalisation contract; ruff's `D` rules are not enforced project-wide but the audit module is held to the stricter bar.
+- The module must never log, print, or include the raw `BMAD_AUDIT_KEY` value or the derived key bytes in exception messages, repr output, or audit payloads.
+
+## Quality gates
+
+- `ruff check skills/bmad-story-automator/src/story_automator/core/audit.py tests/test_audit.py` passes with zero findings.
+- `ruff format --check skills/bmad-story-automator/src/story_automator/core/audit.py tests/test_audit.py` reports no diffs.
+- `python -m unittest discover -s tests -p "test_audit*.py"` passes with zero failures and zero errors.
+- Coverage for `core/audit.py` measured by `coverage run -m unittest` is at least 85 percent of statements, with branch coverage reported.
+- Import allowlist check confirms `audit.py` imports only from the Python 3.11+ standard library plus `filelock`; `psutil` and any other third-party packages are forbidden in this module.
+- The module file size stays at or below 500 lines as enforced by a `wc -l` assertion in the test suite.
+- A tamper test must mutate one byte of a mid-chain `payload` field on disk and assert `verify()` returns `(False, n-1)` where `n` is the corrupted record's seq.
+- A truncation test must remove the trailing record and assert `verify()` returns `(True, n-1)`, confirming that truncation is distinguishable from mutation.
+- A concurrent-append test must spawn two threads that each append 50 records and assert the final chain verifies cleanly with exactly 100 records and contiguous seq values.
