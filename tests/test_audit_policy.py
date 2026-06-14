@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +101,51 @@ class AuditForPolicyGateOffTests(unittest.TestCase):
             )
             # The parent we asked about must not have been created.
             self.assertFalse(target.parent.exists())
+
+
+class AuditForPolicyGateOnTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Snapshot/restore the env var so test ordering can't leak it.
+        self._saved = os.environ.pop("BMAD_AUDIT_KEY", None)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved
+
+    def test_returns_audit_log_when_flag_true_and_key_set(self) -> None:
+        from story_automator.core.audit import AuditLog, audit_for_policy
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        with tempfile.TemporaryDirectory() as d:
+            log = audit_for_policy(
+                {"security": {"audit_trail": True}},
+                Path(d) / "audit.jsonl",
+            )
+            self.assertIsInstance(log, AuditLog)
+            self.assertEqual(log.path, Path(d) / "audit.jsonl")
+            self.assertEqual(len(log.key), 32)
+
+    def test_returned_log_can_append_and_verify(self) -> None:
+        # End-to-end: the returned log is a fully wired AuditLog.
+        from story_automator.core.audit import audit_for_policy
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        with tempfile.TemporaryDirectory() as d:
+            log = audit_for_policy(
+                {"security": {"audit_trail": True}},
+                Path(d) / "audit.jsonl",
+            )
+
+            class Fake:
+                event_name = "E"
+
+                def to_dict(self) -> dict:
+                    return {"k": 1}
+
+            assert log is not None
+            log.append(Fake())
+            self.assertEqual(log.verify(), (True, 1))
 
 
 if __name__ == "__main__":
