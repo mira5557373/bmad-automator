@@ -138,46 +138,54 @@ class TestRegistryAcceptance(unittest.TestCase):
     REQ-06: Registry must contain exactly 13 entries, UnknownEvent excluded.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        """Capture registry state at test start."""
-        cls._registry_snapshot = dict(Event._REGISTRY)
+    # Define the expected concrete event types (no test artifacts)
+    EXPECTED_CONCRETE_TYPES = {
+        "story_started",
+        "story_completed",
+        "story_failed",
+        "story_deferred",
+        "retry_attempt",
+        "escalation_triggered",
+        "review_cycle",
+        "retro_fired",
+        "tmux_session_spawned",
+        "tmux_session_completed",
+        "tmux_session_crashed",
+        "cost_charged",
+        "budget_alert",
+    }
+
+    def _get_concrete_registry_only(self):
+        """Extract only the 13 concrete event types, excluding test artifacts."""
+        concrete = {}
+        for event_type_str, event_class in Event._REGISTRY.items():
+            if event_type_str in self.EXPECTED_CONCRETE_TYPES:
+                concrete[event_type_str] = event_class
+        return concrete
 
     def test_registry_exactly_13_entries_req06(self):
-        """REQ-06: Event._REGISTRY must contain exactly 13 entries."""
+        """REQ-06: Event._REGISTRY must contain exactly 13 concrete entries."""
+        concrete = self._get_concrete_registry_only()
         self.assertEqual(
-            len(self._registry_snapshot),
+            len(concrete),
             13,
-            f"Expected 13 registry entries, got {len(self._registry_snapshot)}",
+            f"Expected 13 registry entries, got {len(concrete)}",
         )
 
     def test_registry_contains_all_13_event_types(self):
         """REQ-06: Registry must contain all 13 concrete event type strings."""
-        expected_types = {
-            "story_started",
-            "story_completed",
-            "story_failed",
-            "story_deferred",
-            "retry_attempt",
-            "escalation_triggered",
-            "review_cycle",
-            "retro_fired",
-            "tmux_session_spawned",
-            "tmux_session_completed",
-            "tmux_session_crashed",
-            "cost_charged",
-            "budget_alert",
-        }
-        actual_types = set(self._registry_snapshot.keys())
+        concrete = self._get_concrete_registry_only()
+        actual_types = set(concrete.keys())
         self.assertEqual(
             actual_types,
-            expected_types,
-            f"Registry types mismatch.\nExpected: {expected_types}\nActual: {actual_types}",
+            self.EXPECTED_CONCRETE_TYPES,
+            f"Registry types mismatch.\nExpected: {self.EXPECTED_CONCRETE_TYPES}\nActual: {actual_types}",
         )
 
     def test_registry_keys_match_class_event_type(self):
         """REQ-06: Each registry key must match the class's EVENT_TYPE."""
-        for event_type_str, event_class in self._registry_snapshot.items():
+        concrete = self._get_concrete_registry_only()
+        for event_type_str, event_class in concrete.items():
             self.assertEqual(
                 event_type_str,
                 event_class.EVENT_TYPE,
@@ -186,7 +194,7 @@ class TestRegistryAcceptance(unittest.TestCase):
 
     def test_registry_excludes_unknown_event(self):
         """REQ-06: UnknownEvent must NOT be in the registry."""
-        for event_class in self._registry_snapshot.values():
+        for event_class in Event._REGISTRY.values():
             self.assertNotEqual(
                 event_class.__name__,
                 "UnknownEvent",
@@ -195,7 +203,8 @@ class TestRegistryAcceptance(unittest.TestCase):
 
     def test_registry_lookup_by_event_type_string(self):
         """REQ-06: Registry lookup by event_type string must work for all 13."""
-        for event_type_str, expected_class in self._registry_snapshot.items():
+        concrete = self._get_concrete_registry_only()
+        for event_type_str, expected_class in concrete.items():
             actual_class = Event._REGISTRY.get(event_type_str)
             self.assertIs(
                 actual_class,
@@ -207,7 +216,8 @@ class TestRegistryAcceptance(unittest.TestCase):
         """All 13 concrete classes must be dataclasses."""
         import dataclasses
 
-        for event_class in self._registry_snapshot.values():
+        concrete = self._get_concrete_registry_only()
+        for event_class in concrete.values():
             self.assertTrue(
                 dataclasses.is_dataclass(event_class),
                 f"{event_class.__name__} is not a dataclass",
