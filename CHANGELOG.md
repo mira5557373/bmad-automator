@@ -1,5 +1,11 @@
 ### Features
 
+- feat(m11): add line-ending portability gate to vocabulary gates (8666730)
+- feat(m11): add prose-immutability + whitespace gate (REQ-10) to vocabulary gates (47a2452)
+- feat(m11): add ordering-preservation gate (REQ-11) to vocabulary gates (caefab4)
+- feat(m11): add contributor-guide gate (REQ-13) to vocabulary gates (1948915)
+- feat(m11): add sub-heading isolation gate (REQ-09) to vocabulary gates (d20b374)
+- feat(m11): seed portable changelog-vocabulary gate script (9d0d0fe)
 - feat(agent-config): per-task model selection for claude/codex (6d1a89c)
 - feat: add Codex runtime support (a05f635)
 - feat: wire policy-backed success verifiers (e84e4b6)
@@ -56,6 +62,8 @@
 
 ### Documentation
 
+- docs(m11): add operator-facing changelog tag audit trail (9ab7b69)
+- docs: update generated documentation (30ae623)
 - docs(m11): tag 260519.md changelog entry with scope vocabulary (2c70156)
 - docs(m11): tag 260517.md changelog entry with scope vocabulary (1a07167)
 - docs(m11): tag 260508.md changelog entries with scope vocabulary (6aa88c4)
@@ -82,6 +90,7 @@
 
 ### Chores
 
+- chore(m11): expose vocabulary gate as npm run gates:vocab (df4c0aa)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
 - chore: keep versioning plan docs off preview branch (4bba55b)
@@ -97,6 +106,7 @@
 
 ### Other
 
+- plan(m11): docs-m2 retroactive-audit lock-in and verification harness (149cb5d)
 - plan(m11): changelog vocabulary implementation plan (3d05217)
 - build: gitignore sw init outputs (1c8f1bd)
 - spec(m11): changelog vocabulary spec (sw lint-spec 100/100) (677d422)
