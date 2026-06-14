@@ -54,5 +54,22 @@ class AuditModuleExistsTests(unittest.TestCase):
         self.assertEqual([alias.name for alias in first.names], ["annotations"])
 
 
+class AuditPublicApiTests(unittest.TestCase):
+    def test_all_lists_milestone_surface(self) -> None:
+        import story_automator.core.audit as audit
+
+        self.assertEqual(
+            sorted(audit.__all__),
+            sorted(
+                [
+                    "AuditKeyMissing",
+                    "AuditLockTimeout",
+                    "derive_key",
+                    "load_key_from_env",
+                ]
+            ),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

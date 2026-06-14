@@ -7,3 +7,11 @@ surface and module-level exception classes. The ``AuditLog`` dataclass,
 """
 
 from __future__ import annotations
+
+
+__all__ = [
+    "AuditKeyMissing",  # noqa: F822 - defined later this milestone
+    "AuditLockTimeout",  # noqa: F822 - defined later this milestone
+    "derive_key",  # noqa: F822 - defined later this milestone
+    "load_key_from_env",  # noqa: F822 - defined later this milestone
+]
