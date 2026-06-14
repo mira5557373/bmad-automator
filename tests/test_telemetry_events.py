@@ -67,6 +67,14 @@ class TestEventRegistry(unittest.TestCase):
         self.assertIn("FirstEvent", error_msg)
         self.assertIn("SecondEvent", error_msg)
 
+    def test_unknown_event_not_auto_registered(self):
+        """UnknownEvent must NOT be in _REGISTRY after definition."""
+        # After import, check UnknownEvent is not in registry
+        self.assertNotIn("unknown_event", Event._REGISTRY)
+        # Verify no key points to UnknownEvent class
+        for value in Event._REGISTRY.values():
+            self.assertNotEqual(value.__name__, "UnknownEvent")
+
 
 class TestEventSerialization(unittest.TestCase):
     """Test to_dict and to_json_line methods."""
