@@ -27,6 +27,9 @@ class Event:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        # Skip auto-registration for UnknownEvent
+        if cls.__name__ == "UnknownEvent":
+            return
         event_type = cls.EVENT_TYPE
         existing = Event._REGISTRY.get(event_type)
         if existing is not None and existing is not cls:
@@ -37,12 +40,20 @@ class Event:
         Event._REGISTRY[event_type] = cls
 
 
-# Placeholder implementations - to be properly defined in later tasks
 @dataclass(kw_only=True)
 class UnknownEvent(Event):
-    EVENT_TYPE: ClassVar[str] = ""
+    """Forward-compatibility fallback for unrecognized event types."""
+
     raw_event_type: str = ""
     raw_fields: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Re-emit original event_type and all raw_fields."""
+        return {"event_type": self.raw_event_type, **self.raw_fields}
+
+    def to_json_line(self) -> str:
+        """Return compact JSON without newline."""
+        return compact_json(self.to_dict())
 
 
 @dataclass(kw_only=True)
