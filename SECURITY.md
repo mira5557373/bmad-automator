@@ -26,7 +26,22 @@ would defeat the orchestrator.
 
 ## Trust boundary
 
-Section body filled in by Task 4.
+The orchestrator reads three inputs and treats them as trusted. They are not
+sanitised, escaped, or sandboxed before being passed to a child agent or interpolated
+into a prompt.
+
+1. Story file content under the BMAD project's stories directory. The orchestrator
+   reads each story markdown file verbatim, including any inline shell snippets or
+   prompts the author embedded.
+2. The BMAD project root path supplied on the command line. The orchestrator joins
+   paths against this root without rechecking that they stay inside it.
+3. `agent-config-presets.json` from the installed skill directory. Each preset can
+   set the child command and prompt template that the orchestrator runs.
+
+If an attacker can influence any of these three inputs, they can influence what the
+child agent does. Operators are responsible for keeping these inputs trustworthy:
+do not run the orchestrator against story files, project roots, or agent-config
+preset files you did not write or vet yourself.
 
 ## Forbidden actions
 
