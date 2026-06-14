@@ -297,5 +297,40 @@ class LoadKeyFromEnvAbsentContractTests(unittest.TestCase):
         self.assertNotEqual(result, b"")
 
 
+import sys  # noqa: E402 - plan keeps imports adjacent to first usage
+
+
+class AuditImportAllowlistTests(unittest.TestCase):
+    ALLOWED_THIRD_PARTY = {"filelock"}
+
+    def _collect_top_level_modules(self) -> set[str]:
+        tree = ast.parse(AUDIT_MODULE_PATH.read_text(encoding="utf-8"))
+        mods: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    mods.add(alias.name.split(".", 1)[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    continue  # relative imports inside the package are fine
+                if node.module:
+                    mods.add(node.module.split(".", 1)[0])
+        return mods
+
+    def test_no_psutil_import(self) -> None:
+        self.assertNotIn("psutil", self._collect_top_level_modules())
+
+    def test_only_stdlib_or_allowlisted_third_party(self) -> None:
+        stdlib = set(sys.stdlib_module_names)
+        offenders = []
+        for mod in self._collect_top_level_modules():
+            if mod in stdlib or mod in self.ALLOWED_THIRD_PARTY:
+                continue
+            offenders.append(mod)
+        self.assertEqual(
+            offenders, [], f"non-allowlisted imports in audit.py: {offenders}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
