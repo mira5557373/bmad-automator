@@ -25,6 +25,7 @@ __all__ = [
     "AuditKeyMissing",
     "AuditLockTimeout",
     "AuditLog",
+    "audit_for_policy",
     "derive_key",
     "load_key_from_env",
 ]
@@ -413,3 +414,25 @@ class AuditLog:
                 last_valid_seq = seq
                 prev_tag_hex = tag_value
         return (True, last_valid_seq)
+
+
+def audit_for_policy(policy: Mapping[str, Any], path: pathlib.Path) -> AuditLog | None:
+    """Return an ``AuditLog`` when policy enables the audit trail, else ``None``.
+
+    REQ-10: when ``policy["security"]["audit_trail"]`` is falsy, returns
+    ``None`` immediately — no key load, no path stat, no parent-directory
+    creation (REQ-14). When truthy, loads the chain key via
+    ``load_key_from_env()`` and returns an ``AuditLog`` instance; if the
+    flag is truthy but no key is available, raises ``AuditKeyMissing``.
+
+    The raw key bytes never appear in exception messages or repr output.
+    """
+    security = policy.get("security") or {}
+    if not security.get("audit_trail"):
+        return None
+    key = load_key_from_env()
+    if key is None:
+        raise AuditKeyMissing(
+            "security.audit_trail is enabled but BMAD_AUDIT_KEY is unset"
+        )
+    return AuditLog(path=path, key=key)
