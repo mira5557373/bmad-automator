@@ -1075,5 +1075,27 @@ class TestRoundTrip(unittest.TestCase):
         self.assertEqual(parsed4.raw_fields, parsed3.raw_fields)
 
 
+class TestUnknownEventRoundTrip(unittest.TestCase):
+    """Test UnknownEvent round-trip with arbitrary event types and fields (REQ-09)."""
+
+    def test_unknown_event_round_trip_basic(self):
+        """UnknownEvent with custom event_type must round-trip."""
+        original_line = '{"event_type":"custom_future_v1","timestamp":"2026-06-14T00:00:00Z","run_id":"r1","custom_field":"value"}'
+        parsed = parse_event(original_line)
+        self.assertIsInstance(parsed, UnknownEvent)
+        reserialized = parsed.to_json_line()
+        self.assertEqual(original_line, reserialized)
+
+    def test_unknown_event_with_nested_json_object(self):
+        """UnknownEvent must preserve nested JSON objects in raw_fields."""
+        original_line = '{"event_type":"unknown_with_nested","timestamp":"2026-06-14T00:00:00Z","run_id":"r1","nested":{"inner":"value","count":42}}'
+        parsed = parse_event(original_line)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_fields["nested"], {"inner": "value", "count": 42})
+        reserialized = parsed.to_json_line()
+        parsed2 = parse_event(reserialized)
+        self.assertEqual(parsed2.raw_fields["nested"], {"inner": "value", "count": 42})
+
+
 if __name__ == "__main__":
     unittest.main()
