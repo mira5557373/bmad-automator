@@ -53,6 +53,20 @@ class TestEventRegistry(unittest.TestCase):
         self.assertIn("test_event", Event._REGISTRY)
         self.assertIs(Event._REGISTRY["test_event"], TestEvent)
 
+    def test_duplicate_event_type_raises_runtime_error(self):
+        """Duplicate EVENT_TYPE must raise RuntimeError with qualnames."""
+        class FirstEvent(Event):
+            EVENT_TYPE: ClassVar[str] = "duplicate_type"
+
+        with self.assertRaises(RuntimeError) as cm:
+            class SecondEvent(Event):
+                EVENT_TYPE: ClassVar[str] = "duplicate_type"
+
+        error_msg = str(cm.exception)
+        self.assertIn("duplicate_type", error_msg)
+        self.assertIn("FirstEvent", error_msg)
+        self.assertIn("SecondEvent", error_msg)
+
 
 class TestEventSerialization(unittest.TestCase):
     """Test to_dict and to_json_line methods."""
