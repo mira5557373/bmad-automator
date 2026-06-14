@@ -5,15 +5,15 @@ discriminator mechanism (auto-registration via __init_subclass__), the
 shared envelope fields (timestamp, run_id), the serialization helpers
 (to_dict, to_json_line), the `UnknownEvent` forward-compatibility
 fallback, the `parse_event(line) -> Event` dispatch function with the
-documented error matrix (ValueError on missing event_type,
-json.JSONDecodeError on malformed input, TypeError on typed-event field
-mismatch), and the 13 concrete typed event classes spanning the BMAD
-story lifecycle (StoryStarted, StoryCompleted, StoryFailed,
-StoryDeferred, RetryAttempt, EscalationTriggered, ReviewCycle,
-RetroFired, TmuxSessionSpawned, TmuxSessionCompleted,
-TmuxSessionCrashed, CostCharged, BudgetAlert). The full round-trip
-invariant test suite plus the coverage / import-allowlist / module-size
-quality gates land in m01-m4.
+documented error matrix (ValueError on missing event_type or non-object
+top-level JSON, json.JSONDecodeError on malformed input, TypeError on
+typed-event field mismatch), and the 13 concrete typed event classes
+spanning the BMAD story lifecycle (StoryStarted, StoryCompleted,
+StoryFailed, StoryDeferred, RetryAttempt, EscalationTriggered,
+ReviewCycle, RetroFired, TmuxSessionSpawned, TmuxSessionCompleted,
+TmuxSessionCrashed, CostCharged, BudgetAlert). The per-class round-trip
+invariant tests landed in m01-m3; the coverage / import-allowlist /
+module-size quality gates land in m01-m4.
 """
 
 from __future__ import annotations
@@ -298,6 +298,19 @@ def parse_event(line: str) -> Event:
     in the M01 spec (REQ-07) and validated by the test matrix.
     """
     payload = json.loads(line)
+    if not isinstance(payload, dict):
+        # JSONL events are JSON objects. Non-object top-level values
+        # (arrays, numbers, strings, booleans, null) can't be dispatched
+        # by event_type. Without this guard a top-level string that
+        # contains the substring "event_type" would slip past the
+        # membership check and fail with a confusing AttributeError on
+        # payload.pop. Surface a ValueError matching the missing-
+        # event_type contract so consumers see one error class for
+        # "this isn't a dispatchable event."
+        raise ValueError(
+            f"event payload must be a JSON object, got {type(payload).__name__}: "
+            f"{line[:80]!r}"
+        )
     if "event_type" not in payload:
         raise ValueError(f"event missing 'event_type' field: {line[:80]!r}")
     event_type = payload.pop("event_type")

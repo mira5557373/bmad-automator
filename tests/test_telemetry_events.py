@@ -579,6 +579,45 @@ class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
         # construction is a property of CPython we lean on for REQ-07.
         self.assertIn("uninvited", str(ctx.exception))
 
+    def test_parse_top_level_array_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        # JSONL events are JSON objects. A top-level array can't be
+        # dispatched by event_type. Without the explicit isinstance
+        # guard this would surface as the less specific "missing
+        # event_type" ValueError (because "event_type" not in [1,2,3]
+        # is True). With the guard the message clearly identifies the
+        # type problem at the top of the function.
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("[1, 2, 3]")
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_string_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        # Catches the most dangerous of the non-object cases: a top-level
+        # JSON string that happens to contain the substring "event_type"
+        # used to slip past the membership check and fail with
+        # AttributeError on the subsequent payload.pop. The dict-type
+        # guard makes the error a clean ValueError instead.
+        with self.assertRaises(ValueError) as ctx:
+            parse_event('"event_type_in_a_string"')
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_number_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("42")
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_null_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("null")
+        self.assertIn("JSON object", str(ctx.exception))
+
 
 class UnknownEventByteEqualPreservationTests(unittest.TestCase):
     def test_round_trip_preserves_byte_equal_for_canonical_input(self) -> None:
