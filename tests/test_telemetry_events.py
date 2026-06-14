@@ -1208,5 +1208,61 @@ class TestRoundTripEdgeCases(unittest.TestCase):
         self.assertEqual(line1, line2)
 
 
+class TestDeterministicSerialization(unittest.TestCase):
+    """Test deterministic JSON serialization for round-trip consistency (REQ-08, REQ-09)."""
+
+    def test_same_concrete_event_produces_byte_identical_json(self):
+        """Multiple serializations of same event must produce byte-identical JSON."""
+        event = StoryCompleted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=120.5,
+            cost_usd=0.25,
+            tokens_in=1000,
+            tokens_out=2000,
+            attempts=2
+        )
+        line1 = event.to_json_line()
+        line2 = event.to_json_line()
+        line3 = event.to_json_line()
+        self.assertEqual(line1, line2, "Multiple to_json_line() calls produced different output")
+        self.assertEqual(line2, line3, "Third to_json_line() call differed from first two")
+
+    def test_json_key_order_is_deterministic(self):
+        """JSON key order must be deterministic across serializations (relies on Python 3.7+ dict ordering)."""
+        event = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="EPIC-1",
+            story_key="S1",
+            agent="agent1",
+            model="model1",
+            complexity="high"
+        )
+        line1 = event.to_json_line()
+
+        # Parse and re-serialize multiple times
+        for _ in range(10):
+            event = parse_event(line1)
+            line1_check = event.to_json_line()
+            self.assertEqual(line1, line1_check,
+                f"JSON key order changed after parse-reserialize cycle.\nExpected: {line1}\nGot: {line1_check}")
+
+    def test_parse_reserialize_produces_identical_json_many_cycles(self):
+        """Multiple parse-reserialize cycles must produce byte-identical JSON (REQ-08, REQ-09)."""
+        original_line = '{"event_type":"review_cycle","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","cycle_num":3,"issues_found":5,"blocking":true}'
+
+        current_line = original_line
+        for cycle in range(10):
+            parsed = parse_event(current_line)
+            current_line = parsed.to_json_line()
+
+        # After 10 cycles, line should still match original
+        self.assertEqual(current_line, original_line,
+            f"JSON diverged after {cycle + 1} parse-reserialize cycles.\nExpected: {original_line}\nGot: {current_line}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,10 +61,10 @@ class Event:
         Event._REGISTRY[event_type] = cls
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert event to dict with event_type injected."""
+        """Convert event to dict with event_type injected first."""
         d = asdict(self)
-        d["event_type"] = self.EVENT_TYPE
-        return d
+        # Build new dict with event_type first to ensure deterministic key order
+        return {"event_type": self.EVENT_TYPE, **d}
 
     def to_json_line(self) -> str:
         """Serialize to compact single-line JSON without trailing newline."""
