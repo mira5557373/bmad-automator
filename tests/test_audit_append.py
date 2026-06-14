@@ -74,5 +74,58 @@ class EventProtocolTests(unittest.TestCase):
         self.assertEqual(ev.to_dict(), {"k": "v"})
 
 
+class CanonicalRecordBytesTests(unittest.TestCase):
+    def test_excludes_tag_field(self) -> None:
+        from story_automator.core.audit import _canonical_record_bytes
+
+        b = _canonical_record_bytes(
+            seq=1, ts="2026-06-14T00:00:00Z", event="X", payload={"a": 1}
+        )
+        self.assertNotIn(b"tag", b)
+
+    def test_matches_compact_json_byte_for_byte(self) -> None:
+        from story_automator.core.audit import _canonical_record_bytes
+        from story_automator.core.common import compact_json
+
+        expected = compact_json(
+            {
+                "seq": 7,
+                "ts": "2026-06-14T01:02:03Z",
+                "event": "EscalationRaised",
+                "payload": {"reason": "block"},
+            }
+        ).encode("utf-8")
+        self.assertEqual(
+            _canonical_record_bytes(
+                seq=7,
+                ts="2026-06-14T01:02:03Z",
+                event="EscalationRaised",
+                payload={"reason": "block"},
+            ),
+            expected,
+        )
+
+    def test_field_order_is_fixed(self) -> None:
+        # Field order must be seq, ts, event, payload regardless of payload
+        # iteration order. Two payloads with the same keys-in-different-order
+        # must produce identical canonical bytes only when the payload mapping
+        # itself preserves order (Python 3.7+ dicts do).
+        from story_automator.core.audit import _canonical_record_bytes
+
+        b = _canonical_record_bytes(seq=1, ts="t", event="E", payload={"a": 1, "b": 2})
+        # Ensure "seq" appears before "ts" appears before "event" appears
+        # before "payload" in the canonical byte stream.
+        s = b.decode("utf-8")
+        i_seq, i_ts, i_event, i_payload = (
+            s.index("seq"),
+            s.index("ts"),
+            s.index("event"),
+            s.index("payload"),
+        )
+        self.assertLess(i_seq, i_ts)
+        self.assertLess(i_ts, i_event)
+        self.assertLess(i_event, i_payload)
+
+
 if __name__ == "__main__":
     unittest.main()

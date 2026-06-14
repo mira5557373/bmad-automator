@@ -15,6 +15,8 @@ import os
 import pathlib
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from .common import compact_json
+
 
 __all__ = [
     "AuditKeyMissing",
@@ -124,6 +126,22 @@ class Event(Protocol):
     event_name: str
 
     def to_dict(self) -> Mapping[str, Any]: ...
+
+
+def _canonical_record_bytes(
+    *, seq: int, ts: str, event: str, payload: Mapping[str, Any]
+) -> bytes:
+    """Return the canonical byte representation hashed into ``tag``.
+
+    The canonical form is ``compact_json({"seq","ts","event","payload"})``
+    encoded as UTF-8, with the field order fixed to ``seq, ts, event,
+    payload``. The ``tag`` field is intentionally excluded — including it
+    would create a cyclic dependency between the record's contents and its
+    own integrity tag.
+    """
+    return compact_json(
+        {"seq": seq, "ts": ts, "event": event, "payload": payload}
+    ).encode("utf-8")
 
 
 @dataclasses.dataclass(kw_only=True)
