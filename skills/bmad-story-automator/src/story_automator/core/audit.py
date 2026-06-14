@@ -16,7 +16,7 @@ import os
 import pathlib
 from typing import Any, Mapping, Protocol, runtime_checkable
 
-from .common import compact_json
+from .common import compact_json, ensure_dir, iso_now
 
 
 __all__ = [
@@ -205,3 +205,47 @@ class AuditLog:
     def __post_init__(self) -> None:
         if self._lock_path is None:
             self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+
+    def append(self, event: "Event") -> None:
+        """Append one record to the chain, computing the tag and bumping seq.
+
+        ``event`` is duck-typed: any object with ``event_name`` and
+        ``to_dict()`` works. The serialised line is:
+
+            {"seq": N, "ts": ISO, "event": NAME, "payload": {...}, "tag": HEX}
+
+        followed by a single ``\\n``. All filesystem mutation in M2 is the
+        single write below; M3 wraps this in a ``filelock.FileLock`` (added
+        in a later task this milestone).
+        """
+        ensure_dir(self.path.parent)
+
+        prev = _read_last_record(self.path)
+        if prev is None:
+            seq = 1
+            prev_tag_hex: str | None = None
+        else:
+            seq = int(prev["seq"]) + 1
+            prev_tag_hex = prev["tag"]
+
+        ts = iso_now()
+        event_name = event.event_name
+        payload = event.to_dict()
+        canonical = _canonical_record_bytes(
+            seq=seq, ts=ts, event=event_name, payload=payload
+        )
+        tag = _compute_tag(key=self.key, prev_tag_hex=prev_tag_hex, canonical=canonical)
+
+        record = {
+            "seq": seq,
+            "ts": ts,
+            "event": event_name,
+            "payload": payload,
+            "tag": tag,
+        }
+        line = compact_json(record) + "\n"
+
+        with self.path.open("ab") as handle:
+            handle.write(line.encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())

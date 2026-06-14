@@ -224,5 +224,104 @@ class ReadLastRecordTests(unittest.TestCase):
             self.assertEqual(rec, {"seq": 1, "tag": "c" * 64})
 
 
+class AppendFirstRecordTests(unittest.TestCase):
+    KEY = b"\x11" * 32
+
+    def _fake_event(self, name: str = "EscalationRaised", payload: dict | None = None):
+        class FakeEvent:
+            event_name = name
+
+            def __init__(self, p: dict) -> None:
+                self._p = p
+
+            def to_dict(self) -> dict:
+                return self._p
+
+        return FakeEvent(payload or {"reason": "blocked"})
+
+    def test_seq_starts_at_1_and_writes_one_line(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event())
+            text = p.read_text(encoding="utf-8")
+            self.assertEqual(text.count("\n"), 1)
+            rec = json.loads(text.strip())
+            self.assertEqual(rec["seq"], 1)
+
+    def test_record_has_exactly_five_fields(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event())
+            rec = json.loads(p.read_text(encoding="utf-8").strip())
+            self.assertEqual(set(rec.keys()), {"seq", "ts", "event", "payload", "tag"})
+
+    def test_event_name_and_payload_copied_from_event(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(
+                self._fake_event(
+                    name="StoryStateChanged", payload={"from": "draft", "to": "qa"}
+                )
+            )
+            rec = json.loads(p.read_text(encoding="utf-8").strip())
+            self.assertEqual(rec["event"], "StoryStateChanged")
+            self.assertEqual(rec["payload"], {"from": "draft", "to": "qa"})
+
+    def test_ts_matches_iso_now_format(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event())
+            rec = json.loads(p.read_text(encoding="utf-8").strip())
+            self.assertRegex(rec["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_tag_matches_compute_tag_with_zero_prev(self) -> None:
+        from story_automator.core.audit import (
+            AuditLog,
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event(payload={"k": 1}))
+            rec = json.loads(p.read_text(encoding="utf-8").strip())
+            expected_tag = _compute_tag(
+                key=self.KEY,
+                prev_tag_hex=None,
+                canonical=_canonical_record_bytes(
+                    seq=rec["seq"],
+                    ts=rec["ts"],
+                    event=rec["event"],
+                    payload=rec["payload"],
+                ),
+            )
+            self.assertEqual(rec["tag"], expected_tag)
+
+    def test_record_line_is_compact_json(self) -> None:
+        # No spaces between separators (compact_json invariant).
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event())
+            text = p.read_text(encoding="utf-8").rstrip("\n")
+            self.assertNotIn(", ", text)
+            self.assertNotIn(": ", text)
+
+
 if __name__ == "__main__":
     unittest.main()
