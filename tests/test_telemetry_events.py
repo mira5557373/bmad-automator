@@ -210,6 +210,67 @@ class TestParseEvent(unittest.TestCase):
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
 
+    def test_story_started_round_trip(self):
+        """StoryStarted round-trip must produce byte-equal JSON."""
+        original = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            epic="EPIC-1",
+            story_key="STORY-1",
+            agent="claude",
+            model="opus",
+            complexity="medium",
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        self.assertEqual(parsed, original)
+        line2 = parsed.to_json_line()
+        self.assertEqual(line1, line2)
+
+    def test_all_concrete_events_round_trip(self):
+        """All 13 concrete events must support round-trip."""
+        test_cases = [
+            StoryStarted(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", agent="claude", model="opus", complexity="medium"),
+            StoryCompleted(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", duration_s=120.5, cost_usd=0.25, tokens_in=1000, tokens_out=2000, attempts=2),
+            StoryFailed(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", error_class="timeout", reason="test", attempts=5, final_session="session1"),
+            StoryDeferred(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", reason="plateau", tasks_completed=3),
+            RetryAttempt(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", attempt_num=2, agent="claude", model="sonnet", prev_error_class="rate_limit"),
+            EscalationTriggered(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", trigger_id=1, severity="CRITICAL", message="test"),
+            ReviewCycle(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", cycle_num=1, issues_found=2, blocking=True),
+            RetroFired(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", stories_completed=5, total_cost_usd=2.5, duration_s=600.0),
+            TmuxSessionSpawned(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", pid=1234, pane_geometry="200x50"),
+            TmuxSessionCompleted(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", exit_code=0, duration_s=120.0),
+            TmuxSessionCrashed(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", exit_code=1, last_capture_chars=500),
+            CostCharged(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", phase="dev", cost_usd=0.1, tokens_in=500, tokens_out=1000, model="opus"),
+            BudgetAlert(timestamp="2026-06-14T12:00:00Z", run_id="r1", threshold_pct=75, total_cost_usd=7.5, max_budget_usd=10.0, epic="E1", story_key="S1"),
+        ]
+        for event in test_cases:
+            with self.subTest(event_type=event.EVENT_TYPE):
+                line1 = event.to_json_line()
+                parsed = parse_event(line1)
+                self.assertEqual(parsed, event)
+                line2 = parsed.to_json_line()
+                self.assertEqual(line1, line2)
+
+    def test_unknown_event_round_trip(self):
+        """UnknownEvent round-trip must preserve event_type and raw_fields."""
+        original = UnknownEvent(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            raw_event_type="future_event_type",
+            raw_fields={"custom_field": "value", "count": 42},
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_event_type, "future_event_type")
+        self.assertEqual(parsed.raw_fields, {"custom_field": "value", "count": 42})
+        line2 = parsed.to_json_line()
+        # For UnknownEvent, at minimum the re-parsed content must match
+        parsed2 = parse_event(line2)
+        self.assertEqual(parsed2.raw_event_type, parsed.raw_event_type)
+        self.assertEqual(parsed2.raw_fields, parsed.raw_fields)
+
 
 if __name__ == "__main__":
     unittest.main()
