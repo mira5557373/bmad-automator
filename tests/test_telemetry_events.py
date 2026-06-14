@@ -227,5 +227,56 @@ class EventToDictTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertIs(type(data), dict)
 
 
+class EventToJsonLineTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_to_json_line_is_single_line(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempLine(Event):
+            EVENT_TYPE: ClassVar[str] = "_line_test"
+
+        line = _TempLine(timestamp="t", run_id="r").to_json_line()
+        self.assertNotIn("\n", line)
+
+    def test_to_json_line_has_no_trailing_newline(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempNoNl(Event):
+            EVENT_TYPE: ClassVar[str] = "_no_nl_test"
+
+        line = _TempNoNl(timestamp="t", run_id="r").to_json_line()
+        self.assertFalse(line.endswith("\n"))
+
+    def test_to_json_line_uses_compact_separators(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempCompact(Event):
+            EVENT_TYPE: ClassVar[str] = "_compact_test"
+
+        line = _TempCompact(timestamp="t", run_id="r").to_json_line()
+        # compact_json uses (",", ":") — no whitespace after either.
+        self.assertNotIn(": ", line)
+        self.assertNotIn(", ", line)
+
+    def test_to_json_line_matches_to_dict_via_compact_json(self) -> None:
+        import json
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempMatch(Event):
+            EVENT_TYPE: ClassVar[str] = "_match_test"
+
+        instance = _TempMatch(timestamp="t", run_id="r")
+        line = instance.to_json_line()
+        # The line must parse back to the same dict to_dict returns.
+        self.assertEqual(json.loads(line), instance.to_dict())
+
+
 if __name__ == "__main__":
     unittest.main()

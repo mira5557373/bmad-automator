@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
+from .common import compact_json
+
 
 @dataclass
 class Event:
@@ -53,3 +55,14 @@ class Event:
         data: dict[str, Any] = {"event_type": self.EVENT_TYPE}
         data.update(asdict(self))
         return data
+
+    def to_json_line(self) -> str:
+        """Compact single-line JSON suitable for JSONL emission.
+
+        No trailing newline — the emitter (M02, out of scope here)
+        is responsible for appending `\n` per JSONL convention.
+        Uses `compact_json` from `story_automator.core.common` so the
+        separator policy (",", ":") and `ensure_ascii=False` matches
+        the rest of the codebase. The helper is NOT duplicated.
+        """
+        return compact_json(self.to_dict())
