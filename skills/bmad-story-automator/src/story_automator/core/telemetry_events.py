@@ -12,7 +12,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, ClassVar
 
-from story_automator.core.common import compact_json, iso_now
+from story_automator.core.common import compact_json
 
 
 @dataclass
