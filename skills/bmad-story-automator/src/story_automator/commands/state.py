@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
 from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_effective_policy
 from ..core.agent_config import normalize_model as _model_or_none
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
+from ..core.audit import audit_for_policy
+from ..core.telemetry_events import StoryStateChanged
 
 
 def cmd_build_state_doc(args: list[str]) -> int:
@@ -306,3 +308,31 @@ def _has_agent_config_block(frontmatter: str) -> bool:
             if key.strip() in {"perTask", "complexityOverrides", "retro"} or raw.strip():
                 return True
     return False
+
+
+def audit_state_change(
+    policy: Mapping[str, Any],
+    audit_path: Path,
+    *,
+    story: str,
+    from_status: str,
+    to_status: str,
+    correlation_id: str,
+) -> None:
+    """Append a ``StoryStateChanged`` record when the policy gate is on.
+
+    No-op when ``audit_for_policy`` returns ``None`` (REQ-14). Any
+    exception from ``AuditLog.append`` propagates per REQ-12 — the state
+    mutation must not be silently divorced from the audit record.
+    """
+    log = audit_for_policy(policy, audit_path)
+    if log is None:
+        return
+    log.append(
+        StoryStateChanged(
+            story=story,
+            from_status=from_status,
+            to_status=to_status,
+            correlation_id=correlation_id,
+        )
+    )
