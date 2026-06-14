@@ -13,7 +13,7 @@ import hashlib
 import hmac
 import os
 import pathlib
-from typing import Mapping
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 
 __all__ = [
@@ -108,6 +108,22 @@ def load_key_from_env(env: Mapping[str, str] | None = None) -> bytes | None:
     if not raw:
         return None
     return derive_key(raw)
+
+
+@runtime_checkable
+class Event(Protocol):
+    """Structural interface that ``AuditLog.append`` requires.
+
+    The audit module never imports the concrete telemetry-events module; any
+    object exposing ``event_name`` (a string class identifier) and
+    ``to_dict()`` (a JSON-serialisable mapping) is acceptable. Documenting
+    the contract here keeps the call-site integrations forward-compatible
+    with the telemetry refactor that ships in a later milestone.
+    """
+
+    event_name: str
+
+    def to_dict(self) -> Mapping[str, Any]: ...
 
 
 @dataclasses.dataclass(kw_only=True)

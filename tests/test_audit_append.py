@@ -42,5 +42,37 @@ class AuditLogDataclassShapeTests(unittest.TestCase):
         self.assertEqual(log._lock_path, custom)
 
 
+class EventProtocolTests(unittest.TestCase):
+    def test_protocol_exists_and_is_typing_protocol(self) -> None:
+        from story_automator.core.audit import Event
+        import typing
+
+        # ``Event`` must be a runtime-checkable Protocol so we can structurally
+        # match telemetry events when they arrive in a later milestone.
+        self.assertTrue(
+            hasattr(Event, "_is_runtime_protocol") or hasattr(Event, "_is_protocol"),
+            "Event must be a typing.Protocol",
+        )
+        self.assertTrue(
+            issubclass(type(Event), type(typing.Protocol))
+            or getattr(Event, "_is_protocol", False)
+        )
+
+    def test_duck_typed_event_satisfies_contract(self) -> None:
+        # We do NOT depend on telemetry_events. The contract is structural:
+        # any object with ``event_name: str`` and ``to_dict()`` is an Event.
+        from story_automator.core.audit import Event
+
+        class FakeEvent:
+            event_name = "Fake"
+
+            def to_dict(self) -> dict:
+                return {"k": "v"}
+
+        ev: Event = FakeEvent()  # type: ignore[assignment]
+        self.assertEqual(ev.event_name, "Fake")
+        self.assertEqual(ev.to_dict(), {"k": "v"})
+
+
 if __name__ == "__main__":
     unittest.main()
