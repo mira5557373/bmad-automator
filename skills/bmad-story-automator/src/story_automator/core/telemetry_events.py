@@ -211,4 +211,43 @@ def parse_event(line: str) -> Event:
             raw_event_type=event_type,
             raw_fields=payload,
         )
+    # Validate field types before instantiation
+    _validate_event_fields(cls, payload)
     return cls(**payload)
+
+
+def _validate_event_fields(cls: type[Event], payload: dict[str, Any]) -> None:
+    """Validate that payload fields match expected types for the event class."""
+    import dataclasses
+    import typing
+
+    field_types = {}
+    for f in dataclasses.fields(cls):
+        # Use get_type_hints to resolve string annotations from __future__ import
+        field_types[f.name] = f.type
+
+    # Get resolved type hints
+    type_hints = typing.get_type_hints(cls)
+
+    for key, value in payload.items():
+        if key not in field_types:
+            # Unknown field will be caught by dataclass constructor
+            continue
+        expected_type = type_hints.get(key, field_types[key])
+        # Reject floats for int fields
+        if expected_type is int and isinstance(value, float):
+            raise TypeError(f"Field {key!r} expects int, got float: {value}")
+        # Accept ints for float fields (Python standard coercion)
+        if (
+            expected_type is float
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
+            # Will be coerced by Python; no error
+            pass
+        # Reject strings for bool fields
+        if expected_type is bool and isinstance(value, str):
+            raise TypeError(f"Field {key!r} expects bool, got string: {value!r}")
+        # Reject strings for int fields
+        if expected_type is int and isinstance(value, str):
+            raise TypeError(f"Field {key!r} expects int, got string: {value!r}")

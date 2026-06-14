@@ -387,6 +387,37 @@ class TestParseEvent(unittest.TestCase):
                 parsed = parse_event(line)
                 self.assertIsInstance(parsed, event_class)
 
+    def test_parse_rejects_float_for_int_field(self):
+        """parse_event must reject float value for int field (tokens_in)."""
+        line = '{"event_type":"story_completed","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","duration_s":120.5,"cost_usd":0.25,"tokens_in":1.5,"tokens_out":2000,"attempts":2}'
+        with self.assertRaises(TypeError):
+            parse_event(line)
+
+    def test_parse_accepts_int_for_float_field(self):
+        """parse_event must accept int value for float field (cost_usd)."""
+        line = '{"event_type":"cost_charged","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","phase":"dev","cost_usd":1,"tokens_in":500,"tokens_out":1000,"model":"opus"}'
+        event = parse_event(line)
+        self.assertIsInstance(event, CostCharged)
+        self.assertEqual(event.cost_usd, 1)  # int coerced to float
+
+    def test_parse_rejects_string_for_int_field(self):
+        """parse_event must reject string value for int field."""
+        line = '{"event_type":"review_cycle","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","cycle_num":"one","issues_found":0,"blocking":false}'
+        with self.assertRaises(TypeError):
+            parse_event(line)
+
+    def test_parse_rejects_string_for_bool_field(self):
+        """parse_event must reject string value for bool field."""
+        line = '{"event_type":"review_cycle","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","cycle_num":1,"issues_found":0,"blocking":"yes"}'
+        with self.assertRaises(TypeError):
+            parse_event(line)
+
+    def test_parse_unicode_in_string_fields(self):
+        """parse_event must preserve non-ASCII in string fields."""
+        line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"史诗","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'
+        event = parse_event(line)
+        self.assertEqual(event.epic, "史诗")
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
