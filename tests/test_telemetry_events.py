@@ -113,6 +113,31 @@ class TestEventRegistry(unittest.TestCase):
         for value in Event._REGISTRY.values():
             self.assertNotEqual(value.__name__, "UnknownEvent")
 
+    def test_registry_idempotent_under_reimport(self):
+        """Re-importing module should not cause duplicate registration errors."""
+        import importlib
+        import sys
+
+        # Verify initial registry state before other tests polluted it
+        self.assertEqual(len(self._initial_registry), 13)
+
+        # Get the current count (may include test artifacts from other tests)
+        count_before_reload = len(Event._REGISTRY)
+
+        # Re-import should not raise RuntimeError
+        from story_automator.core import telemetry_events
+        importlib.reload(telemetry_events)
+
+        # Verify registry count didn't change after reload
+        count_after_reload = len(Event._REGISTRY)
+        self.assertEqual(
+            count_after_reload,
+            count_before_reload,
+            "Registry count should not change after reload",
+        )
+        # Verify story_started is still registered
+        self.assertEqual(Event._REGISTRY["story_started"].__name__, "StoryStarted")
+
 
 class TestEventSerialization(unittest.TestCase):
     """Test to_dict and to_json_line methods."""
