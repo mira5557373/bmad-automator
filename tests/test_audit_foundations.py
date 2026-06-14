@@ -81,5 +81,24 @@ class AuditModuleSizeBudgetTests(unittest.TestCase):
         )
 
 
+class AuditLockTimeoutTests(unittest.TestCase):
+    def test_subclasses_runtime_error(self) -> None:
+        from story_automator.core.audit import AuditLockTimeout
+
+        self.assertTrue(issubclass(AuditLockTimeout, RuntimeError))
+
+    def test_can_be_raised_and_caught(self) -> None:
+        from story_automator.core.audit import AuditLockTimeout
+
+        with self.assertRaises(AuditLockTimeout) as ctx:
+            raise AuditLockTimeout("lock held by another writer")
+        self.assertIn("lock held", str(ctx.exception))
+
+    def test_has_docstring(self) -> None:
+        from story_automator.core.audit import AuditLockTimeout
+
+        self.assertTrue(AuditLockTimeout.__doc__ and AuditLockTimeout.__doc__.strip())
+
+
 if __name__ == "__main__":
     unittest.main()
