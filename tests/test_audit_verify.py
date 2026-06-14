@@ -297,5 +297,146 @@ class VerifyTruncationDistinguishableTests(unittest.TestCase):
             self.assertEqual(log_b.verify(), (False, 3))
 
 
+class VerifyMalformedJsonTests(unittest.TestCase):
+    KEY = b"\xaa" * 32
+
+    def _write_lines(self, path: Path, lines: list[bytes]) -> None:
+        path.write_bytes(b"\n".join(lines) + b"\n")
+
+    def test_malformed_json_on_first_line_returns_false_zero(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            self._write_lines(p, [b"not-json"])
+            self.assertEqual(AuditLog(path=p, key=self.KEY).verify(), (False, 0))
+
+    def test_malformed_json_on_third_line_returns_false_at_two(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            log.append(_FakeEvent("E", {"i": 1}))
+            with p.open("ab") as handle:
+                handle.write(b"{not valid json}\n")
+            self.assertEqual(log.verify(), (False, 2))
+
+    def test_non_dict_top_level_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            with p.open("ab") as handle:
+                handle.write(b"[1, 2, 3]\n")
+            self.assertEqual(log.verify(), (False, 1))
+
+
+class VerifyMissingFieldTests(unittest.TestCase):
+    KEY = b"\xbb" * 32
+
+    def test_missing_tag_field_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            log.append(_FakeEvent("E", {"i": 1}))
+            # Append a record missing the `tag` field.
+            broken = {
+                "seq": 3,
+                "ts": "2026-06-14T00:00:00Z",
+                "event": "E",
+                "payload": {},
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(broken) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 2))
+
+    def test_missing_payload_field_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            broken = {
+                "seq": 2,
+                "ts": "t",
+                "event": "E",
+                "tag": "0" * 64,
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(broken) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 1))
+
+
+class VerifyNonContiguousSeqTests(unittest.TestCase):
+    KEY = b"\xcc" * 32
+
+    def test_first_record_with_seq_not_one_returns_false_zero(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            # Hand-craft a record whose seq is 2 but file is otherwise empty.
+            rec = {
+                "seq": 2,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": "0" * 64,
+            }
+            p.write_bytes((compact_json(rec) + "\n").encode("utf-8"))
+            self.assertEqual(AuditLog(path=p, key=self.KEY).verify(), (False, 0))
+
+    def test_seq_gap_returns_false_at_last_contiguous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))  # seq=1
+            log.append(_FakeEvent("E", {"i": 1}))  # seq=2
+            # Append seq=4 (skipping seq=3).
+            jump = {
+                "seq": 4,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": "0" * 64,
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(jump) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 2))
+
+    def test_seq_not_an_int_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            bad = {
+                "seq": "two",
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": "0" * 64,
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(bad) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
