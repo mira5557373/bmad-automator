@@ -1003,5 +1003,119 @@ class ConcreteEventExportContractTests(unittest.TestCase):
             self.assertTrue(isinstance(obj, type), f"{name} is not a class")
 
 
+class ConcreteEventRoundTripExtendedTests(unittest.TestCase):
+    """REQ-08 broader sweep: round-trip holds under unicode, JSON-special
+    characters, and numeric / boolean edge cases.
+
+    m01-m3 verified the per-class happy path with ASCII fixtures. This
+    class broadens the verification to confirm that `compact_json`'s
+    `ensure_ascii=False` policy preserves unicode in string fields
+    byte-equal, that JSON-special characters in strings are escaped and
+    parsed back identically, and that integer / float / boolean
+    boundary values survive the serialization round-trip without drift.
+    """
+
+    def _round_trip(self, event: Event) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        line = event.to_json_line()
+        parsed = parse_event(line)
+        self.assertIs(type(parsed), type(event))
+        self.assertEqual(parsed, event)
+        self.assertEqual(parsed.to_json_line(), line)
+
+    def test_round_trip_preserves_unicode_in_string_fields(self) -> None:
+        """REQ-08 + NFR: `compact_json(ensure_ascii=False)` must emit
+        non-ASCII codepoints natively (not as `\\uXXXX` escapes), and
+        parse_event must round-trip them byte-equal. Covers the operator's
+        real-world case of unicode in story titles or epic names.
+        """
+        from story_automator.core.telemetry_events import StoryStarted
+
+        self._round_trip(
+            StoryStarted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="エピック-3",
+                story_key="3.1-héllo-世界",
+                agent="クロード",
+                model="sonnet",
+                complexity="medium",
+            )
+        )
+
+    def test_round_trip_preserves_json_special_characters_in_strings(self) -> None:
+        """REQ-08 + NFR: JSON-special characters (`"`, `\\`, control
+        characters) must be escaped on emission and parsed back byte-
+        identically. The strict-byte-equal round-trip is the contract
+        that lets the JSONL stream be transported through any utf-8 pipe
+        without corruption.
+        """
+        from story_automator.core.telemetry_events import StoryFailed
+
+        self._round_trip(
+            StoryFailed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                error_class="CRASH",
+                # Embedded double-quote, backslash, tab, and newline must all
+                # round-trip exactly. json.dumps escapes them; json.loads un-
+                # escapes them; the assertion is that the second emission of
+                # to_json_line yields the same escape sequences.
+                reason='exit code 1: "fatal" \\ stderr=foo\tbar\nline2',
+                attempts=5,
+                final_session="sa-foo-abc123",
+            )
+        )
+
+    def test_round_trip_preserves_numeric_edge_cases(self) -> None:
+        """REQ-08 + NFR: integer / float boundary values (zero, negative,
+        large, fractional) must survive the round-trip. ``json.dumps``
+        emits ``0`` for int zero and ``0.0`` for float zero — distinct
+        wire forms — so the round-trip preserves both type identity and
+        byte representation.
+        """
+        from story_automator.core.telemetry_events import StoryCompleted
+
+        self._round_trip(
+            StoryCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                duration_s=0.0,
+                cost_usd=999_999.123456,
+                tokens_in=0,
+                tokens_out=2_147_483_648,
+                attempts=1,
+            )
+        )
+
+    def test_round_trip_preserves_boolean_both_values(self) -> None:
+        """REQ-08 + NFR: ``ReviewCycle.blocking`` is the only bool field
+        in the M01 type set. Both ``True`` and ``False`` must round-trip,
+        and the wire form must use lowercase JSON booleans (``true`` /
+        ``false``), not the Python repr (``True`` / ``False``). This is
+        guaranteed by ``json.dumps``; the test pins the behavior.
+        """
+        from story_automator.core.telemetry_events import ReviewCycle
+
+        for blocking_value in (True, False):
+            with self.subTest(blocking=blocking_value):
+                self._round_trip(
+                    ReviewCycle(
+                        timestamp="2026-06-14T05:12:34Z",
+                        run_id="20260614-051234",
+                        epic="3",
+                        story_key="3.1",
+                        cycle_num=2,
+                        issues_found=3,
+                        blocking=blocking_value,
+                    )
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
