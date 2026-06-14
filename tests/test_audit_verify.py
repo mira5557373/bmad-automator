@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
 import tempfile
 import threading
 import unittest
@@ -576,6 +579,109 @@ class AuditModuleSizeBudgetM3Tests(unittest.TestCase):
             line_count,
             500,
             f"audit.py is {line_count} lines (budget: 500 per NFR-500-line-cap)",
+        )
+
+
+class AuditCoverageGateTests(unittest.TestCase):
+    """Assert >=85% statement coverage for core/audit.py via subprocess.
+
+    Runs the canonical CI invocation:
+        coverage run --source=<core> -m unittest discover -s tests -p test_audit*.py
+        coverage report --include='*/audit.py'
+
+    and parses the percentage off the last line of ``coverage report`` output.
+    Skipped when ``coverage`` is not on PATH.
+    """
+
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+
+    def _coverage_executable(self) -> str | None:
+        return _shutil.which("coverage")
+
+    def test_audit_coverage_at_least_85_percent(self) -> None:
+        coverage_exe = self._coverage_executable()
+        if coverage_exe is None:
+            self.skipTest("coverage CLI not on PATH in this environment")
+
+        import os as _os
+
+        # Re-entrancy guard: the subprocess below runs `unittest discover -p
+        # test_audit*.py`, which would re-pick this very test and recurse.
+        # When invoked under the gate we sentinel-skip ourselves.
+        if _os.environ.get("BMAD_AUDIT_COVERAGE_GATE_RUNNING") == "1":
+            self.skipTest("re-entrant invocation under coverage gate")
+
+        src_root = self.REPO_ROOT / "skills" / "bmad-story-automator" / "src"
+        audit_dir = src_root / "story_automator" / "core"
+
+        env = dict(_os.environ)
+        env["PYTHONPATH"] = str(src_root) + _os.pathsep + env.get("PYTHONPATH", "")
+        env["BMAD_AUDIT_COVERAGE_GATE_RUNNING"] = "1"
+
+        # Use a private coverage data file so parallel runs and the
+        # external CI gate don't fight over .coverage.
+        data_file = str(self.REPO_ROOT / ".coverage.m3-gate")
+        env["COVERAGE_FILE"] = data_file
+
+        run = _subprocess.run(
+            [
+                coverage_exe,
+                "run",
+                f"--source={audit_dir}",
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                str(self.REPO_ROOT / "tests"),
+                "-p",
+                "test_audit*.py",
+            ],
+            cwd=str(self.REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            run.returncode,
+            0,
+            f"coverage run failed:\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}",
+        )
+
+        report = _subprocess.run(
+            [coverage_exe, "report", "--include=*/audit.py"],
+            cwd=str(self.REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # Clean up the private data file regardless of outcome.
+        try:
+            _os.unlink(data_file)
+        except FileNotFoundError:
+            pass
+
+        self.assertEqual(
+            report.returncode,
+            0,
+            f"coverage report failed:\nSTDOUT:\n{report.stdout}\n"
+            f"STDERR:\n{report.stderr}",
+        )
+
+        # The TOTAL line ends with the overall percentage, e.g.:
+        #   TOTAL    150    10    93%
+        match = _re.search(r"TOTAL.*?(\d+)%", report.stdout)
+        self.assertIsNotNone(
+            match,
+            f"could not parse TOTAL line from coverage report:\n{report.stdout}",
+        )
+        assert match is not None  # narrow for type-checker
+        percent = int(match.group(1))
+        self.assertGreaterEqual(
+            percent,
+            85,
+            f"audit.py coverage = {percent}% (gate: 85%)\n{report.stdout}",
         )
 
 
