@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
+import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -202,6 +205,122 @@ class AuditHooksTests(unittest.TestCase):
             rec = json.loads(target.read_text(encoding="utf-8").strip())
             self.assertEqual(rec["event"], "EscalationRaised")
             self.assertEqual(rec["payload"]["correlation_id"], "c-9")
+
+
+class EscalateAuditIntegrationTests(unittest.TestCase):
+    """Integration tests for the _escalate audit hook.
+
+    We patch the policy loader and project-root lookups in
+    ``story_automator.commands.orchestrator`` so the test does not
+    depend on resolving a real bundled policy under a temp project root
+    (``load_runtime_policy`` with explicit state_file goes through the
+    legacy-mode path which ignores ``_bmad/bmm/story-automator.policy.json``
+    overrides, so toggling via that file would not engage the gate).
+    """
+
+    def setUp(self) -> None:
+        self._saved_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved_key
+
+    def test_escalate_short_circuits_when_gate_off(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": False}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                orch._escalate(["review-loop", "cycles=99"])
+        self.assertFalse(
+            (Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl").exists()
+        )
+
+    def test_escalate_appends_when_gate_on(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": True}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = orch._escalate(["review-loop", "cycles=99"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue().strip())
+        self.assertTrue(out["escalate"])
+
+        audit_path = Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl"
+        self.assertTrue(audit_path.exists())
+        rec = json.loads(audit_path.read_text(encoding="utf-8").strip())
+        self.assertEqual(rec["event"], "EscalationRaised")
+        self.assertEqual(rec["payload"]["trigger"], "review-loop")
+        self.assertIn("Review loop exceeded", rec["payload"]["reason"])
+
+    def test_escalate_does_not_audit_non_escalating_dispatch(self) -> None:
+        # A "review-loop" dispatch under the limit returns escalate=False.
+        # That is not a security event and must not produce an audit row.
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": True}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                orch._escalate(["review-loop", "cycles=0"])
+        self.assertFalse(
+            (Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl").exists()
+        )
+
+    def test_escalate_preserves_policy_error_behavior(self) -> None:
+        # The legacy contract: when load_runtime_policy raises PolicyError or
+        # FileNotFoundError, _escalate prints {"escalate": true, "reason":
+        # str(exc)} and returns 0. The new code must keep this behaviour.
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+        from story_automator.core.runtime_policy import PolicyError
+
+        with (
+            mock.patch.object(
+                orch, "load_runtime_policy", side_effect=PolicyError("bad policy")
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = orch._escalate(["review-loop", "cycles=99"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue().strip())
+        self.assertTrue(out["escalate"])
+        self.assertIn("bad policy", out["reason"])
 
 
 if __name__ == "__main__":

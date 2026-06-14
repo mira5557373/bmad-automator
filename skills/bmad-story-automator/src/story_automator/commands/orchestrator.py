@@ -46,6 +46,8 @@ from .orchestrator_epic_agents import (
     retro_agent_action,
 )
 from .orchestrator_parse import parse_output_action
+from ._audit_hooks import _audit_path_for, _maybe_audit_event
+from story_automator.core.telemetry_events import EscalationRaised
 
 
 def cmd_orchestrator_helper(args: list[str]) -> int:
@@ -335,37 +337,66 @@ def _escalate(args: list[str]) -> int:
                 continue
             idx += 1
     except PolicyError as exc:
+        # Legacy contract: arg-parse PolicyError → escalate=True. No audit
+        # — we never loaded a policy, so the gate state is unknown.
         print_json({"escalate": True, "reason": str(exc)})
         return 0
     try:
         policy = load_runtime_policy(get_project_root(), state_file=state_file)
     except (FileNotFoundError, PolicyError) as exc:
+        # Legacy contract: policy-load failure → escalate=True. Same
+        # rationale as above; do not audit when we have no policy.
         print_json({"escalate": True, "reason": str(exc)})
         return 0
+
     if trigger == "review-loop":
         cycles = _parse_context_int(context, "cycles")
         limit = review_max_cycles(policy)
         if cycles >= limit:
-            print_json({"escalate": True, "reason": f"Review loop exceeded max cycles ({cycles}/{limit})"})
+            result: dict = {
+                "escalate": True,
+                "reason": f"Review loop exceeded max cycles ({cycles}/{limit})",
+            }
         else:
-            print_json({"escalate": False})
-        return 0
-    if trigger == "session-crash":
+            result = {"escalate": False}
+    elif trigger == "session-crash":
         retries = _parse_context_int(context, "retries")
         limit = crash_max_retries(policy)
         if retries >= limit:
-            print_json({"escalate": True, "reason": f"Session crashed after {retries} retries"})
+            result = {
+                "escalate": True,
+                "reason": f"Session crashed after {retries} retries",
+            }
         else:
-            print_json({"escalate": False, "action": "retry"})
-        return 0
-    if trigger == "story-validation":
+            result = {"escalate": False, "action": "retry"}
+    elif trigger == "story-validation":
         created = _parse_context_int(context, "created")
         if created != 1:
-            print_json({"escalate": True, "reason": "No story file created" if created == 0 else f"Runaway creation: {created} files"})
+            result = {
+                "escalate": True,
+                "reason": "No story file created"
+                if created == 0
+                else f"Runaway creation: {created} files",
+            }
         else:
-            print_json({"escalate": False})
-        return 0
-    print_json({"escalate": False, "reason": "Unknown trigger"})
+            result = {"escalate": False}
+    else:
+        result = {"escalate": False, "reason": "Unknown trigger"}
+
+    # REQ-11: audit before the user-visible print, but only on actual
+    # escalations. A non-escalating dispatch is not a security event.
+    if result.get("escalate"):
+        _maybe_audit_event(
+            policy,
+            _audit_path_for(get_project_root()),
+            EscalationRaised(
+                trigger=trigger,
+                reason=str(result.get("reason", "")),
+                correlation_id=_escalate_correlation_id(state_file, trigger),
+            ),
+        )
+
+    print_json(result)
     return 0
 
 
@@ -502,6 +533,16 @@ def _verify_step(args: list[str]) -> int:
 def _parse_context_int(context: str, key: str) -> int:
     match = re.search(rf"{re.escape(key)}=(\d+)", context)
     return int(match.group(1)) if match else 0
+
+
+def _escalate_correlation_id(state_file: str, trigger: str) -> str:
+    """Stable correlation id for one escalation event.
+
+    Combines the state-file basename (or empty) with the trigger so the
+    audit record can be cross-referenced against the orchestration log.
+    """
+    base = Path(state_file).name if state_file else ""
+    return f"escalate:{trigger}:{base}"
 
 
 def _flag_value(args: list[str], idx: int, flag: str) -> str:
