@@ -74,5 +74,27 @@ class IterRecordLinesTests(unittest.TestCase):
                 self.assertIsInstance(result, types.GeneratorType)
 
 
+class VerifyEmptyFileTests(unittest.TestCase):
+    KEY = b"\x55" * 32
+
+    def test_returns_true_zero_when_file_is_empty(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            p.write_text("", encoding="utf-8")
+            log = AuditLog(path=p, key=self.KEY)
+            self.assertEqual(log.verify(), (True, 0))
+
+    def test_returns_true_zero_on_blank_lines_only(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            p.write_text("\n\n\n", encoding="utf-8")
+            log = AuditLog(path=p, key=self.KEY)
+            self.assertEqual(log.verify(), (True, 0))
+
+
 if __name__ == "__main__":
     unittest.main()
