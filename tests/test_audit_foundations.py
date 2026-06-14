@@ -71,5 +71,15 @@ class AuditPublicApiTests(unittest.TestCase):
         )
 
 
+class AuditModuleSizeBudgetTests(unittest.TestCase):
+    def test_module_at_or_below_500_lines(self) -> None:
+        line_count = sum(
+            1 for _ in AUDIT_MODULE_PATH.read_text(encoding="utf-8").splitlines()
+        )
+        self.assertLessEqual(
+            line_count, 500, f"audit.py is {line_count} lines (budget: 500)"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
