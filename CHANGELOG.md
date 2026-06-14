@@ -72,6 +72,9 @@
 
 ### Documentation
 
+- docs(m01-m4): make Task 1 baseline resumable across Prior Work Handling range (4329a23)
+- docs(m01-m4): plan for tests and quality gates (REQ-08, REQ-09, REQ-10, REQ-11, NFR) (84d9c49)
+- docs: update generated documentation (f1b92d1)
 - docs(m01-m3): clarify Task 16 mixed result + EXPECTED_NAMES scope (03c6fe5)
 - docs(m01-m3): plan for concrete event classes (REQ-05 + REQ-06) (dfc2c22)
 - docs: update generated documentation (976e8b3)
@@ -90,6 +93,13 @@
 
 ### Tests
 
+- test(telemetry): NoMutableDefaultsTests codify NFR via AST scan of Event subclasses (349d604)
+- test(telemetry): PEP604UnionTypesTests codify ``T | None`` NFR via textual source scan (55940db)
+- test(telemetry): ModuleSizeTests codify 500-line NFR ceiling and baseline drift gate (be1d7a8)
+- test(telemetry): ImportAllowlistTests codify REQ-11 stdlib+filelock+psutil gate via AST inspection (134ea2b)
+- test(telemetry): FieldTypeTests document M01 no-type-validation stance (deferred to M07) (c2f655d)
+- test(telemetry): broaden REQ-09 UnknownEvent byte-equal sweep across event_type shapes and raw_fields structures (99ef2c4)
+- test(telemetry): broaden REQ-08 round-trip sweep with unicode, special chars, numeric and boolean edge cases (37c1d9c)
 - test(telemetry): UnknownEvent round-trips byte-equal for canonical input (7e212b7)
 - test(telemetry): parse_event raises TypeError for typed event with extra field (bfeb55a)
 - test(telemetry): parse_event raises TypeError for typed event missing field (677a04e)
