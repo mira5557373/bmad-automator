@@ -9,7 +9,11 @@ from story_automator.core.frontmatter import extract_frontmatter, find_frontmatt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
+from story_automator.core.runtime_policy import PolicyError, load_runtime_policy
+from story_automator.core.telemetry_events import RetroAgentDispatched
 from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
+
+from ._audit_hooks import _audit_path_for, _maybe_audit_event
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -216,6 +220,27 @@ def retro_agent_action(args: list[str]) -> int:
         return 1
     config = _load_agent_config_from_state(options["state-file"])
     primary, fallback, model = resolve_agent(config, "medium", "retro")
+
+    # REQ-13: audit each retro-agent selection with the same correlation
+    # id surface that surrounding telemetry uses (the state-file basename).
+    try:
+        policy = load_runtime_policy(
+            get_project_root(), state_file=options["state-file"]
+        )
+    except (FileNotFoundError, PolicyError):
+        policy = {}
+    correlation_id = f"retro:{Path(options['state-file']).name}"
+    _maybe_audit_event(
+        policy,
+        _audit_path_for(get_project_root()),
+        RetroAgentDispatched(
+            primary=primary,
+            fallback=fallback,
+            model=model,
+            correlation_id=correlation_id,
+        ),
+    )
+
     print_json({"ok": True, "task": "retro", "primary": primary, "fallback": fallback, "model": model})
     return 0
 

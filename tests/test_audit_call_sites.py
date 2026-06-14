@@ -411,5 +411,75 @@ class StateUpdateAuditIntegrationTests(unittest.TestCase):
         )
 
 
+class RetroAgentAuditIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved_key
+
+    def _write_state(self) -> Path:
+        state = Path(self._tmp.name) / "state.md"
+        state.write_text(
+            "---\n"
+            "epic: 1\n"
+            "currentStory: 1.2\n"
+            "agentConfig:\n"
+            '  defaultPrimary: "claude"\n'
+            '  defaultFallback: "false"\n'
+            "---\nbody\n",
+            encoding="utf-8",
+        )
+        return state
+
+    def test_retro_agent_short_circuits_when_gate_off(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator_epic_agents as oea
+
+        state = self._write_state()
+        with (
+            mock.patch.object(
+                oea,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": False}},
+            ),
+            mock.patch.object(oea, "get_project_root", return_value=self._tmp.name),
+        ):
+            rc = oea.retro_agent_action(["--state-file", str(state)])
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            (Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl").exists()
+        )
+
+    def test_retro_agent_appends_when_gate_on(self) -> None:
+        import json
+        from unittest import mock
+
+        from story_automator.commands import orchestrator_epic_agents as oea
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        state = self._write_state()
+        with (
+            mock.patch.object(
+                oea,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": True}},
+            ),
+            mock.patch.object(oea, "get_project_root", return_value=self._tmp.name),
+        ):
+            rc = oea.retro_agent_action(["--state-file", str(state)])
+        self.assertEqual(rc, 0)
+        audit_path = Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl"
+        rec = json.loads(audit_path.read_text(encoding="utf-8").strip())
+        self.assertEqual(rec["event"], "RetroAgentDispatched")
+        self.assertIn("correlation_id", rec["payload"])
+        self.assertEqual(rec["payload"]["correlation_id"], f"retro:{state.name}")
+
+
 if __name__ == "__main__":
     unittest.main()
