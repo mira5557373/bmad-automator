@@ -240,6 +240,36 @@ class TestParseEvent(unittest.TestCase):
         with self.assertRaises(TypeError):
             parse_event(line)
 
+    def test_parse_event_all_13_types(self):
+        """parse_event must correctly dispatch all 13 concrete event types."""
+        test_data = {
+            StoryStarted: {"epic": "EPIC-1", "story_key": "S1", "agent": "claude", "model": "opus", "complexity": "medium"},
+            StoryCompleted: {"epic": "EPIC-1", "story_key": "S1", "duration_s": 120.5, "cost_usd": 0.25, "tokens_in": 1000, "tokens_out": 2000, "attempts": 2},
+            StoryFailed: {"epic": "EPIC-1", "story_key": "S1", "error_class": "timeout", "reason": "test", "attempts": 5, "final_session": "session1"},
+            StoryDeferred: {"epic": "EPIC-1", "story_key": "S1", "reason": "plateau", "tasks_completed": 3},
+            RetryAttempt: {"epic": "EPIC-1", "story_key": "S1", "attempt_num": 2, "agent": "claude", "model": "sonnet", "prev_error_class": "rate_limit"},
+            EscalationTriggered: {"epic": "EPIC-1", "story_key": "S1", "trigger_id": 1, "severity": "CRITICAL", "message": "test"},
+            ReviewCycle: {"epic": "EPIC-1", "story_key": "S1", "cycle_num": 1, "issues_found": 2, "blocking": True},
+            RetroFired: {"epic": "EPIC-1", "stories_completed": 5, "total_cost_usd": 2.5, "duration_s": 600.0},
+            TmuxSessionSpawned: {"session_name": "session1", "story_key": "S1", "pid": 1234, "pane_geometry": "200x50"},
+            TmuxSessionCompleted: {"session_name": "session1", "story_key": "S1", "exit_code": 0, "duration_s": 120.0},
+            TmuxSessionCrashed: {"session_name": "session1", "story_key": "S1", "exit_code": 1, "last_capture_chars": 500},
+            CostCharged: {"epic": "EPIC-1", "story_key": "S1", "phase": "dev", "cost_usd": 0.1, "tokens_in": 500, "tokens_out": 1000, "model": "opus"},
+            BudgetAlert: {"threshold_pct": 75, "total_cost_usd": 7.5, "max_budget_usd": 10.0, "epic": "EPIC-1", "story_key": "S1"},
+        }
+
+        for event_class, fields in test_data.items():
+            with self.subTest(event_type=event_class.EVENT_TYPE):
+                fields_with_base = {
+                    "timestamp": "2026-06-14T12:00:00Z",
+                    "run_id": "run-123",
+                    **fields,
+                }
+                event = event_class(**fields_with_base)
+                line = event.to_json_line()
+                parsed = parse_event(line)
+                self.assertIsInstance(parsed, event_class)
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
