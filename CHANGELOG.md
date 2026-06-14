@@ -1,5 +1,12 @@
 ### Features
 
+- feat(telemetry): 13 concrete event classes + round-trip + registry tests (c9817a4)
+- feat(telemetry): export UnknownEvent and parse_event; refresh module docstring (c7755bb)
+- feat(telemetry): parse_event raises ValueError when event_type field missing (e8e179d)
+- feat(telemetry): parse_event routes unknown event_type to UnknownEvent (189fbe9)
+- feat(telemetry): parse_event dispatches known event_type to registered subclass (77f5e1b)
+- feat(telemetry): UnknownEvent.to_dict re-emits raw event_type and fields (7cd5320)
+- feat(telemetry): UnknownEvent dataclass with raw_event_type and raw_fields (0031f98)
 - feat(telemetry): re-export iso_now and compact_json from common (9948834)
 - feat(telemetry): Event.to_json_line via shared compact_json helper (25d11a1)
 - feat(telemetry): Event.to_dict injects event_type from classvar (6101b1d)
@@ -63,6 +70,8 @@
 
 ### Documentation
 
+- docs(m01-m2): TDD plan for UnknownEvent + parse_event (REQ-04, REQ-07) (9494f98)
+- docs: update generated documentation (2fb5726)
 - docs(telemetry): refresh Event class docstring for completed slice (5228a11)
 - docs(claude): add CLAUDE.md with project conventions and guardrails (9b4166c)
 - docs: document versioning release flow (31db861)
@@ -76,6 +85,11 @@
 
 ### Tests
 
+- test(telemetry): UnknownEvent round-trips byte-equal for canonical input (7e212b7)
+- test(telemetry): parse_event raises TypeError for typed event with extra field (bfeb55a)
+- test(telemetry): parse_event raises TypeError for typed event missing field (677a04e)
+- test(telemetry): parse_event surfaces json.JSONDecodeError for malformed input (da6a422)
+- test(telemetry): UnknownEvent is not auto-registered in _REGISTRY (ad0e478)
 - test(telemetry): byte-level deterministic guard for to_json_line (f3026a1)
 - test(telemetry): identity-check idempotency on subclass re-registration (f2b7d39)
 - test: strengthen unicode assertions to verify content preservation (7a521f8)
