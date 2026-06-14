@@ -56,135 +56,135 @@ class UnknownEvent(Event):
         return compact_json(self.to_dict())
 
 
-@dataclass(kw_only=True)
+@dataclass
 class StoryStarted(Event):
     EVENT_TYPE: ClassVar[str] = "story_started"
-    epic: str = ""
-    story_key: str = ""
-    agent: str = ""
-    model: str = ""
-    complexity: str = ""
+    epic: str
+    story_key: str
+    agent: str
+    model: str
+    complexity: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class StoryCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "story_completed"
-    epic: str = ""
-    story_key: str = ""
-    duration_s: float = 0.0
-    cost_usd: float = 0.0
-    tokens_in: int = 0
-    tokens_out: int = 0
-    attempts: int = 0
+    epic: str
+    story_key: str
+    duration_s: float
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    attempts: int
 
 
-@dataclass(kw_only=True)
+@dataclass
 class StoryFailed(Event):
     EVENT_TYPE: ClassVar[str] = "story_failed"
-    epic: str = ""
-    story_key: str = ""
-    error_class: str = ""
-    reason: str = ""
-    attempts: int = 0
-    final_session: str = ""
+    epic: str
+    story_key: str
+    error_class: str
+    reason: str
+    attempts: int
+    final_session: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class StoryDeferred(Event):
     EVENT_TYPE: ClassVar[str] = "story_deferred"
-    epic: str = ""
-    story_key: str = ""
-    reason: str = ""
-    tasks_completed: int = 0
+    epic: str
+    story_key: str
+    reason: str
+    tasks_completed: int
 
 
-@dataclass(kw_only=True)
+@dataclass
 class RetryAttempt(Event):
     EVENT_TYPE: ClassVar[str] = "retry_attempt"
-    epic: str = ""
-    story_key: str = ""
-    attempt_num: int = 0
-    agent: str = ""
-    model: str = ""
-    prev_error_class: str = ""
+    epic: str
+    story_key: str
+    attempt_num: int
+    agent: str
+    model: str
+    prev_error_class: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class EscalationTriggered(Event):
     EVENT_TYPE: ClassVar[str] = "escalation_triggered"
-    epic: str = ""
-    story_key: str = ""
-    trigger_id: int = 0
-    severity: str = ""
-    message: str = ""
+    epic: str
+    story_key: str
+    trigger_id: int
+    severity: str
+    message: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class ReviewCycle(Event):
     EVENT_TYPE: ClassVar[str] = "review_cycle"
-    epic: str = ""
-    story_key: str = ""
-    cycle_num: int = 0
-    issues_found: int = 0
-    blocking: bool = False
+    epic: str
+    story_key: str
+    cycle_num: int
+    issues_found: int
+    blocking: bool
 
 
-@dataclass(kw_only=True)
+@dataclass
 class RetroFired(Event):
     EVENT_TYPE: ClassVar[str] = "retro_fired"
-    epic: str = ""
-    stories_completed: int = 0
-    total_cost_usd: float = 0.0
-    duration_s: float = 0.0
+    epic: str
+    stories_completed: int
+    total_cost_usd: float
+    duration_s: float
 
 
-@dataclass(kw_only=True)
+@dataclass
 class TmuxSessionSpawned(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_spawned"
-    session_name: str = ""
-    story_key: str = ""
-    pid: int = 0
-    pane_geometry: str = ""
+    session_name: str
+    story_key: str
+    pid: int
+    pane_geometry: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class TmuxSessionCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_completed"
-    session_name: str = ""
-    story_key: str = ""
-    exit_code: int = 0
-    duration_s: float = 0.0
+    session_name: str
+    story_key: str
+    exit_code: int
+    duration_s: float
 
 
-@dataclass(kw_only=True)
+@dataclass
 class TmuxSessionCrashed(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_crashed"
-    session_name: str = ""
-    story_key: str = ""
-    exit_code: int = 0
-    last_capture_chars: int = 0
+    session_name: str
+    story_key: str
+    exit_code: int
+    last_capture_chars: int
 
 
-@dataclass(kw_only=True)
+@dataclass
 class CostCharged(Event):
     EVENT_TYPE: ClassVar[str] = "cost_charged"
-    epic: str = ""
-    story_key: str = ""
-    phase: str = ""
-    cost_usd: float = 0.0
-    tokens_in: int = 0
-    tokens_out: int = 0
-    model: str = ""
+    epic: str
+    story_key: str
+    phase: str
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    model: str
 
 
-@dataclass(kw_only=True)
+@dataclass
 class BudgetAlert(Event):
     EVENT_TYPE: ClassVar[str] = "budget_alert"
-    threshold_pct: int = 0
-    total_cost_usd: float = 0.0
-    max_budget_usd: float = 0.0
-    epic: str = ""
-    story_key: str = ""
+    threshold_pct: int
+    total_cost_usd: float
+    max_budget_usd: float
+    epic: str
+    story_key: str
 
 
 def parse_event(line: str) -> Event:
