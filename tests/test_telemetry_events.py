@@ -113,6 +113,41 @@ class TestEventSerialization(unittest.TestCase):
         self.assertIn("epic", d)
         self.assertIn("model", d)
 
+    def test_to_json_line_returns_compact_json(self):
+        """to_json_line must return compact JSON without spaces."""
+        event = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            epic="EPIC-1",
+            story_key="STORY-1",
+            agent="claude",
+            model="opus",
+            complexity="medium",
+        )
+        line = event.to_json_line()
+        self.assertIsInstance(line, str)
+        # Must not have trailing newline
+        self.assertFalse(line.endswith("\n"))
+        # Must be valid JSON
+        parsed = json.loads(line)
+        self.assertEqual(parsed["event_type"], "story_started")
+
+    def test_to_json_line_no_spaces(self):
+        """to_json_line output must be compact (no unnecessary spaces)."""
+        event = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            epic="EPIC-1",
+            story_key="STORY-1",
+            agent="claude",
+            model="opus",
+            complexity="medium",
+        )
+        line = event.to_json_line()
+        # Compact JSON has no spaces after colons or commas
+        self.assertNotIn(", ", line)  # No space after comma
+        self.assertNotIn(": ", line)  # No space after colon
+
 
 class TestParseEvent(unittest.TestCase):
     """Test parse_event function with all branches and error cases."""
