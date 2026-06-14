@@ -1539,5 +1539,53 @@ class ModuleSizeTests(unittest.TestCase):
         )
 
 
+class PEP604UnionTypesTests(unittest.TestCase):
+    """NFR: the M01 module must use PEP 604 union syntax (``str | None``)
+    rather than ``typing.Optional[str]`` or ``typing.Union[str, None]``.
+    Codified here as a textual gate against the module's source.
+
+    The source scan is intentionally textual (not AST) because PEP 604
+    annotations are syntactic — they appear in annotations and string-
+    quoted via ``from __future__ import annotations``. A textual grep
+    is the right granularity: any literal occurrence of ``Optional[`` or
+    ``Union[`` in the module source fails the gate.
+    """
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def test_module_does_not_use_legacy_optional(self) -> None:
+        source_path = self._module_source_path()
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Optional[",
+            source,
+            f"{source_path} contains legacy ``Optional[...]`` syntax; "
+            f"NFR requires PEP 604 ``T | None``. Replace with the modern form.",
+        )
+
+    def test_module_does_not_use_legacy_union(self) -> None:
+        source_path = self._module_source_path()
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Union[",
+            source,
+            f"{source_path} contains legacy ``Union[A, B]`` syntax; "
+            f"NFR requires PEP 604 ``A | B``. Replace with the modern form.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
