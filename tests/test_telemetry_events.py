@@ -1359,5 +1359,122 @@ class FieldTypeTests(unittest.TestCase):
         self.assertEqual(parsed, event)
 
 
+class ImportAllowlistTests(unittest.TestCase):
+    """REQ-11: ``core/telemetry_events.py`` must import only the Python
+    standard library plus ``filelock`` and ``psutil`` (and project-local
+    relative imports from ``story_automator.core``). Codified via AST
+    inspection so a future ``import some_third_party_pkg`` fails fast
+    here rather than waiting for a downstream environment to reveal it.
+
+    The allowlist intentionally mirrors the CLAUDE.md guardrail. Note:
+    pyproject.toml does NOT currently declare a ``[project.dependencies]``
+    list (the spec REQ-11 wording was aspirational); this in-suite gate
+    is the authoritative enforcement until that section exists.
+    """
+
+    # The set of top-level package names whose import is permitted in the
+    # M01 telemetry module. Stdlib roots are enumerated explicitly so the
+    # check stays portable across Python versions (sys.stdlib_module_names
+    # is 3.10+ and would be cleaner — see the alternate impl below).
+    ALLOWED_THIRD_PARTY = frozenset({"filelock", "psutil"})
+
+    # First-party root: a relative import (level >= 1) or an absolute
+    # import beginning with this string is always allowed.
+    FIRST_PARTY_ROOT = "story_automator"
+
+    def _module_imports(self) -> tuple[list[str], list[str]]:
+        """Return (top_level_absolute_imports, relative_module_names)
+        parsed from the telemetry_events module via AST. Avoids
+        importing the module twice — we read the source directly.
+
+        Anchors the source path on ``__file__`` rather than cwd so the
+        test runs identically under ``unittest discover`` from the
+        project root, under ``pytest`` from a subdirectory, and under
+        any IDE test runner with an arbitrary cwd.
+        """
+        import ast
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        source_path = (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+        absolute: list[str] = []
+        relative: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    absolute.append(alias.name.split(".", 1)[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    # Relative import — module may be None for "from . import X"
+                    relative.append(node.module or "")
+                else:
+                    if node.module:
+                        absolute.append(node.module.split(".", 1)[0])
+        return absolute, relative
+
+    def test_only_allowlisted_third_party_imports_in_telemetry_module(self) -> None:
+        """Every absolute import's top-level name must be either a
+        stdlib module OR in ALLOWED_THIRD_PARTY OR a first-party
+        ``story_automator.*`` import. This is the canonical REQ-11 gate.
+        """
+        import sys
+
+        absolute, _ = self._module_imports()
+        stdlib_names = (
+            sys.stdlib_module_names
+            if hasattr(sys, "stdlib_module_names")
+            else frozenset()
+        )
+        # Defensive fallback for Python < 3.10 (project requires 3.11+ so
+        # this branch never executes in practice; the fallback exists so
+        # the test is readable as a standalone gate).
+        if not stdlib_names:  # pragma: no cover
+            self.fail("sys.stdlib_module_names unavailable; Python 3.10+ required")
+
+        for top in absolute:
+            with self.subTest(import_name=top):
+                allowed = (
+                    top in stdlib_names
+                    or top in self.ALLOWED_THIRD_PARTY
+                    or top == self.FIRST_PARTY_ROOT
+                )
+                self.assertTrue(
+                    allowed,
+                    f"forbidden import {top!r} — not in stdlib, not in "
+                    f"{set(self.ALLOWED_THIRD_PARTY)!r}, not the first-party "
+                    f"root {self.FIRST_PARTY_ROOT!r}",
+                )
+
+    def test_relative_imports_stay_within_story_automator_core(self) -> None:
+        """Relative imports (``from .common import ...``) are allowed
+        only when they resolve within ``story_automator.core``. Pins the
+        module's seam — a future ``from ..adapters.something import X``
+        would broaden the module's coupling beyond core/ and fail here.
+        """
+        _, relative = self._module_imports()
+        for module_suffix in relative:
+            with self.subTest(module=module_suffix):
+                # Empty (``from . import X``) is OK — same package.
+                # ``common`` is the canonical sibling import.
+                # Anything else is suspect.
+                self.assertIn(
+                    module_suffix,
+                    ("", "common"),
+                    f"unexpected relative import target {module_suffix!r}; "
+                    f"core/telemetry_events.py is permitted to reach into "
+                    f"core/common.py only (M01 seam)",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
