@@ -1,5 +1,6 @@
 ### Features
 
+- feat(telemetry): export 13 concrete event classes in __all__ (25b4dae)
 - feat(telemetry): 13 concrete event classes + round-trip + registry tests (c9817a4)
 - feat(telemetry): export UnknownEvent and parse_event; refresh module docstring (c7755bb)
 - feat(telemetry): parse_event raises ValueError when event_type field missing (e8e179d)
@@ -24,6 +25,7 @@
 
 ### Bug Fixes
 
+- fix: post-impl review fixes for m01-m3-concrete-events (7ae1072)
 - fix(story-keys): complete non-numeric epic support (#23) (51a3cbc)
 - fix(stop-hooks): resolve codex project trust from global config (#26) (417993d)
 - fix(stop-hooks): migrate Codex feature flag from codex_hooks to hooks (#25) (8176f31)
@@ -70,6 +72,9 @@
 
 ### Documentation
 
+- docs(m01-m3): clarify Task 16 mixed result + EXPECTED_NAMES scope (03c6fe5)
+- docs(m01-m3): plan for concrete event classes (REQ-05 + REQ-06) (dfc2c22)
+- docs: update generated documentation (976e8b3)
 - docs(m01-m2): TDD plan for UnknownEvent + parse_event (REQ-04, REQ-07) (9494f98)
 - docs: update generated documentation (2fb5726)
 - docs(telemetry): refresh Event class docstring for completed slice (5228a11)
