@@ -31,3 +31,14 @@ NONDATED_TAGGED=$(grep -hE '^##+' docs/changelog/*.md \
   | grep -vE '^##+ [0-9]{6}' || true)
 [ -z "$NONDATED_TAGGED" ] || fail "REQ-09 sub-heading isolation: non-dated heading carries a tag: $NONDATED_TAGGED"
 pass "REQ-09 sub-heading isolation (only dated headings tagged)"
+
+# Gate 4 — REQ-13 contributor-guide vocabulary: each tag string must appear at
+# least once as fenced inline code in CONTRIBUTING.md.
+MISSING=""
+for TAG in FULL LITE SKELETON DEFERRED; do
+  if ! grep -qF "\`$TAG\`" CONTRIBUTING.md; then
+    MISSING="$MISSING $TAG"
+  fi
+done
+[ -z "$MISSING" ] || fail "REQ-13 contributor-guide: missing inline-code tags:$MISSING"
+pass "REQ-13 contributor-guide (all four tags present as inline code)"
