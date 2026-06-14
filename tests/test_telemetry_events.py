@@ -1000,6 +1000,142 @@ class TestRoundTrip(unittest.TestCase):
                 line2 = parsed.to_json_line()
                 self.assertEqual(line1, line2)
 
+    def test_all_13_events_round_trip_with_varied_values(self):
+        """All 13 concrete events must round-trip with varying field values (REQ-08)."""
+        test_cases = [
+            StoryStarted(
+                timestamp="2026-06-14T12:34:56Z",
+                run_id="run-alpha",
+                epic="EPIC-1",
+                story_key="STORY-1",
+                agent="agent-model-v1",
+                model="gpt-4-turbo",
+                complexity="extreme",
+            ),
+            StoryCompleted(
+                timestamp="2026-06-14T13:45:00Z",
+                run_id="run-beta",
+                epic="EPIC-2",
+                story_key="STORY-2",
+                duration_s=3661.5,
+                cost_usd=12.3456,
+                tokens_in=50000,
+                tokens_out=100000,
+                attempts=3,
+            ),
+            StoryFailed(
+                timestamp="2026-06-14T14:00:00Z",
+                run_id="run-gamma",
+                epic="EPIC-3",
+                story_key="STORY-3",
+                error_class="OutOfMemoryError",
+                reason="Process exceeded 16GB threshold",
+                attempts=7,
+                final_session="tmux-session-dead",
+            ),
+            StoryDeferred(
+                timestamp="2026-06-14T15:00:00Z",
+                run_id="run-delta",
+                epic="EPIC-4",
+                story_key="STORY-4",
+                reason="budget_exhausted",
+                tasks_completed=42,
+            ),
+            RetryAttempt(
+                timestamp="2026-06-14T16:00:00Z",
+                run_id="run-epsilon",
+                epic="EPIC-5",
+                story_key="STORY-5",
+                attempt_num=5,
+                agent="retry-agent",
+                model="claude-opus",
+                prev_error_class="RateLimitError",
+            ),
+            EscalationTriggered(
+                timestamp="2026-06-14T17:00:00Z",
+                run_id="run-zeta",
+                epic="EPIC-6",
+                story_key="STORY-6",
+                trigger_id=999,
+                severity="CRITICAL",
+                message="Manual escalation by operator",
+            ),
+            ReviewCycle(
+                timestamp="2026-06-14T18:00:00Z",
+                run_id="run-eta",
+                epic="EPIC-7",
+                story_key="STORY-7",
+                cycle_num=10,
+                issues_found=25,
+                blocking=False,
+            ),
+            RetroFired(
+                timestamp="2026-06-14T19:00:00Z",
+                run_id="run-theta",
+                epic="EPIC-8",
+                stories_completed=50,
+                total_cost_usd=250.75,
+                duration_s=86400.5,
+            ),
+            TmuxSessionSpawned(
+                timestamp="2026-06-14T20:00:00Z",
+                run_id="run-iota",
+                session_name="tmux-main-prod",
+                story_key="STORY-8",
+                pid=65536,
+                pane_geometry="120x40",
+            ),
+            TmuxSessionCompleted(
+                timestamp="2026-06-14T21:00:00Z",
+                run_id="run-kappa",
+                session_name="tmux-test",
+                story_key="STORY-9",
+                exit_code=0,
+                duration_s=7200.25,
+            ),
+            TmuxSessionCrashed(
+                timestamp="2026-06-14T22:00:00Z",
+                run_id="run-lambda",
+                session_name="tmux-crashed",
+                story_key="STORY-10",
+                exit_code=137,
+                last_capture_chars=5000,
+            ),
+            CostCharged(
+                timestamp="2026-06-14T23:00:00Z",
+                run_id="run-mu",
+                epic="EPIC-9",
+                story_key="STORY-11",
+                phase="Phase-Z",
+                cost_usd=99.9999,
+                tokens_in=999999,
+                tokens_out=2000000,
+                model="claude-sonnet",
+            ),
+            BudgetAlert(
+                timestamp="2026-06-14T23:59:59Z",
+                run_id="run-nu",
+                threshold_pct=95,
+                total_cost_usd=949.99,
+                max_budget_usd=1000.0,
+                epic="EPIC-10",
+                story_key="STORY-12",
+            ),
+        ]
+
+        for event in test_cases:
+            with self.subTest(event_type=event.EVENT_TYPE):
+                # Serialize
+                line1 = event.to_json_line()
+                # Parse
+                parsed = parse_event(line1)
+                # Verify equality
+                self.assertEqual(parsed, event)
+                # Re-serialize
+                line2 = parsed.to_json_line()
+                # Verify byte-equality (REQ-08)
+                self.assertEqual(line1, line2)
+
     def test_unknown_event_round_trip(self):
         """UnknownEvent round-trip must preserve event_type and raw_fields."""
         original = UnknownEvent(
