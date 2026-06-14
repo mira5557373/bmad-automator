@@ -1476,5 +1476,68 @@ class ImportAllowlistTests(unittest.TestCase):
                 )
 
 
+class ModuleSizeTests(unittest.TestCase):
+    """NFR: ``core/telemetry_events.py`` must be ≤ 500 source lines per
+    the CONTRIBUTING.md guideline. Codified here as an in-suite gate
+    so a future contributor exceeding the budget fails fast.
+
+    Counts logical lines via ``splitlines()`` (which omits the trailing-
+    newline artifact). Docstring stripping is NOT performed — the
+    baseline at the end of m01 (347 lines including docstrings) is far
+    enough under 500 that the simple count is the right gate. If a
+    future milestone genuinely needs more than 500 lines of code (sans
+    docstrings) the gate must be tightened to AST-strip docstrings;
+    that's a deliberate decision, not a quiet workaround.
+    """
+
+    MAX_SOURCE_LINES = 500
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def test_module_is_under_five_hundred_lines(self) -> None:
+        source_path = self._module_source_path()
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+        self.assertLessEqual(
+            len(source_lines),
+            self.MAX_SOURCE_LINES,
+            f"{source_path} is {len(source_lines)} lines; "
+            f"NFR ceiling is {self.MAX_SOURCE_LINES}. Split the module "
+            f"or move helpers to a new file in core/.",
+        )
+
+    def test_module_size_baseline_documented(self) -> None:
+        """The baseline at end-of-M01 should be well under the ceiling.
+        If this test fails with a count near 500, the module has grown
+        unexpectedly during M01 and should be reviewed before the next
+        milestone adds more content.
+        """
+        source_path = self._module_source_path()
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+        # Soft baseline: at end of m01 we expect ~347 lines. A spread of
+        # ±50 absorbs minor edits without becoming a churn test, while
+        # still flagging a >100-line surprise growth that should warrant
+        # a review before merging.
+        self.assertLess(
+            len(source_lines),
+            450,
+            f"{source_path} is {len(source_lines)} lines; the M01 "
+            f"baseline is ~347. If the module is approaching 450 there "
+            f"is likely a refactor opportunity worth surfacing.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
