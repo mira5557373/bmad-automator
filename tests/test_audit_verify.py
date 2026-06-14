@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -436,6 +437,68 @@ class VerifyNonContiguousSeqTests(unittest.TestCase):
             with p.open("ab") as handle:
                 handle.write((compact_json(bad) + "\n").encode("utf-8"))
             self.assertEqual(log.verify(), (False, 1))
+
+
+class VerifyConcurrentAppendTests(unittest.TestCase):
+    KEY = b"\xdd" * 32
+
+    def test_two_threads_each_appending_50_yields_clean_chain_of_100(
+        self,
+    ) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+
+            barrier = threading.Barrier(2)
+            errors: list[BaseException] = []
+
+            def worker(label: str) -> None:
+                try:
+                    barrier.wait()
+                    for i in range(50):
+                        log.append(_FakeEvent(f"E-{label}", {"i": i, "w": label}))
+                except BaseException as exc:  # noqa: BLE001 - record and rethrow
+                    errors.append(exc)
+
+            t1 = threading.Thread(target=worker, args=("a",))
+            t2 = threading.Thread(target=worker, args=("b",))
+            t1.start()
+            t2.start()
+            t1.join(timeout=30)
+            t2.join(timeout=30)
+            self.assertFalse(
+                t1.is_alive() or t2.is_alive(),
+                "concurrent append workers did not finish within 30s",
+            )
+            self.assertEqual(errors, [], f"worker raised: {errors!r}")
+
+            ok, last_seq = log.verify()
+            self.assertTrue(
+                ok, f"chain failed verification after concurrent writes: {last_seq}"
+            )
+            self.assertEqual(
+                last_seq,
+                100,
+                "expected 100 contiguous records after 2 × 50 concurrent appends",
+            )
+
+            # Spot-check that the file actually has 100 lines.
+            line_count = sum(
+                1 for line in p.read_text(encoding="utf-8").splitlines() if line
+            )
+            self.assertEqual(line_count, 100)
+
+            # Spot-check that worker labels are interleaved (not strictly
+            # required, but if all 50 a's preceded all 50 b's the test
+            # would be much weaker as a concurrency exercise).
+            labels = [
+                json.loads(line)["payload"]["w"]
+                for line in p.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            self.assertEqual(set(labels), {"a", "b"})
 
 
 if __name__ == "__main__":
