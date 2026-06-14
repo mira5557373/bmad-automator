@@ -45,6 +45,10 @@ class Event:
         d["event_type"] = self.EVENT_TYPE
         return d
 
+    def to_json_line(self) -> str:
+        """Serialize to compact single-line JSON without trailing newline."""
+        return compact_json(self.to_dict())
+
 
 @dataclass(kw_only=True)
 class UnknownEvent(Event):
