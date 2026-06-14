@@ -618,5 +618,28 @@ class UnknownEventByteEqualPreservationTests(unittest.TestCase):
         self.assertEqual(reemitted, original)
 
 
+class ParseEventExportContractTests(unittest.TestCase):
+    def test_module_exports_unknown_event_in_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("UnknownEvent", telemetry_events.__all__)
+
+    def test_module_exports_parse_event_in_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("parse_event", telemetry_events.__all__)
+
+    def test_module_exports_are_callable_from_top_level(self) -> None:
+        # Both must be reachable via `from .telemetry_events import X`
+        # (smoke-tests that __all__ matches the actually-defined names).
+        from story_automator.core.telemetry_events import (  # noqa: F401
+            UnknownEvent,
+            parse_event,
+        )
+
+        self.assertTrue(callable(parse_event))
+        self.assertTrue(isinstance(UnknownEvent, type))
+
+
 if __name__ == "__main__":
     unittest.main()

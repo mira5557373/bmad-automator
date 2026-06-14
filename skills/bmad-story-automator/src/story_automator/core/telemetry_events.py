@@ -2,10 +2,15 @@
 
 This module provides the `Event` base @dataclass with a registry-based
 discriminator mechanism (auto-registration via __init_subclass__), the
-shared envelope fields (timestamp, run_id), and the serialization
-helpers (to_dict, to_json_line). The forward-compatibility fallback
-`UnknownEvent`, the 13 concrete typed event classes, and the
-`parse_event` dispatch land in subsequent slices (m01-m2 ... m01-m4).
+shared envelope fields (timestamp, run_id), the serialization helpers
+(to_dict, to_json_line), the `UnknownEvent` forward-compatibility
+fallback, and the `parse_event(line) -> Event` dispatch function with
+the documented error matrix (ValueError on missing event_type,
+json.JSONDecodeError on malformed input, TypeError on typed-event field
+mismatch). The 13 concrete typed event classes spanning the BMAD story
+lifecycle land in m01-m3, and the full round-trip invariant test suite
+plus the coverage / import-allowlist / module-size quality gates land
+in m01-m4.
 """
 
 from __future__ import annotations
@@ -136,6 +141,8 @@ def parse_event(line: str) -> Event:
 
 __all__ = [
     "Event",
+    "UnknownEvent",
     "compact_json",
     "iso_now",
+    "parse_event",
 ]
