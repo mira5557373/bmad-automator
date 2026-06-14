@@ -27,7 +27,7 @@ would defeat the orchestrator.
 ## Trust boundary
 
 The orchestrator reads three inputs and treats them as trusted. They are
-not sanitised, escaped, or sandboxed before being passed to a child agent or
+not sanitized, escaped, or sandboxed before being passed to a child agent or
 interpolated into a prompt.
 
 1. Story file content under the BMAD project's stories directory. The orchestrator
@@ -67,7 +67,7 @@ event and report it through the disclosure path below.
 
 ## Required environment
 
-Two environment variables shape the security-relevant behaviour of the orchestrator.
+Two environment variables shape the security-relevant behavior of the orchestrator.
 
 `BMAD_AUDIT_KEY` opts the operator into the M04 audit log. When set to a non-empty
 value, the orchestrator emits structured audit events to a file in the project's
@@ -76,12 +76,12 @@ state directory, encrypted under the key. The full event surface is defined in
 operator can audit the schema directly. The audit writer uses the helpers
 `iso_now`, `compact_json`, and `write_atomic` from
 `skills/bmad-story-automator/src/story_automator/core/common.py`, so timestamps,
-serialisation, and on-disk format are consistent across event types. If
+serialization, and on-disk format are consistent across event types. If
 `BMAD_AUDIT_KEY` is unset, no audit file is written; the operator gives up the
 audit trail in exchange for zero key-management overhead.
 
 `BMAD_ALLOW_CEILING_BYPASS` must remain unset in normal operation. It exists only
-so that maintainers can run integration tests against retry-ceiling behaviour
+so that maintainers can run integration tests against retry-ceiling behavior
 without tripping the production guard. Setting it in a real run silently disables a
 safety check and is not a supported configuration.
 
@@ -112,7 +112,7 @@ Send a private report to `bmad.directory@gmail.com` instead. Include:
 - the affected version (npm `bmad-story-automator` version or the exact commit hash)
 - reproduction steps that work on a clean checkout
 - the impact you observed (data exposure, agent escape, command injection, etc.)
-- whether the issue affects install-time behaviour, the generated command wrappers,
+- whether the issue affects install-time behavior, the generated command wrappers,
   or runtime orchestration
 
 You should receive an acknowledgement within 5 business days. We will coordinate a fix

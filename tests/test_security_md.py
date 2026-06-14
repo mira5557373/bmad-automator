@@ -139,7 +139,7 @@ class SecurityMdStructureTests(unittest.TestCase):
         self.assertIn("BMAD project root", body)
         self.assertIn("agent-config-presets.json", body)
         self.assertIn("trusted", body.lower())
-        self.assertRegex(body, r"not sanitis(ed|ized)")
+        self.assertRegex(body, r"not saniti[sz]ed")
 
     def test_forbidden_actions_section(self) -> None:
         # REQ-05
@@ -176,7 +176,8 @@ class SecurityMdStructureTests(unittest.TestCase):
     def test_reporting_vulnerability_section(self) -> None:
         # REQ-08
         body = _section_body(_load(), "Reporting a vulnerability")
-        self.assertRegex(body, r"@")  # contact channel
+        # Contact channel must be a real email-shaped token, not just any "@".
+        self.assertRegex(body, r"[\w.+-]+@[\w-]+\.[\w.-]+")
         # Numeric response window (e.g. "5 business days").
         self.assertRegex(body, re.compile(r"\d+\s*business\s*day", re.IGNORECASE))
         self.assertRegex(
