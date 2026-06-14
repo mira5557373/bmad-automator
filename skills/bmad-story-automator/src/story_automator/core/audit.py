@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import hmac
+import json as _json
 import os
 import pathlib
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -158,6 +159,28 @@ def _compute_tag(*, key: bytes, prev_tag_hex: str | None, canonical: bytes) -> s
     """
     prev_bytes = _ZERO_TAG if prev_tag_hex is None else bytes.fromhex(prev_tag_hex)
     return hmac.new(key, prev_bytes + canonical, hashlib.sha256).hexdigest()
+
+
+def _read_last_record(path: pathlib.Path) -> dict[str, Any] | None:
+    """Return the last parsed JSON record in ``path``, or ``None``.
+
+    Streams the file line by line, keeping only the most recent successfully
+    parsed object in memory. Blank trailing lines are ignored. Returns
+    ``None`` when the file does not exist, is empty, or contains only blank
+    lines. Malformed JSON on the last non-blank line raises
+    ``json.JSONDecodeError`` — the append path treats that as a fatal
+    corruption signal and propagates it.
+    """
+    if not path.exists():
+        return None
+    last: dict[str, Any] | None = None
+    with path.open("r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line:
+                continue
+            last = _json.loads(line)
+    return last
 
 
 @dataclasses.dataclass(kw_only=True)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import tempfile
 import unittest
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -177,6 +179,49 @@ class ComputeTagTests(unittest.TestCase):
         tag = _compute_tag(key=self.KEY, prev_tag_hex=None, canonical=canonical)
         self.assertEqual(tag, tag.lower())
         self.assertEqual(len(tag), 64)
+
+
+class ReadLastRecordTests(unittest.TestCase):
+    def test_returns_none_on_missing_file(self) -> None:
+        from story_automator.core.audit import _read_last_record
+
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(_read_last_record(Path(d) / "missing.jsonl"))
+
+    def test_returns_none_on_empty_file(self) -> None:
+        from story_automator.core.audit import _read_last_record
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "empty.jsonl"
+            p.write_text("", encoding="utf-8")
+            self.assertIsNone(_read_last_record(p))
+
+    def test_returns_last_line_record(self) -> None:
+        from story_automator.core.audit import _read_last_record
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log.jsonl"
+            p.write_text(
+                json.dumps({"seq": 1, "tag": "a" * 64})
+                + "\n"
+                + json.dumps({"seq": 2, "tag": "b" * 64})
+                + "\n",
+                encoding="utf-8",
+            )
+            rec = _read_last_record(p)
+            self.assertEqual(rec, {"seq": 2, "tag": "b" * 64})
+
+    def test_ignores_trailing_blank_lines(self) -> None:
+        from story_automator.core.audit import _read_last_record
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log.jsonl"
+            p.write_text(
+                json.dumps({"seq": 1, "tag": "c" * 64}) + "\n\n",
+                encoding="utf-8",
+            )
+            rec = _read_last_record(p)
+            self.assertEqual(rec, {"seq": 1, "tag": "c" * 64})
 
 
 if __name__ == "__main__":
