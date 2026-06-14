@@ -86,5 +86,44 @@ class EventRegistrationTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertNotIn("", Event._REGISTRY)
 
 
+class EventDuplicateDetectionTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_duplicate_event_type_raises_runtime_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _DupFirst(Event):
+            EVENT_TYPE: ClassVar[str] = "_dup_key"
+
+        with self.assertRaises(RuntimeError):
+
+            @dataclass
+            class _DupSecond(Event):  # noqa: F841 — declaration triggers __init_subclass__
+                EVENT_TYPE: ClassVar[str] = "_dup_key"
+
+    def test_duplicate_error_message_contains_both_qualnames(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _DupQualA(Event):
+            EVENT_TYPE: ClassVar[str] = "_dup_qual"
+
+        with self.assertRaises(RuntimeError) as ctx:
+
+            @dataclass
+            class _DupQualB(Event):  # noqa: F841
+                EVENT_TYPE: ClassVar[str] = "_dup_qual"
+
+        message = str(ctx.exception)
+        self.assertIn("_dup_qual", message)
+        self.assertIn(_DupQualA.__qualname__, message)
+        # The second class's qualname is harder to obtain post-raise
+        # (the class binding never completes). The implementation must
+        # embed `cls.__qualname__` BEFORE raising, so assert the
+        # expected suffix shape:
+        self.assertIn("_DupQualB", message)
+
+
 if __name__ == "__main__":
     unittest.main()

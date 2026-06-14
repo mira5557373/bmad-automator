@@ -19,9 +19,8 @@ class Event:
     """Base for all typed telemetry events.
 
     Concrete events declare an EVENT_TYPE classvar and become auto-
-    registered via __init_subclass__. Duplicate-detection and identity-
-    check idempotency land in the next two tasks; serialization helpers
-    follow.
+    registered via __init_subclass__. Identity-check idempotency lands
+    in the next task; serialization helpers follow.
     """
 
     EVENT_TYPE: ClassVar[str] = ""
@@ -34,4 +33,10 @@ class Event:
         super().__init_subclass__(**kwargs)
         if not cls.EVENT_TYPE:
             return
+        existing = Event._REGISTRY.get(cls.EVENT_TYPE)
+        if existing is not None and existing is not cls:
+            raise RuntimeError(
+                f"duplicate EVENT_TYPE {cls.EVENT_TYPE!r}: "
+                f"{existing.__qualname__} vs {cls.__qualname__}"
+            )
         Event._REGISTRY[cls.EVENT_TYPE] = cls
