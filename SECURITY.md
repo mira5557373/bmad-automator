@@ -102,4 +102,18 @@ releases inside a supported minor line are always considered supported.
 
 ## Reporting a vulnerability
 
-Section body filled in by Task 8.
+Do not open a public GitHub issue for a credential leak, an agent that breaks one of
+the forbidden-actions contracts, or any other security-sensitive problem. Public
+issues are indexed and cached the moment they are filed, and we cannot pull a leaked
+secret out of search results after the fact.
+
+Send a private report to `bmad.directory@gmail.com` instead. Include:
+
+- the affected version (npm `bmad-story-automator` version or the exact commit hash)
+- reproduction steps that work on a clean checkout
+- the impact you observed (data exposure, agent escape, command injection, etc.)
+- whether the issue affects install-time behaviour, the generated command wrappers,
+  or runtime orchestration
+
+You should receive an acknowledgement within 5 business days. We will coordinate a fix
+and disclosure timeline privately before any public write-up.
