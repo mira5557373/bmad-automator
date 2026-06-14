@@ -1,23 +1,31 @@
 # Security Policy
 
-## Reporting
+The bmad-story-automator port runs a Claude- and Codex-driven orchestration loop that
+spawns short-lived child agent sessions inside `tmux`. The orchestrator runs unattended
+and deliberately suppresses interactive permission prompts. See
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) for contributor guidance, and read this document
+in full before invoking the skill in any project you do not own.
 
-Do not open public issues for credential leaks or security-sensitive problems.
+## Orchestrator posture
 
-Report privately to:
-- `bmad.directory@gmail.com`
+Section body filled in by Task 3.
 
-Include:
-- affected version or commit
-- reproduction steps
-- impact summary
-- whether the issue affects install-time behavior, generated command wrappers, or runtime orchestration
+## Trust boundary
 
-## Scope Notes
+Section body filled in by Task 4.
 
-This project ships workflow payload plus a Python helper runtime. Security review should cover:
-- installer path handling
-- copied workflow payload contents
-- command-wrapper generation
-- subprocess and tmux execution paths
-- any file writes into target projects
+## Forbidden actions
+
+Section body filled in by Task 5.
+
+## Required environment
+
+Section body filled in by Task 6.
+
+## Supported Versions
+
+Section body filled in by Task 7.
+
+## Reporting a vulnerability
+
+Section body filled in by Task 8.
