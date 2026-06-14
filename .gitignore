@@ -10,3 +10,10 @@ skills/bmad-story-automator/build/
 skills/bmad-story-automator/dist/
 skills/bmad-story-automator/*.egg-info/
 docs/plans/versioning/impl_artifacts/
+
+# bmad-automator port: sw runtime artifacts (should never reach upstream)
+.claude/workflow-state.json
+.claude/.workflow.lock.json
+.claude/telemetry.jsonl
+.claude/audit/
+docs/superpowers/cli-spend-log.md
