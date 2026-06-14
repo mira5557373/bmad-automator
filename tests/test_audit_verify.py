@@ -501,5 +501,64 @@ class VerifyConcurrentAppendTests(unittest.TestCase):
             self.assertEqual(set(labels), {"a", "b"})
 
 
+class VerifyStreamingMemoryTests(unittest.TestCase):
+    KEY = b"\xee" * 32
+
+    def test_verify_source_avoids_buffering_calls(self) -> None:
+        # Static check: the verify method body must not call
+        # readlines() or read_text() — both load the whole file at once.
+        import inspect
+        from story_automator.core.audit import AuditLog
+
+        source = inspect.getsource(AuditLog.verify)
+        for forbidden in ("readlines()", ".read_text(", ".read_bytes("):
+            self.assertNotIn(
+                forbidden,
+                source,
+                f"verify() must stream — {forbidden} loads the whole file",
+            )
+
+    def test_verify_uses_iter_record_lines(self) -> None:
+        # Verify must dispatch to our streaming generator helper.
+        import inspect
+        from story_automator.core.audit import AuditLog
+
+        source = inspect.getsource(AuditLog.verify)
+        self.assertIn(
+            "_iter_record_lines",
+            source,
+            "verify() must use the streaming generator helper",
+        )
+
+    def test_verify_peak_memory_stays_bounded_on_5000_records(self) -> None:
+        import tracemalloc
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            payload_blob = "x" * 512  # ~512 B payload per record
+            for i in range(5000):
+                log.append(_FakeEvent("E", {"i": i, "blob": payload_blob}))
+
+            # Re-open a fresh verifier so the M2 append-cache fields do
+            # not pollute the measurement.
+            verifier = AuditLog(path=p, key=self.KEY)
+            tracemalloc.start()
+            ok, last_seq = verifier.verify()
+            _current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            self.assertTrue(ok)
+            self.assertEqual(last_seq, 5000)
+            # A buffered implementation (read all 5000 lines into a list)
+            # would peak ~2.5 MiB+. A streaming implementation peaks well
+            # under 1 MiB even with Python's per-string allocator overhead.
+            self.assertLess(
+                peak,
+                1_048_576,
+                f"verify() peaked at {peak} bytes — expected <1 MiB streaming",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
