@@ -24,3 +24,10 @@ EXTRA=$(grep -hE '^##+ [0-9]{6}' docs/changelog/*.md \
   | grep -vE '^\[(FULL|LITE|SKELETON|DEFERRED)\]$' || true)
 [ -z "$EXTRA" ] || fail "Closed-vocabulary: foreign tokens on dated headings: $EXTRA"
 pass "Closed-vocabulary (only allowed tokens present)"
+
+# Gate 3 — REQ-09 sub-heading isolation: any tagged heading must also be a dated heading.
+NONDATED_TAGGED=$(grep -hE '^##+' docs/changelog/*.md \
+  | grep -E '\[(FULL|LITE|SKELETON|DEFERRED)\]' \
+  | grep -vE '^##+ [0-9]{6}' || true)
+[ -z "$NONDATED_TAGGED" ] || fail "REQ-09 sub-heading isolation: non-dated heading carries a tag: $NONDATED_TAGGED"
+pass "REQ-09 sub-heading isolation (only dated headings tagged)"
