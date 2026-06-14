@@ -65,6 +65,7 @@ class AuditPublicApiTests(unittest.TestCase):
                     "AuditKeyMissing",
                     "AuditLockTimeout",
                     "AuditLog",
+                    "audit_for_policy",
                     "derive_key",
                     "load_key_from_env",
                 ]
