@@ -9,7 +9,7 @@ from .frontmatter import parse_simple_frontmatter
 from .runtime_layout import active_marker_path, bundled_story_skill_root, resolve_portable_path, resolve_skill_dir
 from .utils import ensure_dir, get_project_root, iso_now, md5_hex8, read_text, write_atomic
 
-VALID_TOP_LEVEL_KEYS = {"version", "snapshot", "runtime", "workflow", "steps"}
+VALID_TOP_LEVEL_KEYS = {"version", "snapshot", "runtime", "workflow", "steps", "security"}
 VALID_STEP_NAMES = {"create", "dev", "auto", "review", "retro"}
 VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete"}
 VALID_ASSET_NAMES = {"skill", "workflow", "instructions", "checklist", "template"}
@@ -280,10 +280,33 @@ def _legacy_env_int(name: str, raw: str) -> int:
         raise PolicyError(f"{name} must be an integer") from exc
 
 
+_VALID_SECURITY_KEYS = {"audit_trail"}
+
+
+def _validate_security_shape(policy: dict[str, Any]) -> None:
+    """Validate the optional ``security`` block.
+
+    Accepts a missing block (treated as ``{}``) and the single supported
+    subkey ``audit_trail`` (bool). Any other subkey or a non-bool value
+    raises ``PolicyError``.
+    """
+    if "security" not in policy:
+        return
+    security = policy.get("security")
+    if not isinstance(security, dict):
+        raise PolicyError("security must be an object")
+    unknown = sorted(set(security) - _VALID_SECURITY_KEYS)
+    if unknown:
+        raise PolicyError(f"unknown security keys: {', '.join(unknown)}")
+    if "audit_trail" in security and not isinstance(security["audit_trail"], bool):
+        raise PolicyError("security.audit_trail must be a bool")
+
+
 def _validate_policy_shape(policy: dict[str, Any]) -> None:
     unknown_keys = sorted(set(policy) - VALID_TOP_LEVEL_KEYS)
     if unknown_keys:
         raise PolicyError(f"unknown top-level policy keys: {', '.join(unknown_keys)}")
+    _validate_security_shape(policy)
     snapshot = _expect_optional_dict(policy, "snapshot")
     if "snapshot" in policy and "relativeDir" in snapshot and not isinstance(snapshot.get("relativeDir"), str):
         raise PolicyError("snapshot.relativeDir must be a string")
