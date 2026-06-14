@@ -577,5 +577,46 @@ class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertIn("uninvited", str(ctx.exception))
 
 
+class UnknownEventByteEqualPreservationTests(unittest.TestCase):
+    def test_round_trip_preserves_byte_equal_for_canonical_input(self) -> None:
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        # The original line is built via compact_json so it is canonically
+        # ordered (event_type, timestamp, run_id, then payload fields in
+        # insertion order). This is the contract REQ-04's "byte-equal to
+        # the original input line" relies on — lines produced by
+        # to_json_line are always canonically ordered, so round-trip is
+        # byte-equal for any input that came out of the typed-telemetry
+        # substrate. Hand-built JSON in arbitrary key order is NOT
+        # required to round-trip byte-equal (and m01-m4 does not extend
+        # that property either).
+        original = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+                "alpha": 1,
+                "beta": "two",
+                "gamma": [1, 2, 3],
+                "delta": {"nested": True},
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_event_type, "future_thing_M99")
+
+        reemitted = parsed.to_json_line()
+        # Strict byte-level equality: guards against any future regression
+        # in compact_json's separator policy, UnknownEvent.to_dict's key
+        # insertion order, or dict.update's behavior for raw_fields. The
+        # property-level tests in UnknownEventToDictTests (Task 4) catch
+        # the obvious cases; this one pins the exact wire format.
+        self.assertEqual(reemitted, original)
+
+
 if __name__ == "__main__":
     unittest.main()
