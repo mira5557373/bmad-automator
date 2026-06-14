@@ -1096,6 +1096,61 @@ class TestUnknownEventRoundTrip(unittest.TestCase):
         parsed2 = parse_event(reserialized)
         self.assertEqual(parsed2.raw_fields["nested"], {"inner": "value", "count": 42})
 
+    def test_unknown_event_with_many_fields(self):
+        """UnknownEvent must preserve many field types in raw_fields."""
+        original_line = '{"event_type":"future_event_v5","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","field_a":1,"field_b":"text","field_c":true,"field_d":3.14,"field_e":null,"field_f":["a","b"]}'
+        parsed = parse_event(original_line)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_fields["field_a"], 1)
+        self.assertEqual(parsed.raw_fields["field_b"], "text")
+        self.assertEqual(parsed.raw_fields["field_c"], True)
+        self.assertAlmostEqual(parsed.raw_fields["field_d"], 3.14, places=5)
+        self.assertIsNone(parsed.raw_fields["field_e"])
+        self.assertEqual(parsed.raw_fields["field_f"], ["a", "b"])
+        # Critical: verify byte-equality (REQ-09)
+        reserialized = parsed.to_json_line()
+        self.assertEqual(
+            original_line,
+            reserialized,
+            f"UnknownEvent with mixed types failed byte-equality.\nOriginal: {original_line}\nReserialized: {reserialized}",
+        )
+
+    def test_unknown_event_with_null_values_req09(self):
+        """REQ-09: UnknownEvent must preserve null values and round-trip byte-equal."""
+        original_line = '{"event_type":"future_with_nulls","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","value_a":null,"value_b":"present","value_c":null}'
+        parsed = parse_event(original_line)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertIsNone(parsed.raw_fields["value_a"])
+        self.assertEqual(parsed.raw_fields["value_b"], "present")
+        self.assertIsNone(parsed.raw_fields["value_c"])
+        # Verify byte-equality with nulls preserved
+        reserialized = parsed.to_json_line()
+        self.assertEqual(
+            original_line,
+            reserialized,
+            f"Null values not round-tripped byte-equal.\nOriginal: {original_line}\nReserialized: {reserialized}",
+        )
+
+    def test_unknown_event_byte_equality_req09(self):
+        """REQ-09: UnknownEvent re-serialization must produce byte-equal output."""
+        # Multiple arbitrary unknown events with diverse payloads, each must round-trip to byte-identical JSON
+        test_lines = [
+            '{"event_type":"future_alpha","timestamp":"2026-06-14T00:00:00Z","run_id":"r1","x":1}',
+            '{"event_type":"future_beta","timestamp":"2026-06-14T00:00:01Z","run_id":"r2","y":"hello","z":false}',
+            '{"event_type":"future_gamma","timestamp":"2026-06-14T00:00:02Z","run_id":"r3","data":[1,2,3]}',
+            '{"event_type":"future_delta","timestamp":"2026-06-14T00:00:03Z","run_id":"r4","nested":{"key":"value"},"nullval":null}',
+        ]
+
+        for original_line in test_lines:
+            with self.subTest(event_type=original_line.split('"')[3]):
+                parsed = parse_event(original_line)
+                reserialized = parsed.to_json_line()
+                self.assertEqual(
+                    original_line,
+                    reserialized,
+                    f"Byte-equality failed for {original_line}",
+                )
+
 
 class TestRoundTripEdgeCases(unittest.TestCase):
     """Test round-trip with unicode, special JSON chars, and boundary values."""
@@ -1222,13 +1277,17 @@ class TestDeterministicSerialization(unittest.TestCase):
             cost_usd=0.25,
             tokens_in=1000,
             tokens_out=2000,
-            attempts=2
+            attempts=2,
         )
         line1 = event.to_json_line()
         line2 = event.to_json_line()
         line3 = event.to_json_line()
-        self.assertEqual(line1, line2, "Multiple to_json_line() calls produced different output")
-        self.assertEqual(line2, line3, "Third to_json_line() call differed from first two")
+        self.assertEqual(
+            line1, line2, "Multiple to_json_line() calls produced different output"
+        )
+        self.assertEqual(
+            line2, line3, "Third to_json_line() call differed from first two"
+        )
 
     def test_json_key_order_is_deterministic(self):
         """JSON key order must be deterministic across serializations (relies on Python 3.7+ dict ordering)."""
@@ -1239,7 +1298,7 @@ class TestDeterministicSerialization(unittest.TestCase):
             story_key="S1",
             agent="agent1",
             model="model1",
-            complexity="high"
+            complexity="high",
         )
         line1 = event.to_json_line()
 
@@ -1247,8 +1306,11 @@ class TestDeterministicSerialization(unittest.TestCase):
         for _ in range(10):
             event = parse_event(line1)
             line1_check = event.to_json_line()
-            self.assertEqual(line1, line1_check,
-                f"JSON key order changed after parse-reserialize cycle.\nExpected: {line1}\nGot: {line1_check}")
+            self.assertEqual(
+                line1,
+                line1_check,
+                f"JSON key order changed after parse-reserialize cycle.\nExpected: {line1}\nGot: {line1_check}",
+            )
 
     def test_parse_reserialize_produces_identical_json_many_cycles(self):
         """Multiple parse-reserialize cycles must produce byte-identical JSON (REQ-08, REQ-09)."""
@@ -1260,8 +1322,11 @@ class TestDeterministicSerialization(unittest.TestCase):
             current_line = parsed.to_json_line()
 
         # After 10 cycles, line should still match original
-        self.assertEqual(current_line, original_line,
-            f"JSON diverged after {cycle + 1} parse-reserialize cycles.\nExpected: {original_line}\nGot: {current_line}")
+        self.assertEqual(
+            current_line,
+            original_line,
+            f"JSON diverged after {cycle + 1} parse-reserialize cycles.\nExpected: {original_line}\nGot: {current_line}",
+        )
 
 
 if __name__ == "__main__":
