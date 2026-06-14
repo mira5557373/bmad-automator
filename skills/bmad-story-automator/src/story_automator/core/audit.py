@@ -8,15 +8,18 @@ surface and module-level exception classes. The ``AuditLog`` dataclass,
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import hmac
 import os
+import pathlib
 from typing import Mapping
 
 
 __all__ = [
     "AuditKeyMissing",
     "AuditLockTimeout",
+    "AuditLog",
     "derive_key",
     "load_key_from_env",
 ]
@@ -105,3 +108,27 @@ def load_key_from_env(env: Mapping[str, str] | None = None) -> bytes | None:
     if not raw:
         return None
     return derive_key(raw)
+
+
+@dataclasses.dataclass(kw_only=True)
+class AuditLog:
+    """Append-only, hash-chained JSONL audit log.
+
+    Fields:
+      - ``path``: target JSONL file (one record per line).
+      - ``key``: 32-byte HMAC-SHA256 chain key (typically from ``derive_key``).
+      - ``_lock_path``: per-log advisory lock file. Defaults to
+        ``path.with_suffix(path.suffix + ".lock")``; override only for tests.
+
+    The dataclass is ``kw_only`` to keep call sites readable and to prevent
+    accidental positional swaps of ``path`` and ``key`` (one a path, the other
+    raw secret bytes).
+    """
+
+    path: pathlib.Path
+    key: bytes
+    _lock_path: pathlib.Path = dataclasses.field(default=None)  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self._lock_path is None:
+            self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
