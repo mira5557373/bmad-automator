@@ -521,6 +521,34 @@ class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
         with self.assertRaises(json.JSONDecodeError):
             parse_event("")
 
+    def test_parse_typed_event_missing_required_field_raises_type_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _RequiresPayload(Event):
+            EVENT_TYPE: ClassVar[str] = "_requires_payload"
+            payload: str  # required, no default
+
+        line = compact_json(
+            {
+                "event_type": "_requires_payload",
+                "timestamp": "t",
+                "run_id": "r",
+                # 'payload' deliberately omitted
+            }
+        )
+        with self.assertRaises(TypeError) as ctx:
+            parse_event(line)
+        # Dataclass __init__ raises with the field name embedded so a
+        # consumer can identify the missing field. This is a property of
+        # CPython's dataclass implementation — REQ-07 relies on it.
+        self.assertIn("payload", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
