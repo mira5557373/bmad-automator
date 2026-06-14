@@ -1587,5 +1587,173 @@ class PEP604UnionTypesTests(unittest.TestCase):
         )
 
 
+class NoMutableDefaultsTests(unittest.TestCase):
+    """NFR: no mutable default args and no shared mutable class attributes
+    on concrete event classes; ``Event._REGISTRY`` is the single documented
+    shared mutable state and is populated only at class-creation time.
+
+    Codified via AST inspection so a future contributor adding a mutable
+    default (e.g., ``tags: list[str] = []``) or a shared mutable class
+    attribute on a concrete subclass fails fast here rather than waiting
+    for cross-test contamination to reveal it. Parallel in structure to
+    ``ImportAllowlistTests`` (AST scan) and ``PEP604UnionTypesTests``
+    (textual scan) — closes the last in-suite-codifiable NFR gate.
+
+    Scope: every class in ``core/telemetry_events.py`` whose direct base
+    list names ``Event`` (covers ``Event`` itself via its body and every
+    concrete subclass). Only ``Event._REGISTRY`` is exempted by name per
+    the NFR's documented single-shared-mutable-state allowance.
+    """
+
+    EXEMPT_NAMES = frozenset({"_REGISTRY"})
+
+    MUTABLE_FACTORY_NAMES = frozenset(
+        {"list", "dict", "set", "List", "Dict", "Set", "bytearray"}
+    )
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def _is_immutable_constant(self, node) -> bool:
+        """Return True if the AST node represents an immutable constant.
+
+        Accepts ``ast.Constant`` (None, bool, int, float, str, bytes,
+        complex) and tuples of immutable constants. Rejects ``ast.Dict``,
+        ``ast.List``, ``ast.Set``, and any call expression — those are
+        either mutable containers or runtime-evaluated values that the
+        NFR forbids as class-level defaults on Event subclasses.
+        """
+        import ast
+
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.Tuple):
+            return all(self._is_immutable_constant(e) for e in node.elts)
+        return False
+
+    def _event_subclass_defs(self):
+        """Yield ``ast.ClassDef`` nodes for ``Event`` and every class
+        whose direct base list names ``Event``. Parsing the module via
+        AST avoids importing twice and keeps the gate cwd-independent.
+        """
+        import ast
+
+        source_path = self._module_source_path()
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            is_event_or_subclass = node.name == "Event" or any(
+                isinstance(b, ast.Name) and b.id == "Event" for b in node.bases
+            )
+            if is_event_or_subclass:
+                yield node
+
+    def test_no_mutable_class_level_defaults_on_event_subclasses(self) -> None:
+        """Every annotated class-level assignment on ``Event`` or one of
+        its direct subclasses must declare an immutable constant default
+        (or no default at all). ``Event._REGISTRY`` is the single
+        documented exception (NFR-allowed shared state).
+
+        Catches regressions like ``tags: list[str] = []`` or
+        ``known_keys: ClassVar[set[str]] = {"a", "b"}`` on a concrete
+        event class — both of which would silently share state across
+        instances and violate the NFR.
+        """
+        for class_node in self._event_subclass_defs():
+            import ast
+
+            for stmt in class_node.body:
+                if not isinstance(stmt, ast.AnnAssign):
+                    continue
+                if not isinstance(stmt.target, ast.Name):
+                    continue
+                attr_name = stmt.target.id
+                if stmt.value is None:
+                    continue
+                if attr_name in self.EXEMPT_NAMES:
+                    continue
+                with self.subTest(class_name=class_node.name, attr=attr_name):
+                    self.assertTrue(
+                        self._is_immutable_constant(stmt.value),
+                        f"{class_node.name}.{attr_name} has a non-constant "
+                        f"class-level default; M01 NFR forbids mutable "
+                        f"class-level defaults on Event subclasses. Move the "
+                        f"value to an instance field, or document the "
+                        f"exception in NoMutableDefaultsTests.EXEMPT_NAMES "
+                        f"with rationale.",
+                    )
+
+    def test_no_mutable_default_factory_on_dataclass_fields(self) -> None:
+        """Dataclass fields anywhere in the module must not use
+        ``field(default_factory=<mutable_constructor>)``. The current
+        M01 module declares all subclass fields without defaults
+        (``kw_only=True`` makes this possible despite Python's
+        non-default-after-default ordering constraint); this gate
+        prevents a future regression where ``tags: list[str] =
+        field(default_factory=list)`` slips in.
+
+        ``field()`` calls without ``default_factory`` are unaffected —
+        the gate inspects only the ``default_factory=`` keyword. The
+        check covers any ``field(...)`` call in the module, not just
+        those inside Event subclasses, because the typing scoping logic
+        does not reach into closures or helper functions; a top-level
+        ``field()`` outside a class body is not idiomatic anyway.
+        """
+        import ast
+
+        source_path = self._module_source_path()
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Name) or func.id != "field":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "default_factory":
+                    continue
+                if (
+                    isinstance(keyword.value, ast.Name)
+                    and keyword.value.id in self.MUTABLE_FACTORY_NAMES
+                ):
+                    self.fail(
+                        f"dataclass field uses "
+                        f"``default_factory={keyword.value.id}`` at "
+                        f"{source_path}:{node.lineno} — M01 NFR forbids "
+                        f"mutable defaults on Event subclasses."
+                    )
+
+    def test_registry_is_the_sole_documented_shared_mutable_state(self) -> None:
+        """Pin the NFR's documented exception: ``Event._REGISTRY`` is
+        the single shared mutable class attribute, populated only at
+        class-creation time via ``__init_subclass__``. If a future
+        contributor adds another mutable class attribute to ``Event``
+        and updates ``EXEMPT_NAMES`` to whitelist it, this test catches
+        the change explicitly so the rationale can be reviewed.
+        """
+        self.assertEqual(
+            self.EXEMPT_NAMES,
+            frozenset({"_REGISTRY"}),
+            "EXEMPT_NAMES has drifted from the documented NFR exception. "
+            "Only ``Event._REGISTRY`` is permitted as shared mutable "
+            "class state. If a new exception is genuinely required, "
+            "document the rationale here and update the NFR text in "
+            "docs/superpowers/specs/2026-06-14-m01-event-types.md.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
