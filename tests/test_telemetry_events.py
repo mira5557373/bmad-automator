@@ -181,6 +181,31 @@ class TestParseEvent(unittest.TestCase):
         self.assertEqual(event.raw_event_type, "unknown_event_type")
         self.assertEqual(event.raw_fields["custom_field"], "value")
 
+    def test_parse_event_missing_event_type_raises_value_error(self):
+        """parse_event must raise ValueError if event_type is missing."""
+        line = '{"timestamp":"2026-06-14T12:00:00Z","run_id":"run-123"}'
+        with self.assertRaises(ValueError):
+            parse_event(line)
+
+    def test_parse_event_invalid_json_propagates_decode_error(self):
+        """parse_event must propagate json.JSONDecodeError for invalid JSON."""
+        line = "not valid json {"
+        with self.assertRaises(json.JSONDecodeError):
+            parse_event(line)
+
+    def test_parse_event_missing_required_field_raises_type_error(self):
+        """parse_event must raise TypeError if required field is missing."""
+        line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123"}'
+        # story_key is required but missing
+        with self.assertRaises(TypeError):
+            parse_event(line)
+
+    def test_parse_event_unexpected_extra_fields_raise_type_error(self):
+        """parse_event must raise TypeError if known event has unexpected fields."""
+        line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","story_key":"S1","epic":"E1","unknown_field":"value"}'
+        with self.assertRaises(TypeError):
+            parse_event(line)
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
