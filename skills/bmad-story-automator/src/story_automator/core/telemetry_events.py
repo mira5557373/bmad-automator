@@ -85,6 +85,29 @@ class UnknownEvent(Event):
     raw_event_type: str
     raw_fields: dict[str, Any]
 
+    def to_dict(self) -> dict[str, Any]:
+        """Re-emit the original ``event_type`` and unrecognized fields.
+
+        Returns a dict shaped like the wire form of any other Event:
+        ``{"event_type": <raw>, "timestamp": ..., "run_id": ..., **raw_fields}``.
+        The internal ``raw_event_type`` and ``raw_fields`` field names do
+        NOT appear in the output — they are implementation details that
+        capture the unrecognized payload, not part of the JSONL contract.
+        Key order is event_type -> timestamp -> run_id -> raw_fields-in-
+        insertion-order, which is the canonical order produced by every
+        other Event subclass's ``to_dict``. This is the contract that
+        lets REQ-04's "byte-equal to the original input line" hold for
+        canonically-ordered inputs (which is everything that came out of
+        ``to_json_line``).
+        """
+        data: dict[str, Any] = {
+            "event_type": self.raw_event_type,
+            "timestamp": self.timestamp,
+            "run_id": self.run_id,
+        }
+        data.update(self.raw_fields)
+        return data
+
 
 __all__ = [
     "Event",

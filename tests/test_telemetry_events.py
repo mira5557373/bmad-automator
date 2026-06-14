@@ -373,5 +373,76 @@ class UnknownEventTests(unittest.TestCase):
             self.assertIsNot(registered_cls, UnknownEvent)
 
 
+class UnknownEventToDictTests(unittest.TestCase):
+    def test_to_dict_event_type_is_raw_event_type(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        instance = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="future_thing_M99",
+            raw_fields={"alpha": 1},
+        )
+        data = instance.to_dict()
+        self.assertEqual(data["event_type"], "future_thing_M99")
+
+    def test_to_dict_includes_envelope_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="ts-value",
+            run_id="rid-value",
+            raw_event_type="x",
+            raw_fields={},
+        ).to_dict()
+        self.assertEqual(data["timestamp"], "ts-value")
+        self.assertEqual(data["run_id"], "rid-value")
+
+    def test_to_dict_merges_raw_fields_at_top_level(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1, "beta": "two", "gamma": [3]},
+        ).to_dict()
+        self.assertEqual(data["alpha"], 1)
+        self.assertEqual(data["beta"], "two")
+        self.assertEqual(data["gamma"], [3])
+
+    def test_to_dict_excludes_internal_field_names(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1},
+        ).to_dict()
+        # The internal field names raw_event_type/raw_fields MUST NOT appear
+        # in the output dict — they are implementation details. The output is
+        # the wire representation: event_type + envelope + payload fields.
+        self.assertNotIn("raw_event_type", data)
+        self.assertNotIn("raw_fields", data)
+
+    def test_to_dict_key_order_is_event_type_then_envelope_then_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1, "beta": 2},
+        ).to_dict()
+        keys = list(data.keys())
+        # Canonical order: event_type, timestamp, run_id, then raw_fields keys
+        # in their insertion order. This is the contract that lets REQ-04's
+        # "byte-equal to the original input line" hold when the original input
+        # was itself canonically ordered.
+        self.assertEqual(keys[:3], ["event_type", "timestamp", "run_id"])
+        self.assertEqual(keys[3:], ["alpha", "beta"])
+
+
 if __name__ == "__main__":
     unittest.main()
