@@ -118,7 +118,7 @@ grep -nE "^class (StoryStarted|StoryCompleted|StoryFailed|StoryDeferred|RetryAtt
 
 Expected: exactly 13 matches, one per concrete event class. If fewer than 13 or any are missing, m01-m3 did not land cleanly — **BLOCKED**.
 
-- [ ] **Step 2: Confirm baseline test count is 66, all green**
+- [ ] **Step 2: Confirm baseline test suite is green (count in resumable range)**
 
 Run:
 
@@ -126,7 +126,16 @@ Run:
 PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemetry_events 2>&1 | tail -3
 ```
 
-Expected: `Ran 66 tests in 0.0XXs` followed by `OK`. If the count differs from 66 OR if any test fails, the baseline is not the m01-m3-clean state — **BLOCKED**.
+Expected: `Ran N tests in 0.0XXs` with `N` **in the inclusive range [66, 83]**, followed by `OK`.
+
+The range exists because m01-m4 may have been partially executed in a prior bundle:
+- `N == 66` — clean m01-m3-finish baseline (no m01-m4 tasks landed yet).
+- `66 < N < 83` — some m01-m4 tasks already committed; apply the **Prior Work Handling protocol** (see top of plan) per task in Tasks 2–7.
+- `N == 83` — all in-suite m01-m4 tasks already landed; Tasks 2–7 will short-circuit via the protocol and the slice continues with operator-runnable verification gates (Tasks 8–13).
+
+If `N < 66`, m01-m3 did not land cleanly — **BLOCKED**.
+If `N > 83`, work outside this slice's scope has been added — **BLOCKED**, investigate.
+If any test fails (status not `OK`) — **BLOCKED** regardless of count.
 
 - [ ] **Step 3: Confirm baseline module LOC under 500**
 
