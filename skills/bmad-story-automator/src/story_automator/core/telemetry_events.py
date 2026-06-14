@@ -39,6 +39,12 @@ class Event:
             )
         Event._REGISTRY[event_type] = cls
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dict with event_type injected."""
+        d = asdict(self)
+        d["event_type"] = self.EVENT_TYPE
+        return d
+
 
 @dataclass(kw_only=True)
 class UnknownEvent(Event):
