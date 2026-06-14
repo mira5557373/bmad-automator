@@ -496,5 +496,17 @@ class ParseEventHappyPathTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertEqual(event.raw_fields, {"anything": 42, "other": "value"})
 
 
+class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_parse_missing_event_type_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import compact_json, parse_event
+
+        line = compact_json({"timestamp": "t", "run_id": "r"})
+        with self.assertRaises(ValueError) as ctx:
+            parse_event(line)
+        # The error message must mention the missing field by name so an
+        # operator scanning a log can identify the problem at a glance.
+        self.assertIn("event_type", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

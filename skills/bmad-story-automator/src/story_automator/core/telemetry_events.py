@@ -120,6 +120,8 @@ def parse_event(line: str) -> Event:
     in the M01 spec (REQ-07) and validated by the test matrix.
     """
     payload = json.loads(line)
+    if "event_type" not in payload:
+        raise ValueError(f"event missing 'event_type' field: {line[:80]!r}")
     event_type = payload.pop("event_type")
     cls = Event._REGISTRY.get(event_type)
     if cls is None:
