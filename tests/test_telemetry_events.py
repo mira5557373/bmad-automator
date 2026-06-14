@@ -27,6 +27,24 @@ from story_automator.core.telemetry_events import (
 class TestEventRegistry(unittest.TestCase):
     """Test Event base class, registration, and registry structure."""
 
+    def test_event_has_event_type_classvar(self):
+        """Event base must define EVENT_TYPE classvar."""
+        self.assertTrue(hasattr(Event, "EVENT_TYPE"))
+        self.assertIsNotNone(Event.EVENT_TYPE)
+
+    def test_event_has_registry_classvar(self):
+        """Event base must define _REGISTRY classvar as dict."""
+        self.assertTrue(hasattr(Event, "_REGISTRY"))
+        self.assertIsInstance(Event._REGISTRY, dict)
+
+    def test_event_has_timestamp_and_run_id_fields(self):
+        """Event base must have timestamp and run_id instance fields."""
+        import inspect
+        sig = inspect.signature(Event)
+        params = list(sig.parameters.keys())
+        self.assertIn("timestamp", params)
+        self.assertIn("run_id", params)
+
 
 class TestEventSerialization(unittest.TestCase):
     """Test to_dict and to_json_line methods."""
