@@ -201,8 +201,8 @@ class AuditLog:
     """
 
     path: pathlib.Path
-    key: bytes
-    _lock_path: pathlib.Path = dataclasses.field(default=None)  # type: ignore[assignment]
+    key: bytes = dataclasses.field(repr=False)
+    _lock_path: pathlib.Path = dataclasses.field(default=None, repr=False)  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self._lock_path is None:

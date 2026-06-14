@@ -490,5 +490,41 @@ class AuditModuleSizeBudgetM2Tests(unittest.TestCase):
         )
 
 
+class KeyNeverLeaksTests(unittest.TestCase):
+    SECRET_KEY = b"super-secret-canary-key-9c7c9c7c"
+
+    def test_dataclass_repr_does_not_contain_key_bytes(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        log = AuditLog(path=Path("/tmp/x.jsonl"), key=self.SECRET_KEY)
+        r = repr(log)
+        self.assertNotIn("super-secret-canary-key", r)
+        self.assertNotIn(self.SECRET_KEY.hex(), r)
+
+    def test_lock_timeout_message_does_not_contain_key(self) -> None:
+        import filelock
+        from story_automator.core.audit import AuditLog, AuditLockTimeout
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.SECRET_KEY)
+            held = filelock.FileLock(str(log._lock_path))
+            held.acquire(timeout=1)
+            try:
+                with self.assertRaises(AuditLockTimeout) as ctx:
+
+                    class Fake:
+                        event_name = "E"
+
+                        def to_dict(self) -> dict:
+                            return {}
+
+                    log.append(Fake())
+                self.assertNotIn("super-secret-canary-key", str(ctx.exception))
+                self.assertNotIn(self.SECRET_KEY.hex(), str(ctx.exception))
+            finally:
+                held.release()
+
+
 if __name__ == "__main__":
     unittest.main()
