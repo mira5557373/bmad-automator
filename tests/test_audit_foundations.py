@@ -382,5 +382,39 @@ class SecretsNeverLeakTests(unittest.TestCase):
             )
 
 
+class DocstringCoverageTests(unittest.TestCase):
+    PUBLIC_NAMES = (
+        "AuditKeyMissing",
+        "AuditLockTimeout",
+        "derive_key",
+        "load_key_from_env",
+    )
+
+    def test_every_public_name_has_docstring(self) -> None:
+        import story_automator.core.audit as audit
+
+        missing: list[str] = []
+        for name in self.PUBLIC_NAMES:
+            obj = getattr(audit, name)
+            doc = obj.__doc__
+            if not doc or not doc.strip():
+                missing.append(name)
+        self.assertEqual(missing, [], f"public names missing docstrings: {missing}")
+
+    def test_derive_key_docstring_describes_contract(self) -> None:
+        from story_automator.core.audit import derive_key
+
+        doc = (derive_key.__doc__ or "").lower()
+        for required in ("hkdf", "32", "info"):
+            self.assertIn(required, doc)
+
+    def test_load_key_from_env_docstring_documents_none_return(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        doc = (load_key_from_env.__doc__ or "").lower()
+        self.assertIn("none", doc)
+        self.assertIn("bmad_audit_key", doc)
+
+
 if __name__ == "__main__":
     unittest.main()
