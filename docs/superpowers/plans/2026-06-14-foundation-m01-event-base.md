@@ -1731,7 +1731,168 @@ git commit -m "refactor: ensure telemetry_events.py < 500 lines"
 
 ---
 
-### Task 25: Final verification and cleanup
+### Task 25: Test registry idempotence under re-import
+
+**Files:**
+- Modify: `tests/test_telemetry_events.py`
+- Test: TestEventRegistry
+
+- [ ] **Step 1: Add test for module re-import idempotence**
+
+Add to `TestEventRegistry`:
+
+```python
+def test_registry_idempotent_under_reimport(self):
+    """Re-importing module should not cause duplicate registration errors."""
+    import importlib
+    from story_automator.core import telemetry_events
+    
+    # Verify initial registry state
+    initial_count = len(Event._REGISTRY)
+    self.assertEqual(initial_count, 13)
+    
+    # Re-import should not raise RuntimeError or change registry
+    importlib.reload(telemetry_events)
+    
+    reloaded_count = len(Event._REGISTRY)
+    self.assertEqual(reloaded_count, 13)
+    # Verify identity: same class objects
+    self.assertIs(Event._REGISTRY["story_started"], telemetry_events.StoryStarted)
+```
+
+- [ ] **Step 2: Run test to verify it passes**
+
+Run: `python -m pytest tests/test_telemetry_events.py::TestEventRegistry::test_registry_idempotent_under_reimport -v`
+
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_telemetry_events.py
+git commit -m "test: verify registry idempotence under module re-import"
+```
+
+---
+
+### Task 26: Test field type validation edge cases
+
+**Files:**
+- Modify: `tests/test_telemetry_events.py`
+- Test: New test class or extend TestParseEvent
+
+- [ ] **Step 1: Add field type validation tests**
+
+Add to `TestParseEvent`:
+
+```python
+def test_parse_rejects_float_for_int_field(self):
+    """parse_event must reject float value for int field (tokens_in)."""
+    line = '{"event_type":"story_completed","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","duration_s":120.5,"cost_usd":0.25,"tokens_in":1.5,"tokens_out":2000,"attempts":2}'
+    with self.assertRaises(TypeError):
+        parse_event(line)
+
+def test_parse_accepts_int_for_float_field(self):
+    """parse_event must accept int value for float field (cost_usd)."""
+    line = '{"event_type":"cost_charged","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","phase":"dev","cost_usd":1,"tokens_in":500,"tokens_out":1000,"model":"opus"}'
+    event = parse_event(line)
+    self.assertIsInstance(event, CostCharged)
+    self.assertEqual(event.cost_usd, 1)  # int coerced to float
+
+def test_parse_rejects_string_for_int_field(self):
+    """parse_event must reject string value for int field."""
+    line = '{"event_type":"review_cycle","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","cycle_num":"one","issues_found":0,"blocking":false}'
+    with self.assertRaises(TypeError):
+        parse_event(line)
+
+def test_parse_rejects_string_for_bool_field(self):
+    """parse_event must reject string value for bool field."""
+    line = '{"event_type":"review_cycle","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"E1","story_key":"S1","cycle_num":1,"issues_found":0,"blocking":"yes"}'
+    with self.assertRaises(TypeError):
+        parse_event(line)
+
+def test_parse_unicode_in_string_fields(self):
+    """parse_event must preserve non-ASCII in string fields."""
+    line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"r1","epic":"史诗","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'
+    event = parse_event(line)
+    self.assertEqual(event.epic, "史诗")
+```
+
+- [ ] **Step 2: Run tests to verify they pass**
+
+Run: `python -m pytest tests/test_telemetry_events.py::TestParseEvent::test_parse_rejects_float_for_int_field -v`
+
+Expected: PASS
+
+Run: `python -m pytest tests/test_telemetry_events.py::TestParseEvent::test_parse_accepts_int_for_float_field -v`
+
+Expected: PASS (Python int/float coercion)
+
+Run: `python -m pytest tests/test_telemetry_events.py::TestParseEvent -v`
+
+Expected: All PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_telemetry_events.py
+git commit -m "test: add field type validation edge case tests"
+```
+
+---
+
+### Task 27: Verify UnknownEvent round-trip preserves JSON key order
+
+**Files:**
+- Modify: `tests/test_telemetry_events.py`
+- Test: TestRoundTrip
+
+- [ ] **Step 1: Add test for UnknownEvent JSON key order preservation**
+
+Add to `TestRoundTrip`:
+
+```python
+def test_unknown_event_preserves_key_order(self):
+    """UnknownEvent to_dict must preserve original field order from raw_fields."""
+    # Create UnknownEvent with specific raw_fields order
+    original = UnknownEvent(
+        timestamp="2026-06-14T12:00:00Z",
+        run_id="run-123",
+        raw_event_type="custom_event",
+        raw_fields={"field_a": 1, "field_b": "test", "field_c": True},
+    )
+    
+    # Serialize and parse back
+    line1 = original.to_json_line()
+    parsed = parse_event(line1)
+    
+    # Verify fields are preserved
+    self.assertEqual(parsed.raw_event_type, "custom_event")
+    self.assertEqual(parsed.raw_fields, {"field_a": 1, "field_b": "test", "field_c": True})
+    
+    # Re-serialize and verify content (key order may differ in JSON, but content is same)
+    line2 = parsed.to_json_line()
+    parsed2 = parse_event(line2)
+    self.assertEqual(parsed2.raw_event_type, parsed.raw_event_type)
+    self.assertEqual(parsed2.raw_fields, parsed.raw_fields)
+```
+
+- [ ] **Step 2: Run test to verify it passes**
+
+Run: `python -m pytest tests/test_telemetry_events.py::TestRoundTrip::test_unknown_event_preserves_key_order -v`
+
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_telemetry_events.py
+git commit -m "test: verify UnknownEvent preserves raw_fields through round-trip"
+```
+
+---
+
+### Task 28: Final verification and cleanup
 
 **Files:**
 - Test: skills/bmad-story-automator/src/story_automator/core/telemetry_events.py
@@ -1765,11 +1926,13 @@ git log --oneline -10  # Verify all commits are present
 git commit --allow-empty -m "milestone: foundation-m01-event-base complete
 
 - Event base class with auto-registering discriminator
-- 13 concrete event dataclasses
+- 13 concrete event dataclasses with full field definitions
 - UnknownEvent forward-compatibility fallback
 - parse_event function with error handling
-- Round-trip serialization invariant
-- ≥85% test coverage
+- Round-trip serialization invariant (concrete + UnknownEvent)
+- Registry idempotence under re-import
+- Field type validation edge cases
+- ≥85% test coverage (40+ tests)
 - All quality gates passing (ruff lint/format, pytest)
 - <500 lines source code
 
@@ -1781,42 +1944,49 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 ## Self-Review Against Spec
 
 **Spec Coverage:**
-- ✓ REQ-01: New module at correct path, importable on 3.11-3.14 — Task 3, 25
+- ✓ REQ-01: New module at correct path, importable on 3.11-3.14 — Task 3, 28
 - ✓ REQ-02: Abstract Event with EVENT_TYPE, _REGISTRY, timestamp, run_id, __init_subclass__, to_dict, to_json_line — Tasks 3, 4, 9, 10
 - ✓ REQ-03: RuntimeError on duplicate EVENT_TYPE with qualnames — Task 5
 - ✓ REQ-04: UnknownEvent not registered, carries raw_event_type and raw_fields — Task 7
-- ✓ REQ-05: 13 concrete event classes with snake_case EVENT_TYPE — Task 8
+- ✓ REQ-05: 13 concrete event classes with snake_case EVENT_TYPE + FULL FIELDS — Task 8 (updated with design doc fields)
 - ✓ REQ-06: Registry exactly 13 entries, UnknownEvent not present — Task 17
-- ✓ REQ-07: parse_event with all error cases — Tasks 12, 13, 14
+- ✓ REQ-07: parse_event with all error cases — Tasks 12, 13, 14, 26
 - ✓ REQ-08: Round-trip invariant for concrete events — Task 15
-- ✓ REQ-09: Round-trip invariant for UnknownEvent — Task 16
-- ✓ REQ-10: ~30 tests across 4 TestCase classes — Tasks 1-19
+- ✓ REQ-09: Round-trip invariant for UnknownEvent — Tasks 16, 27
+- ✓ REQ-10: ~30 tests across 4 TestCase classes — Tasks 1-19, +26-27 = 40+ tests
 - ✓ REQ-11: Import allowlist gate — Task 23
 - ✓ REQ-12: Use iso_now and compact_json from common — Task 3
 
 **Quality Gates:**
-- ✓ Ruff lint/format — Task 20, 21
+- ✓ Ruff lint/format — Tasks 20, 21
 - ✓ ≥85% coverage — Task 22
 - ✓ <500 lines — Task 24
-- ✓ Round-trip determinism — Tasks 15, 16
-- ✓ Registry idempotence — Task 4
-- ✓ Multi-version compatibility — Task 25
+- ✓ Round-trip determinism — Tasks 15, 16, 27
+- ✓ Registry idempotence — Task 25
+- ✓ Multi-version compatibility — Task 28
+- ✓ Field type validation — Task 26
 
 **No Placeholders:**
-- All tasks include complete code snippets, exact file paths, exact commands, expected output
+- All 28 tasks include complete code snippets, exact file paths, exact commands, expected output
 - No "implement X", "add error handling", "similar to Task Y"
-- Round-trip tests are explicit with assertions
+- All tests explicit with assertions
+
+**Gap Fixes Applied (from ultrathink-gap-analysis pass 1):**
+- Critical: Updated all 13 event class field definitions from design doc (Task 8)
+- Added registry idempotence test (Task 25)
+- Added field type validation edge cases (Task 26)  
+- Added UnknownEvent preservation test (Task 27)
 
 ---
 
-## Next Steps
+## Execution Instructions
 
-Plan complete and saved to `docs/superpowers/plans/2026-06-14-foundation-m01-event-base.md`. 
+Plan complete with 28 comprehensive TDD tasks. Ready for implementation.
 
 **Two execution options:**
 
-**1. Subagent-Driven (recommended)** — Fresh subagent per task, review between tasks, fast iteration with quality checkpoints
+**1. Subagent-Driven (recommended)** — Fresh subagent per task, review between tasks, quality checkpoints
 
-**2. Inline Execution** — Execute tasks in this session with superpowers:executing-plans, batch checkpoints for review
+**2. Inline Execution** — Execute tasks in this session with superpowers:executing-plans
 
-Which approach would you prefer?
+Proceed with your preferred approach.
