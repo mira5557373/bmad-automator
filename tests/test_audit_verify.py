@@ -381,6 +381,91 @@ class VerifyMissingFieldTests(unittest.TestCase):
             self.assertEqual(log.verify(), (False, 1))
 
 
+class VerifyMalformedTagTests(unittest.TestCase):
+    KEY = b"\xab" * 32
+
+    def test_non_string_tag_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            # Append a record whose tag is an int (not a string). REQ-08
+            # requires this to return (False, last_valid_seq) — not raise.
+            bad = {
+                "seq": 2,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": 12345,
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(bad) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 1))
+
+    def test_null_tag_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            bad = {
+                "seq": 2,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": None,
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(bad) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 1))
+
+    def test_wrong_length_tag_returns_false_at_previous(self) -> None:
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("E", {"i": 0}))
+            bad = {
+                "seq": 2,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": "f",  # not 64 hex chars
+            }
+            with p.open("ab") as handle:
+                handle.write((compact_json(bad) + "\n").encode("utf-8"))
+            self.assertEqual(log.verify(), (False, 1))
+
+
+class VerifyBoolSeqRejectedTests(unittest.TestCase):
+    KEY = b"\xac" * 32
+
+    def test_first_record_seq_true_returns_false_zero(self) -> None:
+        # bool is a subclass of int in Python; `seq=True` would coincidentally
+        # equal 1 but is a type confusion bug that verify must catch.
+        from story_automator.core.audit import AuditLog
+        from story_automator.core.common import compact_json
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            rec = {
+                "seq": True,
+                "ts": "t",
+                "event": "E",
+                "payload": {},
+                "tag": "0" * 64,
+            }
+            p.write_bytes((compact_json(rec) + "\n").encode("utf-8"))
+            self.assertEqual(AuditLog(path=p, key=self.KEY).verify(), (False, 0))
+
+
 class VerifyNonContiguousSeqTests(unittest.TestCase):
     KEY = b"\xcc" * 32
 

@@ -385,7 +385,11 @@ class AuditLog:
                     if field not in record:
                         return (False, last_valid_seq)
                 seq = record["seq"]
-                if not isinstance(seq, int) or seq != last_valid_seq + 1:
+                if (
+                    not isinstance(seq, int)
+                    or isinstance(seq, bool)
+                    or seq != last_valid_seq + 1
+                ):
                     return (False, last_valid_seq)
                 canonical = _canonical_record_bytes(
                     seq=seq,
@@ -398,8 +402,11 @@ class AuditLog:
                     prev_tag_hex=prev_tag_hex,
                     canonical=canonical,
                 )
-                if not hmac.compare_digest(expected_tag, record["tag"]):
+                tag_value = record["tag"]
+                if not isinstance(tag_value, str) or len(tag_value) != 64:
+                    return (False, last_valid_seq)
+                if not hmac.compare_digest(expected_tag, tag_value):
                     return (False, last_valid_seq)
                 last_valid_seq = seq
-                prev_tag_hex = record["tag"]
+                prev_tag_hex = tag_value
         return (True, last_valid_seq)
