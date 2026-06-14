@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import tempfile
+import time as _time
 import unittest
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -487,6 +488,115 @@ class AuditModuleSizeBudgetM2Tests(unittest.TestCase):
             line_count,
             500,
             f"audit.py is {line_count} lines (budget: 500 per NFR-500-line-cap)",
+        )
+
+
+class AppendCacheInvalidationTests(unittest.TestCase):
+    """The in-memory cache must yield to disk state when an outside writer
+    has appended between two of our calls — file-size change must trigger
+    a re-read so seq and tag stay correct cross-process."""
+
+    KEY = b"\x55" * 32
+
+    def _fake_event(self, payload: dict):
+        class FakeEvent:
+            event_name = "E"
+
+            def __init__(self, p: dict) -> None:
+                self._p = p
+
+            def to_dict(self) -> dict:
+                return self._p
+
+        return FakeEvent(payload)
+
+    def test_outside_append_invalidates_cache(self) -> None:
+        from story_automator.core.audit import (
+            AuditLog,
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(self._fake_event({"i": 1}))
+
+            # Outside writer (e.g. another process) appends seq=2.
+            outside_record = {
+                "seq": 2,
+                "ts": "2026-06-14T00:00:00Z",
+                "event": "Outside",
+                "payload": {"src": "other-process"},
+            }
+            outside_canonical = _canonical_record_bytes(
+                seq=2,
+                ts=outside_record["ts"],
+                event=outside_record["event"],
+                payload=outside_record["payload"],
+            )
+            # Read our seq=1 tag from disk to make a properly chained outside
+            # record — this mirrors what a peer process would do.
+            seq1 = json.loads(p.read_text(encoding="utf-8").splitlines()[0])
+            outside_record["tag"] = _compute_tag(
+                key=self.KEY,
+                prev_tag_hex=seq1["tag"],
+                canonical=outside_canonical,
+            )
+            with p.open("ab") as h:
+                h.write(
+                    (json.dumps(outside_record, separators=(",", ":")) + "\n").encode(
+                        "utf-8"
+                    )
+                )
+
+            # Now our next append must observe seq=3 (chaining from the
+            # outside record), not seq=2 from our stale cache.
+            log.append(self._fake_event({"i": 3}))
+            recs = [
+                json.loads(line)
+                for line in p.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual([r["seq"] for r in recs], [1, 2, 3])
+            self.assertEqual(recs[2]["payload"], {"i": 3})
+
+
+class AppendLatencyTests(unittest.TestCase):
+    """NFR-append-latency: 100-record batch must complete under 500 ms wall time."""
+
+    KEY = b"\x44" * 32
+
+    def test_100_record_batch_under_500ms(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        class Fake:
+            event_name = "E"
+
+            def __init__(self, i: int) -> None:
+                self._i = i
+
+            def to_dict(self) -> dict:
+                # ~64 byte payload — well under the 4 KiB NFR cap.
+                return {"i": self._i, "note": "abcdefghijklmnopqrstuvwxyz"}
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            # Spec: "Append latency must stay under 5 ms median on a *warm*
+            # filesystem". One warm-up append primes the OS file cache and
+            # the FileLock's underlying fd so the timed batch reflects the
+            # warm-path the NFR speaks of.
+            log.append(Fake(-1))
+            start = _time.perf_counter()
+            for i in range(100):
+                log.append(Fake(i))
+            elapsed = _time.perf_counter() - start
+
+        self.assertLess(
+            elapsed,
+            0.5,
+            f"100-record batch took {elapsed:.3f}s; NFR cap is 0.500s",
         )
 
 

@@ -163,26 +163,57 @@ def _compute_tag(*, key: bytes, prev_tag_hex: str | None, canonical: bytes) -> s
     return hmac.new(key, prev_bytes + canonical, hashlib.sha256).hexdigest()
 
 
+_TAIL_CHUNK = 4096
+
+
+def _scan_last_line(handle: Any, size: int) -> bytes | None:
+    """Return the last non-blank line in an open binary handle, or ``None``.
+
+    Reads backwards from ``size`` in 4 KiB chunks. The handle's file pointer
+    is left at an unspecified position; callers that intend to write
+    afterwards should rely on the OS's append-mode semantics, not the
+    pointer.
+    """
+    if size == 0:
+        return None
+    pos = size
+    buf = b""
+    while pos > 0:
+        read_size = min(_TAIL_CHUNK, pos)
+        pos -= read_size
+        handle.seek(pos)
+        buf = handle.read(read_size) + buf
+        stripped = buf.rstrip(b"\r\n")
+        if not stripped:
+            if pos == 0:
+                return None
+            continue
+        nl = stripped.rfind(b"\n")
+        if nl >= 0:
+            return stripped[nl + 1 :]
+        if pos == 0:
+            return stripped
+    return None
+
+
 def _read_last_record(path: pathlib.Path) -> dict[str, Any] | None:
     """Return the last parsed JSON record in ``path``, or ``None``.
 
-    Streams the file line by line, keeping only the most recent successfully
-    parsed object in memory. Blank trailing lines are ignored. Returns
-    ``None`` when the file does not exist, is empty, or contains only blank
-    lines. Malformed JSON on the last non-blank line raises
+    Opens read-only, seeks to the end, then delegates to ``_scan_last_line``
+    to isolate the trailing record without re-streaming the whole file.
+    Returns ``None`` when the file does not exist, is empty, or contains
+    only blank lines. Malformed JSON on the last non-blank line raises
     ``json.JSONDecodeError`` — the append path treats that as a fatal
     corruption signal and propagates it.
     """
     if not path.exists():
         return None
-    last: dict[str, Any] | None = None
-    with path.open("r", encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.strip()
-            if not line:
-                continue
-            last = _json.loads(line)
-    return last
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        last_line = _scan_last_line(handle, handle.tell())
+    if last_line is None:
+        return None
+    return _json.loads(last_line.decode("utf-8"))
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -203,12 +234,32 @@ class AuditLog:
     path: pathlib.Path
     key: bytes = dataclasses.field(repr=False)
     _lock_path: pathlib.Path = dataclasses.field(default=None, repr=False)  # type: ignore[assignment]
+    _lock: filelock.FileLock = dataclasses.field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    # Last record we successfully appended, alongside the file size at that
+    # moment. On the next append we re-stat the file; if the size is
+    # unchanged the cache is still authoritative and we skip the disk
+    # re-read. If the size changed, another writer must have appended
+    # between our calls, so we fall back to streaming the tail from disk.
+    # The lock guarantees no concurrent in-process writer; cross-process
+    # safety is enforced by the size check.
+    _cached_seq: int | None = dataclasses.field(default=None, init=False, repr=False)
+    _cached_tag: str | None = dataclasses.field(default=None, init=False, repr=False)
+    _cached_size: int | None = dataclasses.field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self._lock_path is None:
             self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        # Pre-create parent directories once. Append paths assume the dirs
+        # exist; re-checking on every call costs ~50 us on Windows and adds
+        # nothing — the lock guarantees we are the only writer.
+        ensure_dir(self.path.parent)
+        ensure_dir(self._lock_path.parent)
+        # Reuse the same FileLock instance across appends. filelock is
+        # designed for reuse and skips re-opening its underlying lock fd
+        # on subsequent acquires, which trims per-append latency.
+        self._lock = filelock.FileLock(str(self._lock_path))
 
-    def append(self, event: "Event") -> None:
+    def append(self, event: Event) -> None:
         """Append one record to the chain, computing the tag and bumping seq.
 
         ``event`` is duck-typed: any object with ``event_name`` and
@@ -220,25 +271,44 @@ class AuditLog:
         under the per-log ``filelock.FileLock`` acquired with a 5-second
         timeout — on timeout this method raises ``AuditLockTimeout``.
         """
-        ensure_dir(self.path.parent)
-        ensure_dir(self._lock_path.parent)
-
-        lock = filelock.FileLock(str(self._lock_path))
         try:
-            lock.acquire(timeout=5)
+            self._lock.acquire(timeout=5)
         except filelock.Timeout as exc:
             raise AuditLockTimeout(
                 f"could not acquire audit lock within 5s: {self._lock_path}"
             ) from exc
 
         try:
-            prev = _read_last_record(self.path)
-            if prev is None:
+            # Two separate opens (rb for tail-read, ab for append) are cheaper
+            # than one "a+b" open on Windows by an order of magnitude: read-or-
+            # write mode triggers extra FS setup costs.
+            try:
+                current_size = self.path.stat().st_size
+            except FileNotFoundError:
+                current_size = 0
+
+            if (
+                self._cached_size is not None
+                and current_size == self._cached_size
+                and self._cached_seq is not None
+            ):
+                # File untouched since our last write — trust the in-memory
+                # state and skip the disk re-read. fsync invalidates Windows'
+                # page cache, so re-reading would force a real disk hit each
+                # call (~5 ms) and blow the 500 ms NFR.
+                seq = self._cached_seq + 1
+                prev_tag_hex: str | None = self._cached_tag
+            elif current_size == 0:
                 seq = 1
-                prev_tag_hex: str | None = None
+                prev_tag_hex = None
             else:
-                seq = int(prev["seq"]) + 1
-                prev_tag_hex = prev["tag"]
+                prev = _read_last_record(self.path)
+                if prev is None:
+                    seq = 1
+                    prev_tag_hex = None
+                else:
+                    seq = int(prev["seq"]) + 1
+                    prev_tag_hex = prev["tag"]
 
             ts = iso_now()
             event_name = event.event_name
@@ -249,7 +319,6 @@ class AuditLog:
             tag = _compute_tag(
                 key=self.key, prev_tag_hex=prev_tag_hex, canonical=canonical
             )
-
             record = {
                 "seq": seq,
                 "ts": ts,
@@ -258,10 +327,15 @@ class AuditLog:
                 "tag": tag,
             }
             line = compact_json(record) + "\n"
+            line_bytes = line.encode("utf-8")
 
             with self.path.open("ab") as handle:
-                handle.write(line.encode("utf-8"))
+                handle.write(line_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
+
+            self._cached_seq = seq
+            self._cached_tag = tag
+            self._cached_size = current_size + len(line_bytes)
         finally:
-            lock.release()
+            self._lock.release()
