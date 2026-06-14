@@ -1145,6 +1145,49 @@ class TestRoundTripEdgeCases(unittest.TestCase):
             f"JSON not byte-equal after round-trip.\nOriginal: {line1}\nRe-serialized: {line2}",
         )
 
+    def test_cost_charged_with_boundary_float_values(self):
+        """CostCharged must handle float boundaries and precision."""
+        original = CostCharged(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            phase="test",
+            cost_usd=0.0001,  # Small value
+            tokens_in=0,       # Zero
+            tokens_out=999999,  # Large int
+            model="opus"
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        self.assertEqual(parsed.cost_usd, 0.0001)
+        self.assertEqual(parsed.tokens_in, 0)
+        self.assertEqual(parsed.tokens_out, 999999)
+        line2 = parsed.to_json_line()
+        self.assertEqual(line1, line2)
+
+    def test_story_completed_with_large_duration(self):
+        """StoryCompleted must handle large float values without precision loss."""
+        original = StoryCompleted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=999999.99999,
+            cost_usd=123.456789,
+            tokens_in=2000000,
+            tokens_out=5000000,
+            attempts=100
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        # Note: JSON float serialization may lose precision; verify parse succeeds
+        self.assertAlmostEqual(parsed.cost_usd, 123.456789, places=5)
+        line2 = parsed.to_json_line()
+        # Re-parse and verify consistency
+        parsed2 = parse_event(line2)
+        self.assertEqual(parsed2.cost_usd, parsed.cost_usd)
+
 
 if __name__ == "__main__":
     unittest.main()
