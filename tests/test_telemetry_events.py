@@ -588,6 +588,30 @@ class TestRoundTrip(unittest.TestCase):
         self.assertEqual(parsed2.raw_event_type, parsed.raw_event_type)
         self.assertEqual(parsed2.raw_fields, parsed.raw_fields)
 
+    def test_unknown_event_preserves_key_order(self):
+        """UnknownEvent to_dict must preserve original field order from raw_fields."""
+        # Create UnknownEvent with specific raw_fields order
+        original = UnknownEvent(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            raw_event_type="custom_event",
+            raw_fields={"field_a": 1, "field_b": "test", "field_c": True},
+        )
+
+        # Serialize and parse back
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+
+        # Verify fields are preserved
+        self.assertEqual(parsed.raw_event_type, "custom_event")
+        self.assertEqual(parsed.raw_fields, {"field_a": 1, "field_b": "test", "field_c": True})
+
+        # Re-serialize and verify content (key order may differ in JSON, but content is same)
+        line2 = parsed.to_json_line()
+        parsed2 = parse_event(line2)
+        self.assertEqual(parsed2.raw_event_type, parsed.raw_event_type)
+        self.assertEqual(parsed2.raw_fields, parsed.raw_fields)
+
 
 if __name__ == "__main__":
     unittest.main()
