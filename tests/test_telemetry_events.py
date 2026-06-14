@@ -179,5 +179,53 @@ class EventIdempotencyTests(_RegistryIsolationMixin, unittest.TestCase):
                 EVENT_TYPE: ClassVar[str] = "_idemp_negative"
 
 
+class EventToDictTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_to_dict_injects_event_type_from_classvar(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempToDict(Event):
+            EVENT_TYPE: ClassVar[str] = "_to_dict_test"
+
+        data = _TempToDict(timestamp="t", run_id="r").to_dict()
+        self.assertEqual(data["event_type"], "_to_dict_test")
+
+    def test_to_dict_event_type_is_first_key(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempOrder(Event):
+            EVENT_TYPE: ClassVar[str] = "_order_test"
+
+        keys = list(_TempOrder(timestamp="t", run_id="r").to_dict().keys())
+        self.assertEqual(keys[0], "event_type")
+
+    def test_to_dict_includes_envelope_fields(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempEnv(Event):
+            EVENT_TYPE: ClassVar[str] = "_env_test"
+
+        data = _TempEnv(timestamp="ts-value", run_id="rid-value").to_dict()
+        self.assertEqual(data["timestamp"], "ts-value")
+        self.assertEqual(data["run_id"], "rid-value")
+
+    def test_to_dict_returns_plain_dict(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempType(Event):
+            EVENT_TYPE: ClassVar[str] = "_type_test"
+
+        data = _TempType(timestamp="t", run_id="r").to_dict()
+        # to_dict must return a builtin dict for json.dumps compatibility.
+        self.assertIs(type(data), dict)
+
+
 if __name__ == "__main__":
     unittest.main()

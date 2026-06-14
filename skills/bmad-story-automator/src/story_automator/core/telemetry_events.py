@@ -10,8 +10,8 @@ helpers (to_dict, to_json_line). The forward-compatibility fallback
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import asdict, dataclass
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -40,3 +40,16 @@ class Event:
                 f"{existing.__qualname__} vs {cls.__qualname__}"
             )
         Event._REGISTRY[cls.EVENT_TYPE] = cls
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict with event_type injected from the
+        EVENT_TYPE classvar.
+
+        `event_type` is never an instance field. Subclasses cannot
+        accidentally desync the discriminator from the class — the
+        classvar is the single source of truth, and to_dict is the
+        only place it's read into the payload.
+        """
+        data: dict[str, Any] = {"event_type": self.EVENT_TYPE}
+        data.update(asdict(self))
+        return data
