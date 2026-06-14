@@ -1,5 +1,13 @@
 ### Features
 
+- feat(audit): hide key from AuditLog repr (1976f13)
+- feat(audit): guard append with filelock and 5s timeout (16f3b5b)
+- feat(audit): append first record to the chain (dae237e)
+- feat(audit): read_last_record helper for prev tag lookup (773a5a1)
+- feat(audit): compute_tag helper for hash chain (5a02bbb)
+- feat(audit): canonical record bytes helper (c353693)
+- feat(audit): declare Event protocol for append callers (8805918)
+- feat(audit): add AuditLog dataclass scaffold (76ac3b4)
 - feat(audit): add load_key_from_env (27b97d7)
 - feat(audit): add derive_key (HKDF-SHA256) (556d2f7)
 - feat(audit): add HKDF-Expand primitive (7ec5cd0)
@@ -18,6 +26,7 @@
 
 ### Bug Fixes
 
+- fix: post-impl review fixes for m04-m2-append-chain (6ebc19e)
 - fix(story-keys): complete non-numeric epic support (#23) (51a3cbc)
 - fix(stop-hooks): resolve codex project trust from global config (#26) (417993d)
 - fix(stop-hooks): migrate Codex feature flag from codex_hooks to hooks (#25) (8176f31)
@@ -64,6 +73,8 @@
 
 ### Documentation
 
+- docs(audit): plan M04 M2 append-chain milestone (65f2c49)
+- docs: update generated documentation (08d362e)
 - docs(plan): m04-m1-foundations TDD implementation plan (6af9258)
 - docs: add CLAUDE.md with module map and guardrails (f02aa5e)
 - docs: document versioning release flow (31db861)
@@ -77,6 +88,9 @@
 
 ### Tests
 
+- test(audit): pin 500-line budget in M2 suite (1e9b8fb)
+- test(audit): chain three appended records and verify tag continuity (ce7aa8d)
+- test(audit): pin AuditLog in public surface (69d2fc7)
 - test(audit): enforce docstring coverage (c679204)
 - test(audit): enforce secrets-never-leak invariant (c6aea5a)
 - test(audit): enforce stdlib + filelock import allowlist (1e465af)
