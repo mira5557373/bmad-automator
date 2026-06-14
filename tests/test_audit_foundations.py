@@ -234,5 +234,32 @@ class DeriveKeyTests(unittest.TestCase):
         self.assertTrue(derive_key.__doc__ and "HKDF" in derive_key.__doc__)
 
 
+class LoadKeyFromEnvHappyPathTests(unittest.TestCase):
+    def test_reads_supplied_env_mapping(self) -> None:
+        from story_automator.core.audit import derive_key, load_key_from_env
+
+        key = load_key_from_env({"BMAD_AUDIT_KEY": "test-secret"})
+        self.assertEqual(key, derive_key("test-secret"))
+
+    def test_reads_process_environment_when_env_is_none(self) -> None:
+        import os
+        from unittest.mock import patch
+        from story_automator.core.audit import derive_key, load_key_from_env
+
+        with patch.dict(
+            os.environ, {"BMAD_AUDIT_KEY": "from-process-env"}, clear=False
+        ):
+            key = load_key_from_env()
+        self.assertEqual(key, derive_key("from-process-env"))
+
+    def test_returns_bytes_of_length_32(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        key = load_key_from_env({"BMAD_AUDIT_KEY": "x"})
+        assert key is not None
+        self.assertIsInstance(key, bytes)
+        self.assertEqual(len(key), 32)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
+from typing import Mapping
 
 
 __all__ = [
     "AuditKeyMissing",
     "AuditLockTimeout",
     "derive_key",
-    "load_key_from_env",  # noqa: F822 - defined later this milestone
+    "load_key_from_env",
 ]
 
 
@@ -84,3 +86,22 @@ def derive_key(secret: str, *, salt: bytes = _HKDF_DEFAULT_SALT) -> bytes:
     """
     prk = _hkdf_extract(salt, secret.encode("utf-8"))
     return _hkdf_expand(prk, _HKDF_INFO, _KEY_LENGTH)
+
+
+_ENV_VAR = "BMAD_AUDIT_KEY"
+
+
+def load_key_from_env(env: Mapping[str, str] | None = None) -> bytes | None:
+    """Return a derived audit key from the ``BMAD_AUDIT_KEY`` environment variable.
+
+    Reads from ``env`` when provided, otherwise from ``os.environ``. Returns
+    ``None`` when the variable is unset or empty — this function must never
+    raise on a missing variable per REQ-04. The raw env value is consumed
+    only inside ``derive_key`` and is never logged, repr'd, or included in
+    error output anywhere in this module.
+    """
+    source: Mapping[str, str] = env if env is not None else os.environ
+    raw = source.get(_ENV_VAR, "")
+    if not raw:
+        return None
+    return derive_key(raw)
