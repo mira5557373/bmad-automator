@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from story_automator.core.telemetry_events import (
     Event,
@@ -22,6 +22,44 @@ from story_automator.core.telemetry_events import (
     BudgetAlert,
     parse_event,
 )
+
+
+class TestUnknownEvent(unittest.TestCase):
+    """Test UnknownEvent dataclass structure (REQ-04)."""
+
+    def test_unknown_event_has_required_fields(self):
+        """UnknownEvent must have raw_event_type and raw_fields fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(UnknownEvent)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(UnknownEvent)}
+
+        # Check base fields from Event
+        self.assertIn("timestamp", fields)
+        self.assertIn("run_id", fields)
+
+        # Check UnknownEvent-specific fields
+        self.assertIn("raw_event_type", fields)
+        self.assertIn("raw_fields", fields)
+        self.assertEqual(fields["raw_event_type"], str)
+        self.assertEqual(fields["raw_fields"], dict[str, Any])
+
+    def test_unknown_event_to_dict_re_emits_original_type(self):
+        """UnknownEvent.to_dict must use raw_event_type as event_type."""
+        unknown = UnknownEvent(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            raw_event_type="future_event_v2",
+            raw_fields={"custom": "value", "count": 42},
+        )
+        d = unknown.to_dict()
+        self.assertEqual(d["event_type"], "future_event_v2")
+        self.assertNotIn(
+            "raw_event_type", d
+        )  # raw_event_type is injected as event_type
+        self.assertEqual(d["custom"], "value")
+        self.assertEqual(d["count"], 42)
 
 
 class TestEventRegistry(unittest.TestCase):
