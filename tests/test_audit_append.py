@@ -323,5 +323,82 @@ class AppendFirstRecordTests(unittest.TestCase):
             self.assertNotIn(": ", text)
 
 
+class AppendChainTests(unittest.TestCase):
+    KEY = b"\x22" * 32
+
+    def _fake_event(self, name: str, payload: dict):
+        class FakeEvent:
+            event_name = name
+
+            def __init__(self, p: dict) -> None:
+                self._p = p
+
+            def to_dict(self) -> dict:
+                return self._p
+
+        return FakeEvent(payload)
+
+    def test_three_records_have_contiguous_seqs(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(3):
+                log.append(self._fake_event("E", {"i": i}))
+            recs = [
+                json.loads(line)
+                for line in p.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual([r["seq"] for r in recs], [1, 2, 3])
+
+    def test_each_tag_chains_from_previous(self) -> None:
+        from story_automator.core.audit import (
+            AuditLog,
+            _canonical_record_bytes,
+            _compute_tag,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(3):
+                log.append(self._fake_event("E", {"i": i}))
+            recs = [
+                json.loads(line)
+                for line in p.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            prev_tag: str | None = None
+            for rec in recs:
+                expected = _compute_tag(
+                    key=self.KEY,
+                    prev_tag_hex=prev_tag,
+                    canonical=_canonical_record_bytes(
+                        seq=rec["seq"],
+                        ts=rec["ts"],
+                        event=rec["event"],
+                        payload=rec["payload"],
+                    ),
+                )
+                self.assertEqual(rec["tag"], expected)
+                prev_tag = rec["tag"]
+
+    def test_file_is_pure_jsonl_no_extra_whitespace(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(5):
+                log.append(self._fake_event("E", {"i": i}))
+            text = p.read_text(encoding="utf-8")
+            # Exactly 5 newlines, file ends with a newline, no double newlines.
+            self.assertEqual(text.count("\n"), 5)
+            self.assertTrue(text.endswith("\n"))
+            self.assertNotIn("\n\n", text)
+
+
 if __name__ == "__main__":
     unittest.main()
