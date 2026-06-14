@@ -17,3 +17,4 @@ docs/plans/versioning/impl_artifacts/
 .claude/telemetry.jsonl
 .claude/audit/
 docs/superpowers/cli-spend-log.md
+.claude/telemetry.sonnet-run-archive.jsonl
