@@ -1188,6 +1188,25 @@ class TestRoundTripEdgeCases(unittest.TestCase):
         parsed2 = parse_event(line2)
         self.assertEqual(parsed2.cost_usd, parsed.cost_usd)
 
+    def test_concrete_event_with_empty_strings(self):
+        """Events must preserve empty string fields."""
+        original = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="",
+            epic="",
+            story_key="S1",
+            agent="",
+            model="",
+            complexity="",
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        self.assertEqual(parsed.run_id, "")
+        self.assertEqual(parsed.epic, "")
+        self.assertEqual(parsed.agent, "")
+        line2 = parsed.to_json_line()
+        self.assertEqual(line1, line2)
+
 
 if __name__ == "__main__":
     unittest.main()
