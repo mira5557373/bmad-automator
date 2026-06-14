@@ -87,7 +87,18 @@ safety check and is not a supported configuration.
 
 ## Supported Versions
 
-Section body filled in by Task 7.
+Only the current minor release line and the immediately preceding minor release line
+receive security fixes. Older lines are not patched; operators on those lines must
+upgrade before reporting an issue.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| 1.15.x  | Yes                |
+| 1.14.x  | Yes                |
+| < 1.14  | No                 |
+
+The minor lines listed above track `package.json` at the head of `main`. Patch
+releases inside a supported minor line are always considered supported.
 
 ## Reporting a vulnerability
 
