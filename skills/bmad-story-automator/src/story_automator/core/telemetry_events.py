@@ -21,8 +21,10 @@ class Event:
     """Base for all typed telemetry events.
 
     Concrete events declare an EVENT_TYPE classvar and become auto-
-    registered via __init_subclass__. Identity-check idempotency lands
-    in the next task; serialization helpers follow.
+    registered via __init_subclass__, with duplicate-EVENT_TYPE detection
+    (raises RuntimeError) and identity-check idempotency under re-import.
+    The to_dict and to_json_line helpers emit JSON with event_type
+    sourced from the EVENT_TYPE classvar (never an instance field).
     """
 
     EVENT_TYPE: ClassVar[str] = ""
