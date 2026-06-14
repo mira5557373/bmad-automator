@@ -1097,5 +1097,54 @@ class TestUnknownEventRoundTrip(unittest.TestCase):
         self.assertEqual(parsed2.raw_fields["nested"], {"inner": "value", "count": 42})
 
 
+class TestRoundTripEdgeCases(unittest.TestCase):
+    """Test round-trip with unicode, special JSON chars, and boundary values."""
+
+    def test_concrete_event_with_unicode_emoji(self):
+        """StoryStarted must preserve unicode emoji in string fields."""
+        original = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="EPIC-🚀",
+            story_key="S1",
+            agent="claude",
+            model="opus",
+            complexity="high 🎯",
+        )
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        self.assertEqual(parsed.epic, "EPIC-🚀")
+        self.assertEqual(parsed.complexity, "high 🎯")
+        line2 = parsed.to_json_line()
+        self.assertEqual(line1, line2)
+
+    def test_concrete_event_with_escaped_json_chars(self):
+        """Event must handle escaped quotes, newlines, tabs, and backslashes."""
+        original = StoryFailed(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="r1",
+            epic="EPIC-1",
+            story_key="S1",
+            error_class='syntax"error',
+            reason="line1\nline2\ttab",
+            attempts=1,
+            final_session=r"path\to\session",  # Use raw string to avoid double-escape
+        )
+        # First round-trip
+        line1 = original.to_json_line()
+        parsed = parse_event(line1)
+        # Verify parsed values match original
+        self.assertEqual(parsed.error_class, 'syntax"error')
+        self.assertEqual(parsed.reason, "line1\nline2\ttab")
+        self.assertEqual(parsed.final_session, r"path\to\session")
+        # Verify byte-equality on re-serialize
+        line2 = parsed.to_json_line()
+        self.assertEqual(
+            line1,
+            line2,
+            f"JSON not byte-equal after round-trip.\nOriginal: {line1}\nRe-serialized: {line2}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
