@@ -152,6 +152,27 @@ class TestEventSerialization(unittest.TestCase):
 class TestParseEvent(unittest.TestCase):
     """Test parse_event function with all branches and error cases."""
 
+    def test_parse_event_known_type(self):
+        """parse_event must return correct concrete class for known type."""
+        line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'
+        event = parse_event(line)
+        self.assertIsInstance(event, StoryStarted)
+        self.assertEqual(event.story_key, "S1")
+        self.assertEqual(event.epic, "E1")
+        self.assertEqual(event.agent, "claude")
+
+    def test_parse_event_returns_correct_type_for_each_class(self):
+        """parse_event must dispatch to correct concrete class."""
+        cases = [
+            (StoryStarted, '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'),
+            (StoryCompleted, '{"event_type":"story_completed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","duration_s":120.5,"cost_usd":0.25,"tokens_in":1000,"tokens_out":2000,"attempts":2}'),
+            (StoryFailed, '{"event_type":"story_failed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","error_class":"timeout","reason":"test","attempts":5,"final_session":"session1"}'),
+        ]
+        for expected_class, line in cases:
+            with self.subTest(expected_class=expected_class.__name__):
+                event = parse_event(line)
+                self.assertIsInstance(event, expected_class)
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
