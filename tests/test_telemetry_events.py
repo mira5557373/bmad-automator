@@ -173,6 +173,14 @@ class TestParseEvent(unittest.TestCase):
                 event = parse_event(line)
                 self.assertIsInstance(event, expected_class)
 
+    def test_parse_event_unknown_type(self):
+        """parse_event must return UnknownEvent for unrecognized type."""
+        line = '{"event_type":"unknown_event_type","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","custom_field":"value"}'
+        event = parse_event(line)
+        self.assertIsInstance(event, UnknownEvent)
+        self.assertEqual(event.raw_event_type, "unknown_event_type")
+        self.assertEqual(event.raw_fields["custom_field"], "value")
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
