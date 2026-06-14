@@ -9,3 +9,23 @@ helpers (to_dict, to_json_line). The forward-compatibility fallback
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import ClassVar
+
+
+@dataclass
+class Event:
+    """Base for all typed telemetry events.
+
+    Concrete events declare an EVENT_TYPE classvar and become auto-
+    registered via __init_subclass__ (added in the next task). Round-trip
+    helpers (to_dict, to_json_line) and the iso_now / compact_json re-
+    exports also land in subsequent tasks of this slice.
+    """
+
+    EVENT_TYPE: ClassVar[str] = ""
+    _REGISTRY: ClassVar[dict[str, type[Event]]] = {}
+
+    timestamp: str
+    run_id: str
