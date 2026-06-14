@@ -125,5 +125,59 @@ class EventDuplicateDetectionTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertIn("_DupQualB", message)
 
 
+class EventIdempotencyTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_same_class_reregistration_does_not_raise(self) -> None:
+        """Identity check `existing is not cls` lets the same class
+        re-trigger __init_subclass__ (e.g., under module reload) without
+        raising a spurious RuntimeError.
+
+        This is the canonical test for the idempotency NFR. We do NOT
+        use importlib.reload here — reload mutates the module's class
+        identity, which can pollute cross-TestCase state and confuse
+        the snapshot/restore mixin. Calling __init_subclass__ directly
+        on the same class exercises the exact code path that matters."""
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _Reentrant(Event):
+            EVENT_TYPE: ClassVar[str] = "_reentrant_check"
+
+        registered_first = Event._REGISTRY["_reentrant_check"]
+        self.assertIs(registered_first, _Reentrant)
+
+        # Python wraps __init_subclass__ as an implicit classmethod;
+        # __func__ gives the underlying function so we can invoke it
+        # with an explicit `cls` argument matching the same identity
+        # that's already in the registry.
+        init_subclass = Event.__init_subclass__.__func__  # type: ignore[attr-defined]
+        try:
+            init_subclass(_Reentrant)
+        except RuntimeError as exc:
+            self.fail(f"identity check failed: re-registration raised {exc!r}")
+
+        # Registry entry unchanged — not cleared, not duplicated.
+        self.assertIs(Event._REGISTRY["_reentrant_check"], registered_first)
+
+    def test_different_class_same_event_type_still_raises(self) -> None:
+        """Companion negative test: confirm the identity check is
+        SPECIFIC to identity — two different class objects sharing the
+        same EVENT_TYPE must still raise (this is REQ-03 from a
+        different angle and protects against an over-eager identity
+        check that accidentally accepts any class)."""
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _IdFirst(Event):
+            EVENT_TYPE: ClassVar[str] = "_idemp_negative"
+
+        with self.assertRaises(RuntimeError):
+
+            @dataclass
+            class _IdSecond(Event):  # noqa: F841
+                EVENT_TYPE: ClassVar[str] = "_idemp_negative"
+
+
 if __name__ == "__main__":
     unittest.main()
