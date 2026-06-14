@@ -67,7 +67,23 @@ event and report it through the disclosure path below.
 
 ## Required environment
 
-Section body filled in by Task 6.
+Two environment variables shape the security-relevant behaviour of the orchestrator.
+
+`BMAD_AUDIT_KEY` opts the operator into the M04 audit log. When set to a non-empty
+value, the orchestrator emits structured audit events to a file in the project's
+state directory, encrypted under the key. The full event surface is defined in
+`skills/bmad-story-automator/src/story_automator/core/telemetry_events.py` so the
+operator can audit the schema directly. The audit writer uses the helpers
+`iso_now`, `compact_json`, and `write_atomic` from
+`skills/bmad-story-automator/src/story_automator/core/common.py`, so timestamps,
+serialisation, and on-disk format are consistent across event types. If
+`BMAD_AUDIT_KEY` is unset, no audit file is written; the operator gives up the
+audit trail in exchange for zero key-management overhead.
+
+`BMAD_ALLOW_CEILING_BYPASS` must remain unset in normal operation. It exists only
+so that maintainers can run integration tests against retry-ceiling behaviour
+without tripping the production guard. Setting it in a real run silently disables a
+safety check and is not a supported configuration.
 
 ## Supported Versions
 
