@@ -15,7 +15,7 @@ import hmac
 __all__ = [
     "AuditKeyMissing",
     "AuditLockTimeout",
-    "derive_key",  # noqa: F822 - defined later this milestone
+    "derive_key",
     "load_key_from_env",  # noqa: F822 - defined later this milestone
 ]
 
@@ -66,3 +66,21 @@ def _hkdf_expand(prk: bytes, info: bytes, length: int) -> bytes:
         out.extend(previous)
         counter += 1
     return bytes(out[:length])
+
+
+_HKDF_DEFAULT_SALT = b"bmad-audit-v1"
+_HKDF_INFO = b"audit-chain"
+_KEY_LENGTH = 32
+
+
+def derive_key(secret: str, *, salt: bytes = _HKDF_DEFAULT_SALT) -> bytes:
+    """Derive a 32-byte audit-chain key from ``secret`` via RFC 5869 HKDF-SHA256.
+
+    Uses ``salt`` as the HKDF salt (default ``b"bmad-audit-v1"``) and the
+    fixed ``info`` value ``b"audit-chain"``. Implementation is hand-rolled on
+    top of ``hmac`` + ``hashlib.sha256``; ``hashlib.pbkdf2_hmac`` is forbidden
+    here per REQ-03. The returned bytes are the raw key material — never log
+    or include them in repr / exception messages.
+    """
+    prk = _hkdf_extract(salt, secret.encode("utf-8"))
+    return _hkdf_expand(prk, _HKDF_INFO, _KEY_LENGTH)

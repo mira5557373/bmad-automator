@@ -179,5 +179,60 @@ class HkdfExpandTests(unittest.TestCase):
             _hkdf_expand(b"\x44" * 32, b"audit-chain", 8161)
 
 
+class DeriveKeyTests(unittest.TestCase):
+    DEFAULT_VECTORS = {
+        "test-secret": "6e4452e3b4aa348f94f2f85f8cadb311d212993e9c5313281fddacb3435c8c8f",
+        "a": "be84295cf7f53d78930226f9ce762c8f43cc0f619cd3a0c8c502f796ed73b5bf",
+        "rotate-me-2026": "3a685fdd5172d4eb599420312d5a83445d4d61b1b856cf671e81973d49f42b82",
+    }
+
+    def test_default_salt_matches_rfc_vectors(self) -> None:
+        from story_automator.core.audit import derive_key
+
+        for secret, expected_hex in self.DEFAULT_VECTORS.items():
+            with self.subTest(secret=secret):
+                key = derive_key(secret)
+                self.assertEqual(key.hex(), expected_hex)
+                self.assertEqual(len(key), 32)
+                self.assertIsInstance(key, bytes)
+
+    def test_custom_salt_changes_output(self) -> None:
+        from story_automator.core.audit import derive_key
+
+        custom = derive_key("test-secret", salt=b"custom-salt")
+        self.assertEqual(
+            custom.hex(),
+            "200ca78c7bd60448c4676b3009fb33ce374f8c75f02042d7a154b40dc09e4a2f",
+        )
+        self.assertNotEqual(custom, derive_key("test-secret"))
+
+    def test_salt_is_keyword_only(self) -> None:
+        from story_automator.core.audit import derive_key
+
+        with self.assertRaises(TypeError):
+            derive_key("test-secret", b"positional-salt")  # type: ignore[misc]
+
+    def test_does_not_use_pbkdf2(self) -> None:
+        # REQ-03 forbids hashlib.pbkdf2_hmac. Smoke test: the implementation
+        # must not equal the pbkdf2_hmac output for any reasonable iteration count.
+        from story_automator.core.audit import derive_key
+
+        actual = derive_key("test-secret")
+        for iters in (1, 1000, 100_000):
+            forbidden = hashlib.pbkdf2_hmac(
+                "sha256", b"test-secret", b"bmad-audit-v1", iters, 32
+            )
+            self.assertNotEqual(
+                actual,
+                forbidden,
+                f"derive_key accidentally matches pbkdf2_hmac at {iters} iters",
+            )
+
+    def test_docstring_present(self) -> None:
+        from story_automator.core.audit import derive_key
+
+        self.assertTrue(derive_key.__doc__ and "HKDF" in derive_key.__doc__)
+
+
 if __name__ == "__main__":
     unittest.main()
