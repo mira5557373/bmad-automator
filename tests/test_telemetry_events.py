@@ -914,5 +914,55 @@ class RegistryCompletenessTests(unittest.TestCase):
             self.assertEqual(cls.EVENT_TYPE, key)
 
 
+class ConcreteEventExportContractTests(unittest.TestCase):
+    """REQ-05 implication: the 13 concrete classes must be importable
+    via the documented module path. ``__all__`` pins the surface so
+    ``from story_automator.core.telemetry_events import *`` works as
+    documented in the design doc, and so future renames are caught
+    by this gate rather than at downstream call sites.
+    """
+
+    # Only the 13 concrete classes. The base ``Event`` / fallback ``UnknownEvent`` /
+    # function ``parse_event`` / helpers ``iso_now`` + ``compact_json`` are pinned by
+    # m01-m1's ``EventImportContractTests`` and m01-m2's ``ParseEventExportContractTests``.
+    # This tuple is the m01-m3 delta — adding the base/fallback/parser here would
+    # double-cover them and tightly couple this test class to upstream slice contracts.
+    EXPECTED_NAMES = (
+        "BudgetAlert",
+        "CostCharged",
+        "EscalationTriggered",
+        "RetroFired",
+        "RetryAttempt",
+        "ReviewCycle",
+        "StoryCompleted",
+        "StoryDeferred",
+        "StoryFailed",
+        "StoryStarted",
+        "TmuxSessionCompleted",
+        "TmuxSessionCrashed",
+        "TmuxSessionSpawned",
+    )
+
+    def test_all_thirteen_concrete_classes_are_in_dunder_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        for name in self.EXPECTED_NAMES:
+            self.assertIn(
+                name,
+                telemetry_events.__all__,
+                f"{name} missing from __all__",
+            )
+
+    def test_all_thirteen_concrete_classes_are_importable_top_level(self) -> None:
+        # Smoke test: every name in EXPECTED_NAMES resolves to a class
+        # attribute on the module (and is not None / not a function).
+        from story_automator.core import telemetry_events
+
+        for name in self.EXPECTED_NAMES:
+            obj = getattr(telemetry_events, name, None)
+            self.assertIsNotNone(obj, f"{name} is not defined")
+            self.assertTrue(isinstance(obj, type), f"{name} is not a class")
+
+
 if __name__ == "__main__":
     unittest.main()
