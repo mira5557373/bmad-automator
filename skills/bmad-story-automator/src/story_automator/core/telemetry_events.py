@@ -19,9 +19,9 @@ class Event:
     """Base for all typed telemetry events.
 
     Concrete events declare an EVENT_TYPE classvar and become auto-
-    registered via __init_subclass__ (added in the next task). Round-trip
-    helpers (to_dict, to_json_line) and the iso_now / compact_json re-
-    exports also land in subsequent tasks of this slice.
+    registered via __init_subclass__. Duplicate-detection and identity-
+    check idempotency land in the next two tasks; serialization helpers
+    follow.
     """
 
     EVENT_TYPE: ClassVar[str] = ""
@@ -29,3 +29,9 @@ class Event:
 
     timestamp: str
     run_id: str
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if not cls.EVENT_TYPE:
+            return
+        Event._REGISTRY[cls.EVENT_TYPE] = cls
