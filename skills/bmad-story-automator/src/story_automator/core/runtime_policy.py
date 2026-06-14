@@ -9,7 +9,14 @@ from .frontmatter import parse_simple_frontmatter
 from .runtime_layout import active_marker_path, bundled_story_skill_root, resolve_portable_path, resolve_skill_dir
 from .utils import ensure_dir, get_project_root, iso_now, md5_hex8, read_text, write_atomic
 
-VALID_TOP_LEVEL_KEYS = {"version", "snapshot", "runtime", "workflow", "steps", "security"}
+VALID_TOP_LEVEL_KEYS = {
+    "version",
+    "snapshot",
+    "runtime",
+    "workflow",
+    "steps",
+    "security",
+}
 VALID_STEP_NAMES = {"create", "dev", "auto", "review", "retro"}
 VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete"}
 VALID_ASSET_NAMES = {"skill", "workflow", "instructions", "checklist", "template"}
