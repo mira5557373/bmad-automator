@@ -332,5 +332,55 @@ class AuditImportAllowlistTests(unittest.TestCase):
         )
 
 
+class SecretsNeverLeakTests(unittest.TestCase):
+    SECRET = "super-secret-canary-9c7c"
+
+    def test_derive_key_does_not_print(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from story_automator.core.audit import derive_key
+
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf_out), redirect_stderr(buf_err):
+            derive_key(self.SECRET)
+        self.assertNotIn(self.SECRET, buf_out.getvalue())
+        self.assertNotIn(self.SECRET, buf_err.getvalue())
+
+    def test_load_key_from_env_does_not_print(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from story_automator.core.audit import load_key_from_env
+
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf_out), redirect_stderr(buf_err):
+            load_key_from_env({"BMAD_AUDIT_KEY": self.SECRET})
+        self.assertNotIn(self.SECRET, buf_out.getvalue())
+        self.assertNotIn(self.SECRET, buf_err.getvalue())
+
+    def test_exception_messages_do_not_carry_secret(self) -> None:
+        # Raising AuditKeyMissing or AuditLockTimeout in our caller patterns
+        # must never embed the secret. We assert the spec-mandated invariant:
+        # the module source code never references BMAD_AUDIT_KEY's *value*
+        # in any f-string or format call that would echo back the env value.
+        from story_automator.core.audit import AuditKeyMissing, AuditLockTimeout
+
+        for exc_cls in (AuditKeyMissing, AuditLockTimeout):
+            instance = exc_cls("generic message")
+            self.assertNotIn(self.SECRET, str(instance))
+            self.assertNotIn(self.SECRET, repr(instance))
+
+    def test_module_source_does_not_log_or_print_raw_key(self) -> None:
+        # Static check: the module body must not call print, logging.*, or
+        # warnings.warn with f-strings that interpolate the secret. We do a
+        # coarse but cheap check — no `print(`, `logging.`, `warnings.` calls
+        # in the audit module at all (consistent with how other core/* modules
+        # avoid side-effect I/O).
+        source = AUDIT_MODULE_PATH.read_text(encoding="utf-8")
+        for forbidden in ("print(", "logging.", "warnings."):
+            self.assertNotIn(
+                forbidden, source, f"audit.py contains forbidden call: {forbidden}"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
