@@ -79,8 +79,13 @@ class UnknownEvent(Event):
     raw_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Re-emit original event_type and all raw_fields."""
-        return {"event_type": self.raw_event_type, **self.raw_fields}
+        """Re-emit original event_type, timestamp, run_id, and all raw_fields."""
+        return {
+            "event_type": self.raw_event_type,
+            "timestamp": self.timestamp,
+            "run_id": self.run_id,
+            **self.raw_fields,
+        }
 
     def to_json_line(self) -> str:
         """Return compact JSON without newline."""

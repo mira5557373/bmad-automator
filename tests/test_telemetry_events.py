@@ -1058,6 +1058,9 @@ class TestRoundTrip(unittest.TestCase):
         # Re-serialize
         reserialized = parsed.to_json_line()
 
+        # Verify byte-equality (REQ-09): original_line == reserialized
+        self.assertEqual(original_line, reserialized)
+
         # Parse again to verify it's valid
         parsed2 = parse_event(reserialized)
         self.assertIsInstance(parsed2, UnknownEvent)
