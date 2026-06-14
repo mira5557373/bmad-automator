@@ -278,5 +278,36 @@ class EventToJsonLineTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertEqual(json.loads(line), instance.to_dict())
 
 
+class EventImportContractTests(unittest.TestCase):
+    def test_module_re_exports_iso_now(self) -> None:
+        from story_automator.core import telemetry_events
+        from story_automator.core.common import iso_now as canonical
+
+        self.assertIs(telemetry_events.iso_now, canonical)
+
+    def test_module_re_exports_compact_json(self) -> None:
+        from story_automator.core import telemetry_events
+        from story_automator.core.common import compact_json as canonical
+
+        self.assertIs(telemetry_events.compact_json, canonical)
+
+    def test_module_all_lists_event_and_helpers(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("Event", telemetry_events.__all__)
+        self.assertIn("iso_now", telemetry_events.__all__)
+        self.assertIn("compact_json", telemetry_events.__all__)
+
+    def test_module_does_not_redefine_iso_now(self) -> None:
+        # Guard against a future regression where someone re-implements
+        # the helper inside this module. The function object must be
+        # IDENTITY-equal to the one in core.common.
+        from story_automator.core import telemetry_events
+        from story_automator.core import common
+
+        self.assertIs(telemetry_events.iso_now, common.iso_now)
+        self.assertIs(telemetry_events.compact_json, common.compact_json)
+
+
 if __name__ == "__main__":
     unittest.main()

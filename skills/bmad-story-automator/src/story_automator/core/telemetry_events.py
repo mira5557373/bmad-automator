@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
-from .common import compact_json
+from .common import compact_json, iso_now
 
 
 @dataclass
@@ -66,3 +66,10 @@ class Event:
         the rest of the codebase. The helper is NOT duplicated.
         """
         return compact_json(self.to_dict())
+
+
+__all__ = [
+    "Event",
+    "compact_json",
+    "iso_now",
+]
