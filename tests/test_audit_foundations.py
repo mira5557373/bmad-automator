@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import ast
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AUDIT_MODULE_PATH = (
+    REPO_ROOT
+    / "skills"
+    / "bmad-story-automator"
+    / "src"
+    / "story_automator"
+    / "core"
+    / "audit.py"
+)
+
+
+def _parsed_audit_module() -> ast.Module:
+    return ast.parse(AUDIT_MODULE_PATH.read_text(encoding="utf-8"))
+
+
+class AuditModuleExistsTests(unittest.TestCase):
+    def test_module_file_exists(self) -> None:
+        self.assertTrue(
+            AUDIT_MODULE_PATH.is_file(), f"missing audit module: {AUDIT_MODULE_PATH}"
+        )
+
+    def test_first_real_statement_is_future_annotations(self) -> None:
+        # Use AST so a multi-line module docstring is recognised correctly —
+        # naïve line-by-line scanning would misread docstring continuation
+        # lines as code.
+        tree = _parsed_audit_module()
+        body = list(tree.body)
+        self.assertGreater(len(body), 0, "audit.py has no statements")
+        # Skip an optional module docstring (Expr wrapping a string Constant).
+        idx = 0
+        if (
+            isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            idx = 1
+        self.assertGreater(len(body), idx, "audit.py has no statements after docstring")
+        first = body[idx]
+        self.assertIsInstance(
+            first,
+            ast.ImportFrom,
+            "first real statement must be `from __future__ import annotations`",
+        )
+        assert isinstance(first, ast.ImportFrom)  # narrows type for mypy/readers
+        self.assertEqual(first.module, "__future__")
+        self.assertEqual([alias.name for alias in first.names], ["annotations"])
+
+
+if __name__ == "__main__":
+    unittest.main()
