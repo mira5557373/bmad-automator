@@ -1,5 +1,6 @@
 ### Features
 
+- feat: verify REQ-04 (UnknownEvent) and REQ-07 (parse_event) compliance (dd9ad95)
 - feat: implement to_json_line compact serialization (94ac044)
 - feat: implement to_dict method with event_type injection (383f5a3)
 - feat: implement all 13 concrete event classes (93f880a)
@@ -16,6 +17,7 @@
 
 ### Bug Fixes
 
+- fix: post-impl review fixes for foundation-m01-unknown-event-parsing (2413563)
 - fix: post-impl review fixes for foundation-m01-event-base (3c02261)
 - fix: ruff lint violations in telemetry_events.py (ea8d899)
 - fix(plan): update all 13 event class field definitions from design doc (dab3558)
@@ -65,6 +67,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (1476a77)
 - docs: update generated documentation (5fcfba8)
 - docs: CLAUDE.md project conventions and module map (fc180ae)
 - docs(m01): site inventory — no pre-existing collisions (86e5583)
@@ -121,6 +124,8 @@
 
 ### Other
 
+- doc: acceptance report for foundation-m01-unknown-event-parsing (Phase C complete) (897037a)
+- plan: foundation-m01-unknown-event-parsing Phase A (Plan + Ultrathink) (75a4148)
 - review: Phase C complete - post-impl and production-readiness verification (d35913a)
 - doc: acceptance report for foundation-m01-concrete-events (REQ-05, REQ-06 COMPLIANT) (acb864a)
 - plan: foundation-m01-concrete-events validation phase (REQ-05, REQ-06 acceptance audit) (f072a34)
