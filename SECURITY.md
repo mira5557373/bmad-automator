@@ -45,7 +45,25 @@ preset files you did not write or vet yourself.
 
 ## Forbidden actions
 
-Section body filled in by Task 5.
+The orchestrator instructs the Large Language Model (LLM) agent to refuse three
+classes of action while it runs. These prohibitions are LLM-compliance contracts.
+They are encoded in the prompt and the skill instructions. They are
+not enforced by the Python runtime, by the operating-system sandbox, or by any
+pre-commit hook. A sufficiently confused or adversarial agent could violate any
+of them.
+
+1. No `cd` into other directories. The agent must operate from the BMAD project
+   root supplied on the command line and must not change directory into sibling
+   projects, parent directories, or the user's home.
+2. No edits to source files under `skills/bmad-story-automator/src/`. The
+   orchestrator's own Python runtime is off-limits to the agent it spawns; the
+   agent works on stories, not on the automator itself.
+3. No writes to `sprint-status.yaml`. That file is the sprint's source of truth and
+   is maintained by the BMAD review and retrospective workflows, not by the dev
+   agent.
+
+If you observe an agent breaking any of these contracts, treat it as a security
+event and report it through the disclosure path below.
 
 ## Required environment
 
