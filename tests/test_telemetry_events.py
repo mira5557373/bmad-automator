@@ -27,6 +27,40 @@ from story_automator.core.telemetry_events import (
 class TestEventRegistry(unittest.TestCase):
     """Test Event base class, registration, and registry structure."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Save registry state before tests that pollute it."""
+        cls._initial_registry = dict(Event._REGISTRY)
+
+    @classmethod
+    def tearDownClass(cls):
+        """Restore registry to initial state after all tests."""
+        Event._REGISTRY.clear()
+        Event._REGISTRY.update(cls._initial_registry)
+
+    def test_registry_has_13_entries(self):
+        """After import, Event._REGISTRY must contain exactly 13 entries."""
+        self.assertEqual(len(self._initial_registry), 13)
+
+    def test_registry_contains_all_event_types(self):
+        """Registry must contain all 13 concrete event types by their EVENT_TYPE strings."""
+        expected_types = {
+            "story_started",
+            "story_completed",
+            "story_failed",
+            "story_deferred",
+            "retry_attempt",
+            "escalation_triggered",
+            "review_cycle",
+            "retro_fired",
+            "tmux_session_spawned",
+            "tmux_session_completed",
+            "tmux_session_crashed",
+            "cost_charged",
+            "budget_alert",
+        }
+        self.assertEqual(set(self._initial_registry.keys()), expected_types)
+
     def test_event_has_event_type_classvar(self):
         """Event base must define EVENT_TYPE classvar."""
         self.assertTrue(hasattr(Event, "EVENT_TYPE"))
