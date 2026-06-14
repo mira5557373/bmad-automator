@@ -62,12 +62,13 @@ If any step in any task produces unexpected output:
 
 - [ ] **Step 1: Confirm no pre-existing collisions**
 
-Run:
+Run the inventory grep (broadened from adversarial-review v1 to cover ALL names M01 introduces):
 ```bash
-grep -rn "telemetry_events\|EVENT_TYPE\|_REGISTRY\|class Event" skills/bmad-story-automator/src/ tests/ 2>&1
+grep -rn -E "telemetry_events|EVENT_TYPE|_REGISTRY|\bclass Event\b|\bparse_event\b|\bto_json_line\b|\bUnknownEvent\b" \
+  skills/bmad-story-automator/src/ tests/ 2>&1
 ```
 
-Expected: zero matches in `skills/bmad-story-automator/src/`. (`tests/` may have unrelated matches — verify they don't reference the names we'll introduce.)
+Expected: zero matches in `skills/bmad-story-automator/src/`. (`tests/` may have unrelated matches — verify they don't reference the names we'll introduce.) **Known acceptable false positive:** `core/stop_hooks.py` may use `STOP_HOOK_EVENT` (Claude Code Stop hook event name, unrelated to telemetry). It's a different identifier with no semantic overlap.
 
 - [ ] **Step 2: Write the site inventory document**
 
@@ -277,7 +278,27 @@ git commit -m "feat(telemetry): Event base class with EVENT_TYPE+_REGISTRY class
 Append to `tests/test_telemetry_events.py`:
 
 ```python
-class EventRegistrationTests(unittest.TestCase):
+class _RegistryIsolationMixin:
+    """Snapshots Event._REGISTRY on setUp and restores it on tearDown.
+
+    Tests that DEFINE inner-class subclasses of Event mutate the module-level
+    registry. Without isolation, a test that aborts mid-`with assertRaises`
+    leaks its EVENT_TYPE key into the registry for subsequent tests. The
+    snapshot/restore pattern is bulletproof against abort, AND lets us assert
+    cleanup at the test boundary.
+    """
+
+    def setUp(self) -> None:
+        from story_automator.core.telemetry_events import Event
+        self._registry_snapshot = dict(Event._REGISTRY)
+
+    def tearDown(self) -> None:
+        from story_automator.core.telemetry_events import Event
+        Event._REGISTRY.clear()
+        Event._REGISTRY.update(self._registry_snapshot)
+
+
+class EventRegistrationTests(_RegistryIsolationMixin, unittest.TestCase):
     def test_subclass_with_event_type_is_registered(self) -> None:
         from dataclasses import dataclass
         from typing import ClassVar
@@ -287,14 +308,11 @@ class EventRegistrationTests(unittest.TestCase):
         class _TempEventForRegistration(Event):
             EVENT_TYPE: ClassVar[str] = "_temp_registration_test"
 
-        try:
-            self.assertIn("_temp_registration_test", Event._REGISTRY)
-            self.assertIs(
-                Event._REGISTRY["_temp_registration_test"],
-                _TempEventForRegistration,
-            )
-        finally:
-            Event._REGISTRY.pop("_temp_registration_test", None)
+        self.assertIn("_temp_registration_test", Event._REGISTRY)
+        self.assertIs(
+            Event._REGISTRY["_temp_registration_test"],
+            _TempEventForRegistration,
+        )
 
     def test_subclass_without_event_type_is_not_registered(self) -> None:
         from dataclasses import dataclass
@@ -304,7 +322,10 @@ class EventRegistrationTests(unittest.TestCase):
         class _TempEventNoType(Event):
             pass
 
-        # Empty EVENT_TYPE means not registered
+        # Empty EVENT_TYPE means not registered.
+        # Confirm it can also be instantiated (no error at class creation):
+        instance = _TempEventNoType(timestamp="t", run_id="r")
+        self.assertEqual(instance.timestamp, "t")
         self.assertNotIn("", Event._REGISTRY)
 
     def test_duplicate_event_type_raises_runtime_error(self) -> None:
@@ -316,15 +337,12 @@ class EventRegistrationTests(unittest.TestCase):
         class _TempA(Event):
             EVENT_TYPE: ClassVar[str] = "_dup_check_a"
 
-        try:
-            with self.assertRaises(RuntimeError) as ctx:
-                @dataclass
-                class _TempB(Event):
-                    EVENT_TYPE: ClassVar[str] = "_dup_check_a"
+        with self.assertRaises(RuntimeError) as ctx:
+            @dataclass
+            class _TempB(Event):
+                EVENT_TYPE: ClassVar[str] = "_dup_check_a"
 
-            self.assertIn("_dup_check_a", str(ctx.exception))
-        finally:
-            Event._REGISTRY.pop("_dup_check_a", None)
+        self.assertIn("_dup_check_a", str(ctx.exception))
 ```
 
 - [ ] **Step 2: Run the new tests (expect FAIL)**
@@ -399,26 +417,23 @@ git commit -m "feat(telemetry): auto-register Event subclasses by EVENT_TYPE"
 Append to `tests/test_telemetry_events.py`:
 
 ```python
-class EventSerializationTests(unittest.TestCase):
+class EventSerializationTests(_RegistryIsolationMixin, unittest.TestCase):
     def test_to_dict_injects_event_type_from_classvar(self) -> None:
         from dataclasses import dataclass
         from typing import ClassVar
         from story_automator.core.telemetry_events import Event
 
-        @dataclass
+        @dataclass(kw_only=True)
         class _TempSerializable(Event):
             EVENT_TYPE: ClassVar[str] = "_serial_test"
-            extra: str = "x"
+            extra: str
 
-        try:
-            instance = _TempSerializable(timestamp="t", run_id="r", extra="y")
-            data = instance.to_dict()
-            self.assertEqual(data["event_type"], "_serial_test")
-            self.assertEqual(data["timestamp"], "t")
-            self.assertEqual(data["run_id"], "r")
-            self.assertEqual(data["extra"], "y")
-        finally:
-            Event._REGISTRY.pop("_serial_test", None)
+        instance = _TempSerializable(timestamp="t", run_id="r", extra="y")
+        data = instance.to_dict()
+        self.assertEqual(data["event_type"], "_serial_test")
+        self.assertEqual(data["timestamp"], "t")
+        self.assertEqual(data["run_id"], "r")
+        self.assertEqual(data["extra"], "y")
 
     def test_to_dict_event_type_first_key(self) -> None:
         from dataclasses import dataclass
@@ -429,12 +444,9 @@ class EventSerializationTests(unittest.TestCase):
         class _TempOrder(Event):
             EVENT_TYPE: ClassVar[str] = "_order_test"
 
-        try:
-            instance = _TempOrder(timestamp="t", run_id="r")
-            keys = list(instance.to_dict().keys())
-            self.assertEqual(keys[0], "event_type")
-        finally:
-            Event._REGISTRY.pop("_order_test", None)
+        instance = _TempOrder(timestamp="t", run_id="r")
+        keys = list(instance.to_dict().keys())
+        self.assertEqual(keys[0], "event_type")
 
     def test_to_json_line_is_single_line_no_trailing_newline(self) -> None:
         from dataclasses import dataclass
@@ -445,12 +457,9 @@ class EventSerializationTests(unittest.TestCase):
         class _TempJson(Event):
             EVENT_TYPE: ClassVar[str] = "_json_test"
 
-        try:
-            line = _TempJson(timestamp="t", run_id="r").to_json_line()
-            self.assertNotIn("\n", line)
-            self.assertFalse(line.endswith("\n"))
-        finally:
-            Event._REGISTRY.pop("_json_test", None)
+        line = _TempJson(timestamp="t", run_id="r").to_json_line()
+        self.assertNotIn("\n", line)
+        self.assertFalse(line.endswith("\n"))
 
     def test_to_json_line_uses_compact_separators(self) -> None:
         from dataclasses import dataclass
@@ -461,13 +470,10 @@ class EventSerializationTests(unittest.TestCase):
         class _TempCompact(Event):
             EVENT_TYPE: ClassVar[str] = "_compact_test"
 
-        try:
-            line = _TempCompact(timestamp="t", run_id="r").to_json_line()
-            # compact_json uses (",", ":") separators - no spaces after them
-            self.assertNotIn(": ", line)
-            self.assertNotIn(", ", line)
-        finally:
-            Event._REGISTRY.pop("_compact_test", None)
+        line = _TempCompact(timestamp="t", run_id="r").to_json_line()
+        # compact_json uses (",", ":") separators - no spaces after them
+        self.assertNotIn(": ", line)
+        self.assertNotIn(", ", line)
 ```
 
 - [ ] **Step 2: Run the new tests (expect FAIL)**
@@ -589,10 +595,16 @@ Expected: All 4 tests FAIL — `UnknownEvent` doesn't exist yet.
 
 - [ ] **Step 3: Implement UnknownEvent**
 
-Append to `skills/bmad-story-automator/src/story_automator/core/telemetry_events.py` (after the `Event` class):
+Add `field` to the dataclass import line in `core/telemetry_events.py`:
 
 ```python
-@dataclass
+from dataclasses import asdict, dataclass, field
+```
+
+Append to `core/telemetry_events.py` (after the `Event` class):
+
+```python
+@dataclass(kw_only=True)
 class UnknownEvent(Event):
     """Fallback for unrecognized event_type strings.
 
@@ -604,12 +616,8 @@ class UnknownEvent(Event):
 
     EVENT_TYPE: ClassVar[str] = ""
 
-    raw_event_type: str = ""
-    raw_fields: dict[str, Any] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.raw_fields is None:
-            self.raw_fields = {}
+    raw_event_type: str
+    raw_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Re-emit original event_type + raw_fields byte-equal to input."""
@@ -650,31 +658,28 @@ git commit -m "feat(telemetry): UnknownEvent forward-compat fallback"
 Append to `tests/test_telemetry_events.py`:
 
 ```python
-class ParseEventHappyPathTests(unittest.TestCase):
+class ParseEventHappyPathTests(_RegistryIsolationMixin, unittest.TestCase):
     def test_parse_known_event_type_dispatches_to_subclass(self) -> None:
         import json
         from dataclasses import dataclass
         from typing import ClassVar
         from story_automator.core.telemetry_events import Event, parse_event
 
-        @dataclass
+        @dataclass(kw_only=True)
         class _ParsedFoo(Event):
             EVENT_TYPE: ClassVar[str] = "_parsed_foo"
-            payload: str = ""
+            payload: str
 
-        try:
-            line = json.dumps({
-                "event_type": "_parsed_foo",
-                "timestamp": "t",
-                "run_id": "r",
-                "payload": "hi",
-            })
-            event = parse_event(line)
-            self.assertIs(type(event), _ParsedFoo)
-            self.assertEqual(event.timestamp, "t")
-            self.assertEqual(event.payload, "hi")
-        finally:
-            Event._REGISTRY.pop("_parsed_foo", None)
+        line = json.dumps({
+            "event_type": "_parsed_foo",
+            "timestamp": "t",
+            "run_id": "r",
+            "payload": "hi",
+        })
+        event = parse_event(line)
+        self.assertIs(type(event), _ParsedFoo)
+        self.assertEqual(event.timestamp, "t")
+        self.assertEqual(event.payload, "hi")
 
     def test_parse_unknown_event_type_routes_to_unknown_event(self) -> None:
         import json
@@ -765,7 +770,7 @@ git commit -m "feat(telemetry): parse_event dispatch for known + unknown event_t
 Append to `tests/test_telemetry_events.py`:
 
 ```python
-class ParseEventErrorPathTests(unittest.TestCase):
+class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
     def test_parse_missing_event_type_raises_value_error(self) -> None:
         import json
         from story_automator.core.telemetry_events import parse_event
@@ -788,31 +793,19 @@ class ParseEventErrorPathTests(unittest.TestCase):
         from typing import ClassVar
         from story_automator.core.telemetry_events import Event, parse_event
 
-        @dataclass
-        class _RequiresPayload(Event):
-            EVENT_TYPE: ClassVar[str] = "_requires_payload"
-            payload: str = ""  # default needed so dataclass ordering works
+        @dataclass(kw_only=True)
+        class _StrictPayload(Event):
+            EVENT_TYPE: ClassVar[str] = "_strict_payload"
+            payload: str  # no default - required (kw_only allows this)
 
-        try:
-            # Override default by passing required-payload via a class with no default.
-            # Simulate by deleting field default at runtime is fragile; instead, use
-            # a class that genuinely has no default for 'payload':
-            @dataclass
-            class _StrictPayload(Event):
-                EVENT_TYPE: ClassVar[str] = "_strict_payload"
-                payload: str  # no default - required
-
-            line = json.dumps({
-                "event_type": "_strict_payload",
-                "timestamp": "t",
-                "run_id": "r",
-                # 'payload' deliberately missing
-            })
-            with self.assertRaises(TypeError):
-                parse_event(line)
-        finally:
-            Event._REGISTRY.pop("_requires_payload", None)
-            Event._REGISTRY.pop("_strict_payload", None)
+        line = json.dumps({
+            "event_type": "_strict_payload",
+            "timestamp": "t",
+            "run_id": "r",
+            # 'payload' deliberately missing
+        })
+        with self.assertRaises(TypeError):
+            parse_event(line)
 
     def test_parse_extra_field_raises_type_error(self) -> None:
         import json
@@ -824,17 +817,14 @@ class ParseEventErrorPathTests(unittest.TestCase):
         class _NoExtras(Event):
             EVENT_TYPE: ClassVar[str] = "_no_extras"
 
-        try:
-            line = json.dumps({
-                "event_type": "_no_extras",
-                "timestamp": "t",
-                "run_id": "r",
-                "uninvited": "guest",
-            })
-            with self.assertRaises(TypeError):
-                parse_event(line)
-        finally:
-            Event._REGISTRY.pop("_no_extras", None)
+        line = json.dumps({
+            "event_type": "_no_extras",
+            "timestamp": "t",
+            "run_id": "r",
+            "uninvited": "guest",
+        })
+        with self.assertRaises(TypeError):
+            parse_event(line)
 ```
 
 - [ ] **Step 2: Run tests (expect PASS)**
@@ -926,69 +916,69 @@ PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemet
 
 Expected: `ImportError` for `StoryStarted` etc.
 
-- [ ] **Step 3: Implement the 5 story-lifecycle event classes**
+- [ ] **Step 3: Implement the 5 story-lifecycle event classes (kw_only)**
+
+**Why `kw_only=True`:** Python's dataclass inheritance forces non-default fields to precede defaulted ones. The `Event` base has `timestamp` and `run_id` as required (no defaults). Without `kw_only=True`, every subclass field would need a default — which silently lets callers omit fields and violates spec REQ-07 ("missing required field raises TypeError"). The `kw_only=True` modifier (Python 3.10+, available under our `requires-python = ">=3.11"`) makes the subclass's fields keyword-only AND removes the ordering constraint, so they can stay non-default. Strict construction is preserved end-to-end.
 
 Append to `core/telemetry_events.py`:
 
 ```python
-@dataclass
+@dataclass(kw_only=True)
 class StoryStarted(Event):
     EVENT_TYPE: ClassVar[str] = "story_started"
-    epic: str = ""
-    story_key: str = ""
-    agent: str = ""
-    model: str = ""
-    complexity: str = ""
+    epic: str
+    story_key: str
+    agent: str
+    model: str
+    complexity: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StoryCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "story_completed"
-    epic: str = ""
-    story_key: str = ""
-    duration_s: float = 0.0
-    cost_usd: float = 0.0
-    tokens_in: int = 0
-    tokens_out: int = 0
-    attempts: int = 0
+    epic: str
+    story_key: str
+    duration_s: float
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    attempts: int
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StoryFailed(Event):
     EVENT_TYPE: ClassVar[str] = "story_failed"
-    epic: str = ""
-    story_key: str = ""
-    error_class: str = ""
-    reason: str = ""
-    attempts: int = 0
-    final_session: str = ""
+    epic: str
+    story_key: str
+    error_class: str
+    reason: str
+    attempts: int
+    final_session: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StoryDeferred(Event):
     EVENT_TYPE: ClassVar[str] = "story_deferred"
-    epic: str = ""
-    story_key: str = ""
-    reason: str = ""
-    tasks_completed: int = 0
+    epic: str
+    story_key: str
+    reason: str
+    tasks_completed: int
 
 
-@dataclass
+@dataclass(kw_only=True)
 class RetryAttempt(Event):
     EVENT_TYPE: ClassVar[str] = "retry_attempt"
-    epic: str = ""
-    story_key: str = ""
-    attempt_num: int = 0
-    agent: str = ""
-    model: str = ""
-    prev_error_class: str = ""
+    epic: str
+    story_key: str
+    attempt_num: int
+    agent: str
+    model: str
+    prev_error_class: str
 ```
 
-(Reason for `= ""` / `= 0` defaults: Python dataclass inheritance requires all non-default fields to precede defaulted ones. Since the `Event` base has `timestamp` and `run_id` as required (no defaults), every subclass field must have a default. The spec calls for fields being "required" at the API level — tests enforce strictness by passing each field explicitly. The defaults are a Python language constraint, not a semantic statement; pytest construction errors still surface when a caller intends to be strict.)
+**Verifies REQ-07:** `StoryStarted(timestamp="t", run_id="r")` (without subclass fields) raises `TypeError: missing N required keyword-only arguments`. Task 8's `test_parse_missing_required_field_raises_type_error` now works naturally because `parse_event`'s `cls(**payload)` passes only the kwargs present in the JSON, and missing kw_only fields raise.
 
-**Important note on the "Task 8 extra-field test":** With defaults assigned, an extra unexpected field in JSON still raises `TypeError` at `cls(**payload)` construction because the field is not in the dataclass at all. The defaults do NOT mask "extra field" errors — only "missing field" errors. This matters for the extra-field test in Task 8 which already passes.
-
-**Important note on the "Task 8 missing-field test":** The test class `_StrictPayload` in Task 8 has `payload: str` with no default, which violates the "non-default after default" rule because `Event.timestamp` and `Event.run_id` have no defaults (they come first). Re-validate that test in Task 8 still passes; if not, amend `_StrictPayload` to use `payload: str = "__sentinel__"` and instead make the missing-field test verify a NEW class registered with a field that has no default — easier approach: just delete the failing case and rely on Python's dataclass enforcement which is well-documented elsewhere.
+**Task 8's existing extra-field test still passes** — `cls(**payload)` with an unexpected key raises `TypeError: __init__() got an unexpected keyword argument 'X'` regardless of `kw_only`. No interaction.
 
 - [ ] **Step 4: Run tests (expect PASS)**
 
@@ -1060,38 +1050,38 @@ PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemet
 
 Expected: `ImportError` for the 3 classes.
 
-- [ ] **Step 3: Implement the 3 classes**
+- [ ] **Step 3: Implement the 3 classes (kw_only)**
 
 Append to `core/telemetry_events.py`:
 
 ```python
-@dataclass
+@dataclass(kw_only=True)
 class EscalationTriggered(Event):
     EVENT_TYPE: ClassVar[str] = "escalation_triggered"
-    epic: str = ""
-    story_key: str = ""
-    trigger_id: int = 0
-    severity: str = ""
-    message: str = ""
+    epic: str
+    story_key: str
+    trigger_id: int
+    severity: str
+    message: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ReviewCycle(Event):
     EVENT_TYPE: ClassVar[str] = "review_cycle"
-    epic: str = ""
-    story_key: str = ""
-    cycle_num: int = 0
-    issues_found: int = 0
-    blocking: bool = False
+    epic: str
+    story_key: str
+    cycle_num: int
+    issues_found: int
+    blocking: bool
 
 
-@dataclass
+@dataclass(kw_only=True)
 class RetroFired(Event):
     EVENT_TYPE: ClassVar[str] = "retro_fired"
-    epic: str = ""
-    stories_completed: int = 0
-    total_cost_usd: float = 0.0
-    duration_s: float = 0.0
+    epic: str
+    stories_completed: int
+    total_cost_usd: float
+    duration_s: float
 ```
 
 - [ ] **Step 4: Run tests (expect PASS)**
@@ -1164,36 +1154,36 @@ PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemet
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Implement the 3 classes**
+- [ ] **Step 3: Implement the 3 classes (kw_only)**
 
 Append to `core/telemetry_events.py`:
 
 ```python
-@dataclass
+@dataclass(kw_only=True)
 class TmuxSessionSpawned(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_spawned"
-    session_name: str = ""
-    story_key: str = ""
-    pid: int = 0
-    pane_geometry: str = ""
+    session_name: str
+    story_key: str
+    pid: int
+    pane_geometry: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class TmuxSessionCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_completed"
-    session_name: str = ""
-    story_key: str = ""
-    exit_code: int = 0
-    duration_s: float = 0.0
+    session_name: str
+    story_key: str
+    exit_code: int
+    duration_s: float
 
 
-@dataclass
+@dataclass(kw_only=True)
 class TmuxSessionCrashed(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_crashed"
-    session_name: str = ""
-    story_key: str = ""
-    exit_code: int = 0
-    last_capture_chars: int = 0
+    session_name: str
+    story_key: str
+    exit_code: int
+    last_capture_chars: int
 ```
 
 - [ ] **Step 4: Run tests (expect PASS)**
@@ -1260,31 +1250,31 @@ PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_telemet
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Implement the 2 classes**
+- [ ] **Step 3: Implement the 2 classes (kw_only)**
 
 Append to `core/telemetry_events.py`:
 
 ```python
-@dataclass
+@dataclass(kw_only=True)
 class CostCharged(Event):
     EVENT_TYPE: ClassVar[str] = "cost_charged"
-    epic: str = ""
-    story_key: str = ""
-    phase: str = ""
-    cost_usd: float = 0.0
-    tokens_in: int = 0
-    tokens_out: int = 0
-    model: str = ""
+    epic: str
+    story_key: str
+    phase: str
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    model: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BudgetAlert(Event):
     EVENT_TYPE: ClassVar[str] = "budget_alert"
-    threshold_pct: int = 0
-    total_cost_usd: float = 0.0
-    max_budget_usd: float = 0.0
-    epic: str = ""
-    story_key: str = ""
+    threshold_pct: int
+    total_cost_usd: float
+    max_budget_usd: float
+    epic: str
+    story_key: str
 ```
 
 - [ ] **Step 4: Run tests (expect PASS)**
@@ -1337,7 +1327,11 @@ class RegistryAndRoundTripIntegrationTests(unittest.TestCase):
         import json
         from story_automator.core.telemetry_events import UnknownEvent, parse_event
 
-        original = json.dumps({
+        # NOTE: original is built via json.dumps which uses default separators
+        # (", ", ": "). compact_json uses (",", ":"). So we build `original` to
+        # match compact_json's output so byte-equal can hold.
+        from story_automator.core.common import compact_json
+        original = compact_json({
             "event_type": "future_thing_M99",
             "timestamp": "2026-06-14T05:12:34Z",
             "run_id": "20260614-051234",
@@ -1349,8 +1343,10 @@ class RegistryAndRoundTripIntegrationTests(unittest.TestCase):
         parsed = parse_event(original)
         self.assertIsInstance(parsed, UnknownEvent)
         reemitted = parsed.to_json_line()
-        # Parse both and compare dict-equal (key order may differ in JSON
-        # but the content must be identical):
+        # Spec REQ-09: byte-equal preserve. Strict assertion catches any
+        # to_dict reordering or separator drift in regressions.
+        self.assertEqual(reemitted, original)
+        # Sanity: parsed content matches original payload semantics.
         self.assertEqual(json.loads(reemitted), json.loads(original))
 
     def test_parse_preserves_unicode_in_story_key(self) -> None:
@@ -1387,6 +1383,20 @@ git commit -m "test(telemetry): registry completeness + UnknownEvent round-trip 
 
 **Files:** No file edits — verification only.
 
+- [ ] **Step 0: Ensure pytest + coverage are available**
+
+The spec's quality gates name `pytest` and `pytest --cov-fail-under=85`. The project itself uses `unittest discover` (per `package.json` scripts). pytest discovers `unittest.TestCase` classes natively, so a pytest invocation does run the same tests. Install if missing:
+
+```bash
+python -m pip install --user pytest coverage
+python -m pytest --version
+python -m coverage --version
+```
+
+Expected: both report a version. (Note: `pip install --user` keeps it out of system Python's site-packages — operator tooling only, not committed to project deps.)
+
+If you do NOT install pytest, replace Step 1's pytest invocation with `npm run test:python` and skip Step 1's `pytest` line entirely. Document the choice in `docs/superpowers/cli-spend-log.md` so future M01 reruns are consistent.
+
 - [ ] **Step 1: Ruff lint**
 
 ```bash
@@ -1418,16 +1428,16 @@ git add -A
 git commit -m "style(telemetry): ruff format"
 ```
 
-- [ ] **Step 3: Coverage**
+- [ ] **Step 3: Coverage (with --fail-under enforcement)**
 
 ```bash
 PYTHONPATH=skills/bmad-story-automator/src python -m coverage run \
   --source=skills/bmad-story-automator/src/story_automator/core/telemetry_events \
   -m unittest tests.test_telemetry_events
-python -m coverage report -m
+python -m coverage report -m --fail-under=85
 ```
 
-Expected: `telemetry_events.py` coverage ≥ 85%. (Note: requires `pip install coverage` if not already installed. The project doesn't ship coverage as a dev dep; this is operator-side tooling.)
+Expected: exit code 0 with the report printed; if coverage < 85% the `--fail-under=85` flag makes `coverage report` exit non-zero, failing the gate automatically. (Note: requires `pip install coverage` if not already installed. The project doesn't ship coverage as a dev dep; this is operator-side tooling.)
 
 If coverage is below 85%: identify uncovered lines from the report and add tests targeting them in a new test class `CoverageFillTests`. Commit with `test(telemetry): cover <specific behavior>`.
 
@@ -1454,13 +1464,28 @@ Expected (exactly these imports, no others):
 
 If any import outside stdlib + project-internal: BLOCKED.
 
-- [ ] **Step 6: Module size check**
+- [ ] **Step 6: Module size check (conservative proxy)**
 
 ```bash
 wc -l skills/bmad-story-automator/src/story_automator/core/telemetry_events.py
 ```
 
-Expected: under 500 lines (CONTRIBUTING.md guideline). Anticipated: 200-300.
+Expected: under 500 lines (CONTRIBUTING.md guideline; spec NFR says "excluding tests and docstrings"). Anticipated: 200-300.
+
+**Note on the proxy:** `wc -l` includes docstrings + blank lines + comments. Spec wording is stricter ("source lines of code excluding tests and docstrings"). For a precise check substitute:
+
+```bash
+python -c "
+import ast, pathlib
+src = pathlib.Path('skills/bmad-story-automator/src/story_automator/core/telemetry_events.py').read_text()
+tree = ast.parse(src)
+# Remove docstrings, count remaining executable nodes' line spans
+sloc = sum(1 for line in src.splitlines() if line.strip() and not line.strip().startswith('#'))
+print(f'SLOC (no comments/blanks): {sloc}')
+"
+```
+
+For M01 the difference is small enough that `wc -l < 500` is a safe proxy — module is anticipated 200-300 LOC total including all docstrings. Documented as a deliberate looser proxy here.
 
 - [ ] **Step 7: Final commit + push topic branch**
 
@@ -1545,17 +1570,22 @@ After writing the plan, audit it against the spec:
 - `parse_event(line: str) -> Event` — consistent (Tasks 7, 8, 9-13)
 - `Event._REGISTRY` — consistent class-level dict[str, type[Event]]
 
-**Acknowledged gap from Task 9 Step 3 notes:**
+**v2 changes from adversarial review (commit reference: see `docs/superpowers/reviews/2026-06-14-m01-plan-adversarial-review.md`):**
 
-The design doc and spec say "all fields required (no defaults)". Python's dataclass inheritance forces non-default fields to come BEFORE default fields. Since `Event.timestamp` and `Event.run_id` have no defaults, every subclass field must have a default. This is a language constraint, not a semantic relaxation: the plan addresses it by:
+1. CRITICAL fix: switched all 13 concrete subclasses (Tasks 9-12) to `@dataclass(kw_only=True)` with no field defaults. This satisfies spec REQ-07 ("missing required field raises TypeError") cleanly because `kw_only=True` removes Python's "non-default after default" ordering constraint. Verified empirically: `StoryStarted(timestamp="t", run_id="r")` now raises `TypeError: missing 5 required keyword-only arguments`.
 
-1. Giving every subclass field a sensible default (empty string for str, 0 for int, 0.0 for float, False for bool, None+`__post_init__` for dict)
-2. Tests pass each field explicitly, so behaviorally the strictness holds at the test level
-3. The "missing required field raises TypeError" requirement from REQ-07 becomes "the dataclass constructor enforces required positional fields" — still true at the language level, but in practice callers will use kwargs and bypass the default
+2. HIGH fixes:
+   - Task 14 Step 3 coverage gate now uses `--fail-under=85` for auto-enforcement.
+   - Task 14 Step 0 adds pytest install (or documented fallback to `npm run test:python`).
+   - Task 14 Step 6 documents `wc -l` as a conservative proxy with a precise SLOC tool alternative.
+   - Task 6 UnknownEvent uses `field(default_factory=dict)` instead of `= None + __post_init__`.
+   - Tasks 4, 5, 7, 8 wrap registry-mutating tests in `_RegistryIsolationMixin` for setUp/tearDown snapshot/restore.
+   - Task 13 UnknownEvent round-trip test now asserts byte-equal via `compact_json`-built original.
 
-This pragmatic gap is documented in Task 9 Step 3 and noted in the design doc's evolution section. If post-implementation review demands true required-field enforcement, Task 9's defaults can be replaced with `dataclasses.field(default=MISSING_SENTINEL)` and a `__post_init__` validator — but that's evolution work, not M01.
-
-**Re-verification of Task 8 "missing required field" test:** With defaults, the test must be amended. The plan flags this explicitly in Task 9 Step 3 as a known follow-up: either remove the test, or use `__post_init__` enforcement. Recommendation: remove the `test_parse_missing_required_field_raises_type_error` test and replace it with `test_parse_known_event_with_only_required_envelope_fields_uses_defaults` (positive assertion that the system handles minimal events). Document this in the commit message.
+3. NOTE fixes:
+   - Task 1 inventory grep broadened to cover `parse_event`, `to_json_line`, `UnknownEvent`.
+   - Task 8 removed dead `_RequiresPayload` definition.
+   - Task 4 `test_subclass_without_event_type_is_not_registered` now also instantiates the test class to verify the class is usable.
 
 ---
 
