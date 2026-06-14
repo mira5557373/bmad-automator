@@ -323,5 +323,93 @@ class EscalateAuditIntegrationTests(unittest.TestCase):
         self.assertIn("bad policy", out["reason"])
 
 
+class StateUpdateAuditIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved_key
+
+    def _write_state(self, status_before: str) -> Path:
+        state = Path(self._tmp.name) / "state.md"
+        state.write_text(
+            f"---\nstatus: {status_before}\ncurrentStory: 1.2\n---\nbody\n",
+            encoding="utf-8",
+        )
+        return state
+
+    def test_state_update_short_circuits_when_gate_off(self) -> None:
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        state = self._write_state("READY")
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": False}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            rc = orch._state_update([str(state), "--set", "status=IN_PROGRESS"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            (Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl").exists()
+        )
+
+    def test_state_update_appends_when_gate_on(self) -> None:
+        import json
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        state = self._write_state("READY")
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": True}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            rc = orch._state_update([str(state), "--set", "status=IN_PROGRESS"])
+        self.assertEqual(rc, 0)
+        audit_path = Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl"
+        rec = json.loads(audit_path.read_text(encoding="utf-8").strip())
+        self.assertEqual(rec["event"], "StoryStateChanged")
+        self.assertEqual(rec["payload"]["from_status"], "READY")
+        self.assertEqual(rec["payload"]["to_status"], "IN_PROGRESS")
+        self.assertEqual(rec["payload"]["story"], "1.2")
+
+    def test_state_update_without_status_change_skips_audit(self) -> None:
+        # Updating a non-status field must not produce an audit record —
+        # StoryStateChanged is, by name, only for status transitions.
+        from unittest import mock
+
+        from story_automator.commands import orchestrator as orch
+
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+        state = self._write_state("READY")
+        with (
+            mock.patch.object(
+                orch,
+                "load_runtime_policy",
+                return_value={"security": {"audit_trail": True}},
+            ),
+            mock.patch.object(orch, "get_project_root", return_value=self._tmp.name),
+        ):
+            rc = orch._state_update([str(state), "--set", "currentStory=1.3"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            (Path(self._tmp.name) / "_bmad" / "audit" / "audit.jsonl").exists()
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,7 @@ from .orchestrator_epic_agents import (
 )
 from .orchestrator_parse import parse_output_action
 from ._audit_hooks import _audit_path_for, _maybe_audit_event
+from .state import audit_state_change
 from story_automator.core.telemetry_events import EscalationRaised
 
 
@@ -304,12 +305,17 @@ def _state_update(args: list[str]) -> int:
         print_json({"ok": False, "error": "file_not_found"})
         return 1
     text = read_text(args[0])
+    fields_before = parse_simple_frontmatter(text)
     updated: list[str] = []
     idx = 1
     while idx < len(args):
         if args[idx] == "--set" and idx + 1 < len(args):
             key, value = args[idx + 1].split("=", 1)
-            replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
+            replaced, count = re.subn(
+                rf"(?m)^{re.escape(key)}:.*$",
+                lambda m, k=key, v=value: f"{k}: {v}",
+                text,
+            )
             if count:
                 text = replaced
                 updated.append(key)
@@ -320,6 +326,25 @@ def _state_update(args: list[str]) -> int:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
     Path(args[0]).write_text(text, encoding="utf-8")
+
+    # REQ-12: audit after the write succeeds. Failures from append are
+    # re-raised by audit_state_change so the state mutation is never
+    # silently divorced from its audit record.
+    if "status" in updated:
+        fields_after = parse_simple_frontmatter(text)
+        try:
+            policy = load_runtime_policy(get_project_root(), state_file=args[0])
+        except (FileNotFoundError, PolicyError):
+            policy = {}
+        audit_state_change(
+            policy,
+            _audit_path_for(get_project_root()),
+            story=str(fields_before.get("currentStory") or ""),
+            from_status=str(fields_before.get("status") or ""),
+            to_status=str(fields_after.get("status") or ""),
+            correlation_id=f"state-update:{Path(args[0]).name}",
+        )
+
     print_json({"ok": True, "updated": updated})
     return 0
 
