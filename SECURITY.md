@@ -26,9 +26,9 @@ would defeat the orchestrator.
 
 ## Trust boundary
 
-The orchestrator reads three inputs and treats them as trusted. They are not
-sanitised, escaped, or sandboxed before being passed to a child agent or interpolated
-into a prompt.
+The orchestrator reads three inputs and treats them as trusted. They are
+not sanitised, escaped, or sandboxed before being passed to a child agent or
+interpolated into a prompt.
 
 1. Story file content under the BMAD project's stories directory. The orchestrator
    reads each story markdown file verbatim, including any inline shell snippets or
