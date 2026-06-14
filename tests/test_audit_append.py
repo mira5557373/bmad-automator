@@ -469,5 +469,26 @@ class AppendFileLockContractTests(unittest.TestCase):
                 outside.release()
 
 
+class AuditModuleSizeBudgetM2Tests(unittest.TestCase):
+    def test_audit_module_at_or_below_500_lines(self) -> None:
+        from pathlib import Path
+
+        audit_path = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "audit.py"
+        )
+        line_count = sum(1 for _ in audit_path.read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(
+            line_count,
+            500,
+            f"audit.py is {line_count} lines (budget: 500 per NFR-500-line-cap)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
