@@ -507,6 +507,20 @@ class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
         # operator scanning a log can identify the problem at a glance.
         self.assertIn("event_type", str(ctx.exception))
 
+    def test_parse_invalid_json_propagates_json_decode_error(self) -> None:
+        import json
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(json.JSONDecodeError):
+            parse_event("this is not json {{{")
+
+    def test_parse_empty_string_propagates_json_decode_error(self) -> None:
+        import json
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(json.JSONDecodeError):
+            parse_event("")
+
 
 if __name__ == "__main__":
     unittest.main()
