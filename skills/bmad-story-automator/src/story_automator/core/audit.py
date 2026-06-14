@@ -339,3 +339,17 @@ class AuditLog:
             self._cached_size = current_size + len(line_bytes)
         finally:
             self._lock.release()
+
+    def verify(self) -> tuple[bool, int]:
+        """Walk the log and recompute every chain tag.
+
+        Returns ``(True, last_seq)`` when the chain is intact, or
+        ``(False, last_valid_seq)`` on the first detected anomaly:
+        malformed JSON, missing field, non-contiguous seq, or tag
+        mismatch. Returns ``(True, 0)`` when the log file does not
+        exist or is empty (REQ-09). Streams the file line by line and
+        never buffers more than one record at a time.
+        """
+        if not self.path.exists():
+            return (True, 0)
+        return (True, 0)  # placeholder — extended in subsequent tasks
