@@ -1154,9 +1154,9 @@ class TestRoundTripEdgeCases(unittest.TestCase):
             story_key="S1",
             phase="test",
             cost_usd=0.0001,  # Small value
-            tokens_in=0,       # Zero
+            tokens_in=0,  # Zero
             tokens_out=999999,  # Large int
-            model="opus"
+            model="opus",
         )
         line1 = original.to_json_line()
         parsed = parse_event(line1)
@@ -1177,7 +1177,7 @@ class TestRoundTripEdgeCases(unittest.TestCase):
             cost_usd=123.456789,
             tokens_in=2000000,
             tokens_out=5000000,
-            attempts=100
+            attempts=100,
         )
         line1 = original.to_json_line()
         parsed = parse_event(line1)
