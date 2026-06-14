@@ -237,5 +237,65 @@ class VerifyTamperDetectionTests(unittest.TestCase):
             self.assertEqual(log.verify(), (False, 1))
 
 
+class VerifyTruncationDistinguishableTests(unittest.TestCase):
+    KEY = b"\x99" * 32
+
+    def test_trailing_record_removed_returns_true_n_minus_1(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(5):
+                log.append(_FakeEvent("E", {"i": i}))
+            lines = p.read_bytes().splitlines(keepends=True)
+            # Drop the last line (seq=5).
+            p.write_bytes(b"".join(lines[:-1]))
+            self.assertEqual(log.verify(), (True, 4))
+
+    def test_multiple_trailing_records_removed_returns_true_at_last_remaining(
+        self,
+    ) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(5):
+                log.append(_FakeEvent("E", {"i": i}))
+            lines = p.read_bytes().splitlines(keepends=True)
+            # Drop the last three lines (keep seq=1, seq=2).
+            p.write_bytes(b"".join(lines[:2]))
+            self.assertEqual(log.verify(), (True, 2))
+
+    def test_truncation_and_mutation_differ(self) -> None:
+        # The whole point of the QA gate: truncation yields (True, n-k),
+        # mutation yields (False, n-1). Verify both outcomes from the
+        # same starting log to make the distinction explicit.
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p_a = Path(d) / "a.jsonl"
+            p_b = Path(d) / "b.jsonl"
+            for p in (p_a, p_b):
+                log = AuditLog(path=p, key=self.KEY)
+                for i in range(4):
+                    log.append(_FakeEvent("E", {"i": i}))
+
+            # Truncate p_a's last record.
+            lines = p_a.read_bytes().splitlines(keepends=True)
+            p_a.write_bytes(b"".join(lines[:-1]))
+            # Mutate p_b's last record (flip one byte of payload).
+            lines = p_b.read_bytes().splitlines(keepends=True)
+            line = lines[-1].replace(b'"i":3', b'"i":7', 1)
+            lines[-1] = line
+            p_b.write_bytes(b"".join(lines))
+
+            log_a = AuditLog(path=p_a, key=self.KEY)
+            log_b = AuditLog(path=p_b, key=self.KEY)
+            self.assertEqual(log_a.verify(), (True, 3))
+            self.assertEqual(log_b.verify(), (False, 3))
+
+
 if __name__ == "__main__":
     unittest.main()
