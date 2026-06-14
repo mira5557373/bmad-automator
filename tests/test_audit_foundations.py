@@ -261,5 +261,41 @@ class LoadKeyFromEnvHappyPathTests(unittest.TestCase):
         self.assertEqual(len(key), 32)
 
 
+class LoadKeyFromEnvAbsentContractTests(unittest.TestCase):
+    def test_returns_none_when_env_mapping_is_empty(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        self.assertIsNone(load_key_from_env({}))
+
+    def test_returns_none_when_var_is_empty_string(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        self.assertIsNone(load_key_from_env({"BMAD_AUDIT_KEY": ""}))
+
+    def test_returns_none_when_var_missing_from_process_env(self) -> None:
+        import os
+        from unittest.mock import patch
+        from story_automator.core.audit import load_key_from_env
+
+        scrubbed = {k: v for k, v in os.environ.items() if k != "BMAD_AUDIT_KEY"}
+        with patch.dict(os.environ, scrubbed, clear=True):
+            self.assertIsNone(load_key_from_env())
+
+    def test_does_not_raise_on_unrelated_env_keys(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        try:
+            load_key_from_env({"OTHER_VAR": "x", "PATH": "/usr/bin"})
+        except Exception as exc:  # noqa: BLE001 - asserting absence
+            self.fail(f"load_key_from_env raised on absent var: {exc!r}")
+
+    def test_returns_none_not_empty_bytes(self) -> None:
+        from story_automator.core.audit import load_key_from_env
+
+        result = load_key_from_env({})
+        self.assertIsNone(result)
+        self.assertNotEqual(result, b"")
+
+
 if __name__ == "__main__":
     unittest.main()
