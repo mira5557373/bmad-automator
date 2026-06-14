@@ -100,5 +100,31 @@ class AuditLockTimeoutTests(unittest.TestCase):
         self.assertTrue(AuditLockTimeout.__doc__ and AuditLockTimeout.__doc__.strip())
 
 
+class AuditKeyMissingTests(unittest.TestCase):
+    def test_subclasses_runtime_error(self) -> None:
+        from story_automator.core.audit import AuditKeyMissing
+
+        self.assertTrue(issubclass(AuditKeyMissing, RuntimeError))
+
+    def test_can_be_raised_and_caught(self) -> None:
+        from story_automator.core.audit import AuditKeyMissing
+
+        with self.assertRaises(AuditKeyMissing) as ctx:
+            raise AuditKeyMissing("BMAD_AUDIT_KEY is not set")
+        self.assertIn("BMAD_AUDIT_KEY", str(ctx.exception))
+
+    def test_distinct_from_lock_timeout(self) -> None:
+        from story_automator.core.audit import AuditKeyMissing, AuditLockTimeout
+
+        self.assertIsNot(AuditKeyMissing, AuditLockTimeout)
+        self.assertFalse(issubclass(AuditKeyMissing, AuditLockTimeout))
+        self.assertFalse(issubclass(AuditLockTimeout, AuditKeyMissing))
+
+    def test_has_docstring(self) -> None:
+        from story_automator.core.audit import AuditKeyMissing
+
+        self.assertTrue(AuditKeyMissing.__doc__ and AuditKeyMissing.__doc__.strip())
+
+
 if __name__ == "__main__":
     unittest.main()

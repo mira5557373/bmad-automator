@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 __all__ = [
-    "AuditKeyMissing",  # noqa: F822 - defined later this milestone
+    "AuditKeyMissing",
     "AuditLockTimeout",
     "derive_key",  # noqa: F822 - defined later this milestone
     "load_key_from_env",  # noqa: F822 - defined later this milestone
@@ -23,4 +23,13 @@ class AuditLockTimeout(RuntimeError):
     The lock timeout is fixed at 5 seconds per REQ-07a. Catching this exception
     indicates contention or a stale lock file — never a programming error in
     the caller's payload. The message must not include the audit key.
+    """
+
+
+class AuditKeyMissing(RuntimeError):
+    """Raised by ``audit_for_policy`` when the policy enables audit but no key is loadable.
+
+    The runtime contract per REQ-10: if ``security.audit_trail`` is truthy and
+    ``load_key_from_env()`` returns ``None``, callers refusing to open an unkeyed
+    log raise this exception. The message must not include the audit key.
     """
