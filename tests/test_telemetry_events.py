@@ -79,6 +79,40 @@ class TestEventRegistry(unittest.TestCase):
 class TestEventSerialization(unittest.TestCase):
     """Test to_dict and to_json_line methods."""
 
+    def test_to_dict_injects_event_type(self):
+        """to_dict must inject event_type from EVENT_TYPE classvar."""
+        event = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            epic="EPIC-1",
+            story_key="STORY-1",
+            agent="claude",
+            model="opus",
+            complexity="medium",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["event_type"], "story_started")
+        self.assertEqual(d["story_key"], "STORY-1")
+        self.assertEqual(d["epic"], "EPIC-1")
+        self.assertEqual(d["agent"], "claude")
+
+    def test_to_dict_includes_all_fields(self):
+        """to_dict must include timestamp and run_id."""
+        event = StoryStarted(
+            timestamp="2026-06-14T12:00:00Z",
+            run_id="run-123",
+            epic="EPIC-1",
+            story_key="STORY-1",
+            agent="claude",
+            model="opus",
+            complexity="medium",
+        )
+        d = event.to_dict()
+        self.assertIn("timestamp", d)
+        self.assertIn("run_id", d)
+        self.assertIn("epic", d)
+        self.assertIn("model", d)
+
 
 class TestParseEvent(unittest.TestCase):
     """Test parse_event function with all branches and error cases."""
