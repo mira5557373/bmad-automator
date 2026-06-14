@@ -50,3 +50,4 @@ htmlcov/
 .claude/settings.local.json
 .claude/skills/
 .claude/commands/
+.claude/sw-run-stdout.log
