@@ -490,97 +490,138 @@ git commit -m "feat: implement UnknownEvent forward-compatibility fallback"
 
 - [ ] **Step 1: Write all 13 concrete event classes**
 
-Add after UnknownEvent in `skills/bmad-story-automator/src/story_automator/core/telemetry_events.py`:
+Add after UnknownEvent in `skills/bmad-story-automator/src/story_automator/core/telemetry_events.py`. All fields match design doc table with snake_case names:
 
 ```python
 @dataclass
 class StoryStarted(Event):
     EVENT_TYPE: ClassVar[str] = "story_started"
+    epic: str
     story_key: str
-    epic_key: str
+    agent: str
+    model: str
+    complexity: str
 
 
 @dataclass
 class StoryCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "story_completed"
+    epic: str
     story_key: str
-    epic_key: str
+    duration_s: float
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    attempts: int
 
 
 @dataclass
 class StoryFailed(Event):
     EVENT_TYPE: ClassVar[str] = "story_failed"
+    epic: str
     story_key: str
-    epic_key: str
+    error_class: str
     reason: str
+    attempts: int
+    final_session: str
 
 
 @dataclass
 class StoryDeferred(Event):
     EVENT_TYPE: ClassVar[str] = "story_deferred"
+    epic: str
     story_key: str
-    epic_key: str
     reason: str
+    tasks_completed: int
 
 
 @dataclass
 class RetryAttempt(Event):
     EVENT_TYPE: ClassVar[str] = "retry_attempt"
+    epic: str
     story_key: str
-    attempt_number: int
+    attempt_num: int
+    agent: str
+    model: str
+    prev_error_class: str
 
 
 @dataclass
 class EscalationTriggered(Event):
     EVENT_TYPE: ClassVar[str] = "escalation_triggered"
+    epic: str
     story_key: str
-    escalation_reason: str
+    trigger_id: int
+    severity: str
+    message: str
 
 
 @dataclass
 class ReviewCycle(Event):
     EVENT_TYPE: ClassVar[str] = "review_cycle"
+    epic: str
     story_key: str
-    review_round: int
+    cycle_num: int
+    issues_found: int
+    blocking: bool
 
 
 @dataclass
 class RetroFired(Event):
     EVENT_TYPE: ClassVar[str] = "retro_fired"
-    epic_key: str
+    epic: str
+    stories_completed: int
+    total_cost_usd: float
+    duration_s: float
 
 
 @dataclass
 class TmuxSessionSpawned(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_spawned"
     session_name: str
+    story_key: str
+    pid: int
+    pane_geometry: str
 
 
 @dataclass
 class TmuxSessionCompleted(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_completed"
     session_name: str
+    story_key: str
+    exit_code: int
+    duration_s: float
 
 
 @dataclass
 class TmuxSessionCrashed(Event):
     EVENT_TYPE: ClassVar[str] = "tmux_session_crashed"
     session_name: str
-    error_message: str
+    story_key: str
+    exit_code: int
+    last_capture_chars: int
 
 
 @dataclass
 class CostCharged(Event):
     EVENT_TYPE: ClassVar[str] = "cost_charged"
+    epic: str
+    story_key: str
+    phase: str
     cost_usd: float
-    reason: str
+    tokens_in: int
+    tokens_out: int
+    model: str
 
 
 @dataclass
 class BudgetAlert(Event):
     EVENT_TYPE: ClassVar[str] = "budget_alert"
-    remaining_usd: float
-    threshold_usd: float
+    threshold_pct: int
+    total_cost_usd: float
+    max_budget_usd: float
+    epic: str
+    story_key: str
 ```
 
 - [ ] **Step 2: Verify imports**
@@ -614,25 +655,34 @@ def test_to_dict_injects_event_type(self):
     event = StoryStarted(
         timestamp="2026-06-14T12:00:00Z",
         run_id="run-123",
+        epic="EPIC-1",
         story_key="STORY-1",
-        epic_key="EPIC-1",
+        agent="claude",
+        model="opus",
+        complexity="medium",
     )
     d = event.to_dict()
     self.assertEqual(d["event_type"], "story_started")
     self.assertEqual(d["story_key"], "STORY-1")
-    self.assertEqual(d["epic_key"], "EPIC-1")
+    self.assertEqual(d["epic"], "EPIC-1")
+    self.assertEqual(d["agent"], "claude")
 
 def test_to_dict_includes_all_fields(self):
     """to_dict must include timestamp and run_id."""
     event = StoryStarted(
         timestamp="2026-06-14T12:00:00Z",
         run_id="run-123",
+        epic="EPIC-1",
         story_key="STORY-1",
-        epic_key="EPIC-1",
+        agent="claude",
+        model="opus",
+        complexity="medium",
     )
     d = event.to_dict()
     self.assertIn("timestamp", d)
     self.assertIn("run_id", d)
+    self.assertIn("epic", d)
+    self.assertIn("model", d)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -684,8 +734,11 @@ def test_to_json_line_returns_compact_json(self):
     event = StoryStarted(
         timestamp="2026-06-14T12:00:00Z",
         run_id="run-123",
+        epic="EPIC-1",
         story_key="STORY-1",
-        epic_key="EPIC-1",
+        agent="claude",
+        model="opus",
+        complexity="medium",
     )
     line = event.to_json_line()
     self.assertIsInstance(line, str)
@@ -700,8 +753,11 @@ def test_to_json_line_no_spaces(self):
     event = StoryStarted(
         timestamp="2026-06-14T12:00:00Z",
         run_id="run-123",
+        epic="EPIC-1",
         story_key="STORY-1",
-        epic_key="EPIC-1",
+        agent="claude",
+        model="opus",
+        complexity="medium",
     )
     line = event.to_json_line()
     # Compact JSON has no spaces after colons or commas
@@ -753,18 +809,19 @@ Add to `TestParseEvent`:
 ```python
 def test_parse_event_known_type(self):
     """parse_event must return correct concrete class for known type."""
-    line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","story_key":"STORY-1","epic_key":"EPIC-1"}'
+    line = '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'
     event = parse_event(line)
     self.assertIsInstance(event, StoryStarted)
-    self.assertEqual(event.story_key, "STORY-1")
-    self.assertEqual(event.epic_key, "EPIC-1")
+    self.assertEqual(event.story_key, "S1")
+    self.assertEqual(event.epic, "E1")
+    self.assertEqual(event.agent, "claude")
 
 def test_parse_event_returns_correct_type_for_each_class(self):
     """parse_event must dispatch to correct concrete class."""
     cases = [
-        (StoryStarted, '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","story_key":"S1","epic_key":"E1"}'),
-        (StoryCompleted, '{"event_type":"story_completed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","story_key":"S1","epic_key":"E1"}'),
-        (StoryFailed, '{"event_type":"story_failed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","story_key":"S1","epic_key":"E1","reason":"test"}'),
+        (StoryStarted, '{"event_type":"story_started","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'),
+        (StoryCompleted, '{"event_type":"story_completed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","duration_s":120.5,"cost_usd":0.25,"tokens_in":1000,"tokens_out":2000,"attempts":2}'),
+        (StoryFailed, '{"event_type":"story_failed","timestamp":"2026-06-14T12:00:00Z","run_id":"run-123","epic":"E1","story_key":"S1","error_class":"timeout","reason":"test","attempts":5,"final_session":"session1"}'),
     ]
     for expected_class, line in cases:
         with self.subTest(expected_class=expected_class.__name__):
@@ -1319,8 +1376,11 @@ def test_story_started_round_trip(self):
     original = StoryStarted(
         timestamp="2026-06-14T12:00:00Z",
         run_id="run-123",
+        epic="EPIC-1",
         story_key="STORY-1",
-        epic_key="EPIC-1",
+        agent="claude",
+        model="opus",
+        complexity="medium",
     )
     line1 = original.to_json_line()
     parsed = parse_event(line1)
@@ -1331,10 +1391,19 @@ def test_story_started_round_trip(self):
 def test_all_concrete_events_round_trip(self):
     """All 13 concrete events must support round-trip."""
     test_cases = [
-        StoryStarted(timestamp="2026-06-14T12:00:00Z", run_id="r1", story_key="S1", epic_key="E1"),
-        StoryCompleted(timestamp="2026-06-14T12:00:00Z", run_id="r1", story_key="S1", epic_key="E1"),
-        StoryFailed(timestamp="2026-06-14T12:00:00Z", run_id="r1", story_key="S1", epic_key="E1", reason="test"),
-        # ... etc for all 13
+        StoryStarted(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", agent="claude", model="opus", complexity="medium"),
+        StoryCompleted(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", duration_s=120.5, cost_usd=0.25, tokens_in=1000, tokens_out=2000, attempts=2),
+        StoryFailed(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", error_class="timeout", reason="test", attempts=5, final_session="session1"),
+        StoryDeferred(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", reason="plateau", tasks_completed=3),
+        RetryAttempt(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", attempt_num=2, agent="claude", model="sonnet", prev_error_class="rate_limit"),
+        EscalationTriggered(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", trigger_id=1, severity="CRITICAL", message="test"),
+        ReviewCycle(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", cycle_num=1, issues_found=2, blocking=True),
+        RetroFired(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", stories_completed=5, total_cost_usd=2.5, duration_s=600.0),
+        TmuxSessionSpawned(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", pid=1234, pane_geometry="200x50"),
+        TmuxSessionCompleted(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", exit_code=0, duration_s=120.0),
+        TmuxSessionCrashed(timestamp="2026-06-14T12:00:00Z", run_id="r1", session_name="session1", story_key="S1", exit_code=1, last_capture_chars=500),
+        CostCharged(timestamp="2026-06-14T12:00:00Z", run_id="r1", epic="E1", story_key="S1", phase="dev", cost_usd=0.1, tokens_in=500, tokens_out=1000, model="opus"),
+        BudgetAlert(timestamp="2026-06-14T12:00:00Z", run_id="r1", threshold_pct=75, total_cost_usd=7.5, max_budget_usd=10.0, epic="E1", story_key="S1"),
     ]
     for event in test_cases:
         with self.subTest(event_type=event.EVENT_TYPE):
@@ -1470,19 +1539,19 @@ Add to `TestParseEvent`:
 def test_parse_event_all_13_types(self):
     """parse_event must correctly dispatch all 13 concrete event types."""
     test_data = {
-        StoryStarted: {"story_key": "S1", "epic_key": "E1"},
-        StoryCompleted: {"story_key": "S1", "epic_key": "E1"},
-        StoryFailed: {"story_key": "S1", "epic_key": "E1", "reason": "test"},
-        StoryDeferred: {"story_key": "S1", "epic_key": "E1", "reason": "test"},
-        RetryAttempt: {"story_key": "S1", "attempt_number": 1},
-        EscalationTriggered: {"story_key": "S1", "escalation_reason": "test"},
-        ReviewCycle: {"story_key": "S1", "review_round": 1},
-        RetroFired: {"epic_key": "E1"},
-        TmuxSessionSpawned: {"session_name": "session1"},
-        TmuxSessionCompleted: {"session_name": "session1"},
-        TmuxSessionCrashed: {"session_name": "session1", "error_message": "test"},
-        CostCharged: {"cost_usd": 1.5, "reason": "test"},
-        BudgetAlert: {"remaining_usd": 100.0, "threshold_usd": 50.0},
+        StoryStarted: {"epic": "EPIC-1", "story_key": "S1", "agent": "claude", "model": "opus", "complexity": "medium"},
+        StoryCompleted: {"epic": "EPIC-1", "story_key": "S1", "duration_s": 120.5, "cost_usd": 0.25, "tokens_in": 1000, "tokens_out": 2000, "attempts": 2},
+        StoryFailed: {"epic": "EPIC-1", "story_key": "S1", "error_class": "timeout", "reason": "test", "attempts": 5, "final_session": "session1"},
+        StoryDeferred: {"epic": "EPIC-1", "story_key": "S1", "reason": "plateau", "tasks_completed": 3},
+        RetryAttempt: {"epic": "EPIC-1", "story_key": "S1", "attempt_num": 2, "agent": "claude", "model": "sonnet", "prev_error_class": "rate_limit"},
+        EscalationTriggered: {"epic": "EPIC-1", "story_key": "S1", "trigger_id": 1, "severity": "CRITICAL", "message": "test"},
+        ReviewCycle: {"epic": "EPIC-1", "story_key": "S1", "cycle_num": 1, "issues_found": 2, "blocking": True},
+        RetroFired: {"epic": "EPIC-1", "stories_completed": 5, "total_cost_usd": 2.5, "duration_s": 600.0},
+        TmuxSessionSpawned: {"session_name": "session1", "story_key": "S1", "pid": 1234, "pane_geometry": "200x50"},
+        TmuxSessionCompleted: {"session_name": "session1", "story_key": "S1", "exit_code": 0, "duration_s": 120.0},
+        TmuxSessionCrashed: {"session_name": "session1", "story_key": "S1", "exit_code": 1, "last_capture_chars": 500},
+        CostCharged: {"epic": "EPIC-1", "story_key": "S1", "phase": "dev", "cost_usd": 0.1, "tokens_in": 500, "tokens_out": 1000, "model": "opus"},
+        BudgetAlert: {"threshold_pct": 75, "total_cost_usd": 7.5, "max_budget_usd": 10.0, "epic": "EPIC-1", "story_key": "S1"},
     }
     
     for event_class, fields in test_data.items():
