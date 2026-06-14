@@ -1117,5 +1117,115 @@ class ConcreteEventRoundTripExtendedTests(unittest.TestCase):
                 )
 
 
+class UnknownEventExtendedRoundTripTests(unittest.TestCase):
+    """REQ-09 broader sweep: byte-equal round-trip for arbitrary
+    unrecognized event_type strings and arbitrary JSON-primitive
+    raw_fields shapes.
+
+    m01-m3 verified one canonical fixture; m01-m4 broadens to multiple
+    event_type shapes (numeric-like, mixed-case, special chars) and
+    multiple raw_fields structures (nested, empty, JSON-primitive
+    leaves only).
+    """
+
+    def test_round_trip_preserves_byte_equal_across_event_type_shapes(self) -> None:
+        """REQ-09: arbitrary unrecognized event_type strings must round-
+        trip byte-equal. The pop-and-restore path in parse_event reads
+        the event_type string opaquely — no character class is privileged
+        — so any non-empty string the registry doesn't recognize routes
+        to UnknownEvent and is preserved verbatim.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        candidate_event_types = (
+            "future_thing_M99",
+            "v2.story_started",
+            "MixedCase_Event",
+            "with-dashes-and_underscores",
+            "with.dots.in.the.name",
+            "numeric_like_42",
+            "trailing_whitespace_chars",
+        )
+        for raw_event_type in candidate_event_types:
+            with self.subTest(event_type=raw_event_type):
+                original = compact_json(
+                    {
+                        "event_type": raw_event_type,
+                        "timestamp": "2026-06-14T05:12:34Z",
+                        "run_id": "20260614-051234",
+                        "alpha": 1,
+                    }
+                )
+                parsed = parse_event(original)
+                self.assertIsInstance(parsed, UnknownEvent)
+                self.assertEqual(parsed.raw_event_type, raw_event_type)
+                self.assertEqual(parsed.to_json_line(), original)
+
+    def test_round_trip_preserves_byte_equal_for_nested_raw_fields(self) -> None:
+        """REQ-09: nested JSON primitives (list-of-dicts, dict-of-lists,
+        bools, nulls) inside raw_fields must round-trip byte-equal. The
+        UnknownEvent.to_dict implementation merges raw_fields via
+        dict.update — which preserves insertion order, which `compact_json`
+        re-emits in the same order — making byte-equality hold for any
+        canonically-ordered input.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        original = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+                "nested_list_of_dicts": [
+                    {"key": "value-1", "num": 1},
+                    {"key": "value-2", "num": 2},
+                ],
+                "nested_dict_of_lists": {"odds": [1, 3, 5], "evens": [2, 4]},
+                "primitive_bool": True,
+                "primitive_null": None,
+                "primitive_zero_int": 0,
+                "primitive_zero_float": 0.0,
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.to_json_line(), original)
+
+    def test_round_trip_preserves_byte_equal_for_empty_raw_fields(self) -> None:
+        """REQ-09: UnknownEvent with empty raw_fields (only envelope +
+        event_type, no payload) must round-trip byte-equal. The dict.update
+        of an empty dict is a no-op; the output equals the envelope alone.
+        Pins the boundary where the parser receives an unknown event_type
+        without any unrecognized payload — a real possibility when an
+        older codebase consumes a stream emitted by a newer one whose new
+        event has no payload yet.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        original = compact_json(
+            {
+                "event_type": "future_thing_no_payload",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_fields, {})
+        self.assertEqual(parsed.to_json_line(), original)
+
+
 if __name__ == "__main__":
     unittest.main()
