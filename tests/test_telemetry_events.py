@@ -419,6 +419,294 @@ class TestParseEvent(unittest.TestCase):
         self.assertIn("does not accept None", str(cm.exception))
 
 
+class TestConcreteEventSpecCompliance(unittest.TestCase):
+    """Audit concrete event classes against REQ-05 specification.
+
+    REQ-05: Must define exactly 13 concrete event classes with correct fields.
+    Design doc table: Each class has specific field names and types.
+    """
+
+    def test_story_started_fields_req05(self):
+        """StoryStarted must have exactly 7 fields: timestamp, run_id, epic, story_key, agent, model, complexity."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(StoryStarted)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(StoryStarted)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "agent": str,
+            "model": str,
+            "complexity": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_story_completed_fields_req05(self):
+        """StoryCompleted must have exactly 9 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(StoryCompleted)
+        fields = {
+            f.name: type_hints[f.name] for f in dataclasses.fields(StoryCompleted)
+        }
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "duration_s": float,
+            "cost_usd": float,
+            "tokens_in": int,
+            "tokens_out": int,
+            "attempts": int,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_story_failed_fields_req05(self):
+        """StoryFailed must have exactly 8 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(StoryFailed)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(StoryFailed)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "error_class": str,
+            "reason": str,
+            "attempts": int,
+            "final_session": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_story_deferred_fields_req05(self):
+        """StoryDeferred must have exactly 6 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(StoryDeferred)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(StoryDeferred)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "reason": str,
+            "tasks_completed": int,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_retry_attempt_fields_req05(self):
+        """RetryAttempt must have exactly 8 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(RetryAttempt)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(RetryAttempt)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "attempt_num": int,
+            "agent": str,
+            "model": str,
+            "prev_error_class": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_escalation_triggered_fields_req05(self):
+        """EscalationTriggered must have exactly 7 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(EscalationTriggered)
+        fields = {
+            f.name: type_hints[f.name] for f in dataclasses.fields(EscalationTriggered)
+        }
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "trigger_id": int,
+            "severity": str,
+            "message": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_review_cycle_fields_req05(self):
+        """ReviewCycle must have exactly 7 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(ReviewCycle)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(ReviewCycle)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "cycle_num": int,
+            "issues_found": int,
+            "blocking": bool,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_retro_fired_fields_req05(self):
+        """RetroFired must have exactly 6 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(RetroFired)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(RetroFired)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "stories_completed": int,
+            "total_cost_usd": float,
+            "duration_s": float,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_tmux_session_spawned_fields_req05(self):
+        """TmuxSessionSpawned must have exactly 6 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(TmuxSessionSpawned)
+        fields = {
+            f.name: type_hints[f.name] for f in dataclasses.fields(TmuxSessionSpawned)
+        }
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "session_name": str,
+            "story_key": str,
+            "pid": int,
+            "pane_geometry": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_tmux_session_completed_fields_req05(self):
+        """TmuxSessionCompleted must have exactly 6 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(TmuxSessionCompleted)
+        fields = {
+            f.name: type_hints[f.name] for f in dataclasses.fields(TmuxSessionCompleted)
+        }
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "session_name": str,
+            "story_key": str,
+            "exit_code": int,
+            "duration_s": float,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_tmux_session_crashed_fields_req05(self):
+        """TmuxSessionCrashed must have exactly 6 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(TmuxSessionCrashed)
+        fields = {
+            f.name: type_hints[f.name] for f in dataclasses.fields(TmuxSessionCrashed)
+        }
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "session_name": str,
+            "story_key": str,
+            "exit_code": int,
+            "last_capture_chars": int,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_cost_charged_fields_req05(self):
+        """CostCharged must have exactly 9 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(CostCharged)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(CostCharged)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "epic": str,
+            "story_key": str,
+            "phase": str,
+            "cost_usd": float,
+            "tokens_in": int,
+            "tokens_out": int,
+            "model": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_budget_alert_fields_req05(self):
+        """BudgetAlert must have exactly 7 fields."""
+        import dataclasses
+        import typing
+
+        type_hints = typing.get_type_hints(BudgetAlert)
+        fields = {f.name: type_hints[f.name] for f in dataclasses.fields(BudgetAlert)}
+        expected = {
+            "timestamp": str,
+            "run_id": str,
+            "threshold_pct": int,
+            "total_cost_usd": float,
+            "max_budget_usd": float,
+            "epic": str,
+            "story_key": str,
+        }
+        self.assertEqual(fields, expected)
+
+    def test_all_event_types_are_snake_case(self):
+        """REQ-05: All EVENT_TYPE strings must be snake_case."""
+        event_classes = [
+            StoryStarted,
+            StoryCompleted,
+            StoryFailed,
+            StoryDeferred,
+            RetryAttempt,
+            EscalationTriggered,
+            ReviewCycle,
+            RetroFired,
+            TmuxSessionSpawned,
+            TmuxSessionCompleted,
+            TmuxSessionCrashed,
+            CostCharged,
+            BudgetAlert,
+        ]
+        for cls in event_classes:
+            event_type = cls.EVENT_TYPE
+            self.assertTrue(
+                event_type.islower(),
+                f"{cls.__name__}.EVENT_TYPE = {event_type!r} is not lowercase",
+            )
+            self.assertNotIn(
+                " ",
+                event_type,
+                f"{cls.__name__}.EVENT_TYPE contains spaces",
+            )
+            # Verify snake_case (letters, digits, underscores only)
+            self.assertRegex(
+                event_type,
+                r"^[a-z0-9_]+$",
+                f"{cls.__name__}.EVENT_TYPE = {event_type!r} is not snake_case",
+            )
+
+
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""
 
