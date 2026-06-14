@@ -120,5 +120,43 @@ class VerifySingleRecordHappyPathTests(unittest.TestCase):
             self.assertEqual(log.verify(), (True, 1))
 
 
+class VerifyMultiRecordHappyPathTests(unittest.TestCase):
+    KEY = b"\x77" * 32
+
+    def test_three_records_verify_clean(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(3):
+                log.append(_FakeEvent("E", {"i": i}))
+            self.assertEqual(log.verify(), (True, 3))
+
+    def test_hundred_records_verify_clean(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(100):
+                log.append(_FakeEvent("E", {"i": i, "note": "x" * 16}))
+            self.assertEqual(log.verify(), (True, 100))
+
+    def test_verify_after_fresh_instance_reads_chain_from_disk(self) -> None:
+        # A fresh AuditLog (no in-memory cache) must verify a chain that
+        # an earlier instance wrote. This guards against verify accidentally
+        # relying on the M2 append cache fields.
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            writer = AuditLog(path=p, key=self.KEY)
+            for i in range(5):
+                writer.append(_FakeEvent("E", {"i": i}))
+            verifier = AuditLog(path=p, key=self.KEY)
+            self.assertEqual(verifier.verify(), (True, 5))
+
+
 if __name__ == "__main__":
     unittest.main()
