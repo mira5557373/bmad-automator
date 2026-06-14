@@ -231,6 +231,9 @@ def _iter_record_lines(handle: Any) -> "Iterator[bytes]":
         yield line
 
 
+_REQUIRED_RECORD_FIELDS = ("seq", "ts", "event", "payload", "tag")
+
+
 @dataclasses.dataclass(kw_only=True)
 class AuditLog:
     """Append-only, hash-chained JSONL audit log.
@@ -367,4 +370,36 @@ class AuditLog:
         """
         if not self.path.exists():
             return (True, 0)
-        return (True, 0)  # placeholder — extended in subsequent tasks
+
+        last_valid_seq = 0
+        prev_tag_hex: str | None = None
+        with self.path.open("rb") as handle:
+            for raw_line in _iter_record_lines(handle):
+                try:
+                    record = _json.loads(raw_line.decode("utf-8"))
+                except _json.JSONDecodeError:
+                    return (False, last_valid_seq)
+                if not isinstance(record, dict):
+                    return (False, last_valid_seq)
+                for field in _REQUIRED_RECORD_FIELDS:
+                    if field not in record:
+                        return (False, last_valid_seq)
+                seq = record["seq"]
+                if not isinstance(seq, int) or seq != last_valid_seq + 1:
+                    return (False, last_valid_seq)
+                canonical = _canonical_record_bytes(
+                    seq=seq,
+                    ts=record["ts"],
+                    event=record["event"],
+                    payload=record["payload"],
+                )
+                expected_tag = _compute_tag(
+                    key=self.key,
+                    prev_tag_hex=prev_tag_hex,
+                    canonical=canonical,
+                )
+                if not hmac.compare_digest(expected_tag, record["tag"]):
+                    return (False, last_valid_seq)
+                last_valid_seq = seq
+                prev_tag_hex = record["tag"]
+        return (True, last_valid_seq)

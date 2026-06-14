@@ -96,5 +96,29 @@ class VerifyEmptyFileTests(unittest.TestCase):
             self.assertEqual(log.verify(), (True, 0))
 
 
+class _FakeEvent:
+    """Minimal duck-typed event for verify tests."""
+
+    def __init__(self, name: str, payload: dict) -> None:
+        self.event_name = name
+        self._payload = payload
+
+    def to_dict(self) -> dict:
+        return self._payload
+
+
+class VerifySingleRecordHappyPathTests(unittest.TestCase):
+    KEY = b"\x66" * 32
+
+    def test_single_appended_record_verifies_clean(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            log.append(_FakeEvent("EscalationRaised", {"reason": "block"}))
+            self.assertEqual(log.verify(), (True, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
