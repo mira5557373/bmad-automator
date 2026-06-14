@@ -444,5 +444,34 @@ class UnknownEventToDictTests(unittest.TestCase):
         self.assertEqual(keys[3:], ["alpha", "beta"])
 
 
+class ParseEventHappyPathTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_parse_known_event_type_dispatches_to_subclass(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _ParsedFoo(Event):
+            EVENT_TYPE: ClassVar[str] = "_parsed_foo"
+            payload: str
+
+        line = compact_json(
+            {
+                "event_type": "_parsed_foo",
+                "timestamp": "t",
+                "run_id": "r",
+                "payload": "hi",
+            }
+        )
+        event = parse_event(line)
+        self.assertIs(type(event), _ParsedFoo)
+        self.assertEqual(event.timestamp, "t")
+        self.assertEqual(event.run_id, "r")
+        self.assertEqual(event.payload, "hi")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ helpers (to_dict, to_json_line). The forward-compatibility fallback
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
@@ -107,6 +108,21 @@ class UnknownEvent(Event):
         }
         data.update(self.raw_fields)
         return data
+
+
+def parse_event(line: str) -> Event:
+    """Parse a single JSONL line into a typed ``Event`` instance.
+
+    Dispatches by the ``event_type`` field. Known event_types route to the
+    matching concrete subclass in ``Event._REGISTRY``; unknown event_types
+    route to ``UnknownEvent`` (preserving the original event_type string
+    and the unrecognized payload fields). Error semantics are documented
+    in the M01 spec (REQ-07) and validated by the test matrix.
+    """
+    payload = json.loads(line)
+    event_type = payload.pop("event_type")
+    cls = Event._REGISTRY[event_type]
+    return cls(**payload)
 
 
 __all__ = [
