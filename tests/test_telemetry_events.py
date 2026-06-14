@@ -549,6 +549,33 @@ class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
         # CPython's dataclass implementation — REQ-07 relies on it.
         self.assertIn("payload", str(ctx.exception))
 
+    def test_parse_typed_event_extra_field_raises_type_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _NoExtras(Event):
+            EVENT_TYPE: ClassVar[str] = "_no_extras"
+            # No additional fields — only inherits timestamp + run_id.
+
+        line = compact_json(
+            {
+                "event_type": "_no_extras",
+                "timestamp": "t",
+                "run_id": "r",
+                "uninvited": "guest",
+            }
+        )
+        with self.assertRaises(TypeError) as ctx:
+            parse_event(line)
+        # Dataclass __init__ rejects unexpected kwargs by name. Strict
+        # construction is a property of CPython we lean on for REQ-07.
+        self.assertIn("uninvited", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
