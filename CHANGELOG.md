@@ -1,5 +1,13 @@
 ### Features
 
+- feat(retro): emit RetroAgentDispatched audit event on selection (46fb9f7)
+- feat(orchestrator): emit StoryStateChanged audit event after status writes (9772d8c)
+- feat(orchestrator): emit EscalationRaised audit event on escalation (477d848)
+- feat(commands): _audit_path_for and _maybe_audit_event leaf module (0963c6e)
+- feat(state): audit_state_change wrapper for StoryStateChanged events (a789987)
+- feat(telemetry): add EscalationRaised, StoryStateChanged, RetroAgentDispatched (6293df8)
+- feat(audit): audit_for_policy returns None when gate is off (430a5b8)
+- feat(policy): allow optional security.audit_trail block (d4ccc00)
 - feat(audit): verify recomputes chain tags streaming (c3db57b)
 - feat(audit): streaming line iterator for verify (3cb2dbf)
 - feat(audit): verify returns (True, 0) when log missing (bf847be)
@@ -78,6 +86,8 @@
 
 ### Documentation
 
+- docs(plans): m04-m4 policy integration plan (REQ-10..14) (936886c)
+- docs: update generated documentation (9e76d70)
 - docs: update generated documentation (14cbbbb)
 - docs(audit): plan M04 M2 append-chain milestone (65f2c49)
 - docs: update generated documentation (08d362e)
@@ -94,6 +104,11 @@
 
 ### Tests
 
+- test(audit): re-pin 500-line module budget in M4 policy suite (3474afa)
+- test(audit): assert no-IO contract across three call-site integrations (2e3b3b6)
+- test(audit): include audit_for_policy in M1 surface assertion (b0da104)
+- test(audit): audit_for_policy raises AuditKeyMissing, never leaks key (c5ed5af)
+- test(audit): audit_for_policy returns wired AuditLog when gate is on (f76a647)
 - test(audit): assert >=85% statement coverage via subprocess (7beadba)
 - test(audit): pin 500-line budget in M3 suite (67f7c12)
 - test(audit): structural + tracemalloc check on verify streaming (8ad6289)
@@ -115,6 +130,7 @@
 
 ### Chores
 
+- chore(format): wrap VALID_TOP_LEVEL_KEYS over multiple lines (9fd8fe0)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
 - chore: keep versioning plan docs off preview branch (4bba55b)
