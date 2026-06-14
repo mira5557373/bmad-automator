@@ -100,3 +100,14 @@ $NON_HEADING"
 else
   printf 'SKIP: no %s ref available — gate 6 skipped (acceptable for shallow CI checkouts)\n' "$BASE"
 fi
+
+# Gate 7 — Line-ending portability: every file the M11 vocab gates inspect must be LF-only.
+CRLF_HITS=""
+for F in CONTRIBUTING.md docs/changelog/*.md; do
+  # Detect a literal CR (\r) anywhere in the file. Portable across GNU and BSD grep.
+  if LC_ALL=C grep -l "$(printf '\r')" "$F" >/dev/null 2>&1; then
+    CRLF_HITS="$CRLF_HITS $F"
+  fi
+done
+[ -z "$CRLF_HITS" ] || fail "Line-ending portability: CRLF detected in:$CRLF_HITS"
+pass "Line-ending portability (CONTRIBUTING.md + docs/changelog/*.md are LF-only)"
