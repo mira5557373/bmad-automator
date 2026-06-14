@@ -472,6 +472,29 @@ class ParseEventHappyPathTests(_RegistryIsolationMixin, unittest.TestCase):
         self.assertEqual(event.run_id, "r")
         self.assertEqual(event.payload, "hi")
 
+    def test_parse_unknown_event_type_routes_to_unknown_event(self) -> None:
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        line = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "t",
+                "run_id": "r",
+                "anything": 42,
+                "other": "value",
+            }
+        )
+        event = parse_event(line)
+        self.assertIs(type(event), UnknownEvent)
+        self.assertEqual(event.raw_event_type, "future_thing_M99")
+        self.assertEqual(event.timestamp, "t")
+        self.assertEqual(event.run_id, "r")
+        self.assertEqual(event.raw_fields, {"anything": 42, "other": "value"})
+
 
 if __name__ == "__main__":
     unittest.main()

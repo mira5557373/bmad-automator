@@ -121,7 +121,14 @@ def parse_event(line: str) -> Event:
     """
     payload = json.loads(line)
     event_type = payload.pop("event_type")
-    cls = Event._REGISTRY[event_type]
+    cls = Event._REGISTRY.get(event_type)
+    if cls is None:
+        return UnknownEvent(
+            timestamp=payload.pop("timestamp", ""),
+            run_id=payload.pop("run_id", ""),
+            raw_event_type=event_type,
+            raw_fields=payload,
+        )
     return cls(**payload)
 
 
