@@ -277,6 +277,25 @@ class EventToJsonLineTests(_RegistryIsolationMixin, unittest.TestCase):
         # The line must parse back to the same dict to_dict returns.
         self.assertEqual(json.loads(line), instance.to_dict())
 
+    def test_to_json_line_byte_output_is_deterministic(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempBytes(Event):
+            EVENT_TYPE: ClassVar[str] = "_byte_stable"
+
+        line = _TempBytes(timestamp="ts1", run_id="rid1").to_json_line()
+        # Strict byte-level assertion: guards the future REQ-08 round-trip
+        # invariant against silent regressions in compact_json's separator
+        # policy, asdict's field ordering, or to_dict's key insertion order.
+        # The existing property tests (no spaces, event_type-first) catch
+        # the obvious cases; this one pins the exact wire format.
+        self.assertEqual(
+            line,
+            '{"event_type":"_byte_stable","timestamp":"ts1","run_id":"rid1"}',
+        )
+
 
 class EventImportContractTests(unittest.TestCase):
     def test_module_re_exports_iso_now(self) -> None:
