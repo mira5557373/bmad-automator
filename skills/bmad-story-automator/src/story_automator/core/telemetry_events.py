@@ -70,6 +70,22 @@ class Event:
         return compact_json(self.to_dict())
 
 
+@dataclass
+class UnknownEvent(Event):
+    """Forward-compatibility fallback for unrecognized event_type strings.
+
+    Carries the raw event_type and the unrecognized payload fields so a
+    JSONL stream produced by a newer codebase can be read by an older
+    parser without data loss. NOT auto-registered: `EVENT_TYPE = ""` so
+    `__init_subclass__` skips it via the empty-string early return.
+    """
+
+    EVENT_TYPE: ClassVar[str] = ""
+
+    raw_event_type: str
+    raw_fields: dict[str, Any]
+
+
 __all__ = [
     "Event",
     "compact_json",

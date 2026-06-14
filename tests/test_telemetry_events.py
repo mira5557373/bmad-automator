@@ -328,5 +328,38 @@ class EventImportContractTests(unittest.TestCase):
         self.assertIs(telemetry_events.compact_json, common.compact_json)
 
 
+class UnknownEventTests(unittest.TestCase):
+    def test_unknown_event_class_exists(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        self.assertTrue(hasattr(UnknownEvent, "EVENT_TYPE"))
+        self.assertEqual(UnknownEvent.EVENT_TYPE, "")
+
+    def test_unknown_event_dataclass_fields(self) -> None:
+        from dataclasses import fields
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        field_names = {f.name for f in fields(UnknownEvent)}
+        # Inherits timestamp + run_id from Event; adds raw_event_type + raw_fields.
+        self.assertEqual(
+            field_names,
+            {"timestamp", "run_id", "raw_event_type", "raw_fields"},
+        )
+
+    def test_unknown_event_constructs_with_required_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        instance = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="future_thing_M99",
+            raw_fields={"alpha": 1, "beta": "two"},
+        )
+        self.assertEqual(instance.timestamp, "t")
+        self.assertEqual(instance.run_id, "r")
+        self.assertEqual(instance.raw_event_type, "future_thing_M99")
+        self.assertEqual(instance.raw_fields, {"alpha": 1, "beta": "two"})
+
+
 if __name__ == "__main__":
     unittest.main()
