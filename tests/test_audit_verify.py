@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -156,6 +157,84 @@ class VerifyMultiRecordHappyPathTests(unittest.TestCase):
                 writer.append(_FakeEvent("E", {"i": i}))
             verifier = AuditLog(path=p, key=self.KEY)
             self.assertEqual(verifier.verify(), (True, 5))
+
+
+class VerifyTamperDetectionTests(unittest.TestCase):
+    KEY = b"\x88" * 32
+
+    def _mutate_payload_byte(self, path: Path, target_seq: int) -> None:
+        """Flip one byte inside the payload field of the target seq's line."""
+        lines = path.read_bytes().splitlines(keepends=True)
+        idx = target_seq - 1
+        line = lines[idx]
+        # Locate the payload value's first character (the '{' after
+        # `"payload":`) and flip its byte to '['. The structural change
+        # keeps the line as valid JSON but mutates the canonical bytes.
+        marker = b'"payload":'
+        pos = line.index(marker) + len(marker)
+        # Flip the payload-opening byte (a '{') to '[': still parseable
+        # but produces a different canonical record.
+        original = line[pos : pos + 1]
+        replacement = b"[" if original == b"{" else b"{"
+        mutated = line[:pos] + replacement + line[pos + 1 :]
+        # We must also flip the matching closer to keep JSON valid. The
+        # mutated payload becomes an empty list/object, but the tag
+        # comparison fires first so JSON validity past `payload` is
+        # immaterial — still, be conservative and balance braces.
+        if original == b"{":
+            close_pos = mutated.index(b"}", pos)
+            mutated = mutated[:close_pos] + b"]" + mutated[close_pos + 1 :]
+        else:
+            close_pos = mutated.index(b"]", pos)
+            mutated = mutated[:close_pos] + b"}" + mutated[close_pos + 1 :]
+        lines[idx] = mutated
+        path.write_bytes(b"".join(lines))
+
+    def test_mutated_payload_returns_false_at_previous_seq(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(5):
+                log.append(_FakeEvent("E", {"i": i}))
+            # Mutate record seq=3.
+            self._mutate_payload_byte(p, target_seq=3)
+            self.assertEqual(log.verify(), (False, 2))
+
+    def test_mutated_first_record_returns_false_zero(self) -> None:
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(3):
+                log.append(_FakeEvent("E", {"i": i}))
+            self._mutate_payload_byte(p, target_seq=1)
+            self.assertEqual(log.verify(), (False, 0))
+
+    def test_mutated_tag_field_returns_false_at_previous_seq(self) -> None:
+        # Even if the payload is intact, flipping a single byte of the
+        # tag itself must be caught.
+        from story_automator.core.audit import AuditLog
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "audit.jsonl"
+            log = AuditLog(path=p, key=self.KEY)
+            for i in range(3):
+                log.append(_FakeEvent("E", {"i": i}))
+            text = p.read_text(encoding="utf-8")
+            recs = [json.loads(line) for line in text.splitlines() if line]
+            # Replace the second record's tag with a tag of the right
+            # shape but wrong value.
+            recs[1]["tag"] = "f" * 64
+            from story_automator.core.common import compact_json
+
+            p.write_text(
+                "\n".join(compact_json(r) for r in recs) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(log.verify(), (False, 1))
 
 
 if __name__ == "__main__":
