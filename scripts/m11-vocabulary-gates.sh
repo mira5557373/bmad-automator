@@ -76,3 +76,27 @@ rm -f "$TMP_EXPECTED" "$TMP_ACTUAL"
 [ -z "$DIFF" ] || fail "REQ-11 ordering-preservation drift detected:
 $DIFF"
 pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
+
+# Gate 6 — REQ-10 prose-immutability + whitespace hygiene against the integration base.
+# BASE env var lets CI override (default = origin/main, falling back to main if unfetched).
+# AUDIT.md is excluded because it is a wholly new operator-facing document — every
+# line is an addition, none describe a historical entry's prose, and REQ-10 only
+# constrains "the prose body, bullet content, file list, or QA notes of any
+# historical entry" (spec lines 22–23). The exclude pathspec keeps that intent.
+BASE="${BASE:-origin/main}"
+if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then BASE=main; fi
+if git rev-parse --verify --quiet "$BASE" >/dev/null; then
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' \
+    | grep -E '^[+-][^+-]' \
+    | grep -vE '^[+-]## [0-9]{6}' || true)
+  [ -z "$NON_HEADING" ] || fail "REQ-10 prose-immutability: non-heading changes under docs/changelog/:
+$NON_HEADING"
+  pass "REQ-10 prose-immutability (only dated headings changed vs $BASE)"
+
+  # Whitespace hygiene on every changed file we are responsible for.
+  git diff --check "$BASE"...HEAD -- 'docs/changelog/*.md' CONTRIBUTING.md scripts/m11-vocabulary-gates.sh >/dev/null \
+    || fail "Whitespace hygiene: git diff --check reported violations"
+  pass "Whitespace hygiene (no trailing ws, no CRLF mix on changed files)"
+else
+  printf 'SKIP: no %s ref available — gate 6 skipped (acceptable for shallow CI checkouts)\n' "$BASE"
+fi
