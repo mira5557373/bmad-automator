@@ -411,6 +411,13 @@ class TestParseEvent(unittest.TestCase):
         event = parse_event(line)
         self.assertEqual(event.epic, "史诗")
 
+    def test_parse_rejects_none_for_required_fields(self):
+        """parse_event must reject None for non-optional required fields."""
+        line = '{"event_type":"story_started","timestamp":null,"run_id":"run-123","epic":"E1","story_key":"S1","agent":"claude","model":"opus","complexity":"medium"}'
+        with self.assertRaises(TypeError) as cm:
+            parse_event(line)
+        self.assertIn("does not accept None", str(cm.exception))
+
 
 class TestRoundTrip(unittest.TestCase):
     """Test round-trip invariant: construct → to_json_line → parse_event."""

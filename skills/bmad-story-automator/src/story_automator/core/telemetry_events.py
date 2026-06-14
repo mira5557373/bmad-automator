@@ -8,11 +8,32 @@ protocol. Emitter and reader live in M02.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import typing
 from dataclasses import asdict, dataclass, field
 from typing import Any, ClassVar
 
 from story_automator.core.common import compact_json
+
+__all__ = [
+    "Event",
+    "UnknownEvent",
+    "StoryStarted",
+    "StoryCompleted",
+    "StoryFailed",
+    "StoryDeferred",
+    "RetryAttempt",
+    "EscalationTriggered",
+    "ReviewCycle",
+    "RetroFired",
+    "TmuxSessionSpawned",
+    "TmuxSessionCompleted",
+    "TmuxSessionCrashed",
+    "CostCharged",
+    "BudgetAlert",
+    "parse_event",
+]
 
 
 @dataclass
@@ -216,11 +237,17 @@ def parse_event(line: str) -> Event:
     return cls(**payload)
 
 
+def _is_optional_type(tp: Any) -> bool:
+    """Check if a type hint includes None (e.g., str | None or Optional[str])."""
+    origin = typing.get_origin(tp)
+    if origin is typing.Union:
+        args = typing.get_args(tp)
+        return type(None) in args
+    return False
+
+
 def _validate_event_fields(cls: type[Event], payload: dict[str, Any]) -> None:
     """Validate that payload fields match expected types for the event class."""
-    import dataclasses
-    import typing
-
     field_types = {}
     for f in dataclasses.fields(cls):
         # Use get_type_hints to resolve string annotations from __future__ import
@@ -234,6 +261,11 @@ def _validate_event_fields(cls: type[Event], payload: dict[str, Any]) -> None:
             # Unknown field will be caught by dataclass constructor
             continue
         expected_type = type_hints.get(key, field_types[key])
+        # Reject None for non-optional fields (no union with None)
+        if value is None and not _is_optional_type(expected_type):
+            raise TypeError(f"Field {key!r} does not accept None")
+        if value is None:
+            continue
         # Reject floats for int fields
         if expected_type is int and isinstance(value, float):
             raise TypeError(f"Field {key!r} expects int, got float: {value}")
