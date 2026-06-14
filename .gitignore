@@ -17,3 +17,36 @@ docs/plans/versioning/impl_artifacts/
 .claude/telemetry.jsonl
 .claude/audit/
 docs/superpowers/cli-spend-log.md
+
+# superpower-workflow runtime files
+.claude/.workflow-phase.json
+.claude/.gap-report.json
+.claude/.gap-report.raw.json
+.claude/.workflow.lock
+.claude/.workflow.lock.filelock
+.claude/workflow-complete.json
+.claude/workflow-*.log
+.claude/audit-trail.jsonl
+.worktrees/
+.claude/.gap-validation.json
+.claude/.spec-compliance.json
+.claude/.feature-verification.json
+.claude/.quality-gate-results.json
+.claude/reports/
+
+# Python standard ignores
+.venv/
+build/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# sw init outputs (operator-local; each milestone re-inits)
+.claude/workflow.json
+.claude/settings.local.json
+.claude/skills/
+.claude/commands/
