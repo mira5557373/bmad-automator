@@ -338,5 +338,31 @@ class SkillMdReq05Tests(unittest.TestCase):
             )
 
 
+class Step03abReq07Tests(unittest.TestCase):
+    """REQ-07: ## When to run section names section B, section D, step-03a."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, STEP_03AB)
+
+    def test_when_to_run_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## When to run\s*$",
+            msg="step-03ab must include a level-2 '## When to run' heading",
+        )
+
+    def test_when_to_run_references_section_b_d_and_step_03a(self) -> None:
+        for needle in (
+            "section B",
+            "section D",
+            "step-03a-execute-review.md",
+        ):
+            self.assertIn(
+                needle,
+                self.text,
+                msg=f"step-03ab ## When to run missing reference: {needle!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
