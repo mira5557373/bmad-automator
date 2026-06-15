@@ -62,6 +62,10 @@
 
 ### Documentation
 
+- docs(m12a): describe both gate modifications in changelog entry (96f5f05)
+- docs(m12a): exclude new M12a entry from REQ-10 immutability gate (e0a2c23)
+- docs(m12a): land retraction-as-changelog convention (571bc3d)
+- docs: update generated documentation (d3cf432)
 - docs(m11): add operator-facing changelog tag audit trail (9ab7b69)
 - docs: update generated documentation (30ae623)
 - docs(m11): tag 260519.md changelog entry with scope vocabulary (2c70156)
@@ -106,6 +110,9 @@
 
 ### Other
 
+- plan(m12a): implementation plan for retraction-as-changelog convention docs (7fbf972)
+- build: gitignore sw init outputs (4d954c1)
+- spec(m12): retraction-as-changelog convention spec (0ea7870)
 - plan(m11): docs-m2 retroactive-audit lock-in and verification harness (149cb5d)
 - plan(m11): changelog vocabulary implementation plan (3d05217)
 - build: gitignore sw init outputs (1c8f1bd)
