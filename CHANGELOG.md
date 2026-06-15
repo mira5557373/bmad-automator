@@ -1,5 +1,14 @@
 ### Features
 
+- feat(gap_validator): implement symbol_present substring check (REQ-04) (6672eaf)
+- feat(gap_validator): implement line_in_range check (REQ-04) (7dc6bdd)
+- feat(gap_validator): resolve file_path inside repo_root, reject escapes (REQ-05) (4af5cdf)
+- feat(gap_validator): validate_gaps skeleton with base 0.8 confidence (REQ-03, REQ-04 partial) (7b8a296)
+- feat(gap_validator): implement parse_gap_list happy path (REQ-06) (26bfc3f)
+- feat(gap_validator): add frozen kw_only ValidationReport dataclass (REQ-03) (2b47ba5)
+- feat(gap_validator): add frozen kw_only GapStatus dataclass (REQ-02) (95fb006)
+- feat(gap_validator): add frozen kw_only Gap dataclass (REQ-01) (863e437)
+- feat(gap_validator): add module skeleton, __all__, and import-contract tests (4d35dd8)
 - feat(state): guard cmd_build_state_doc write with acquire_run_lock (8d35f6d)
 - feat(state): route cmd_build_state_doc writes through write_atomic_text (4c0bbc8)
 - feat(state): cmd_build_state_doc removes legacy marker at startup (9c65ed4)
@@ -57,6 +66,7 @@
 
 ### Bug Fixes
 
+- fix(gap_validator): post-impl and production review fixes (597c845)
 - fix: post-impl review fixes for m05-m4-state-integration (4679457)
 - fix(test-state): make cross-thread smoke test deterministic (a9332e8)
 - fix(atomic_io): drop redundant unittest.mock.patch reimport in test (95577f9)
@@ -112,6 +122,8 @@
 
 ### Documentation
 
+- docs(plan): m06a-m1-gap-validator implementation plan + gap report (142a001)
+- docs: update generated documentation (ecf0658)
 - docs(plan): add m05-m4 state integration TDD plan (40adec4)
 - docs: update generated documentation (cca5d41)
 - docs(plan): add M05-M3 heartbeat & staleness implementation plan (0782fe2)
@@ -144,6 +156,8 @@
 
 ### Tests
 
+- test(gap_validator): assert __all__ resolves and forbidden layer imports absent (REQ-16) (3786ccc)
+- test(gap_validator): cover parse_gap_list error matrix (REQ-06) (7de455e)
 - test(state): cross-thread cmd_build_state_doc never deadlocks (c8f2797)
 - test(state): regression pin legacy marker cleanup runs before lock (107f39e)
 - test(state): pin RunLockBusy envelope under contended .state-build.lock (105e489)
@@ -203,6 +217,8 @@
 
 ### Other
 
+- build: gitignore sw init outputs (681f67c)
+- spec: copy m06a-trust-verify-python spec into worktree (275c9c5)
 - build: gitignore sw init outputs (0c6e2e5)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
