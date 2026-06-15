@@ -1,5 +1,12 @@
 ### Features
 
+- feat(m10a): add compare_traces happy path (1958fe2)
+- feat(m10a): add load_golden round-trip parser (6494071)
+- feat(m10a): add canonical serialize_trace (2d68252)
+- feat(m10a): add TraceDiff with summary() diagnostic (b724269)
+- feat(m10a): add TraceMismatch kw_only dataclass (7d6c7e0)
+- feat(m10a): add frozen kw_only TraceEntry dataclass (b72dc96)
+- feat(m10a): bootstrap golden-trace helpers module (8867751)
 - feat(state): guard cmd_build_state_doc write with acquire_run_lock (8d35f6d)
 - feat(state): route cmd_build_state_doc writes through write_atomic_text (4c0bbc8)
 - feat(state): cmd_build_state_doc removes legacy marker at startup (9c65ed4)
@@ -57,6 +64,7 @@
 
 ### Bug Fixes
 
+- fix(m10a): reject non-int seq and non-string kind in load_golden (3dc3f14)
 - fix: post-impl review fixes for m05-m4-state-integration (4679457)
 - fix(test-state): make cross-thread smoke test deterministic (a9332e8)
 - fix(atomic_io): drop redundant unittest.mock.patch reimport in test (95577f9)
@@ -112,6 +120,8 @@
 
 ### Documentation
 
+- docs(m10a): plan for golden-trace data types (127593c)
+- docs: update generated documentation (ecf0658)
 - docs(plan): add m05-m4 state integration TDD plan (40adec4)
 - docs: update generated documentation (cca5d41)
 - docs(plan): add M05-M3 heartbeat & staleness implementation plan (0782fe2)
@@ -144,6 +154,11 @@
 
 ### Tests
 
+- test(m10a): lock diagnostic summary contract (45e5c7f)
+- test(m10a): cover compare_traces length mismatches (fab1f16)
+- test(m10a): lock compare_traces field-priority contract (c642acc)
+- test(m10a): cover load_golden rejection paths (c97a00d)
+- test(m10a): lock GoldenTraceError as ValueError subclass (daff35f)
 - test(state): cross-thread cmd_build_state_doc never deadlocks (c8f2797)
 - test(state): regression pin legacy marker cleanup runs before lock (107f39e)
 - test(state): pin RunLockBusy envelope under contended .state-build.lock (105e489)
@@ -203,6 +218,8 @@
 
 ### Other
 
+- build: gitignore sw init outputs (5a587dc)
+- spec: copy m10-golden-trace spec into worktree (8f7af4d)
 - build: gitignore sw init outputs (0c6e2e5)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
