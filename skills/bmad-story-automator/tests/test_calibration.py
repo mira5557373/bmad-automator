@@ -432,6 +432,37 @@ class FormatCalibrationReportTests(unittest.TestCase):
         self.assertTrue(text.isascii())
 
 
+class FormatCalibrationReportEndToEndSnapshotTests(_ShimmedEventCase):
+    def test_jsonl_fixture_round_trips_to_known_snapshot(self) -> None:
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            lines = [
+                _completed_line(
+                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
+                ),
+                _completed_line(
+                    "2026-06-14T10:01:00Z", "r2", "S-2", "claude-opus-4", "code"
+                ),
+                _failed_line(
+                    "2026-06-14T10:02:00Z", "r3", "S-3", "claude-opus-4", "code"
+                ),
+                _completed_line(
+                    "2026-06-14T10:03:00Z", "r4", "S-4", "gpt-5-codex", "review"
+                ),
+            ]
+            _write_jsonl(ledger, lines)
+            table = build_calibration(ledger)
+            text = format_calibration_report(table)
+
+        expected = (
+            f"source: {ledger}\n"
+            "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
+            "claude-opus-4\tcode\t0.6667\t3\t2026-06-14T10:02:00Z\n"
+            "gpt-5-codex\treview\t1.0000\t1\t2026-06-14T10:03:00Z\n"
+        )
+        self.assertEqual(text, expected)
+
+
 class IterEventLinesTests(unittest.TestCase):
     def test_blank_lines_and_crlf_are_stripped(self) -> None:
         from story_automator.core.calibration import _iter_event_lines
