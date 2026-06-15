@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from story_automator.core.telemetry_emitter import TelemetryEmitter
+
 Channel = Literal["event", "state", "claude_p"]
 MismatchField = Literal["channel", "kind", "payload", "length"]
 
@@ -305,6 +307,10 @@ class GoldenTraceRecorder:
         return list(self._entries)
 
     def __enter__(self) -> GoldenTraceRecorder:
+        if self._installed:
+            raise RuntimeError("GoldenTraceRecorder is not reentrant")
+        self._orig_emit = TelemetryEmitter.emit
+        self._install_emit_hook()
         self._installed = True
         return self
 
@@ -314,8 +320,23 @@ class GoldenTraceRecorder:
         exc: BaseException | None,
         tb: object,
     ) -> None:
-        self._installed = False
+        try:
+            TelemetryEmitter.emit = self._orig_emit  # type: ignore[method-assign]
+        finally:
+            self._installed = False
         return None
+
+    def _install_emit_hook(self) -> None:
+        orig = self._orig_emit
+        recorder = self
+
+        def wrapper(emitter_self: TelemetryEmitter, event: object) -> None:
+            result = orig(emitter_self, event)
+            payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
+            recorder._record("event", type(event).__name__, payload)
+            return result
+
+        TelemetryEmitter.emit = wrapper  # type: ignore[method-assign]
 
     def _record(self, channel: Channel, kind: str, payload: dict[str, object]) -> None:
         """Append one entry under the arrival lock (REQ-06).

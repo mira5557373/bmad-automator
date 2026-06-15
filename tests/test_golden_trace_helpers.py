@@ -9,6 +9,9 @@ import threading as _threading
 import unittest
 from pathlib import Path
 
+from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.core.telemetry_events import StoryStarted
+
 from tests.golden_trace_helpers import (
     GoldenTraceError,
     GoldenTraceRecorder,
@@ -589,6 +592,67 @@ class RecorderRepoRootResolutionTests(unittest.TestCase):
             (resolved / "pyproject.toml").exists() or (resolved / ".git").exists(),
             f"resolved repo_root {resolved} contains no project marker",
         )
+
+
+class EmitHookTests(unittest.TestCase):
+    def test_emit_records_event_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(log)
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r1",
+                epic="e1",
+                story_key="s1",
+                agent="dev",
+                model="opus",
+                complexity="L",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+        self.assertEqual(len(rec.entries), 1)
+        entry = rec.entries[0]
+        self.assertEqual(entry.channel, "event")
+        self.assertEqual(entry.kind, "StoryStarted")
+        self.assertEqual(entry.payload.get("epic"), "e1")
+        self.assertEqual(entry.payload.get("story_key"), "s1")
+        self.assertEqual(entry.payload.get("event_type"), "story_started")
+
+    def test_emit_passes_through_normal_return(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(log)
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r1",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)):
+                emitter.emit(event)
+            self.assertTrue(log.exists())
+            self.assertGreater(log.stat().st_size, 0)
+
+    def test_emit_hook_removed_on_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(log)
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r1",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+            emitter.emit(event)
+        self.assertEqual(len(rec.entries), 1)
 
 
 if __name__ == "__main__":
