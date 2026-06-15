@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from story_automator.core.common import ensure_dir
+from story_automator.core.common import compact_json, ensure_dir
+from story_automator.core.telemetry_events import (
+    BudgetAlert,
+    CostCharged,
+    StoryStarted,
+)
 
 
 class ModuleSurfaceTests(unittest.TestCase):
@@ -143,6 +148,68 @@ class BuildCalibrationMissingPathTests(unittest.TestCase):
         self.assertEqual(table.total_events_scanned, 0)
         self.assertEqual(table.source_path, str(missing))
         self.assertTrue(table.generated_at.endswith("Z"))
+
+
+def _write_jsonl(path: Path, lines: list[str]) -> None:
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+class BuildCalibrationEmptyAndIgnoredTests(unittest.TestCase):
+    def test_empty_file_returns_empty_table(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            ledger.write_text("", encoding="utf-8")
+            table = build_calibration(ledger)
+
+        self.assertEqual(table.entries, {})
+        self.assertEqual(table.total_events_scanned, 0)
+        self.assertEqual(table.source_path, str(ledger))
+
+    def test_unrelated_event_types_are_counted_but_not_aggregated(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            started = StoryStarted(
+                timestamp="2026-06-14T10:00:00Z",
+                run_id="r1",
+                epic="EP-1",
+                story_key="S-1",
+                agent="ag",
+                model="claude-opus-4",
+                complexity="M",
+            )
+            cost = CostCharged(
+                timestamp="2026-06-14T10:01:00Z",
+                run_id="r1",
+                epic="EP-1",
+                story_key="S-1",
+                phase="impl",
+                cost_usd=0.12,
+                tokens_in=1000,
+                tokens_out=200,
+                model="claude-opus-4",
+            )
+            budget = BudgetAlert(
+                timestamp="2026-06-14T10:02:00Z",
+                run_id="r1",
+                threshold_pct=50,
+                total_cost_usd=5.0,
+                max_budget_usd=10.0,
+                epic="EP-1",
+                story_key="S-1",
+            )
+            _write_jsonl(
+                ledger,
+                [compact_json(e.to_dict()) for e in (started, cost, budget)],
+            )
+            table = build_calibration(ledger)
+
+        self.assertEqual(table.entries, {})
+        self.assertEqual(table.total_events_scanned, 3)
+        self.assertEqual(table.source_path, str(ledger))
 
 
 if __name__ == "__main__":
