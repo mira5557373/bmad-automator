@@ -1,5 +1,16 @@
 ### Features
 
+- feat(m10b): normalize claude_p argv paths, preserve placeholders (0a6587f)
+- feat(m10b): hook notify_claude_p for invoke recording (44ae05e)
+- feat(m10b): exclude heartbeat-driven lock writes from trace (4236d29)
+- feat(m10b): hook state.write_atomic_text for mutation recording (b3c759c)
+- feat(m10b): redact PID and lock-token fields in event payloads (94eea5b)
+- feat(m10b): redact event timestamps to <ts> sentinel (25e2576)
+- feat(m10b): hook TelemetryEmitter.emit for event recording (7227e1f)
+- feat(m10b): auto-resolve repo_root from project markers (2258a92)
+- feat(m10b): add repo-relative POSIX path helper (81a141a)
+- feat(m10b): add thread-safe _record on recorder (20820de)
+- feat(m10b): bootstrap GoldenTraceRecorder stub and notify_claude_p hook (f90eb16)
 - feat(m10a): add compare_traces happy path (1958fe2)
 - feat(m10a): add load_golden round-trip parser (6494071)
 - feat(m10a): add canonical serialize_trace (2d68252)
@@ -64,6 +75,8 @@
 
 ### Bug Fixes
 
+- fix(m10b): post-impl review fixes for recorder hooks (7bf94e7)
+- fix(m10b): satisfy ruff + mypy --strict (d077bb2)
 - fix(m10a): reject non-int seq and non-string kind in load_golden (3dc3f14)
 - fix: post-impl review fixes for m05-m4-state-integration (4679457)
 - fix(test-state): make cross-thread smoke test deterministic (a9332e8)
@@ -120,6 +133,8 @@
 
 ### Documentation
 
+- docs(m10b): add recorder + hooks implementation plan (67854bd)
+- docs: update generated documentation (7096bed)
 - docs(m10a): plan for golden-trace data types (127593c)
 - docs: update generated documentation (ecf0658)
 - docs(plan): add m05-m4 state integration TDD plan (40adec4)
@@ -154,6 +169,9 @@
 
 ### Tests
 
+- test(m10b): lock end-to-end determinism contract (489cfbb)
+- test(m10b): lock import-time safety contract (e50ac3f)
+- test(m10b): lock hook restoration on exception (0ca2d87)
 - test(m10a): lock diagnostic summary contract (45e5c7f)
 - test(m10a): cover compare_traces length mismatches (fab1f16)
 - test(m10a): lock compare_traces field-priority contract (c642acc)
