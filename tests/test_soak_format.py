@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re as stdlib_re
 import sys
 import tempfile
 import unittest
@@ -510,3 +511,31 @@ class LineEndingTests(unittest.TestCase):
                 newline="",
             )
             self.assertEqual(main([str(root)]), 0)
+
+
+class ImportAllowlistTests(unittest.TestCase):
+    def test_verifier_only_imports_allowlisted_stdlib(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "scripts" / "verify_soak_format.py"
+        text = path.read_text(encoding="utf-8")
+        allowed = {"__future__", "json", "pathlib", "datetime", "argparse", "sys", "re"}
+        import_lines = [
+            ln
+            for ln in text.split("\n")
+            if ln.startswith("import ") or ln.startswith("from ")
+        ]
+        for line in import_lines:
+            match = stdlib_re.match(
+                r"^(?:from|import)\s+([A-Za-z_][A-Za-z_0-9.]*)", line
+            )
+            self.assertIsNotNone(match, line)
+            top = match.group(1).split(".")[0]
+            self.assertIn(
+                top,
+                allowed,
+                f"verify_soak_format.py imports non-allowlisted module {top!r} ({line})",
+            )
+
+    def test_verifier_does_not_import_story_automator(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "scripts" / "verify_soak_format.py"
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("story_automator", text)
