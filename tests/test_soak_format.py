@@ -1,6 +1,8 @@
 # tests/test_soak_format.py
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -447,3 +449,25 @@ class PlaceholderTokenTests(unittest.TestCase):
                 newline="",
             )
             self.assertEqual(main([str(root)]), 0)
+
+
+class DeterministicOutputTests(unittest.TestCase):
+    def _run_capture(self, root: Path) -> list[str]:
+        from scripts.verify_soak_format import main
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = main([str(root)])
+        self.assertEqual(rc, 1)
+        return [line for line in buf.getvalue().split("\n") if line]
+
+    def test_findings_are_sorted_by_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            for arm in ("zeta", "alpha", "mid"):
+                arm_dir = root / "2026-06-13" / arm
+                arm_dir.mkdir(parents=True)
+                # All three missing files → three findings per arm.
+            findings = self._run_capture(root)
+            self.assertEqual(findings, sorted(findings))
