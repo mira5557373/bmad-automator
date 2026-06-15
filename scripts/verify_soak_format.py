@@ -5,12 +5,82 @@ import argparse
 import json  # noqa: F401  # used by later tasks
 import re
 import sys
-from datetime import date, datetime  # noqa: F401  # used by later tasks
+from datetime import date, datetime
 from pathlib import Path
 
 REQUIRED_FILES = ("telemetry.jsonl", "report.md", "config.json")
 
 ARM_SLUG_RE = re.compile(r"^[a-z0-9._-]+$")
+
+REQUIRED_FRONTMATTER_KEYS = (
+    "arm",
+    "date",
+    "run_id",
+    "git_sha",
+    "started_at",
+    "ended_at",
+)
+_FRONTMATTER_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$")
+
+
+def _read_text_lf(path: Path) -> str:
+    # NFR: treat CRLF and LF equivalently when reading.
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def _parse_frontmatter(text: str) -> dict[str, str] | None:
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    result: dict[str, str] = {}
+    for idx in range(1, len(lines)):
+        line = lines[idx]
+        if line.strip() == "---":
+            return result
+        match = _FRONTMATTER_LINE_RE.match(line)
+        if match is None:
+            continue
+        key, value = match.group(1), match.group(2).strip()
+        # Strip optional surrounding quotes.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        result[key] = value
+    return None  # closing --- not found
+
+
+def _parse_iso_datetime(value: str) -> bool:
+    # Normalize 'Z' suffix to '+00:00' so behavior is identical on 3.11+
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_report_md(arm_dir: Path) -> list[str]:
+    path = arm_dir / "report.md"
+    findings: list[str] = []
+    try:
+        text = _read_text_lf(path)
+    except OSError as exc:
+        return [f"{path}: cannot read: {exc}"]
+    fm = _parse_frontmatter(text)
+    if fm is None:
+        return [f"{path}: missing or unterminated YAML frontmatter block"]
+    for key in REQUIRED_FRONTMATTER_KEYS:
+        if key not in fm:
+            findings.append(f"{path}: frontmatter missing required key {key!r}")
+    started = fm.get("started_at")
+    if started is not None and not _parse_iso_datetime(started):
+        findings.append(
+            f"{path}: frontmatter 'started_at' does not parse as ISO datetime: {started!r}"
+        )
+    ended = fm.get("ended_at")
+    if ended is not None and not _parse_iso_datetime(ended):
+        findings.append(
+            f"{path}: frontmatter 'ended_at' does not parse as ISO datetime: {ended!r}"
+        )
+    return findings
 
 
 def _validate_date_dir(name: str) -> str | None:
@@ -32,6 +102,8 @@ def _validate_arm_dir(arm_dir: Path) -> list[str]:
     for name in REQUIRED_FILES:
         if not (arm_dir / name).is_file():
             findings.append(f"{arm_dir / name}: required file missing")
+    if (arm_dir / "report.md").is_file():
+        findings.extend(_validate_report_md(arm_dir))
     return findings
 
 

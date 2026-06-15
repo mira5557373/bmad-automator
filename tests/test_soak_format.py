@@ -122,3 +122,105 @@ class RequiredFilesTests(unittest.TestCase):
                 arm_dir = _write_minimal_arm(root)
                 (arm_dir / missing).unlink()
                 self.assertEqual(main([str(root)]), 1, missing)
+
+
+class FrontmatterTests(unittest.TestCase):
+    # REQ-13(c)
+
+    def test_missing_frontmatter_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "Body only.\n", encoding="utf-8", newline=""
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_unterminated_frontmatter_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "no closing fence\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_missing_required_key_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            # Drop git_sha.
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_unparseable_started_at_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: nope\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_unparseable_ended_at_fails(self) -> None:
+        # REQ-05 is literal: ended_at must parse via fromisoformat. No
+        # 'pending' carve-out here — that tension is M2 scope.
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: pending\n"
+                "---\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
