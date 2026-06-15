@@ -137,6 +137,8 @@
 
 ### Documentation
 
+- docs(m06b): plan c-m01 fixtures and format tests (1e9cc5f)
+- docs: update generated documentation (33eeff1)
 - docs(plan): m06a-m3 feature-tester TDD plan + Phase A gap report (3b5bfa9)
 - docs: update generated documentation (1b3af92)
 - docs(plan): add M06a-M2 spec compliance TDD implementation plan (03290e9)
@@ -175,6 +177,19 @@
 
 ### Tests
 
+- test(m06b): assert step-03ab Failure modes section (REQ-09) (6947209)
+- test(m06b): assert step-03ab What it does section (REQ-08) (9b2aa83)
+- test(m06b): assert step-03ab When to run section (REQ-07) (b5a91e7)
+- test(m06b): assert SKILL.md Output contract keys and decisions (REQ-05) (87d44ca)
+- test(m06b): assert SKILL.md Invocation contract CLI pattern (REQ-04) (bbeb9e8)
+- test(m06b): assert SKILL.md Pre-conditions section (REQ-03) (d10f2f0)
+- test(m06b): assert SKILL.md Trigger section names four triggers (REQ-02) (db05bf0)
+- test(m06b): assert SKILL.md presence, layer paths, order (REQ-01) (8282f72)
+- test(m06b): assert output fixture matches chain emit shape (REQ-13, REQ-05) (bbaa0f4)
+- test(m06b): assert input fixture shape matches parse_gap_list (REQ-13) (9df0b36)
+- test(m06b): scaffold trust-verify format test module (REQ-14) (b75819b)
+- test(m06b): add trust-verify output sample fixture (REQ-13) (c179c4e)
+- test(m06b): add trust-verify input sample fixture (REQ-13) (9a4ffe8)
 - test(feature_tester): forbid psutil/commands/cross-layer runtime imports (c24cf5a)
 - test(feature_tester): pin docstring contracts and atomic-write call (REQ-13, NFR) (87727f8)
 - test(feature_tester): dry_run semantics (REQ-15) (b99a8e3)
@@ -247,6 +262,8 @@
 
 ### Other
 
+- build: gitignore sw init outputs (7dda015)
+- spec(m06b): copy spec into worktree (1573484)
 - build: gitignore sw init outputs (681f67c)
 - spec: copy m06a-trust-verify-python spec into worktree (275c9c5)
 - build: gitignore sw init outputs (0c6e2e5)
