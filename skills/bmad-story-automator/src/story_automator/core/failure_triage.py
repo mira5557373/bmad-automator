@@ -20,3 +20,30 @@ land in M07b.
 """
 
 from __future__ import annotations
+
+
+import enum
+
+
+class FailureClass(enum.Enum):
+    """Closed taxonomy of failure shapes consumed by triage.
+
+    Exactly thirteen members. Declaration order is the canonical order
+    asserted by the taxonomy-completeness gate (REQ-02). String values
+    equal the member name so JSONL serialisations in M07b round-trip
+    cleanly.
+    """
+
+    CRASH = "CRASH"
+    TIMEOUT = "TIMEOUT"
+    POLICY_VIOLATION = "POLICY_VIOLATION"
+    REVIEW_REJECTED = "REVIEW_REJECTED"
+    TEST_FAILURE = "TEST_FAILURE"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    PARSE_ERROR = "PARSE_ERROR"
+    AGENT_REFUSED = "AGENT_REFUSED"
+    NETWORK_ERROR = "NETWORK_ERROR"
+    GATE_DEFER = "GATE_DEFER"
+    PLATEAU = "PLATEAU"
+    REPEATED_RETRY = "REPEATED_RETRY"
+    UNKNOWN = "UNKNOWN"
