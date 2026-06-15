@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import contextlib
-import tempfile
 import unittest
-from dataclasses import dataclass as _dc
 from pathlib import Path
 
-from story_automator.core import telemetry_events as _events_mod
-from story_automator.core.common import compact_json, ensure_dir
+from story_automator.core.common import compact_json
 from story_automator.core.telemetry_events import (
     BudgetAlert,
     CostCharged,
-    StoryCompleted,
-    StoryFailed,
     StoryStarted,
+)
+from tests._calibration_fixtures import (
+    _ExtendedEventShim,
+    _completed_line,
+    _failed_line,
+    _fixture_dir,
+    _write_jsonl,
 )
 
 
@@ -127,19 +128,6 @@ class CalibrationTableShapeTests(unittest.TestCase):
             CalibrationTable({}, "x", "y", 0)  # type: ignore[misc]
 
 
-@contextlib.contextmanager
-def _fixture_dir():
-    """REQ-14 compliant fixture directory.
-
-    Creates the parent via `ensure_dir` before opening the
-    `tempfile.TemporaryDirectory`. Yields a `pathlib.Path`.
-    """
-    parent = Path(tempfile.gettempdir()) / "m08_calibration_fixtures"
-    ensure_dir(parent)
-    with tempfile.TemporaryDirectory(dir=str(parent)) as tmpdir:
-        yield Path(tmpdir)
-
-
 class BuildCalibrationMissingPathTests(unittest.TestCase):
     def test_missing_path_returns_empty_table_without_raising(self) -> None:
         from story_automator.core.calibration import build_calibration
@@ -152,10 +140,6 @@ class BuildCalibrationMissingPathTests(unittest.TestCase):
         self.assertEqual(table.total_events_scanned, 0)
         self.assertEqual(table.source_path, str(missing))
         self.assertTrue(table.generated_at.endswith("Z"))
-
-
-def _write_jsonl(path: Path, lines: list[str]) -> None:
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 class BuildCalibrationEmptyAndIgnoredTests(unittest.TestCase):
@@ -216,122 +200,6 @@ class BuildCalibrationEmptyAndIgnoredTests(unittest.TestCase):
         self.assertEqual(table.source_path, str(ledger))
 
 
-def _completed_line(
-    *,
-    timestamp: str,
-    run_id: str,
-    epic: str,
-    story_key: str,
-    model_id: str,
-    task_kind: str,
-    duration_s: float = 100.0,
-    cost_usd: float = 0.5,
-    tokens_in: int = 1000,
-    tokens_out: int = 200,
-    attempts: int = 1,
-) -> str:
-    event = StoryCompleted(
-        timestamp=timestamp,
-        run_id=run_id,
-        epic=epic,
-        story_key=story_key,
-        duration_s=duration_s,
-        cost_usd=cost_usd,
-        tokens_in=tokens_in,
-        tokens_out=tokens_out,
-        attempts=attempts,
-    )
-    payload = event.to_dict()
-    payload["model_id"] = model_id
-    payload["task_kind"] = task_kind
-    return compact_json(payload)
-
-
-def _failed_line(
-    *,
-    timestamp: str,
-    run_id: str,
-    epic: str,
-    story_key: str,
-    model_id: str,
-    task_kind: str,
-    error_class: str = "TimeoutError",
-    reason: str = "exceeded",
-    attempts: int = 5,
-    final_session: str = "sess-1",
-) -> str:
-    event = StoryFailed(
-        timestamp=timestamp,
-        run_id=run_id,
-        epic=epic,
-        story_key=story_key,
-        error_class=error_class,
-        reason=reason,
-        attempts=attempts,
-        final_session=final_session,
-    )
-    payload = event.to_dict()
-    payload["model_id"] = model_id
-    payload["task_kind"] = task_kind
-    return compact_json(payload)
-
-
-class _ExtendedEventShim:
-    """Per-test-class shim: temporarily widens StoryCompleted/StoryFailed
-    so test fixtures can carry `model_id` and `task_kind` without
-    requiring an M01 change. Restored in tearDownClass.
-
-    This is strictly a TEST scaffold for M08. M01 is the right place to
-    add `model_id` and `task_kind` to the event dataclasses; until then
-    the production aggregator reads them defensively via getattr.
-    """
-
-    _saved: dict[str, type] = {}
-
-    @classmethod
-    def install(cls) -> None:
-        cls._saved = {
-            "StoryCompleted": _events_mod.StoryCompleted,
-            "StoryFailed": _events_mod.StoryFailed,
-        }
-        _events_mod.Event._REGISTRY.pop("story_completed", None)
-        _events_mod.Event._REGISTRY.pop("story_failed", None)
-        new_completed = cls._widen(_events_mod.StoryCompleted, "story_completed")
-        new_failed = cls._widen(_events_mod.StoryFailed, "story_failed")
-        _events_mod.StoryCompleted = new_completed
-        _events_mod.StoryFailed = new_failed
-        import story_automator.core.calibration as cal_mod
-
-        cal_mod.StoryCompleted = new_completed
-        cal_mod.StoryFailed = new_failed
-
-    @classmethod
-    def uninstall(cls) -> None:
-        _events_mod.Event._REGISTRY.pop("story_completed", None)
-        _events_mod.Event._REGISTRY.pop("story_failed", None)
-        _events_mod.StoryCompleted = cls._saved["StoryCompleted"]
-        _events_mod.StoryFailed = cls._saved["StoryFailed"]
-        _events_mod.Event._REGISTRY["story_completed"] = cls._saved["StoryCompleted"]
-        _events_mod.Event._REGISTRY["story_failed"] = cls._saved["StoryFailed"]
-        import story_automator.core.calibration as cal_mod
-
-        cal_mod.StoryCompleted = cls._saved["StoryCompleted"]
-        cal_mod.StoryFailed = cls._saved["StoryFailed"]
-
-    @staticmethod
-    def _widen(base: type, event_type: str) -> type:
-        @_dc(kw_only=True)
-        class _Widened(base):  # type: ignore[misc, valid-type]
-            model_id: str = ""
-            task_kind: str = ""
-
-        _Widened.__name__ = base.__name__
-        _Widened.__qualname__ = base.__qualname__
-        _Widened.EVENT_TYPE = event_type
-        _events_mod.Event._REGISTRY[event_type] = _Widened
-        return _Widened
-
-
 class BuildCalibrationAggregationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -346,19 +214,10 @@ class BuildCalibrationAggregationTests(unittest.TestCase):
 
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            _write_jsonl(
-                ledger,
-                [
-                    _completed_line(
-                        timestamp="2026-06-14T10:00:00Z",
-                        run_id="r1",
-                        epic="EP-1",
-                        story_key="S-1",
-                        model_id="claude-opus-4",
-                        task_kind="code",
-                    )
-                ],
+            line = _completed_line(
+                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
             )
+            _write_jsonl(ledger, [line])
             table = build_calibration(ledger)
 
         self.assertEqual(table.total_events_scanned, 1)
@@ -373,19 +232,10 @@ class BuildCalibrationAggregationTests(unittest.TestCase):
 
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            _write_jsonl(
-                ledger,
-                [
-                    _failed_line(
-                        timestamp="2026-06-14T11:00:00Z",
-                        run_id="r1",
-                        epic="EP-1",
-                        story_key="S-2",
-                        model_id="claude-sonnet-4-5",
-                        task_kind="review",
-                    )
-                ],
+            line = _failed_line(
+                "2026-06-14T11:00:00Z", "r1", "S-2", "claude-sonnet-4-5", "review"
             )
+            _write_jsonl(ledger, [line])
             table = build_calibration(ledger)
 
         entry = table.entries[("claude-sonnet-4-5", "review")]
@@ -410,37 +260,17 @@ class BuildCalibrationMixedAggregationTests(unittest.TestCase):
 
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            lines = []
-            lines.append(
+            lines = [
                 _completed_line(
-                    timestamp="2026-06-14T10:00:00Z",
-                    run_id="r1",
-                    epic="EP-1",
-                    story_key="S-1",
-                    model_id="claude-opus-4",
-                    task_kind="code",
-                )
-            )
-            lines.append(
+                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
+                ),
                 _completed_line(
-                    timestamp="2026-06-14T11:00:00Z",
-                    run_id="r2",
-                    epic="EP-1",
-                    story_key="S-2",
-                    model_id="claude-opus-4",
-                    task_kind="code",
-                )
-            )
-            lines.append(
+                    "2026-06-14T11:00:00Z", "r2", "S-2", "claude-opus-4", "code"
+                ),
                 _failed_line(
-                    timestamp="2026-06-14T12:00:00Z",
-                    run_id="r3",
-                    epic="EP-1",
-                    story_key="S-3",
-                    model_id="claude-opus-4",
-                    task_kind="code",
-                )
-            )
+                    "2026-06-14T12:00:00Z", "r3", "S-3", "claude-opus-4", "code"
+                ),
+            ]
             _write_jsonl(ledger, lines)
             table = build_calibration(ledger)
 
@@ -456,30 +286,9 @@ class BuildCalibrationMixedAggregationTests(unittest.TestCase):
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
             lines = [
-                _completed_line(
-                    timestamp="2026-06-14T15:00:00Z",
-                    run_id="r1",
-                    epic="EP-1",
-                    story_key="S-1",
-                    model_id="m",
-                    task_kind="t",
-                ),
-                _completed_line(
-                    timestamp="2026-06-14T09:00:00Z",
-                    run_id="r2",
-                    epic="EP-1",
-                    story_key="S-2",
-                    model_id="m",
-                    task_kind="t",
-                ),
-                _failed_line(
-                    timestamp="2026-06-14T12:00:00Z",
-                    run_id="r3",
-                    epic="EP-1",
-                    story_key="S-3",
-                    model_id="m",
-                    task_kind="t",
-                ),
+                _completed_line("2026-06-14T15:00:00Z", "r1", "S-1", "m", "t"),
+                _completed_line("2026-06-14T09:00:00Z", "r2", "S-2", "m", "t"),
+                _failed_line("2026-06-14T12:00:00Z", "r3", "S-3", "m", "t"),
             ]
             _write_jsonl(ledger, lines)
             table = build_calibration(ledger)
@@ -502,22 +311,8 @@ class BuildCalibrationParsingTolerationTests(unittest.TestCase):
 
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            line1 = _completed_line(
-                timestamp="2026-06-14T10:00:00Z",
-                run_id="r1",
-                epic="EP-1",
-                story_key="S-1",
-                model_id="m",
-                task_kind="t",
-            )
-            line2 = _completed_line(
-                timestamp="2026-06-14T10:01:00Z",
-                run_id="r2",
-                epic="EP-1",
-                story_key="S-2",
-                model_id="m",
-                task_kind="t",
-            )
+            line1 = _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t")
+            line2 = _completed_line("2026-06-14T10:01:00Z", "r2", "S-2", "m", "t")
             ledger.write_bytes(
                 (line1 + "\r\n" + line2 + "\r\n" + "\r\n").encode("utf-8")
             )
@@ -540,14 +335,7 @@ class BuildCalibrationParsingTolerationTests(unittest.TestCase):
                     "some_field": 42,
                 }
             )
-            good = _completed_line(
-                timestamp="2026-06-14T10:00:00Z",
-                run_id="r1",
-                epic="EP-1",
-                story_key="S-1",
-                model_id="m",
-                task_kind="t",
-            )
+            good = _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t")
             _write_jsonl(ledger, [unknown, good])
             table = build_calibration(ledger)
 
