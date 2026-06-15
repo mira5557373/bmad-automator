@@ -934,5 +934,39 @@ class RecorderRestorationOnExceptionTests(unittest.TestCase):
                         pass
 
 
+class ImportSafetyTests(unittest.TestCase):
+    def test_import_does_not_install_hooks(self) -> None:
+        # Fresh subprocess so we observe pristine module state — using
+        # importlib.reload in-process is unsafe (the reload could race
+        # with a concurrently-active recorder in another test thread).
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.path.insert(0, 'skills/bmad-story-automator/src');\n"
+                "from story_automator.core.telemetry_emitter import TelemetryEmitter\n"
+                "from story_automator.commands import state\n"
+                "orig_emit = TelemetryEmitter.emit\n"
+                "orig_write = state.write_atomic_text\n"
+                "import tests.golden_trace_helpers as gh\n"
+                "assert TelemetryEmitter.emit is orig_emit, 'emit was patched at import'\n"
+                "assert state.write_atomic_text is orig_write, 'write_atomic_text patched at import'\n"
+                "assert gh._CLAUDE_P_HOOK is None, 'claude_p hook installed at import'\n"
+                "print('ok')",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_module_level_claude_p_hook_is_none(self) -> None:
+        import tests.golden_trace_helpers as gh
+        self.assertIsNone(gh._CLAUDE_P_HOOK)  # type: ignore[attr-defined]
+
+
 if __name__ == "__main__":
     unittest.main()
