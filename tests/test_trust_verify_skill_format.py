@@ -393,5 +393,47 @@ class Step03abReq08Tests(unittest.TestCase):
             )
 
 
+class Step03abReq09Tests(unittest.TestCase):
+    """REQ-09: ## Failure modes section enumerates the five documented modes."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, STEP_03AB)
+
+    def test_failure_modes_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## Failure modes\s*$",
+            msg="step-03ab must include a level-2 '## Failure modes' heading",
+        )
+
+    def test_layer1_confidence_threshold_named(self) -> None:
+        # The spec pins the threshold at 0.6.
+        self.assertIn("Layer 1", self.text)
+        self.assertIn("0.6", self.text)
+
+    def test_layer2_missing_verdict_named(self) -> None:
+        self.assertIn("Layer 2", self.text)
+        self.assertIn("missing", self.text)
+
+    def test_layer3_created_test_path_named(self) -> None:
+        self.assertIn("Layer 3", self.text)
+        self.assertIn("tests/test_compliance_", self.text)
+
+    def test_malformed_json_failure_named(self) -> None:
+        # Match either 'malformed' or 'malformed JSON' anywhere in the section.
+        self.assertRegex(
+            self.text,
+            r"(?i)malformed",
+            msg="step-03ab ## Failure modes must mention malformed JSON output",
+        )
+
+    def test_subprocess_nonzero_exit_named(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?i)non[- ]?zero",
+            msg="step-03ab ## Failure modes must mention non-zero subprocess exit",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
