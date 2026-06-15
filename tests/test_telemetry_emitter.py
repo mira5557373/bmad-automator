@@ -472,3 +472,44 @@ class TelemetryEmitterTmuxWiringTests(unittest.TestCase):
             self.assertEqual(payload["event_type"], "tmux_session_spawned")
             self.assertEqual(payload["session_name"], "sess-1")
             self.assertEqual(payload["pid"], 4242)
+
+
+class TelemetryEmitterEpicAgentsWiringTests(unittest.TestCase):
+    def test_emit_retry_attempt_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+            emitter.emit(
+                RetryAttempt(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    story_key="S1",
+                    attempt_num=2,
+                    agent="claude",
+                    model="opus",
+                    prev_error_class="test_fail",
+                )
+            )
+            payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
+            self.assertEqual(payload["event_type"], "retry_attempt")
+            self.assertEqual(payload["attempt_num"], 2)
+
+    def test_emit_escalation_triggered_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+            emitter.emit(
+                EscalationTriggered(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    story_key="S1",
+                    trigger_id=3,
+                    severity="critical",
+                    message="review loop",
+                )
+            )
+            payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
+            self.assertEqual(payload["event_type"], "escalation_triggered")
+            self.assertEqual(payload["severity"], "critical")

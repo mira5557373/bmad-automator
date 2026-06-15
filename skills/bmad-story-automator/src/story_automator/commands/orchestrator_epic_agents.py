@@ -10,6 +10,23 @@ from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
 from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
+from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.core.telemetry_events import (
+    EscalationTriggered,
+    RetryAttempt,
+)
+
+_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
+
+
+def _telemetry_emitter() -> TelemetryEmitter:
+    path = (Path(get_project_root()) / "telemetry" / "events.jsonl").resolve()
+    cached = _EMITTER_CACHE.get(path)
+    if cached is not None:
+        return cached
+    emitter = TelemetryEmitter(path)
+    _EMITTER_CACHE[path] = emitter
+    return emitter
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -113,6 +130,17 @@ def check_blocking_action(args: list[str]) -> int:
                 if _line_references_story(project_root, epic, norm, args[0], line):
                     dependents.append(current_story)
         if dependents:
+            _telemetry_emitter().emit(
+                EscalationTriggered(
+                    timestamp=iso_now(),
+                    run_id="",
+                    epic=epic,
+                    story_key=norm.id,
+                    trigger_id=0,
+                    severity="warning",
+                    message=f"blocked by {len(dependents)} dependent stories",
+                )
+            )
             print_json({"ok": True, "blocking": True, "story": norm.id, "epic": epic, "dependents": sorted(set(dependents), key=lambda item: _story_sort_key(project_root, item, epic)), "reason": "dependent_stories", "source": "epic_file"})
             return 0
         print_json({"ok": True, "blocking": False, "story": norm.id, "epic": epic, "dependents": [], "reason": "no_dependents_found", "source": "epic_file"})
@@ -162,7 +190,7 @@ def agents_build_action(args: list[str]) -> int:
 
 
 def agents_resolve_action(args: list[str]) -> int:
-    options = {"state-file": "", "agents-file": "", "story": "", "task": ""}
+    options = {"state-file": "", "agents-file": "", "story": "", "task": "", "attempt": "", "prev-error-class": ""}
     idx = 0
     while idx < len(args):
         key = args[idx].lstrip("-")
@@ -192,6 +220,20 @@ def agents_resolve_action(args: list[str]) -> int:
         fallback = selection.get("fallback", "")
         fallback = "false" if fallback in {False, "false", "none", "null"} else fallback
         model = _normalize_model_value(selection.get("model"))
+        attempt_num = int(options.get("attempt") or 0)
+        if attempt_num >= 2:
+            _telemetry_emitter().emit(
+                RetryAttempt(
+                    timestamp=iso_now(),
+                    run_id="",
+                    epic=options["story"].split(".", 1)[0],
+                    story_key=options["story"],
+                    attempt_num=attempt_num,
+                    agent=selection.get("primary", ""),
+                    model=model,
+                    prev_error_class=options.get("prev-error-class") or "",
+                )
+            )
         print_json({"ok": True, "story": options["story"], "task": options["task"], "primary": selection.get("primary", ""), "fallback": fallback, "model": model, "complexity": story.get("complexity", "")})
         return 0
     print_json({"ok": False, "error": "story_not_found"})
