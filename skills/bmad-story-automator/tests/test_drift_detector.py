@@ -192,5 +192,50 @@ class ComputeDriftBaselineTests(unittest.TestCase):
         self.assertEqual(current.entries, current_snapshot)
 
 
+class ComputeDriftBoundaryTests(unittest.TestCase):
+    def _drift_entry(self, baseline_rate: float, current_rate: float) -> DriftEntry:
+        baseline = _table(_entry("m", "t", baseline_rate))
+        current = _table(_entry("m", "t", current_rate))
+        report = compute_drift(baseline=baseline, current=current)
+        self.assertEqual(len(report.entries), 1)
+        return report.entries[0]
+
+    def test_stable_below_then_minor_at_boundary(self) -> None:
+        below = self._drift_entry(0.80, 0.8499)
+        at = self._drift_entry(0.80, 0.85)
+        self.assertIs(below.classification, DriftClassification.STABLE)
+        self.assertIs(at.classification, DriftClassification.MINOR_DRIFT)
+
+    def test_minor_below_then_major_at_boundary(self) -> None:
+        below = self._drift_entry(0.80, 0.8999)
+        at = self._drift_entry(0.80, 0.90)
+        self.assertIs(below.classification, DriftClassification.MINOR_DRIFT)
+        self.assertIs(at.classification, DriftClassification.MAJOR_DRIFT)
+
+    def test_major_below_then_severe_at_boundary(self) -> None:
+        below = self._drift_entry(0.80, 0.9999)
+        at = self._drift_entry(0.60, 0.80)
+        self.assertIs(below.classification, DriftClassification.MAJOR_DRIFT)
+        self.assertIs(at.classification, DriftClassification.SEVERE_DRIFT)
+
+    def test_negative_deltas_classify_symmetrically_stable_minor(self) -> None:
+        below = self._drift_entry(0.80, 0.7501)
+        at = self._drift_entry(0.85, 0.80)
+        self.assertIs(below.classification, DriftClassification.STABLE)
+        self.assertIs(at.classification, DriftClassification.MINOR_DRIFT)
+
+    def test_negative_deltas_classify_symmetrically_minor_major(self) -> None:
+        below = self._drift_entry(0.80, 0.7001)
+        at = self._drift_entry(0.90, 0.80)
+        self.assertIs(below.classification, DriftClassification.MINOR_DRIFT)
+        self.assertIs(at.classification, DriftClassification.MAJOR_DRIFT)
+
+    def test_negative_deltas_classify_symmetrically_major_severe(self) -> None:
+        below = self._drift_entry(0.80, 0.6001)
+        at = self._drift_entry(0.80, 0.60)
+        self.assertIs(below.classification, DriftClassification.MAJOR_DRIFT)
+        self.assertIs(at.classification, DriftClassification.SEVERE_DRIFT)
+
+
 if __name__ == "__main__":
     unittest.main()
