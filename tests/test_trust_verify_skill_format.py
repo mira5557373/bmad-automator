@@ -196,5 +196,33 @@ class SkillMdReq01Tests(unittest.TestCase):
         self.assertGreater(l3, l2, msg="'Layer 3' must appear after 'Layer 2'")
 
 
+class SkillMdReq02Tests(unittest.TestCase):
+    """REQ-02: ## Trigger section names the four documented triggers."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, SKILL_MD)
+
+    def test_trigger_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## Trigger\s*$",
+            msg="SKILL.md must include a level-2 '## Trigger' heading",
+        )
+
+    def test_all_four_triggers_named(self) -> None:
+        needles = (
+            "/sw-trust-verify",
+            "step-03a",
+            "Dev Story",
+            "orchestrator menu",
+        )
+        missing = [n for n in needles if n not in self.text]
+        self.assertEqual(
+            missing,
+            [],
+            msg=f"SKILL.md ## Trigger section missing references: {missing}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
