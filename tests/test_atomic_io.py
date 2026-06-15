@@ -493,8 +493,6 @@ class RunLockIdentityTests(unittest.TestCase):
     def test_to_json_uses_compact_json_helper(self) -> None:
         # REQ-05 explicitly requires the compact_json helper from common.py;
         # patching it must be observable so we know the wiring is right.
-        from unittest.mock import patch
-
         identity = self._sample()
         with patch(
             "story_automator.core.atomic_io.compact_json",
