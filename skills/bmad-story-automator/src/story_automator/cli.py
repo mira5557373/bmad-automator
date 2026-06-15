@@ -12,6 +12,7 @@ from .commands.basic import (
     cmd_list_sessions,
     cmd_stop_hook,
 )
+from .commands.ceiling_check import cmd_ceiling_check
 from .commands.orchestrator import cmd_orchestrator_helper
 from .commands.state import cmd_build_state_doc, cmd_sprint_compare, cmd_state_metrics, cmd_validate_state
 from .commands.tmux import cmd_codex_status_check, cmd_heartbeat_check, cmd_monitor_session, cmd_tmux_status_check, cmd_tmux_wrapper
@@ -56,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         "monitor-session": cmd_monitor_session,
         "orchestrator-helper": cmd_orchestrator_helper,
         "agent-config": cmd_agent_config,
+        "ceiling-check": cmd_ceiling_check,
     }
     handler = commands.get(command)
     if not handler:
@@ -92,6 +94,7 @@ def _usage(stream: object) -> None:
         "monitor-session",
         "orchestrator-helper",
         "agent-config",
+        "ceiling-check",
     ):
         print(f"  {name}", file=stream)
 
