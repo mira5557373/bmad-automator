@@ -28,6 +28,8 @@ import sys  # noqa: F401 — used by bypass_allowed in M03-M2 task T10
 from dataclasses import dataclass
 from pathlib import Path
 
+from .telemetry_events import parse_event
+
 __all__ = [
     "BudgetCeiling",
     "CeilingDecision",
@@ -87,6 +89,12 @@ _REQUIRED_KEYS: tuple[str, ...] = (
     "warn_at",
     "gate_names",
 )
+_WINDOW_SECONDS: dict[str, int] = {
+    "per_run": 0,  # sentinel — "0" means "no time filter, sum all events"
+    "24h": 86400,
+    "7d": 604800,
+    "30d": 2592000,
+}
 
 
 def _validate_ceiling_dict(index: int, raw: object) -> BudgetCeiling | None:
@@ -220,6 +228,50 @@ def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]
     return parsed
 
 
+def _compute_spent(
+    events_path: str | Path,
+    window: str,
+    now_iso: str,
+) -> float:
+    """Stream the JSONL ledger and sum ``cost_usd`` (REQ-08).
+
+    Missing file returns ``0.0``. Lines that fail to parse via
+    ``parse_event`` are skipped (NFR line-ending tolerance). Events
+    without a ``cost_usd`` attribute do not contribute. The ``window``
+    filter is applied in Task 6; this cut sums all events.
+    """
+    path = Path(events_path)
+    if not path.is_file():
+        return 0.0
+    total = 0.0
+    with path.open("r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.rstrip("\r\n").strip()
+            if not line:
+                continue
+            try:
+                event = parse_event(line)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            cost = getattr(event, "cost_usd", None)
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                total += float(cost)
+    return total
+
+
+def _decide(ceiling: BudgetCeiling, spent: float) -> tuple[CeilingDecision, str]:
+    """Apply the REQ-09 verdict and produce the reason string."""
+    reason = (
+        f"{ceiling.name}:{ceiling.window}"
+        f":spent={spent:.4f}:limit={ceiling.limit_usd:.4f}"
+    )
+    if spent >= ceiling.limit_usd:
+        return CeilingDecision.BLOCK, reason
+    if spent >= ceiling.limit_usd * ceiling.warn_at:
+        return CeilingDecision.WARN, reason
+    return CeilingDecision.ALLOW, reason
+
+
 def evaluate_ceilings(
     events_path: str | Path,
     gate_name: str,
@@ -249,10 +301,11 @@ def evaluate_ceilings(
         resolved = parse_ceilings_config(workflow_json_path)  # type: ignore[arg-type]
     if not resolved:
         return CeilingDecision.ALLOW, "no_ceilings_configured"
-    # Gate filter, ledger streaming, and verdict merge land in later
-    # tasks. Until then, an applicable-but-unimplemented call returns
-    # the sentinel so the test surface stays green.
-    return CeilingDecision.ALLOW, "no_ceilings_configured"
+    # Use the first (and, until Task 8, only) ceiling — gate filtering
+    # and multi-ceiling severity merging arrive in later tasks.
+    ceiling = resolved[0]
+    spent = _compute_spent(events_path, ceiling.window, now_iso)
+    return _decide(ceiling, spent)
 
 
 def bypass_allowed() -> bool:

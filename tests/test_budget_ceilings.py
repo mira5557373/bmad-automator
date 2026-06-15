@@ -470,5 +470,38 @@ class EvaluateCeilingsNoConfigTests(unittest.TestCase):
         self.assertEqual(reason, "no_ceilings_configured")
 
 
+class EvaluateCeilingsEmptyLedgerTests(unittest.TestCase):
+    def _ceiling(self):
+        return BudgetCeiling(
+            name="c1",
+            window="per_run",
+            limit_usd=10.0,
+            warn_at=0.8,
+            gate_names=("init",),
+        )
+
+    def test_missing_ledger_file_returns_allow(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "events.jsonl"
+            verdict, reason = evaluate_ceilings(
+                missing, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "c1:per_run:spent=0.0000:limit=10.0000")
+
+    def test_empty_ledger_file_returns_allow(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "c1:per_run:spent=0.0000:limit=10.0000")
+
+
 if __name__ == "__main__":
     unittest.main()
