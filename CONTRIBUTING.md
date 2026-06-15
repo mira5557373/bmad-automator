@@ -15,6 +15,9 @@ This repository packages the BMAD story-automator workflow payload plus the Pyth
   - `npm run pack:dry-run`
   - `npm run test:smoke`
   - `PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator --help`
+  - `python scripts/verify_retraction_format.py`
+
+The `python scripts/verify_retraction_format.py` gate is expected to exit 0 on a clean tree; a non-zero exit indicates a malformed `### Retractions` bullet under `docs/changelog/` that must be fixed before opening the PR.
 
 ## PR Notes
 

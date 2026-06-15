@@ -58,7 +58,8 @@ docs/changelog/260506.md:3
 docs/changelog/260508.md:3,25,43
 docs/changelog/260517.md:3
 docs/changelog/260519.md:3
-docs/changelog/260615.md:3"
+docs/changelog/260615.md:3
+docs/changelog/260616.md:3"
 
 ACTUAL=$(for F in docs/changelog/*.md; do
   LINES=$(grep -nE '^##+ [0-9]{6}' "$F" | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
@@ -89,7 +90,7 @@ pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
 BASE="${BASE:-origin/main}"
 if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then BASE=main; fi
 if git rev-parse --verify --quiet "$BASE" >/dev/null; then
-  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' \
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' \
     | grep -E '^[+-][^+-]' \
     | grep -vE '^[+-]## [0-9]{6}' || true)
   [ -z "$NON_HEADING" ] || fail "REQ-10 prose-immutability: non-heading changes under docs/changelog/:
