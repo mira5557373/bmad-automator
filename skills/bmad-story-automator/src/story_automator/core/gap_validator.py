@@ -208,6 +208,32 @@ def _check_line_in_range(
     return False, f"line {line} outside file range 1..{line_count}"
 
 
+def _check_symbol_present(
+    resolved_path: Path | None,
+    symbol: str,
+) -> tuple[bool, str | None]:
+    """Return `(True, None)` if `symbol` literally occurs in the source text.
+
+    Empty `symbol` is rejected (an empty string is trivially a substring
+    of every file and would silently inflate confidence). If
+    `resolved_path` is None, returns `(False, None)` — the caller has
+    already noted the root cause.
+    """
+    if resolved_path is None:
+        return False, None
+    if not symbol:
+        return False, "symbol '' is empty; refusing to claim presence"
+    try:
+        text = resolved_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"could not read {resolved_path.name} for symbol check: {exc}"
+    except UnicodeDecodeError as exc:
+        return False, f"could not decode {resolved_path.name} as UTF-8: {exc}"
+    if symbol in text:
+        return True, None
+    return False, f"symbol {symbol!r} not found in {resolved_path.name}"
+
+
 def _empty_overall_confidence() -> float:
     """Overall confidence when no gaps were submitted.
 
@@ -248,10 +274,10 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
         line_in_range, line_note = _check_line_in_range(resolved, gap.line)
         if line_note is not None:
             notes.append(line_note)
-        symbol_present = False  # Placeholder — Task 10 implements symbol check.
 
-        if not symbol_present:
-            notes.append(f"symbol {gap.symbol!r} not found in {gap.file_path}")
+        symbol_present, symbol_note = _check_symbol_present(resolved, gap.symbol)
+        if symbol_note is not None:
+            notes.append(symbol_note)
 
         confidence = _BASE_CONFIDENCE + _PASS_BONUS * sum(
             [path_exists, line_in_range, symbol_present]

@@ -519,3 +519,77 @@ class LineInRangeTests(unittest.TestCase):
             repo_root=self.root,
         )
         self.assertFalse(report.statuses[0].line_in_range)
+
+
+class SymbolPresentTests(unittest.TestCase):
+    """REQ-04: `symbol_present` is True iff the literal symbol occurs in the source."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / "a.py").write_text(
+            "def do_thing():\n    return 42\n",
+            encoding="utf-8",
+        )
+
+    def _gap(self, symbol: str) -> Gap:
+        from story_automator.core.gap_validator import Gap
+
+        return Gap(
+            file_path="a.py",
+            line=1,
+            symbol=symbol,
+            description="d",
+            severity="minor",
+        )
+
+    def test_present_symbol_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap("do_thing")], repo_root=self.root)
+        self.assertTrue(report.statuses[0].symbol_present)
+
+    def test_absent_symbol_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap("not_there")], repo_root=self.root)
+        self.assertFalse(report.statuses[0].symbol_present)
+        joined = " | ".join(report.statuses[0].notes)
+        self.assertIn("not_there", joined)
+
+    def test_all_three_checks_passing_yields_confidence_0_95(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap("do_thing")], repo_root=self.root)
+        s = report.statuses[0]
+        self.assertTrue(s.path_exists)
+        self.assertTrue(s.line_in_range)
+        self.assertTrue(s.symbol_present)
+        self.assertAlmostEqual(s.confidence, 0.95)
+        self.assertEqual(s.notes, [])
+
+    def test_missing_path_implies_symbol_not_present(self) -> None:
+        from story_automator.core.gap_validator import Gap, validate_gaps
+
+        report = validate_gaps(
+            [
+                Gap(
+                    file_path="missing.py",
+                    line=1,
+                    symbol="x",
+                    description="d",
+                    severity="minor",
+                )
+            ],
+            repo_root=self.root,
+        )
+        self.assertFalse(report.statuses[0].symbol_present)
+
+    def test_empty_symbol_string_is_rejected(self) -> None:
+        # An empty string is trivially a substring of any text; reject
+        # explicitly so the verifier cannot be silently bypassed.
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap("")], repo_root=self.root)
+        self.assertFalse(report.statuses[0].symbol_present)
