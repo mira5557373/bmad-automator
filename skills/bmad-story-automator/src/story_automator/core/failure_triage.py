@@ -233,7 +233,31 @@ def _classify_story_failed(event: StoryFailed) -> Classification:
 
 
 def _classify_story_deferred(event: StoryDeferred) -> Classification:
-    raise NotImplementedError  # implemented in Task 9
+    """Map a ``StoryDeferred`` event onto either GATE_DEFER or REPEATED_RETRY.
+
+    Spec REQ-10 names an optional ``attempt_count`` field that M01 does
+    not currently emit (M01 ships ``tasks_completed``); ``getattr`` with
+    a 0 default keeps the canonical M01 event on the default branch.
+    The plateau check on ``reason`` runs against the lowercased value.
+    """
+    event_id = getattr(event, "event_id", None)
+    reason_lower = (event.reason or "").lower()
+    attempt_count = getattr(event, "attempt_count", 0)
+    if "plateau" in reason_lower or attempt_count > 3:
+        return Classification(
+            primary=FailureClass.REPEATED_RETRY,
+            implies=(FailureClass.PLATEAU,),
+            confidence=Confidence.HIGH,
+            reason="plateau_or_high_attempts",
+            event_id=event_id,
+        )
+    return Classification(
+        primary=FailureClass.GATE_DEFER,
+        implies=(),
+        confidence=Confidence.HIGH,
+        reason="story_deferred",
+        event_id=event_id,
+    )
 
 
 def _classify_tmux_crash(event: TmuxSessionCrashed) -> Classification:
