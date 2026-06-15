@@ -143,5 +143,66 @@ class LegacyMarkerCleanupTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class AtomicWriteIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name)
+        self.output_dir = self.project_root / "_bmad-output" / "story-automator"
+        _install_bundle(self.project_root)
+        _install_required_skills(self.project_root)
+        self.template = (
+            self.project_root
+            / ".claude"
+            / "skills"
+            / "bmad-story-automator"
+            / "templates"
+            / "state-document.md"
+        )
+
+    def test_cmd_build_state_doc_routes_through_write_atomic_text(self) -> None:
+        """REQ-10: state.py must route every previous ``write_text`` site
+        through ``write_atomic_text``. We assert this by patching
+        ``story_automator.commands.state.write_atomic_text`` and checking it
+        was invoked with the rendered state-doc path and the rendered text.
+        """
+        from unittest.mock import patch
+
+        recorded: list[tuple[Path, str]] = []
+
+        def _spy(path: Path, data: str, *, encoding: str = "utf-8") -> None:
+            recorded.append((Path(path), data))
+            Path(path).write_bytes(data.encode(encoding))
+
+        stdout = io.StringIO()
+        with (
+            _PatchEnv(self.project_root),
+            redirect_stdout(stdout),
+            patch(
+                "story_automator.commands.state.write_atomic_text", side_effect=_spy
+            ) as spy,
+        ):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(self.template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(_config()),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        # write_atomic_text is the only allowed write path for the rendered
+        # state document. Multiple calls are permissible (acquire_run_lock
+        # writes its identity payload through write_atomic_text too); we just
+        # require that the state-doc target itself was written through it.
+        self.assertTrue(spy.called, "write_atomic_text must be invoked")
+        targets = {str(call_path) for call_path, _ in recorded}
+        payload = json.loads(stdout.getvalue())
+        self.assertIn(payload["path"], targets)
+
+
 if __name__ == "__main__":
     unittest.main()
