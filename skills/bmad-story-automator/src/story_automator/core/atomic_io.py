@@ -6,7 +6,11 @@ import threading
 import time
 from pathlib import Path
 
-__all__ = ["AtomicWriteRetryExhausted", "write_atomic_text"]
+__all__ = [
+    "AtomicWriteRetryExhausted",
+    "RunLockBusy",
+    "write_atomic_text",
+]
 
 
 # Inter-retry backoffs: sleep _WINDOWS_REPLACE_BACKOFFS_S[i] BEFORE the
@@ -52,6 +56,18 @@ class AtomicWriteRetryExhausted(PermissionError):
     observability NFR (later M02 telemetry wiring can classify it by type
     rather than string-match). PermissionError is itself a subclass of
     OSError, so callers that already handle OSError keep working.
+    """
+
+
+class RunLockBusy(Exception):
+    """Raised when acquiring a run lock times out.
+
+    Intentionally NOT a subclass of PermissionError or
+    AtomicWriteRetryExhausted: a busy run lock means another holder is
+    actively making progress (or recently crashed and has not yet been
+    reclaimed by the stale-detection path added in M05-M3). Future M02
+    telemetry consumers classify it by type, so it must remain distinct
+    from the atomic-write retry-exhaustion failure mode.
     """
 
 

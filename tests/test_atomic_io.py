@@ -387,3 +387,30 @@ class CrashSafetyTests(unittest.TestCase):
         self.assertFalse(target.exists())
         siblings = list(self.dir.iterdir())
         self.assertEqual(siblings, [])
+
+
+class RunLockBusyExceptionTests(unittest.TestCase):
+    def test_run_lock_busy_is_exported(self) -> None:
+        from story_automator.core.atomic_io import RunLockBusy
+
+        self.assertTrue(issubclass(RunLockBusy, Exception))
+
+    def test_run_lock_busy_is_distinct_from_permission_error(self) -> None:
+        # REQ-04 vs REQ-06: a Windows replace timeout is AtomicWriteRetryExhausted
+        # (a PermissionError); a run-lock acquisition timeout is RunLockBusy.
+        # They must NOT collapse onto each other so M02 telemetry wiring can
+        # classify them by type without string-matching (observability NFR).
+        from story_automator.core.atomic_io import (
+            AtomicWriteRetryExhausted,
+            RunLockBusy,
+        )
+
+        self.assertFalse(issubclass(RunLockBusy, PermissionError))
+        self.assertFalse(issubclass(AtomicWriteRetryExhausted, RunLockBusy))
+        self.assertFalse(issubclass(RunLockBusy, AtomicWriteRetryExhausted))
+
+    def test_run_lock_busy_accepts_message(self) -> None:
+        from story_automator.core.atomic_io import RunLockBusy
+
+        err = RunLockBusy("lock /tmp/x.lock held by pid 42")
+        self.assertIn("pid 42", str(err))
