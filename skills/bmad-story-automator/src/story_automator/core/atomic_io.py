@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -12,6 +13,31 @@ __all__ = ["AtomicWriteRetryExhausted", "write_atomic_text"]
 # (i+1)-th retry. With 5 entries this gives 1 initial attempt + 5 retries =
 # 6 total attempts on Windows; on POSIX exactly 1 attempt.
 _WINDOWS_REPLACE_BACKOFFS_S: tuple[float, ...] = (0.050, 0.100, 0.200, 0.400, 0.800)
+
+
+_registry_lock: threading.Lock = threading.Lock()
+_path_locks: dict[str, threading.Lock] = {}
+
+
+def _lock_for_path(path: Path) -> threading.Lock:
+    """Return the threading.Lock guarding writes to the resolved `path`.
+
+    The registry itself is guarded by `_registry_lock` so that concurrent
+    first-time lookups for the same path agree on a single Lock instance.
+    """
+    key = str(Path(path).resolve())
+    with _registry_lock:
+        lock = _path_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _path_locks[key] = lock
+        return lock
+
+
+def _reset_registry_for_tests() -> None:
+    """Clear the registry. Test-only — not part of the public API."""
+    with _registry_lock:
+        _path_locks.clear()
 
 
 def _is_windows() -> bool:
@@ -106,7 +132,9 @@ def write_atomic_text(path: Path, data: str, *, encoding: str = "utf-8") -> None
     Writes to a sibling temp file in the same directory, fsyncs, then
     os.replace's into place. On Windows, retries os.replace up to 5 times
     against PermissionError (ERROR_SHARING_VIOLATION) with exponential
-    backoff. Per-path serialization is handled by the module-level lock
-    registry — added in a later task.
+    backoff. The write is serialized in-process via a per-path
+    threading.Lock; cross-process serialization is the caller's
+    responsibility (see acquire_run_lock — added in a later sub-milestone).
     """
-    _write_once(path, data, encoding)
+    with _lock_for_path(path):
+        _write_once(path, data, encoding)

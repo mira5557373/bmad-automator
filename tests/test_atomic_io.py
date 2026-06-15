@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -222,3 +223,105 @@ class WindowsRetryTests(unittest.TestCase):
 
         self.assertEqual(attempts["n"], 1)
         self.assertEqual(sleep_log, [])
+
+
+class PerPathLockSerializationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_two_threads_on_same_path_observe_only_complete_writes(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "shared.txt"
+        # Two payloads of equal length; only one of these two exact strings
+        # may appear in the file at any sampling point.
+        a = "A" * 4096
+        b = "B" * 4096
+        valid = {a, b}
+
+        # Pre-create so readers don't race on FileNotFoundError.
+        write_atomic_text(target, a)
+
+        stop = threading.Event()
+        errors: list[BaseException] = []
+
+        def writer(payload: str) -> None:
+            try:
+                for _ in range(50):
+                    if stop.is_set():
+                        return
+                    write_atomic_text(target, payload)
+            except BaseException as err:
+                errors.append(err)
+
+        ta = threading.Thread(target=writer, args=(a,))
+        tb = threading.Thread(target=writer, args=(b,))
+        ta.start()
+        tb.start()
+
+        observed: set[str] = set()
+        for _ in range(200):
+            try:
+                observed.add(target.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                # If this fires we've violated atomicity — readers must see
+                # either the prior contents or the new contents, never absence.
+                stop.set()
+                ta.join()
+                tb.join()
+                self.fail("reader observed FileNotFoundError mid-write")
+
+        ta.join()
+        tb.join()
+
+        self.assertEqual(errors, [])
+        self.assertTrue(
+            observed.issubset(valid),
+            f"observed non-atomic content: {observed - valid!r}",
+        )
+
+    def test_lock_registry_keyed_by_resolved_path(self) -> None:
+        from story_automator.core.atomic_io import _lock_for_path
+
+        a = self.dir / "out.txt"
+        # Symlink-free alternative spelling of the same resolved path:
+        b = self.dir / "." / "out.txt"
+
+        self.assertIs(_lock_for_path(a), _lock_for_path(b))
+
+    def test_lock_registry_distinguishes_different_paths(self) -> None:
+        from story_automator.core.atomic_io import _lock_for_path
+
+        a = self.dir / "a.txt"
+        b = self.dir / "b.txt"
+
+        self.assertIsNot(_lock_for_path(a), _lock_for_path(b))
+
+    def test_lock_registry_concurrent_first_access_returns_same_lock(self) -> None:
+        # If the registry isn't guarded, two threads racing on the first
+        # access to the same path could each install their own Lock,
+        # silently breaking serialization. This test exercises that race.
+        from story_automator.core.atomic_io import (
+            _lock_for_path,
+            _reset_registry_for_tests,
+        )
+
+        _reset_registry_for_tests()
+        target = self.dir / "race.txt"
+        results: list = []
+        barrier = threading.Barrier(8)
+
+        def grab() -> None:
+            barrier.wait()
+            results.append(_lock_for_path(target))
+
+        threads = [threading.Thread(target=grab) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(results), 8)
+        self.assertTrue(all(r is results[0] for r in results))
