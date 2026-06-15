@@ -5,6 +5,7 @@ import shlex
 import time
 from pathlib import Path
 
+from story_automator.core.common import safe_int
 from story_automator.core.prompt_rendering import render_step_prompt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
@@ -209,14 +210,20 @@ def _build_cmd(args: list[str]) -> int:
     quoted_prompt = shlex.quote(prompt)
     if agent == "codex" and not ai_command:
         codex_home_template = f"${{TMPDIR:-/tmp}}/sa-codex-home-{project_hash(root)}.XXXXXX"
-        auth_src = os.path.expanduser("~/.codex/auth.json")
+        auth_src = shlex.quote(os.path.expanduser("~/.codex/auth.json"))
         model_flag = f" --model {shlex.quote(model)}" if model else ""
+        # Run inside a subshell with an EXIT trap so the per-step CODEX_HOME
+        # temp dir (and its symlinked auth.json) is removed when codex exits,
+        # instead of leaking a fresh directory on every step. auth_src is
+        # shlex.quote'd so an unusual $HOME cannot break or inject into the
+        # generated shell.
         print(
-            f'codex_home=$(mktemp -d "{codex_home_template}")'
-            + f' && if [ -f "{auth_src}" ]; then ln -sf "{auth_src}" "$codex_home/auth.json"; fi'
+            f'(codex_home=$(mktemp -d "{codex_home_template}")'
+            + " && trap 'rm -rf \"$codex_home\"' EXIT"
+            + f' && if [ -f {auth_src} ]; then ln -sf {auth_src} "$codex_home/auth.json"; fi'
             + ' && CODEX_HOME="$codex_home" codex exec -s workspace-write -c \'approval_policy="never"\''
             + f' -c \'model_reasoning_effort="high"\'{model_flag}'
-            + f" --disable plugins --disable sqlite --disable shell_snapshot {quoted_prompt}"
+            + f" --disable plugins --disable sqlite --disable shell_snapshot {quoted_prompt})"
         )
     else:
         print(f"unset CLAUDECODE && {cli} {quoted_prompt}")
@@ -301,15 +308,15 @@ def cmd_monitor_session(args: list[str]) -> int:
     while idx < len(args):
         arg = args[idx]
         if arg == "--max-polls" and idx + 1 < len(args):
-            max_polls = int(args[idx + 1])
+            max_polls = safe_int(args[idx + 1], 30)
             idx += 2
             continue
         if arg == "--initial-wait" and idx + 1 < len(args):
-            initial_wait = int(args[idx + 1])
+            initial_wait = safe_int(args[idx + 1], 5)
             idx += 2
             continue
         if arg == "--timeout" and idx + 1 < len(args):
-            timeout_minutes = int(args[idx + 1])
+            timeout_minutes = safe_int(args[idx + 1], 60)
             idx += 2
             continue
         if arg == "--json":

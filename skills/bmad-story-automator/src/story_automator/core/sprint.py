@@ -20,7 +20,19 @@ def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
     status_file = sprint_status_file(project_root)
     if not file_exists(status_file):
         return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
-    content = read_text(status_file)
+    return sprint_status_in_text(project_root, read_text(status_file), story_key)
+
+
+def sprint_status_in_text(project_root: str, content: str, story_key: str) -> SprintStatus:
+    """Resolve a story's status against an explicit sprint-status *content* blob.
+
+    Mirrors ``sprint_status_get`` but matches against the supplied content
+    instead of always reading the configured sprint-status file. This lets
+    callers that already hold a specific sprint-status file (e.g.
+    ``sprint-compare --sprint``) reuse the dotted-id -> dashed-prefix ->
+    full-key normalization machinery rather than matching dotted ids
+    literally against full-key rows.
+    """
     norm = normalize_story_key(project_root, story_key)
     if norm is not None:
         result = _best_status_match(project_root, content, story_key, norm)

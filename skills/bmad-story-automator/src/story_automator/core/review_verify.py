@@ -17,5 +17,10 @@ def verify_code_review_completion(
     try:
         contract = resolve_success_contract(project_root, "review", state_file=state_file) if success_contract is None else success_contract
         return review_completion(project_root=project_root, story_key=story_key, contract=contract)
-    except (FileNotFoundError, ValueError, PolicyError) as exc:
+    except (OSError, ValueError, PolicyError) as exc:
+        # OSError (covers FileNotFoundError/PermissionError/IsADirectoryError)
+        # so an existing-but-unreadable story file or policy/override file
+        # degrades to a controlled {verified: false} result instead of
+        # crashing the helper with a traceback. Matches the OSError handling
+        # in _verify_step and _verify_monitor_completion.
         return {"verified": False, "reason": "review_contract_invalid", "input": story_key, "error": str(exc)}

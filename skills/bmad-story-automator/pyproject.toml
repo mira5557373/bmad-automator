@@ -26,3 +26,20 @@ story-automator = "story_automator.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/story_automator"]
+
+# The runtime data (policy, prompts, parse contracts, templates, step docs)
+# lives outside src/, so a plain package build ships a wheel whose console
+# script crashes with "bundled policy not found" on every real command.
+# Force-include the skill assets at a package-relative path that
+# bundled_story_skill_root()'s parent-walk already resolves
+# (<site-packages>/story_automator/skills/bmad-story-automator/...), so the
+# installed wheel is self-contained without any resolver change.
+[tool.hatch.build.targets.wheel.force-include]
+"data" = "story_automator/skills/bmad-story-automator/data"
+"templates" = "story_automator/skills/bmad-story-automator/templates"
+"steps-c" = "story_automator/skills/bmad-story-automator/steps-c"
+"steps-e" = "story_automator/skills/bmad-story-automator/steps-e"
+"steps-v" = "story_automator/skills/bmad-story-automator/steps-v"
+"workflow.md" = "story_automator/skills/bmad-story-automator/workflow.md"
+"SKILL.md" = "story_automator/skills/bmad-story-automator/SKILL.md"
+"../bmad-story-automator-review" = "story_automator/skills/bmad-story-automator-review"

@@ -97,6 +97,10 @@ def parse_story(epic_file: str | Path, story_id: str, rules_file: str | Path) ->
             dep = line.replace("**Dependencies**:", "").replace("Dependencies:", "").strip()
             if not dependencies:
                 dependencies = dep
+            # The dependency marker is metadata, not prose — record it but
+            # don't let it bleed into the description (or into AC when it
+            # appears after the Acceptance Criteria header).
+            continue
         if in_ac:
             acceptance_criteria.append(stripped)
         else:

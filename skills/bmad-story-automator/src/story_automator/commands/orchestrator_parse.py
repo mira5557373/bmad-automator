@@ -31,7 +31,11 @@ def parse_output_action(args: list[str]) -> int:
     if not content.strip():
         print('{"status":"error","reason":"output file not found or empty"}')
         return 1
-    lines = trim_lines(content)[:150]
+    # Keep the TAIL: an agent session's conclusion (tests passed/failed,
+    # final summary, completion/error status) is at the END of the transcript.
+    # Keeping the head would hand the classifier only the opening banner and
+    # drop the very signal it needs to judge SUCCESS/FAILURE/proceed/retry.
+    lines = trim_lines(content)[-150:]
     try:
         policy = load_runtime_policy(state_file=state_file)
         contract = step_contract(policy, step)

@@ -48,6 +48,33 @@ from .orchestrator_epic_agents import (
 from .orchestrator_parse import parse_output_action
 
 
+def _coerce_int(value: object, default: int) -> int | None:
+    """Parse an int from CLI input. Empty/None -> default; non-numeric -> None.
+
+    Returning None lets the caller emit a structured error instead of crashing
+    with an uncaught ValueError on corrupted/non-numeric marker input.
+    """
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return default
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _scalar_or_empty(value: object) -> str:
+    """Render a frontmatter scalar, mapping YAML/JSON null sentinels to "".
+
+    currentStory/currentStep are persisted as JSON null when unset; the simple
+    frontmatter parser surfaces that as the literal string "null", which would
+    otherwise leak into the human-facing state summary.
+    """
+    if value is None or value in ("null", "~"):
+        return ""
+    return str(value)
+
+
 def cmd_orchestrator_helper(args: list[str]) -> int:
     if not args:
         return _usage(1)
@@ -182,14 +209,19 @@ def _marker(args: list[str]) -> int:
             else:
                 idx += 1
         ensure_dir(marker_file.parent)
+        remaining = _coerce_int(options["remaining"], 0)
+        pid = _coerce_int(options["pid"], 0)
+        if remaining is None or pid is None:
+            print_json({"ok": False, "error": "invalid_int"})
+            return 1
         payload = {
             "epic": options["epic"],
             "currentStory": options["story"],
-            "storiesRemaining": int(options["remaining"] or "0"),
+            "storiesRemaining": remaining,
             "stateFile": options["state-file"],
             "createdAt": iso_now(),
             "heartbeat": options["heartbeat"] or iso_now(),
-            "pid": int(options["pid"] or "0"),
+            "pid": pid,
             "projectSlug": options["project-slug"],
         }
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
@@ -202,7 +234,9 @@ def _marker(args: list[str]) -> int:
         return 0
     if args[0] == "check":
         if marker_file.exists():
-            print(f'{{"exists":true,"file":"{marker_file}"}}')
+            # json.dumps so a path containing a quote/backslash can't produce
+            # invalid (or forgeable) JSON on the first line.
+            print(json.dumps({"exists": True, "file": str(marker_file)}))
             print(marker_file.read_text(encoding="utf-8"), end="")
             return 0
         print('{"exists":false}')
@@ -211,7 +245,11 @@ def _marker(args: list[str]) -> int:
         if not marker_file.exists():
             print("No marker file to update")
             return 1
-        payload = json.loads(marker_file.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(marker_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            print_json({"ok": False, "error": "marker_invalid"})
+            return 1
         payload["heartbeat"] = iso_now()
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
         print(f"Heartbeat updated: {payload['heartbeat']}")
@@ -281,8 +319,8 @@ def _state_summary(args: list[str]) -> int:
         "ok": True,
         "epic": str(fields.get("epic") or ""),
         "epicName": str(fields.get("epicName") or ""),
-        "currentStory": str(fields.get("currentStory") or ""),
-        "currentStep": str(fields.get("currentStep") or ""),
+        "currentStory": _scalar_or_empty(fields.get("currentStory")),
+        "currentStep": _scalar_or_empty(fields.get("currentStep")),
         "status": str(fields.get("status") or ""),
         "lastUpdated": str(fields.get("lastUpdated") or ""),
         "policyVersion": policy_version,
@@ -306,7 +344,11 @@ def _state_update(args: list[str]) -> int:
     idx = 1
     while idx < len(args):
         if args[idx] == "--set" and idx + 1 < len(args):
-            key, value = args[idx + 1].split("=", 1)
+            pair = args[idx + 1]
+            if "=" not in pair:
+                print_json({"ok": False, "error": "invalid_set", "arg": pair})
+                return 1
+            key, value = pair.split("=", 1)
             replaced, count = re.subn(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {v}", text)
             if count:
                 text = replaced
@@ -317,7 +359,9 @@ def _state_update(args: list[str]) -> int:
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
-    Path(args[0]).write_text(text, encoding="utf-8")
+    # Atomic write: _state_update mutates the recovery-critical orchestration
+    # state document, so a crash mid-write must not leave it truncated.
+    atomic_write(args[0], text)
     print_json({"ok": True, "updated": updated})
     return 0
 

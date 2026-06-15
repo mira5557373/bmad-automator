@@ -9,7 +9,7 @@ from story_automator.core.frontmatter import extract_frontmatter, find_frontmatt
 from story_automator.core.runtime_layout import runtime_provider
 from story_automator.core.sprint import sprint_status_epic
 from story_automator.core.story_keys import StoryKey, normalize_story_key, normalize_story_key_for_epic
-from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar
+from story_automator.core.utils import file_exists, get_project_root, iso_now, print_json, read_text, strip_inline_yaml_comment, trim_lines, unquote_scalar, write_atomic
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -135,12 +135,25 @@ def agents_build_action(args: list[str]) -> int:
     if not all(options.values()) or not file_exists(options["state-file"]) or not file_exists(options["complexity-file"]):
         print_json({"ok": False, "error": "missing_args" if not all(options.values()) else "file_not_found"})
         return 1
-    config = parse_agent_config(options["config-json"])
-    complexity = json.loads(read_text(options["complexity-file"]))
-    state_fields = parse_frontmatter(read_text(options["state-file"]))
+    try:
+        config = parse_agent_config(options["config-json"])
+        complexity = json.loads(read_text(options["complexity-file"]))
+        state_fields = parse_frontmatter(read_text(options["state-file"]))
+    except (OSError, ValueError) as exc:
+        print_json({"ok": False, "error": "complexity_file_invalid", "detail": str(exc)})
+        return 1
     stories = []
+    skipped = 0
     for story in complexity.get("stories", []):
-        level = str(story.get("complexity", {}).get("level", "medium")).lower() or "medium"
+        story_id = story.get("storyId")
+        if not story_id:
+            # A complexity entry without a usable id can't be planned; skip it
+            # rather than crashing the whole build with a KeyError.
+            skipped += 1
+            continue
+        complexity_obj = story.get("complexity")
+        level_value = complexity_obj.get("level") if isinstance(complexity_obj, dict) else complexity_obj
+        level = str(level_value or "medium").lower() or "medium"
         tasks = {}
         for task in ("create", "dev", "auto", "review"):
             primary, fallback, model = resolve_agent(config, level, task)
@@ -151,13 +164,15 @@ def agents_build_action(args: list[str]) -> int:
             if model:
                 entry["model"] = model
             tasks[task] = entry
-        stories.append({"storyId": story["storyId"], "title": story.get("title", ""), "complexity": level, "tasks": tasks})
+        stories.append({"storyId": story_id, "title": story.get("title", ""), "complexity": level, "tasks": tasks})
     payload = {"version": "1.0.0", "stateFile": options["state-file"], "epic": state_fields.get("epic", ""), "epicName": state_fields.get("epicName", ""), "createdAt": iso_now(), "stories": stories}
     header = f'---\nstateFile: "{payload["stateFile"]}"\ncreatedAt: "{payload["createdAt"]}"\n---\n\n# Agents Plan: {payload["epicName"]}\n\n'
     content = header + "```json\n" + json.dumps(payload, indent=2) + "\n```\n"
-    Path(options["output"]).parent.mkdir(parents=True, exist_ok=True)
-    Path(options["output"]).write_text(content, encoding="utf-8")
-    print_json({"ok": True, "path": options["output"], "stories": len(stories)})
+    write_atomic(options["output"], content)
+    result = {"ok": True, "path": options["output"], "stories": len(stories)}
+    if skipped:
+        result["skipped"] = skipped
+    print_json(result)
     return 0
 
 
@@ -178,10 +193,17 @@ def agents_resolve_action(args: list[str]) -> int:
     if not agents_path or not file_exists(agents_path):
         print_json({"ok": False, "error": "agents_file_not_found"})
         return 1
-    text = read_text(agents_path)
-    match = re.search(r"(?s)```json\s*(\{.*?\})\s*```", text)
-    block = match.group(1) if match else text.strip()
-    payload = json.loads(block)
+    try:
+        text = read_text(agents_path)
+        match = re.search(r"(?s)```json\s*(\{.*?\})\s*```", text)
+        block = match.group(1) if match else text.strip()
+        payload = json.loads(block)
+    except (OSError, ValueError) as exc:
+        # Unreadable or malformed (e.g. truncated by an interrupted
+        # agents-build) agents file: return the structured error contract the
+        # sibling actions use instead of crashing the orchestrator helper.
+        print_json({"ok": False, "story": options["story"], "task": options["task"], "error": "agents_file_invalid", "detail": str(exc)})
+        return 1
     for story in payload.get("stories", []):
         if story.get("storyId") != options["story"]:
             continue

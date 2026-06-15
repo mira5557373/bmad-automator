@@ -70,15 +70,15 @@ def cmd_ensure_marker_gitignore(args: list[str]) -> int:
         return 1
     path = Path(gitignore)
     if not path.exists():
-        path.write_text("")
-    content = path.read_text()
+        path.write_text("", encoding="utf-8")
+    content = path.read_text(encoding="utf-8")
     for line in content.replace("\r\n", "\n").split("\n"):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and stripped == entry:
             write_json({"ok": True, "changed": False, "path": str(path)})
             return 0
     prefix = "" if not content or content.endswith("\n") else "\n"
-    with path.open("a") as handle:
+    with path.open("a", encoding="utf-8") as handle:
         handle.write(f"{prefix}{entry}\n")
     write_json({"ok": True, "changed": True, "path": str(path)})
     return 0
@@ -148,13 +148,17 @@ def cmd_stop_hook(_: list[str]) -> int:
     if not marker.exists():
         return 0
     try:
-        payload = json.loads(marker.read_text())
+        payload = json.loads(marker.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return 0
-    remaining = payload.get("storiesRemaining", 0)
-    if isinstance(remaining, str) and remaining.isdigit():
-        remaining = int(remaining)
-    if not remaining:
+    raw_remaining = payload.get("storiesRemaining", 0)
+    try:
+        remaining = int(float(str(raw_remaining).strip()))
+    except (TypeError, ValueError):
+        # A malformed/non-numeric value must not wedge the session into an
+        # indefinite block; treat it as "nothing remaining" and allow stop.
+        remaining = 0
+    if remaining <= 0:
         return 0
     reason = (
         "Story Automator active "

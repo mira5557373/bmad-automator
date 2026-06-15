@@ -8,7 +8,25 @@ from typing import Any
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
 from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_effective_policy
 from ..core.agent_config import normalize_model as _model_or_none
+from ..core.sprint import sprint_status_in_text
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
+
+
+def _max_parallel(overrides: dict[str, Any]) -> int | None:
+    """Coerce overrides.maxParallel to a positive int, or None if invalid.
+
+    Returns 1 when the key is absent/None, clamps values below 1 up to 1, and
+    returns None for non-numeric input so the caller can emit the standard
+    ``{ok: false}`` error contract instead of crashing with a ValueError.
+    """
+    raw = overrides.get("maxParallel", 1)
+    if raw is None:
+        return 1
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 1 else 1
 
 
 def cmd_build_state_doc(args: list[str]) -> int:
@@ -69,11 +87,15 @@ def cmd_build_state_doc(args: list[str]) -> int:
         "legacyPolicy": False,
     }
     overrides = config.get("overrides", {}) if isinstance(config.get("overrides"), dict) else {}
+    max_parallel = _max_parallel(overrides)
+    if max_parallel is None:
+        write_json({"ok": False, "error": "invalid_max_parallel"})
+        return 1
     text = re.sub(
         r"(?m)^overrides:\n(?:(?:\s{2}.*\n)*)",
         "overrides:\n"
         f"  skipAutomate: {str(bool(overrides.get('skipAutomate', False))).lower()}\n"
-        f"  maxParallel: {int(overrides.get('maxParallel', 1) or 1)}\n",
+        f"  maxParallel: {max_parallel}\n",
         text,
     )
     custom_instructions = json.dumps(config.get("customInstructions", ""))
@@ -160,13 +182,13 @@ def cmd_build_state_doc(args: list[str]) -> int:
         "{{storyRange}}": ", ".join(story_range),
         "{{createdAt}}": now,
         "{{overrides.skipAutomate}}": str(bool(overrides.get("skipAutomate", False))).lower(),
-        "{{overrides.maxParallel}}": str(int(overrides.get("maxParallel", 1) or 1)),
+        "{{overrides.maxParallel}}": str(max_parallel),
         "{{customInstructions}}": str(config.get("customInstructions", "")),
     }
     for key, value in body.items():
         text = text.replace(key, value)
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
-    output_path.write_text(text)
+    output_path.write_text(text, encoding="utf-8")
     write_json({"ok": True, "path": str(output_path), "createdAt": now})
     return 0
 
@@ -192,10 +214,15 @@ def cmd_sprint_compare(args: list[str]) -> int:
     if isinstance(current_story, str) and current_story in story_range:
         before = story_range[: story_range.index(current_story)]
     sprint_text = read_text(sprint)
+    project_root = get_project_root()
     incomplete = []
     for story_id in before:
-        match = re.search(rf"(?m)^\s*{re.escape(story_id)}:\s*(\S+)", sprint_text)
-        if not match or match.group(1) != "done":
+        # storyRange holds dotted ids ("1.2") while sprint-status rows use
+        # dashed prefixes / full keys ("1-2-password-reset"). Resolve through
+        # the shared normalizer instead of matching the dotted id literally,
+        # which would never match a real row and flag every prior story as
+        # incomplete. See sprint_status_in_text.
+        if not sprint_status_in_text(project_root, sprint_text, story_id).done:
             incomplete.append(story_id)
     write_json({"ok": True, "incomplete": incomplete, "checked": before})
     return 0

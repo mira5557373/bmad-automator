@@ -10,6 +10,8 @@
     "bin/",
     "docs/",
     "install.sh",
+    "!docs/plans",
+    "!docs/plans/**",
     "skills/",
     "!skills/bmad-story-automator/dist/",
     "!skills/**/__pycache__/",

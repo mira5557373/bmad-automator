@@ -325,7 +325,9 @@ def verify_or_create_output(output_file: str, session_name: str, hash_value: str
     if tmux_has_session(session_name):
         capture = _capture_text(session_name, start=-300)
         if capture:
-            _write_private_text(expected, "\n".join(capture.splitlines()[:200]), 0o600)
+            # Keep the most-recent lines: the completion banner / final result
+            # / error traceback live at the bottom of the pane buffer.
+            _write_private_text(expected, "\n".join(capture.splitlines()[-200:]), 0o600)
             if expected.stat().st_size > 0:
                 return str(expected)
     if expected.exists() and expected.stat().st_size > 0:
@@ -345,6 +347,11 @@ def extract_active_task(capture: str) -> str:
             active = line.strip()
     active = re.sub(r"[·✳⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✶✻⏺]", "", active)
     active = re.sub(r"\(ctrl\+c.*", "", active).strip()
+    # The status line is emitted as a comma-joined CSV whose field 4 is this
+    # value; downstream shells extract later fields with `cut -d',' -f6`. A
+    # comma (or newline) in a captured pane line would shift every later
+    # field, so collapse separators to spaces before truncating.
+    active = active.replace(",", " ").replace("\n", " ").replace("\r", " ")
     return active[:80]
 
 
@@ -842,7 +849,7 @@ def _legacy_claude_session_status(
     current_status_time = _parse_statusline_time(capture)
     todos_done, todos_total = _todo_counts(capture)
 
-    if re.search(r"for [0-9]+m [0-9]+s", capture):
+    if _claude_completion_marker_present(capture):
         _save_legacy_state(
             state_path,
             poll_count=int(state["poll_count"]),
@@ -1135,7 +1142,9 @@ def _capture_text(session: str, *, start: int) -> str:
 
 def _write_capture(session: str, capture: str, *, project_root: str | None = None, max_lines: int = 200) -> str:
     path = session_paths(session, project_root).output
-    lines = capture.splitlines()[:max_lines]
+    # Keep the most-recent lines: the result/traceback lives at the bottom of
+    # the captured buffer, so truncating the head would discard it.
+    lines = capture.splitlines()[-max_lines:]
     _write_private_text(path, "\n".join(lines), 0o600)
     return str(path)
 

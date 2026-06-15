@@ -30,6 +30,23 @@ def _current_skills_root() -> Path | None:
     return None
 
 
+def _bundled_skills_root() -> Path | None:
+    """Skills root bundled inside an installed wheel (last-resort fallback).
+
+    A pip-installed wheel ships the skills at
+    ``<site-packages>/story_automator/skills/``. Every other candidate root
+    only inspects project/home ``.claude|.agents|.codex`` trees, so without
+    this fallback the console script cannot locate its own bundled skills
+    (e.g. the review skill referenced by ``<skills-root>/...`` policy paths).
+    It is appended LAST, so any project/home install still takes precedence.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "skills"
+        if (candidate / STORY_SKILL_NAME / "data" / "orchestration-policy.json").is_file():
+            return candidate.resolve()
+    return None
+
+
 def candidate_skills_roots(project_root: str | Path | None = None) -> list[Path]:
     root = _project_root(project_root)
     candidates: list[Path] = []
@@ -48,6 +65,9 @@ def candidate_skills_roots(project_root: str | Path | None = None) -> list[Path]
             Path.home() / ".claude" / "skills",
         ]
     )
+    bundled = _bundled_skills_root()
+    if bundled:
+        candidates.append(bundled)
     seen: set[str] = set()
     unique: list[Path] = []
     for candidate in candidates:

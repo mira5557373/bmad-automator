@@ -69,8 +69,12 @@ def write_atomic(path: str | Path, data: str | bytes) -> None:
     ensure_dir(path.parent)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        mode = "wb" if isinstance(data, bytes) else "w"
-        with os.fdopen(fd, mode) as handle:
+        is_bytes = isinstance(data, bytes)
+        mode = "wb" if is_bytes else "w"
+        # Pin UTF-8 for text writes so state/marker docs containing non-ASCII
+        # (e.g. the "→" arrow, Chinese epic names) round-trip correctly under
+        # any locale (Windows cp1252, Linux LANG=C) rather than crashing.
+        with os.fdopen(fd, mode, encoding=None if is_bytes else "utf-8") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
