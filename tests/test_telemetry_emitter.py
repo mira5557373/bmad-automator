@@ -197,3 +197,72 @@ class TelemetryEmitterFsyncOrderingTests(unittest.TestCase):
                 events.index("filelock_release"),
                 msg=f"fsync must precede filelock_release, got {events}",
             )
+
+
+class TelemetryEmitterRunIdTests(unittest.TestCase):
+    def test_ctor_run_id_stamps_empty_event_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path, run_id="ctor-run")
+            event = StoryStarted(
+                timestamp="t",
+                run_id="",
+                epic="E",
+                story_key="S",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            emitter.emit(event)
+            payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
+            self.assertEqual(payload["run_id"], "ctor-run")
+
+    def test_caller_run_id_wins_over_ctor_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path, run_id="ctor-run")
+            event = StoryStarted(
+                timestamp="t",
+                run_id="caller-run",
+                epic="E",
+                story_key="S",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            emitter.emit(event)
+            payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
+            self.assertEqual(payload["run_id"], "caller-run")
+
+    def test_no_ctor_run_id_passes_event_through_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)  # no run_id arg
+            event = StoryStarted(
+                timestamp="t",
+                run_id="",
+                epic="E",
+                story_key="S",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            emitter.emit(event)
+            payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
+            self.assertEqual(payload["run_id"], "")
+
+    def test_emit_does_not_mutate_caller_event_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path, run_id="ctor-run")
+            event = StoryStarted(
+                timestamp="t",
+                run_id="",
+                epic="E",
+                story_key="S",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            emitter.emit(event)
+            self.assertEqual(event.run_id, "")

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from .common import ensure_dir
+from .common import compact_json, ensure_dir
 from .telemetry_events import Event
 
 
@@ -29,13 +29,23 @@ class TelemetryEmitter:
 
     def emit(self, event: Event) -> None:
         ensure_dir(self._path.parent)
-        line = event.to_json_line() + "\n"
+        line = self._serialize(event) + "\n"
         with self._thread_lock:
             with self._file_lock:
                 with open(self._path, "a", encoding="utf-8") as fh:
                     fh.write(line)
                     fh.flush()
                     os.fsync(fh.fileno())
+
+    def _serialize(self, event: Event) -> str:
+        # REQ-05: caller's non-empty run_id always wins; only stamp the
+        # ctor-provided run_id into events whose run_id is empty. Mutate
+        # the dict, not the dataclass — the caller keeps their object.
+        if self._run_id is None or event.run_id:
+            return event.to_json_line()
+        data = event.to_dict()
+        data["run_id"] = self._run_id
+        return compact_json(data)
 
 
 __all__ = ["TelemetryEmitter"]
