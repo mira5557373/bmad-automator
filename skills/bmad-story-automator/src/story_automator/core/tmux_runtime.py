@@ -307,7 +307,7 @@ def _emit_tmux_spawned(session: str, project_root: str | None) -> None:
             timestamp=iso_now(),
             run_id="",
             session_name=session,
-            story_key="",
+            story_key=_story_key_from_session_name(session),
             pid=pid,
             pane_geometry=geometry,
         )
