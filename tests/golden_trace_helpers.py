@@ -276,3 +276,17 @@ class GoldenTraceRecorder:
     ) -> None:
         self._installed = False
         return None
+
+    def _record(self, channel: Channel, kind: str, payload: dict[str, object]) -> None:
+        """Append one entry under the arrival lock (REQ-06).
+
+        The lock serializes (a) the seq assignment and (b) the list
+        append so that traces produced under concurrent threads receive
+        deterministic, contiguous seq numbers. Operation completion
+        order itself is still the underlying code's problem.
+        """
+        with self._lock:
+            seq = len(self._entries)
+            self._entries.append(
+                TraceEntry(seq=seq, channel=channel, kind=kind, payload=dict(payload))
+            )

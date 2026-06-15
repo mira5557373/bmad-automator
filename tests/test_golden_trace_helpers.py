@@ -4,6 +4,7 @@ import dataclasses
 import importlib
 import json
 import tempfile
+import threading as _threading
 import unittest
 from pathlib import Path
 
@@ -505,6 +506,38 @@ class RecorderSurfaceTests(unittest.TestCase):
     def test_recorder_constructs_with_no_args(self) -> None:
         rec = GoldenTraceRecorder()
         self.assertEqual(rec.entries, [])
+
+
+class RecorderArrivalOrderingTests(unittest.TestCase):
+    def test_record_assigns_monotonic_seq_starting_at_zero(self) -> None:
+        rec = GoldenTraceRecorder()
+        rec._record("event", "StoryStarted", {"epic": "1"})  # type: ignore[attr-defined]
+        rec._record("state", "mutation", {"path": "p", "sha256": "x"})  # type: ignore[attr-defined]
+        rec._record("claude_p", "invoke", {"argv": ["claude"]})  # type: ignore[attr-defined]
+        self.assertEqual([e.seq for e in rec.entries], [0, 1, 2])
+        self.assertEqual(
+            [e.channel for e in rec.entries], ["event", "state", "claude_p"]
+        )
+        self.assertEqual(
+            [e.kind for e in rec.entries], ["StoryStarted", "mutation", "invoke"]
+        )
+
+    def test_record_is_thread_safe_under_concurrent_callers(self) -> None:
+        rec = GoldenTraceRecorder()
+
+        def worker(label: str) -> None:
+            for i in range(100):
+                rec._record("event", label, {"i": i})  # type: ignore[attr-defined]
+
+        t1 = _threading.Thread(target=worker, args=("A",))
+        t2 = _threading.Thread(target=worker, args=("B",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        seqs = sorted(e.seq for e in rec.entries)
+        self.assertEqual(seqs, list(range(200)))
+        self.assertEqual(len(rec.entries), 200)
 
 
 if __name__ == "__main__":
