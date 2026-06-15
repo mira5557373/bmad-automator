@@ -1501,5 +1501,54 @@ class M05DeterminismTests(unittest.TestCase):
             )
 
 
+class RecorderRegressionLocalizationTests(unittest.TestCase):
+    """REQ-12(b) at recorder altitude: a real recorded run with one
+    injected payload divergence is detected by compare_traces with the
+    correct seq and field. Strengthens the M10a unit-level coverage by
+    exercising the full pipeline (record -> serialize -> mutate -> load
+    -> compare).
+    """
+
+    def test_payload_regression_localized_to_correct_seq(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            actual = _build_m02_recording(root)
+            golden = [
+                TraceEntry(
+                    seq=e.seq,
+                    channel=e.channel,
+                    kind=e.kind,
+                    payload=dict(e.payload),
+                )
+                for e in actual
+            ]
+            golden[2] = TraceEntry(
+                seq=golden[2].seq,
+                channel=golden[2].channel,
+                kind=golden[2].kind,
+                payload={**dict(golden[2].payload), "story_key": "s2-regressed"},
+            )
+        diff = compare_traces(actual, golden)
+        self.assertFalse(diff.ok)
+        self.assertEqual(len(diff.mismatches), 1)
+        mismatch = diff.mismatches[0]
+        self.assertEqual(mismatch.seq, 2)
+        self.assertEqual(mismatch.field, "payload")
+        summary = diff.summary()
+        self.assertIn("seq=2", summary)
+        self.assertIn("payload", summary)
+
+    def test_length_regression_localized_via_recorder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            actual = _build_m02_recording(root)
+            golden = list(actual[:-1])
+        diff = compare_traces(actual, golden)
+        self.assertFalse(diff.ok)
+        self.assertEqual(len(diff.mismatches), 1)
+        self.assertEqual(diff.mismatches[0].seq, 4)
+        self.assertEqual(diff.mismatches[0].field, "length")
+
+
 if __name__ == "__main__":
     unittest.main()
