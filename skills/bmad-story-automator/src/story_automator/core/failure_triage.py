@@ -90,3 +90,23 @@ class Classification:
     confidence: Confidence
     reason: str
     event_id: str | None
+
+
+IMPLIES_GRAPH: dict[FailureClass, tuple[FailureClass, ...]] = {
+    FailureClass.POLICY_VIOLATION: (FailureClass.REVIEW_REJECTED,),
+    FailureClass.BUDGET_EXCEEDED: (FailureClass.GATE_DEFER,),
+    FailureClass.REPEATED_RETRY: (FailureClass.PLATEAU,),
+}
+# Spec REQ-05 also mentions a conditional CRASH -> (NETWORK_ERROR,) edge
+# "when transport hints are present". That edge is *runtime conditional*
+# on the tmux-crash payload, not a static implication of CRASH itself
+# (most crashes are not network-shaped). It is therefore applied inside
+# `_classify_tmux_crash` (M07b), not encoded here.
+
+
+__all__ = [
+    "Classification",
+    "Confidence",
+    "FailureClass",
+    "IMPLIES_GRAPH",
+]
