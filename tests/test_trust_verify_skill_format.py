@@ -224,5 +224,33 @@ class SkillMdReq02Tests(unittest.TestCase):
         )
 
 
+class SkillMdReq03Tests(unittest.TestCase):
+    """REQ-03: ## Pre-conditions section names the four documented prereqs."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, SKILL_MD)
+
+    def test_preconditions_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## Pre-conditions\s*$",
+            msg="SKILL.md must include a level-2 '## Pre-conditions' heading",
+        )
+
+    def test_all_four_preconditions_named(self) -> None:
+        needles = (
+            "story file",
+            ".claude/trust-verify-input/gaps.json",
+            "spec",
+            "git working tree",
+        )
+        missing = [n for n in needles if n not in self.text]
+        self.assertEqual(
+            missing,
+            [],
+            msg=f"SKILL.md ## Pre-conditions missing references: {missing}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
