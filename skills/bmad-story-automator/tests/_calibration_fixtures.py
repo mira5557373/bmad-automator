@@ -241,3 +241,78 @@ def _make_table(
         source_path=source_path,
         total_events_scanned=scanned,
     )
+
+
+# REQ-11 forbidden import tokens; REQ-12 forbidden write-mode patterns.
+# Non-greedy `[^)]*?` in write patterns is REQUIRED: a greedy quantifier
+# would consume the inner `"w"` and silently miss real violations.
+_FORBIDDEN_IMPORT_TOKENS = (
+    "requests",
+    "httpx",
+    "aiohttp",
+    "subprocess",
+    "os.system",
+    "filelock",
+    "psutil",
+)
+_FORBIDDEN_WRITE_PATTERNS = (
+    r'open\([^)]*?["\']w',
+    r'open\([^)]*?["\']a',
+    r'\.open\([^)]*?["\']w',
+    r'\.open\([^)]*?["\']a',
+    r"\.write_text\(",
+    r"\.write_bytes\(",
+    r"os\.write\(",
+)
+
+
+def _calibration_module_source() -> str:
+    """Return the calibration.py source as text for static-grep guardrails."""
+
+    from story_automator.core import calibration
+
+    return Path(calibration.__file__).read_text(encoding="utf-8")
+
+
+def _e2e_snapshot_lines() -> list[str]:
+    """JSONL lines for the REQ-13 end-to-end snapshot fixture."""
+
+    return [
+        _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"),
+        _completed_line("2026-06-14T10:01:00Z", "r2", "S-2", "claude-opus-4", "code"),
+        _failed_line("2026-06-14T10:02:00Z", "r3", "S-3", "claude-opus-4", "code"),
+        _completed_line("2026-06-14T10:03:00Z", "r4", "S-4", "gpt-5-codex", "review"),
+    ]
+
+
+def _e2e_snapshot_expected(ledger: Path) -> str:
+    """Expected `format_calibration_report` text for `_e2e_snapshot_lines`."""
+
+    return (
+        f"source: {ledger}\n"
+        "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
+        "claude-opus-4\tcode\t0.6667\t3\t2026-06-14T10:02:00Z\n"
+        "gpt-5-codex\treview\t1.0000\t1\t2026-06-14T10:03:00Z\n"
+    )
+
+
+def _two_event_ledger_lines() -> list[str]:
+    """Minimal one-completed, one-failed JSONL pair for runtime guardrails."""
+
+    return [
+        _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t"),
+        _failed_line("2026-06-14T10:01:00Z", "r2", "S-2", "m", "t"),
+    ]
+
+
+# Shorthand event-line builders for the two canonical lanes used in tests.
+def _opus_ok(ts: str, run_id: str, story_key: str) -> str:
+    return _completed_line(ts, run_id, story_key, "claude-opus-4", "code")
+
+
+def _opus_fail(ts: str, run_id: str, story_key: str) -> str:
+    return _failed_line(ts, run_id, story_key, "claude-opus-4", "code")
+
+
+def _gpt_ok(ts: str, run_id: str, story_key: str) -> str:
+    return _completed_line(ts, run_id, story_key, "gpt-5-codex", "review")

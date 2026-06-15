@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 from pathlib import Path
 
@@ -13,12 +14,21 @@ from story_automator.core.calibration import (
 from story_automator.core.common import compact_json
 from story_automator.core.telemetry_events import StoryCompleted
 from tests._calibration_fixtures import (
+    _FORBIDDEN_IMPORT_TOKENS,
+    _FORBIDDEN_WRITE_PATTERNS,
     _ExtendedEventShim,
+    _calibration_module_source,
     _completed_line,
+    _e2e_snapshot_expected,
+    _e2e_snapshot_lines,
     _failed_line,
     _fixture_dir,
+    _gpt_ok,
     _make_entry,
     _make_table,
+    _opus_fail,
+    _opus_ok,
+    _two_event_ledger_lines,
     _unrelated_event_lines,
     _write_jsonl,
 )
@@ -29,16 +39,14 @@ class ModuleSurfaceTests(unittest.TestCase):
         import story_automator.core.calibration as cal
 
         self.assertEqual(
-            sorted(cal.__all__),
-            sorted(
-                [
-                    "CalibrationEntry",
-                    "CalibrationTable",
-                    "build_calibration",
-                    "lookup_success_rate",
-                    "format_calibration_report",
-                ]
-            ),
+            set(cal.__all__),
+            {
+                "CalibrationEntry",
+                "CalibrationTable",
+                "build_calibration",
+                "lookup_success_rate",
+                "format_calibration_report",
+            },
         )
 
     def test_direct_imports_work(self) -> None:
@@ -59,29 +67,21 @@ class ModuleSurfaceTests(unittest.TestCase):
 
 class CalibrationEntryShapeTests(unittest.TestCase):
     def test_construction_kw_only_and_frozen(self) -> None:
-        entry = CalibrationEntry(
-            model_id="claude-opus-4",
-            task_kind="code",
-            success_rate=0.8750,
-            sample_count=8,
-            last_seen_iso="2026-06-14T12:00:00Z",
-        )
-        self.assertEqual(entry.model_id, "claude-opus-4")
-        self.assertEqual(entry.task_kind, "code")
-        self.assertEqual(entry.success_rate, 0.8750)
-        self.assertEqual(entry.sample_count, 8)
-        self.assertEqual(entry.last_seen_iso, "2026-06-14T12:00:00Z")
+        kw = {
+            "model_id": "claude-opus-4",
+            "task_kind": "code",
+            "success_rate": 0.8750,
+            "sample_count": 8,
+            "last_seen_iso": "2026-06-14T12:00:00Z",
+        }
+        entry = CalibrationEntry(**kw)
+        for k, v in kw.items():
+            self.assertEqual(getattr(entry, k), v)
 
     def test_entry_is_frozen(self) -> None:
         from dataclasses import FrozenInstanceError
 
-        entry = CalibrationEntry(
-            model_id="m",
-            task_kind="t",
-            success_rate=0.5,
-            sample_count=1,
-            last_seen_iso="2026-06-14T12:00:00Z",
-        )
+        entry = _make_entry()
         with self.assertRaises(FrozenInstanceError):
             entry.success_rate = 0.9  # type: ignore[misc]
 
@@ -92,15 +92,11 @@ class CalibrationEntryShapeTests(unittest.TestCase):
 
 class CalibrationTableShapeTests(unittest.TestCase):
     def test_construction(self) -> None:
-        entry = _make_entry(
-            model_id="m", task_kind="t", success_rate=0.5, sample_count=2
-        )
-        table = _make_table(
-            [entry], source_path="/tmp/telemetry.jsonl", total_events_scanned=2
-        )
-        self.assertEqual(table.entries[("m", "t")], entry)
+        entry = _make_entry(success_rate=0.5, sample_count=2)
+        table = _make_table([entry], source_path="/tmp/t.jsonl", total_events_scanned=2)
+        self.assertEqual(table.entries[("claude-opus-4", "code")], entry)
         self.assertEqual(table.generated_at, "2026-06-14T13:00:00Z")
-        self.assertEqual(table.source_path, "/tmp/telemetry.jsonl")
+        self.assertEqual(table.source_path, "/tmp/t.jsonl")
         self.assertEqual(table.total_events_scanned, 2)
 
     def test_table_is_kw_only_mutable(self) -> None:
@@ -159,10 +155,7 @@ class BuildCalibrationAggregationTests(_ShimmedEventCase):
     def test_single_completed_yields_success_rate_one(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            line = _completed_line(
-                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-            )
-            _write_jsonl(ledger, [line])
+            _write_jsonl(ledger, [_opus_ok("2026-06-14T10:00:00Z", "r1", "S-1")])
             table = build_calibration(ledger)
 
         self.assertEqual(table.total_events_scanned, 1)
@@ -194,15 +187,9 @@ class BuildCalibrationMixedAggregationTests(_ShimmedEventCase):
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
             lines = [
-                _completed_line(
-                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-                ),
-                _completed_line(
-                    "2026-06-14T11:00:00Z", "r2", "S-2", "claude-opus-4", "code"
-                ),
-                _failed_line(
-                    "2026-06-14T12:00:00Z", "r3", "S-3", "claude-opus-4", "code"
-                ),
+                _opus_ok("2026-06-14T10:00:00Z", "r1", "S-1"),
+                _opus_ok("2026-06-14T11:00:00Z", "r2", "S-2"),
+                _opus_fail("2026-06-14T12:00:00Z", "r3", "S-3"),
             ]
             _write_jsonl(ledger, lines)
             table = build_calibration(ledger)
@@ -231,18 +218,10 @@ class BuildCalibrationMixedAggregationTests(_ShimmedEventCase):
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
             lines = [
-                _completed_line(
-                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-                ),
-                _failed_line(
-                    "2026-06-14T10:01:00Z", "r2", "S-2", "claude-opus-4", "code"
-                ),
-                _completed_line(
-                    "2026-06-14T10:02:00Z", "r3", "S-3", "gpt-5-codex", "review"
-                ),
-                _completed_line(
-                    "2026-06-14T10:03:00Z", "r4", "S-4", "gpt-5-codex", "review"
-                ),
+                _opus_ok("2026-06-14T10:00:00Z", "r1", "S-1"),
+                _opus_fail("2026-06-14T10:01:00Z", "r2", "S-2"),
+                _gpt_ok("2026-06-14T10:02:00Z", "r3", "S-3"),
+                _gpt_ok("2026-06-14T10:03:00Z", "r4", "S-4"),
             ]
             _write_jsonl(ledger, lines)
             table = build_calibration(ledger)
@@ -298,9 +277,7 @@ class BuildCalibrationParsingTolerationTests(_ShimmedEventCase):
     def test_non_string_model_id_or_task_kind_is_skipped(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            good = _completed_line(
-                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-            )
+            good = _opus_ok("2026-06-14T10:00:00Z", "r1", "S-1")
             base = StoryCompleted(
                 timestamp="2026-06-14T10:01:00Z",
                 run_id="r2",
@@ -328,9 +305,7 @@ class BuildCalibrationMalformedLineTests(_ShimmedEventCase):
     def test_malformed_json_line_is_skipped_without_counting(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            good = _completed_line(
-                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-            )
+            good = _opus_ok("2026-06-14T10:00:00Z", "r1", "S-1")
             ledger.write_text(
                 "\n".join(["{not json", good, "[1, 2, 3]"]) + "\n",
                 encoding="utf-8",
@@ -356,45 +331,37 @@ class BuildCalibrationMalformedLineTests(_ShimmedEventCase):
 
 
 class LookupSuccessRateTests(unittest.TestCase):
-    def _make_table(self):
-        return _make_table([_make_entry()])
+    def setUp(self) -> None:
+        self.table = _make_table([_make_entry()])
 
     def test_hit_returns_stored_rate(self) -> None:
-        table = self._make_table()
-        self.assertEqual(lookup_success_rate(table, "claude-opus-4", "code"), 0.8750)
+        t = self.table
+        self.assertEqual(lookup_success_rate(t, "claude-opus-4", "code"), 0.8750)
 
     def test_miss_returns_default(self) -> None:
-        table = self._make_table()
-        cases = [
+        t = self.table
+        for args, kwargs, expected in [
             (("gpt-5-codex", "code"), {}, 0.5),
             (("claude-opus-4", "docs"), {}, 0.5),
             (("unknown", "unknown"), {"default": 0.123}, 0.123),
-        ]
-        for args, kwargs, expected in cases:
+        ]:
             with self.subTest(args=args):
-                self.assertEqual(lookup_success_rate(table, *args, **kwargs), expected)
+                self.assertEqual(lookup_success_rate(t, *args, **kwargs), expected)
 
     def test_default_kwarg_is_exactly_zero_point_five(self) -> None:
-        import inspect
-
-        from story_automator.core.calibration import lookup_success_rate
-
-        sig = inspect.signature(lookup_success_rate)
-        self.assertIn("default", sig.parameters)
-        self.assertEqual(sig.parameters["default"].default, 0.5)
-        self.assertEqual(sig.parameters["default"].annotation, "float")
+        param = inspect.signature(lookup_success_rate).parameters["default"]
+        self.assertEqual(param.default, 0.5)
+        self.assertEqual(param.annotation, "float")
 
 
 class FormatCalibrationReportTests(unittest.TestCase):
     def test_empty_table_emits_header_and_trailing_newline(self) -> None:
-        table = _make_table(source_path="/tmp/telemetry.jsonl")
-        text = format_calibration_report(table)
-
+        table = _make_table(source_path="/tmp/t.jsonl")
         expected = (
-            "source: /tmp/telemetry.jsonl\n"
+            "source: /tmp/t.jsonl\n"
             "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
         )
-        self.assertEqual(text, expected)
+        self.assertEqual(format_calibration_report(table), expected)
 
     def test_rows_sorted_by_model_id_then_task_kind(self) -> None:
         rows = [
@@ -427,78 +394,34 @@ class FormatCalibrationReportTests(unittest.TestCase):
         self.assertEqual(text, expected)
 
     def test_report_is_plain_ascii(self) -> None:
+        table = _make_table([_make_entry()], source_path="/tmp/t.jsonl")
+        self.assertTrue(format_calibration_report(table).isascii())
+
+    def test_exactly_one_trailing_newline_and_deterministic(self) -> None:
+        # _make_entry default = claude-opus-4/code/0.8750/8; second row overrides task_kind/rate/count.
         table = _make_table(
             [
-                _make_entry(
-                    model_id="m",
-                    task_kind="t",
-                    success_rate=0.6667,
-                    sample_count=3,
-                ),
+                _make_entry(),
+                _make_entry(task_kind="docs", success_rate=1.0, sample_count=2),
             ],
             source_path="/tmp/t.jsonl",
         )
         text = format_calibration_report(table)
-        self.assertTrue(text.isascii())
-
-    def test_exactly_one_trailing_newline_and_deterministic(self) -> None:
-        table = _make_table(
-            [
-                _make_entry(
-                    model_id="claude-opus-4",
-                    task_kind="code",
-                    success_rate=0.8750,
-                    sample_count=8,
-                ),
-                _make_entry(
-                    model_id="claude-opus-4",
-                    task_kind="docs",
-                    success_rate=1.0,
-                    sample_count=2,
-                    last_seen_iso="2026-06-14T12:00:00Z",
-                ),
-            ],
-            source_path="/tmp/t.jsonl",
-        )
-        text_one = format_calibration_report(table)
-        text_two = format_calibration_report(table)
-
-        self.assertTrue(text_one.endswith("\n"))
-        self.assertFalse(text_one.endswith("\n\n"))
-        self.assertEqual(text_one, text_two)
+        self.assertTrue(text.endswith("\n"))
+        self.assertFalse(text.endswith("\n\n"))
+        self.assertEqual(text, format_calibration_report(table))
         # Header + body lines + final empty after split.
-        self.assertEqual(len(text_one.split("\n")), 2 + 2 + 1)
+        self.assertEqual(len(text.split("\n")), 2 + 2 + 1)
 
 
 class FormatCalibrationReportEndToEndSnapshotTests(_ShimmedEventCase):
     def test_jsonl_fixture_round_trips_to_known_snapshot(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            lines = [
-                _completed_line(
-                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
-                ),
-                _completed_line(
-                    "2026-06-14T10:01:00Z", "r2", "S-2", "claude-opus-4", "code"
-                ),
-                _failed_line(
-                    "2026-06-14T10:02:00Z", "r3", "S-3", "claude-opus-4", "code"
-                ),
-                _completed_line(
-                    "2026-06-14T10:03:00Z", "r4", "S-4", "gpt-5-codex", "review"
-                ),
-            ]
-            _write_jsonl(ledger, lines)
-            table = build_calibration(ledger)
-            text = format_calibration_report(table)
+            _write_jsonl(ledger, _e2e_snapshot_lines())
+            text = format_calibration_report(build_calibration(ledger))
 
-        expected = (
-            f"source: {ledger}\n"
-            "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
-            "claude-opus-4\tcode\t0.6667\t3\t2026-06-14T10:02:00Z\n"
-            "gpt-5-codex\treview\t1.0000\t1\t2026-06-14T10:03:00Z\n"
-        )
-        self.assertEqual(text, expected)
+        self.assertEqual(text, _e2e_snapshot_expected(ledger))
 
 
 class IterEventLinesTests(unittest.TestCase):
@@ -530,63 +453,27 @@ class MaterializeEntriesTests(unittest.TestCase):
 
 
 class ImportAllowlistGuardrailTests(unittest.TestCase):
-    """Static-grep REQ-11 over the calibration module source.
+    """REQ-11 static grep: forbidden tokens must never appear in calibration.py.
 
-    The orchestrator and M03 callers rely on this module being
-    side-effect free; a stray subprocess or network import would
-    silently break those assumptions.
+    The orchestrator and M03 callers rely on this module being side-effect
+    free; a stray subprocess or network import would silently break them.
     """
 
-    FORBIDDEN = (
-        "requests",
-        "httpx",
-        "aiohttp",
-        "subprocess",
-        "os.system",
-        "filelock",
-        "psutil",
-    )
-
-    def _calibration_source(self) -> str:
-        from story_automator.core import calibration
-
-        path = Path(calibration.__file__)
-        return path.read_text(encoding="utf-8")
-
     def test_no_forbidden_import_tokens_anywhere_in_module(self) -> None:
-        source = self._calibration_source()
-        for token in self.FORBIDDEN:
+        source = _calibration_module_source()
+        for token in _FORBIDDEN_IMPORT_TOKENS:
             with self.subTest(token=token):
                 self.assertNotIn(token, source)
 
 
 class NoFileWritesStaticGuardrailTests(unittest.TestCase):
-    """REQ-12: the calibration module must never write to disk.
-
-    Static-grep for write-mode token shapes.  Future cache support
-    must wait for an explicit follow-up milestone.
-    """
-
-    # Non-greedy `[^)]*?` is REQUIRED here. A greedy quantifier would
-    # consume the inner `"w"` and leave only `)` for `["\']w` to match,
-    # silently letting real `open("file", "w")` violations through.
-    FORBIDDEN_PATTERNS = (
-        r'open\([^)]*?["\']w',
-        r'open\([^)]*?["\']a',
-        r'\.open\([^)]*?["\']w',
-        r'\.open\([^)]*?["\']a',
-        r"\.write_text\(",
-        r"\.write_bytes\(",
-        r"os\.write\(",
-    )
+    """REQ-12 static grep: calibration.py must contain no write-mode tokens."""
 
     def test_no_write_mode_tokens_in_module_source(self) -> None:
         import re
 
-        from story_automator.core import calibration
-
-        source = Path(calibration.__file__).read_text(encoding="utf-8")
-        for pattern in self.FORBIDDEN_PATTERNS:
+        source = _calibration_module_source()
+        for pattern in _FORBIDDEN_WRITE_PATTERNS:
             with self.subTest(pattern=pattern):
                 self.assertIsNone(
                     re.search(pattern, source),
@@ -595,25 +482,14 @@ class NoFileWritesStaticGuardrailTests(unittest.TestCase):
 
 
 class NoFileWritesRuntimeGuardrailTests(_ShimmedEventCase):
-    """REQ-12 runtime verification: calling build_calibration and
-    format_calibration_report must not create or modify any file
-    on disk other than the JSONL fixture the test itself wrote.
-    """
+    """REQ-12 runtime check: build + format must not touch disk."""
 
     def test_build_and_format_create_no_disk_artifacts(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            _write_jsonl(
-                ledger,
-                [
-                    _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t"),
-                    _failed_line("2026-06-14T10:01:00Z", "r2", "S-2", "m", "t"),
-                ],
-            )
-
+            _write_jsonl(ledger, _two_event_ledger_lines())
             before = {p.relative_to(tmpdir).as_posix() for p in tmpdir.rglob("*")}
-            table = build_calibration(ledger)
-            _ = format_calibration_report(table)
+            _ = format_calibration_report(build_calibration(ledger))
             after = {p.relative_to(tmpdir).as_posix() for p in tmpdir.rglob("*")}
 
         self.assertEqual(before, after)
