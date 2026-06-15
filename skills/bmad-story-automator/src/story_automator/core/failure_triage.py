@@ -157,7 +157,79 @@ def classify(event: Event) -> Classification:
 
 
 def _classify_story_failed(event: StoryFailed) -> Classification:
-    raise NotImplementedError  # implemented in Task 5
+    """Map a ``StoryFailed`` event onto a ``Classification`` by substring.
+
+    Inspects the lowercase concatenation of ``reason`` + ``error_class``
+    (spec REQ-08 names the second field ``error_kind``; M01 defines it
+    as ``error_class``, so both names are honoured via a defensive
+    ``getattr`` so injected test attributes also flow through). Rules
+    are applied in spec-declaration order — ``timeout`` wins over
+    ``policy``, ``policy`` wins over ``test``, etc. — to keep the
+    dispatch deterministic when a reason contains multiple substrings.
+    """
+    event_id = getattr(event, "event_id", None)
+    haystack = " ".join(
+        (
+            event.reason or "",
+            getattr(event, "error_kind", "") or "",
+            event.error_class or "",
+        )
+    ).lower()
+    if "timeout" in haystack:
+        return Classification(
+            primary=FailureClass.TIMEOUT,
+            implies=(),
+            confidence=Confidence.HIGH,
+            reason="timeout_substring",
+            event_id=event_id,
+        )
+    if "policy" in haystack or "guardrail" in haystack:
+        return Classification(
+            primary=FailureClass.POLICY_VIOLATION,
+            implies=(FailureClass.REVIEW_REJECTED,),
+            confidence=Confidence.HIGH,
+            reason="policy_or_guardrail_substring",
+            event_id=event_id,
+        )
+    if "test" in haystack or "pytest" in haystack:
+        return Classification(
+            primary=FailureClass.TEST_FAILURE,
+            implies=(),
+            confidence=Confidence.HIGH,
+            reason="test_substring",
+            event_id=event_id,
+        )
+    if "parse" in haystack or "json" in haystack:
+        return Classification(
+            primary=FailureClass.PARSE_ERROR,
+            implies=(),
+            confidence=Confidence.MEDIUM,
+            reason="parse_or_json_substring",
+            event_id=event_id,
+        )
+    if "refused" in haystack or "refusal" in haystack:
+        return Classification(
+            primary=FailureClass.AGENT_REFUSED,
+            implies=(),
+            confidence=Confidence.HIGH,
+            reason="refusal_substring",
+            event_id=event_id,
+        )
+    if "budget" in haystack or "cost" in haystack:
+        return Classification(
+            primary=FailureClass.BUDGET_EXCEEDED,
+            implies=(FailureClass.GATE_DEFER,),
+            confidence=Confidence.HIGH,
+            reason="budget_or_cost_substring",
+            event_id=event_id,
+        )
+    return Classification(
+        primary=FailureClass.UNKNOWN,
+        implies=(),
+        confidence=Confidence.LOW,
+        reason="story_failed_unmatched",
+        event_id=event_id,
+    )
 
 
 def _classify_story_deferred(event: StoryDeferred) -> Classification:
