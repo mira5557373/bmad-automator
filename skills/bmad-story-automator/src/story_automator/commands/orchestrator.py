@@ -46,6 +46,25 @@ from .orchestrator_epic_agents import (
     retro_agent_action,
 )
 from .orchestrator_parse import parse_output_action
+from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.core.telemetry_events import (
+    ReviewCycle,
+    StoryCompleted,
+    StoryFailed,
+    StoryStarted,
+)
+
+_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
+
+
+def _telemetry_emitter() -> TelemetryEmitter:
+    path = (Path(get_project_root()) / "telemetry" / "events.jsonl").resolve()
+    cached = _EMITTER_CACHE.get(path)
+    if cached is not None:
+        return cached
+    emitter = TelemetryEmitter(path)
+    _EMITTER_CACHE[path] = emitter
+    return emitter
 
 
 def cmd_orchestrator_helper(args: list[str]) -> int:
@@ -193,6 +212,15 @@ def _marker(args: list[str]) -> int:
             "projectSlug": options["project-slug"],
         }
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
+        _telemetry_emitter().emit(StoryStarted(
+            timestamp=iso_now(),
+            run_id="",
+            epic=options["epic"],
+            story_key=options["story"],
+            agent="",
+            model="",
+            complexity="",
+        ))
         print(f"Marker created: {marker_file}")
         return 0
     if args[0] == "remove":
@@ -354,6 +382,16 @@ def _escalate(args: list[str]) -> int:
         retries = _parse_context_int(context, "retries")
         limit = crash_max_retries(policy)
         if retries >= limit:
+            _telemetry_emitter().emit(StoryFailed(
+                timestamp=iso_now(),
+                run_id="",
+                epic="",
+                story_key="",
+                error_class="session_crash",
+                reason=f"Session crashed after {retries} retries",
+                attempts=retries,
+                final_session="",
+            ))
             print_json({"escalate": True, "reason": f"Session crashed after {retries} retries"})
         else:
             print_json({"escalate": False, "action": "retry"})
@@ -382,6 +420,17 @@ def _commit_ready(args: list[str]) -> int:
     if status.done:
         out, _ = run_cmd("git", "-C", project_root, "status", "--porcelain")
         if out.strip():
+            _telemetry_emitter().emit(StoryCompleted(
+                timestamp=iso_now(),
+                run_id="",
+                epic="",
+                story_key=args[0],
+                duration_s=0.0,
+                cost_usd=0.0,
+                tokens_in=0,
+                tokens_out=0,
+                attempts=1,
+            ))
             print_json({"ready": True, "story": args[0], "status": "done", "uncommitted_changes": True})
             return 0
         print_json({"ready": False, "reason": "No uncommitted changes", "story": args[0]})
@@ -454,6 +503,15 @@ def _verify_code_review(args: list[str]) -> int:
         print_json({"verified": False, "reason": "review_contract_invalid", "input": args[0], "error": str(exc)})
         return 1
     payload = verify_code_review_completion(get_project_root(), args[0], state_file=state_file or None)
+    _telemetry_emitter().emit(ReviewCycle(
+        timestamp=iso_now(),
+        run_id="",
+        epic="",
+        story_key=args[0],
+        cycle_num=int(payload.get("cycle") or 0),
+        issues_found=int(payload.get("issuesFound") or 0),
+        blocking=not bool(payload.get("verified")),
+    ))
     print_json(payload)
     return 0 if bool(payload.get("verified")) else 1
 

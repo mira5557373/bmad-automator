@@ -13,6 +13,7 @@ from story_automator.core.utils import file_exists, get_project_root, iso_now, p
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 from story_automator.core.telemetry_events import (
     EscalationTriggered,
+    RetroFired,
     RetryAttempt,
 )
 
@@ -258,6 +259,14 @@ def retro_agent_action(args: list[str]) -> int:
         return 1
     config = _load_agent_config_from_state(options["state-file"])
     primary, fallback, model = resolve_agent(config, "medium", "retro")
+    _telemetry_emitter().emit(RetroFired(
+        timestamp=iso_now(),
+        run_id="",
+        epic=str(config.get("epic") or ""),
+        stories_completed=int(config.get("storiesCompleted") or 0),
+        total_cost_usd=float(config.get("totalCostUsd") or 0.0),
+        duration_s=float(config.get("durationSeconds") or 0.0),
+    ))
     print_json({"ok": True, "task": "retro", "primary": primary, "fallback": fallback, "model": model})
     return 0
 

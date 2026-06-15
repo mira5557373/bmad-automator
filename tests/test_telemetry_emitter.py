@@ -513,3 +513,62 @@ class TelemetryEmitterEpicAgentsWiringTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8").rstrip("\n"))
             self.assertEqual(payload["event_type"], "escalation_triggered")
             self.assertEqual(payload["severity"], "critical")
+
+
+class TelemetryEmitterOrchestratorWiringTests(unittest.TestCase):
+    def test_emit_story_started(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            TelemetryEmitter(path).emit(StoryStarted(
+                timestamp="t", run_id="r", epic="E1", story_key="S1",
+                agent="claude", model="sonnet", complexity="medium",
+            ))
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8").rstrip("\n"))[
+                    "event_type"
+                ],
+                "story_started",
+            )
+
+    def test_emit_story_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            TelemetryEmitter(path).emit(StoryCompleted(
+                timestamp="t", run_id="r", epic="E1", story_key="S1",
+                duration_s=10.0, cost_usd=0.5, tokens_in=100,
+                tokens_out=200, attempts=1,
+            ))
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8").rstrip("\n"))[
+                    "event_type"
+                ],
+                "story_completed",
+            )
+
+    def test_emit_review_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            TelemetryEmitter(path).emit(ReviewCycle(
+                timestamp="t", run_id="r", epic="E1", story_key="S1",
+                cycle_num=2, issues_found=4, blocking=True,
+            ))
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8").rstrip("\n"))[
+                    "event_type"
+                ],
+                "review_cycle",
+            )
+
+    def test_emit_retro_fired(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            TelemetryEmitter(path).emit(RetroFired(
+                timestamp="t", run_id="r", epic="E1",
+                stories_completed=4, total_cost_usd=2.5, duration_s=120.0,
+            ))
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8").rstrip("\n"))[
+                    "event_type"
+                ],
+                "retro_fired",
+            )
