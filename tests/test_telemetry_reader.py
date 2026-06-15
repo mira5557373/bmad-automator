@@ -246,3 +246,83 @@ class TelemetryReaderAttemptsByStoryTests(unittest.TestCase):
             path = Path(tmp) / "events.jsonl"
             path.touch()
             self.assertEqual(TelemetryReader(path).attempts_by_story(), {})
+
+
+class TelemetryReaderRetroInputsTests(unittest.TestCase):
+    def _write(self, path: Path, events: list[dict]) -> None:
+        with open(path, "w", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    def test_retro_inputs_returns_most_recent_match(self) -> None:
+        # REQ-08: "most recent RetroFired event matching the supplied epic"
+        # Most recent = last in file order (file is append-only).
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._write(
+                path,
+                [
+                    {
+                        "event_type": "retro_fired",
+                        "timestamp": "2026-06-13T00:00:00Z",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "stories_completed": 1,
+                        "total_cost_usd": 0.5,
+                        "duration_s": 30.0,
+                    },
+                    {
+                        "event_type": "retro_fired",
+                        "timestamp": "2026-06-14T00:00:00Z",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "stories_completed": 4,
+                        "total_cost_usd": 2.0,
+                        "duration_s": 120.0,
+                    },
+                    {
+                        "event_type": "retro_fired",
+                        "timestamp": "2026-06-14T00:00:00Z",
+                        "run_id": "r",
+                        "epic": "E2",
+                        "stories_completed": 7,
+                        "total_cost_usd": 3.0,
+                        "duration_s": 60.0,
+                    },
+                ],
+            )
+            reader = TelemetryReader(path)
+            result = reader.retro_inputs("E1")
+            self.assertEqual(
+                result,
+                {
+                    "stories_completed": 4,
+                    "total_cost_usd": 2.0,
+                    "duration_s": 120.0,
+                },
+            )
+
+    def test_retro_inputs_returns_empty_dict_when_no_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._write(
+                path,
+                [
+                    {
+                        "event_type": "retro_fired",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "stories_completed": 1,
+                        "total_cost_usd": 0.5,
+                        "duration_s": 30.0,
+                    },
+                ],
+            )
+            self.assertEqual(TelemetryReader(path).retro_inputs("E_other"), {})
+
+    def test_retro_inputs_returns_empty_when_no_retro_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            path.touch()
+            self.assertEqual(TelemetryReader(path).retro_inputs("E1"), {})

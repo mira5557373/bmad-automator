@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any  # noqa: F401
+from typing import Any
 
 from .telemetry_events import (
     CostCharged,
     Event,
-    RetroFired,  # noqa: F401
+    RetroFired,
     RetryAttempt,
     parse_event,
 )
@@ -50,6 +50,19 @@ class TelemetryReader:
                 key = (event.epic, event.story_key)
                 counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def retro_inputs(self, epic: str) -> dict[str, Any]:
+        latest: RetroFired | None = None
+        for event in self.iter_events():
+            if isinstance(event, RetroFired) and event.epic == epic:
+                latest = event
+        if latest is None:
+            return {}
+        return {
+            "stories_completed": latest.stories_completed,
+            "total_cost_usd": latest.total_cost_usd,
+            "duration_s": latest.duration_s,
+        }
 
 
 __all__ = ["TelemetryReader"]
