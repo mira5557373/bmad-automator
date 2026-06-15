@@ -1,5 +1,6 @@
 ### Features
 
+- feat(m12b): add retraction format verifier script and gate doc (0cff17c)
 - feat(m11): add line-ending portability gate to vocabulary gates (8666730)
 - feat(m11): add prose-immutability + whitespace gate (REQ-10) to vocabulary gates (47a2452)
 - feat(m11): add ordering-preservation gate (REQ-11) to vocabulary gates (caefab4)
@@ -62,6 +63,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (9634259)
 - docs(m12a): describe both gate modifications in changelog entry (96f5f05)
 - docs(m12a): exclude new M12a entry from REQ-10 immutability gate (e0a2c23)
 - docs(m12a): land retraction-as-changelog convention (571bc3d)
@@ -110,6 +112,7 @@
 
 ### Other
 
+- plan(m12b): implementation plan for retraction format verifier script (a1d2b91)
 - plan(m12a): implementation plan for retraction-as-changelog convention docs (7fbf972)
 - build: gitignore sw init outputs (4d954c1)
 - spec(m12): retraction-as-changelog convention spec (0ea7870)

@@ -1,1 +1,1 @@
-Wrote `README.md` with overview, quickstart, architecture, and contributing sections, reflecting v1.15.0, the npm scripts (including `gates:vocab`), the closed four-tag M11 vocabulary, and the module map from `CLAUDE.md`.
+Updated `README.md` with overview, quickstart, architecture, and contributing sections drawn from `CLAUDE.md`.
