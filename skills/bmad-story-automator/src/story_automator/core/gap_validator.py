@@ -19,6 +19,7 @@ files outside `repo_root` — path-escape attempts (absolute paths,
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 __all__ = [  # noqa: F822 — symbols are added incrementally in later M06a-M1 tasks
     "Gap",
@@ -29,3 +30,20 @@ __all__ = [  # noqa: F822 — symbols are added incrementally in later M06a-M1 t
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Gap:
+    """A review-skill gap claim: file/line/symbol citation plus metadata.
+
+    Preconditions: `severity` must be one of "blocker", "major", "minor"
+        — enforced by `parse_gap_list`, not by this dataclass itself.
+    Postconditions: instance is frozen; all five fields are present.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    file_path: str
+    line: int
+    symbol: str
+    description: str
+    severity: str

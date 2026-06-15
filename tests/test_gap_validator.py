@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import sys
@@ -51,3 +52,56 @@ class ModuleImportContractTests(unittest.TestCase):
             gap_validator.logger.name,
             "story_automator.core.gap_validator",
         )
+
+
+class GapDataclassTests(unittest.TestCase):
+    """REQ-01: frozen kw_only @dataclass with five fields."""
+
+    def test_gap_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.gap_validator import Gap
+
+        self.assertTrue(dataclasses.is_dataclass(Gap))
+        params = Gap.__dataclass_params__
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_gap_field_names_and_types(self) -> None:
+        from story_automator.core.gap_validator import Gap
+
+        fields = {f.name: f.type for f in dataclasses.fields(Gap)}
+        self.assertEqual(
+            sorted(fields.keys()),
+            ["description", "file_path", "line", "severity", "symbol"],
+        )
+
+    def test_gap_construction_requires_keyword_args(self) -> None:
+        from story_automator.core.gap_validator import Gap
+
+        with self.assertRaises(TypeError):
+            Gap("a", 1, "s", "d", "minor")  # type: ignore[misc]
+
+    def test_gap_instances_are_immutable(self) -> None:
+        from story_automator.core.gap_validator import Gap
+
+        g = Gap(
+            file_path="a.py",
+            line=1,
+            symbol="x",
+            description="d",
+            severity="minor",
+        )
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            g.line = 2  # type: ignore[misc]
+
+    def test_gap_does_not_subclass_other_dataclasses(self) -> None:
+        # NFR: dataclasses must not subclass other dataclasses.
+        from story_automator.core.gap_validator import Gap
+
+        ancestors = [
+            base for base in Gap.__mro__ if base is not Gap and base is not object
+        ]
+        for base in ancestors:
+            self.assertFalse(
+                dataclasses.is_dataclass(base),
+                f"Gap unexpectedly inherits from dataclass {base!r}",
+            )
