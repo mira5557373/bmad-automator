@@ -491,5 +491,36 @@ class MaterializeEntriesTests(unittest.TestCase):
         self.assertEqual(entries[("m", "u")].sample_count, 4)
 
 
+class ImportAllowlistGuardrailTests(unittest.TestCase):
+    """Static-grep REQ-11 over the calibration module source.
+
+    The orchestrator and M03 callers rely on this module being
+    side-effect free; a stray subprocess or network import would
+    silently break those assumptions.
+    """
+
+    FORBIDDEN = (
+        "requests",
+        "httpx",
+        "aiohttp",
+        "subprocess",
+        "os.system",
+        "filelock",
+        "psutil",
+    )
+
+    def _calibration_source(self) -> str:
+        from story_automator.core import calibration
+
+        path = Path(calibration.__file__)
+        return path.read_text(encoding="utf-8")
+
+    def test_no_forbidden_import_tokens_anywhere_in_module(self) -> None:
+        source = self._calibration_source()
+        for token in self.FORBIDDEN:
+            with self.subTest(token=token):
+                self.assertNotIn(token, source)
+
+
 if __name__ == "__main__":
     unittest.main()
