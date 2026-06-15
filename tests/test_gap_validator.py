@@ -105,3 +105,53 @@ class GapDataclassTests(unittest.TestCase):
                 dataclasses.is_dataclass(base),
                 f"Gap unexpectedly inherits from dataclass {base!r}",
             )
+
+
+class GapStatusDataclassTests(unittest.TestCase):
+    """REQ-02: frozen kw_only @dataclass with six fields."""
+
+    def test_gap_status_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.gap_validator import GapStatus
+
+        self.assertTrue(dataclasses.is_dataclass(GapStatus))
+        params = GapStatus.__dataclass_params__
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_gap_status_field_names(self) -> None:
+        from story_automator.core.gap_validator import GapStatus
+
+        names = sorted(f.name for f in dataclasses.fields(GapStatus))
+        self.assertEqual(
+            names,
+            [
+                "confidence",
+                "gap",
+                "line_in_range",
+                "notes",
+                "path_exists",
+                "symbol_present",
+            ],
+        )
+
+    def test_gap_status_construction(self) -> None:
+        from story_automator.core.gap_validator import Gap, GapStatus
+
+        g = Gap(
+            file_path="a.py",
+            line=1,
+            symbol="x",
+            description="d",
+            severity="minor",
+        )
+        s = GapStatus(
+            gap=g,
+            path_exists=True,
+            line_in_range=True,
+            symbol_present=True,
+            confidence=0.95,
+            notes=[],
+        )
+        self.assertIs(s.gap, g)
+        self.assertEqual(s.notes, [])
+        self.assertEqual(s.confidence, 0.95)

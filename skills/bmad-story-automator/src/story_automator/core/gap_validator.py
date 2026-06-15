@@ -47,3 +47,21 @@ class Gap:
     symbol: str
     description: str
     severity: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class GapStatus:
+    """Result of validating a single `Gap` against the local source tree.
+
+    Preconditions: `confidence` must lie in `[0.0, 1.0]`; `notes` must be
+        a list of human-readable strings explaining failed checks.
+    Postconditions: instance is frozen; `gap` is the original `Gap`.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    gap: Gap
+    path_exists: bool
+    line_in_range: bool
+    symbol_present: bool
+    confidence: float
+    notes: list[str]
