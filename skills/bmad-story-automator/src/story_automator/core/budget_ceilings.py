@@ -19,7 +19,7 @@ Those land in M03-M2 (evaluator) and M03-M3 (BMAD wiring).
 
 from __future__ import annotations
 
-import datetime as dt  # noqa: F401 — used by evaluate_ceilings in M03-M2 tasks T6+
+import datetime as dt
 import enum
 import json
 import math
@@ -95,6 +95,27 @@ _WINDOW_SECONDS: dict[str, int] = {
     "7d": 604800,
     "30d": 2592000,
 }
+
+
+def _parse_iso_timestamp(value: str) -> dt.datetime | None:
+    """Parse an ``iso_now()``-style timestamp (REQ-08 anchor).
+
+    Accepts the canonical ``"YYYY-MM-DDTHH:MM:SSZ"`` shape emitted by
+    ``core.common.iso_now`` and any other ISO-8601 string accepted by
+    ``datetime.fromisoformat`` once a trailing ``Z`` is normalized to
+    ``+00:00``. Returns ``None`` on failure rather than raising —
+    callers treat unparseable timestamps as out-of-window (zero spend).
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
 
 
 def _validate_ceiling_dict(index: int, raw: object) -> BudgetCeiling | None:
@@ -235,14 +256,24 @@ def _compute_spent(
 ) -> float:
     """Stream the JSONL ledger and sum ``cost_usd`` (REQ-08).
 
-    Missing file returns ``0.0``. Lines that fail to parse via
-    ``parse_event`` are skipped (NFR line-ending tolerance). Events
-    without a ``cost_usd`` attribute do not contribute. The ``window``
-    filter is applied in Task 6; this cut sums all events.
+    Window semantics (REQ-08):
+    - ``per_run`` sums all events regardless of timestamp.
+    - ``24h`` / ``7d`` / ``30d`` sum events whose timestamp is within
+      86400 / 604800 / 2592000 seconds of ``now_iso``.
+
+    Missing file, parse failures, and missing ``cost_usd`` attributes
+    all contribute zero. An unparseable ``now_iso`` under a windowed
+    mode short-circuits to zero spend (no anchor available).
     """
     path = Path(events_path)
     if not path.is_file():
         return 0.0
+    delta_seconds = _WINDOW_SECONDS.get(window, 0)
+    anchor: dt.datetime | None = None
+    if delta_seconds > 0:
+        anchor = _parse_iso_timestamp(now_iso)
+        if anchor is None:
+            return 0.0
     total = 0.0
     with path.open("r", encoding="utf-8") as handle:
         for raw in handle:
@@ -254,8 +285,18 @@ def _compute_spent(
             except (ValueError, TypeError, json.JSONDecodeError):
                 continue
             cost = getattr(event, "cost_usd", None)
-            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
-                total += float(cost)
+            if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+                continue
+            if anchor is not None:
+                ts = _parse_iso_timestamp(getattr(event, "timestamp", ""))
+                if ts is None:
+                    continue
+                # REQ-08 "within N seconds of now_iso" is symmetric:
+                # past events older than the window AND future events
+                # further out than the window are both excluded.
+                if abs((anchor - ts).total_seconds()) > delta_seconds:
+                    continue
+            total += float(cost)
     return total
 
 

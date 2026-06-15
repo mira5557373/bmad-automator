@@ -583,5 +583,147 @@ class EvaluateCeilingsDecisionRuleTests(unittest.TestCase):
         self.assertEqual(reason, "c1:per_run:spent=12.5000:limit=10.0000")
 
 
+class EvaluateCeilingsWindowTests(unittest.TestCase):
+    def _event(self, ts, cost):
+        return StoryCompleted(
+            timestamp=ts,
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def _ceiling(self, window):
+        return BudgetCeiling(
+            name="c1",
+            window=window,
+            limit_usd=100.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+
+    def test_per_run_sums_all_events_regardless_of_timestamp(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("1996-01-01T00:00:00Z", 3.0),
+            self._event("2026-06-15T00:00:00Z", 4.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("per_run")],
+            )
+        self.assertIn("spent=7.0000", reason)
+
+    def test_24h_excludes_events_older_than_86400_seconds(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("2026-06-13T23:59:59Z", 5.0),
+            self._event("2026-06-14T01:00:00Z", 7.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("24h")],
+            )
+        self.assertIn("spent=7.0000", reason)
+
+    def test_7d_excludes_events_older_than_604800_seconds(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("2026-06-07T23:59:59Z", 5.0),
+            self._event("2026-06-10T00:00:00Z", 9.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("7d")],
+            )
+        self.assertIn("spent=9.0000", reason)
+
+    def test_30d_excludes_events_older_than_2592000_seconds(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("2026-05-15T23:59:59Z", 5.0),
+            self._event("2026-05-20T00:00:00Z", 11.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("30d")],
+            )
+        self.assertIn("spent=11.0000", reason)
+
+    def test_unparseable_event_timestamp_is_skipped_in_windowed_modes(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("not-a-timestamp", 99.0),
+            self._event("2026-06-14T12:00:00Z", 3.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("24h")],
+            )
+        self.assertIn("spent=3.0000", reason)
+
+    def test_future_event_beyond_window_is_excluded(self) -> None:
+        """REQ-08 'within N seconds' is symmetric."""
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [
+            self._event("2026-12-31T00:00:00Z", 50.0),
+            self._event("2026-06-14T12:00:00Z", 3.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[self._ceiling("24h")],
+            )
+        self.assertIn("spent=3.0000", reason)
+
+    def test_unparseable_now_iso_short_circuits_to_zero_in_windowed_modes(self) -> None:
+        """A bad now_iso plus a windowed ceiling counts zero spend."""
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        events = [self._event("2026-06-14T12:00:00Z", 50.0)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path,
+                "init",
+                "not-a-timestamp",
+                ceilings=[self._ceiling("24h")],
+            )
+        self.assertIn("spent=0.0000", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
