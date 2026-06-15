@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from story_automator.core.calibration import CalibrationEntry, CalibrationTable
 from story_automator.core.drift_detector import (
     MAJOR_MAX,
     MINOR_MAX,
@@ -135,6 +136,28 @@ class ClassifyHelperTests(unittest.TestCase):
         self.assertEqual(STABLE_MAX, 0.05)
         self.assertEqual(MINOR_MAX, 0.10)
         self.assertEqual(MAJOR_MAX, 0.20)
+
+
+def _entry(model_id: str, task_kind: str, success_rate: float) -> CalibrationEntry:
+    return CalibrationEntry(
+        model_id=model_id,
+        task_kind=task_kind,
+        success_rate=round(success_rate, 4),
+        sample_count=10,
+        last_seen_iso="2026-06-15T00:00:00Z",
+    )
+
+
+def _table(
+    *entries: CalibrationEntry,
+    source_path: str = "/fixtures/table.jsonl",
+) -> CalibrationTable:
+    return CalibrationTable(
+        entries={(e.model_id, e.task_kind): e for e in entries},
+        generated_at="2026-06-15T00:00:00Z",
+        source_path=source_path,
+        total_events_scanned=sum(e.sample_count for e in entries),
+    )
 
 
 if __name__ == "__main__":
