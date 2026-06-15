@@ -342,9 +342,11 @@ def evaluate_ceilings(
         resolved = parse_ceilings_config(workflow_json_path)  # type: ignore[arg-type]
     if not resolved:
         return CeilingDecision.ALLOW, "no_ceilings_configured"
-    # Use the first (and, until Task 8, only) ceiling — gate filtering
-    # and multi-ceiling severity merging arrive in later tasks.
-    ceiling = resolved[0]
+    applicable = [c for c in resolved if gate_name in c.gate_names]
+    if not applicable:
+        return CeilingDecision.ALLOW, "no_ceilings_configured"
+    # Multi-ceiling severity merge lands in Task 8 — pick first for now.
+    ceiling = applicable[0]
     spent = _compute_spent(events_path, ceiling.window, now_iso)
     return _decide(ceiling, spent)
 

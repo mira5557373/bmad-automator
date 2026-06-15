@@ -725,5 +725,58 @@ class EvaluateCeilingsWindowTests(unittest.TestCase):
         self.assertIn("spent=0.0000", reason)
 
 
+class EvaluateCeilingsGateFilterTests(unittest.TestCase):
+    def _event(self, cost):
+        return StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def test_ceiling_not_listing_gate_is_ignored(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        ceiling = BudgetCeiling(
+            name="only_story_start",
+            window="per_run",
+            limit_usd=1.0,
+            warn_at=0.5,
+            gate_names=("story_start",),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(99.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[ceiling]
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "no_ceilings_configured")
+
+    def test_ceiling_listing_gate_is_applied(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        ceiling = BudgetCeiling(
+            name="any_gate",
+            window="per_run",
+            limit_usd=10.0,
+            warn_at=0.8,
+            gate_names=("init", "story_start", "retry_start"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(11.0)])
+            for gate in ("init", "story_start", "retry_start"):
+                with self.subTest(gate=gate):
+                    verdict, reason = evaluate_ceilings(
+                        path, gate, "2026-06-15T00:00:00Z", ceilings=[ceiling]
+                    )
+                    self.assertEqual(verdict, CeilingDecision.BLOCK)
+                    self.assertIn("any_gate", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
