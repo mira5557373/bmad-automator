@@ -70,3 +70,21 @@ class DriftReport:
     generated_at: str
     baseline_source: str
     current_source: str
+
+
+def _classify(delta: float) -> DriftClassification:
+    """Bin `delta` into a DriftClassification using REQ-07 bands.
+
+    Bands are half-open: the lower bound belongs to the higher tier.
+    This matches the spec language "`|delta| < 0.05` is STABLE,
+    `0.05 <= |delta| < 0.10` is MINOR_DRIFT, ...".
+    """
+
+    magnitude = abs(delta)
+    if magnitude < STABLE_MAX:
+        return DriftClassification.STABLE
+    if magnitude < MINOR_MAX:
+        return DriftClassification.MINOR_DRIFT
+    if magnitude < MAJOR_MAX:
+        return DriftClassification.MAJOR_DRIFT
+    return DriftClassification.SEVERE_DRIFT

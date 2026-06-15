@@ -3,9 +3,13 @@ from __future__ import annotations
 import unittest
 
 from story_automator.core.drift_detector import (
+    MAJOR_MAX,
+    MINOR_MAX,
+    STABLE_MAX,
     DriftClassification,
     DriftEntry,
     DriftReport,
+    _classify,
 )
 
 
@@ -95,6 +99,42 @@ class DriftReportTests(unittest.TestCase):
             )
         )
         self.assertEqual(len(report.entries), 1)
+
+
+class ClassifyHelperTests(unittest.TestCase):
+    def test_zero_is_stable(self) -> None:
+        self.assertIs(_classify(0.0), DriftClassification.STABLE)
+
+    def test_just_below_stable_max_is_stable(self) -> None:
+        self.assertIs(_classify(0.0499), DriftClassification.STABLE)
+        self.assertIs(_classify(-0.0499), DriftClassification.STABLE)
+
+    def test_stable_max_is_minor(self) -> None:
+        self.assertIs(_classify(STABLE_MAX), DriftClassification.MINOR_DRIFT)
+        self.assertIs(_classify(-STABLE_MAX), DriftClassification.MINOR_DRIFT)
+
+    def test_just_below_minor_max_is_minor(self) -> None:
+        self.assertIs(_classify(0.0999), DriftClassification.MINOR_DRIFT)
+
+    def test_minor_max_is_major(self) -> None:
+        self.assertIs(_classify(MINOR_MAX), DriftClassification.MAJOR_DRIFT)
+        self.assertIs(_classify(-MINOR_MAX), DriftClassification.MAJOR_DRIFT)
+
+    def test_just_below_major_max_is_major(self) -> None:
+        self.assertIs(_classify(0.1999), DriftClassification.MAJOR_DRIFT)
+
+    def test_major_max_is_severe(self) -> None:
+        self.assertIs(_classify(MAJOR_MAX), DriftClassification.SEVERE_DRIFT)
+        self.assertIs(_classify(-MAJOR_MAX), DriftClassification.SEVERE_DRIFT)
+
+    def test_large_magnitude_is_severe(self) -> None:
+        self.assertIs(_classify(0.95), DriftClassification.SEVERE_DRIFT)
+        self.assertIs(_classify(-0.95), DriftClassification.SEVERE_DRIFT)
+
+    def test_boundary_constants_match_spec(self) -> None:
+        self.assertEqual(STABLE_MAX, 0.05)
+        self.assertEqual(MINOR_MAX, 0.10)
+        self.assertEqual(MAJOR_MAX, 0.20)
 
 
 if __name__ == "__main__":
