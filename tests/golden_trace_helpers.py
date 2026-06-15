@@ -7,6 +7,7 @@ events, no state mutations, and no claude_p invocations.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import warnings
@@ -14,6 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from story_automator.commands import state as _state_module
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 
 Channel = Literal["event", "state", "claude_p"]
@@ -340,7 +342,9 @@ class GoldenTraceRecorder:
         if self._installed:
             raise RuntimeError("GoldenTraceRecorder is not reentrant")
         self._orig_emit = TelemetryEmitter.emit
+        self._orig_state_write = _state_module.write_atomic_text
         self._install_emit_hook()
+        self._install_state_hook()
         self._installed = True
         return self
 
@@ -350,10 +354,22 @@ class GoldenTraceRecorder:
         exc: BaseException | None,
         tb: object,
     ) -> None:
-        try:
-            TelemetryEmitter.emit = self._orig_emit  # type: ignore[method-assign]
-        finally:
-            self._installed = False
+        errors: list[BaseException] = []
+        for restore in (
+            lambda: setattr(TelemetryEmitter, "emit", self._orig_emit),
+            lambda: setattr(_state_module, "write_atomic_text", self._orig_state_write),
+        ):
+            try:
+                restore()
+            except BaseException as restore_err:
+                errors.append(restore_err)
+        self._installed = False
+        if errors:
+            # BaseExceptionGroup is a builtin on Python 3.11+ (project floor).
+            raise BaseExceptionGroup(  # noqa: F821
+                "GoldenTraceRecorder failed to restore one or more hooks",
+                errors,
+            )
         return None
 
     def _install_emit_hook(self) -> None:
@@ -368,6 +384,26 @@ class GoldenTraceRecorder:
             return result
 
         TelemetryEmitter.emit = wrapper  # type: ignore[method-assign]
+
+    def _install_state_hook(self) -> None:
+        orig = self._orig_state_write
+        recorder = self
+
+        def wrapper(path: Path, data: str, *, encoding: str = "utf-8") -> None:
+            result = orig(path, data, encoding=encoding)
+            try:
+                rel = _to_repo_relative_posix(Path(path), repo_root=recorder._repo_root)
+                sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                recorder._record("state", "mutation", {"path": rel, "sha256": sha})
+            except Exception as exc:
+                warnings.warn(
+                    f"GoldenTraceRecorder: state-hook recording failed for "
+                    f"{path!r}: {exc!r}",
+                    stacklevel=2,
+                )
+            return result
+
+        _state_module.write_atomic_text = wrapper  # type: ignore[assignment]
 
     def _record(self, channel: Channel, kind: str, payload: dict[str, object]) -> None:
         """Append one entry under the arrival lock (REQ-06).

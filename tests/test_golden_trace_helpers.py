@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib
 import json
 import os
@@ -9,6 +10,7 @@ import threading as _threading
 import unittest
 from pathlib import Path
 
+from story_automator.commands import state as _state_module
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 from story_automator.core.telemetry_events import StoryStarted, TmuxSessionSpawned
 
@@ -738,6 +740,41 @@ class EventRedactionTests(unittest.TestCase):
             with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
                 emitter.emit(event)
         self.assertEqual(rec.entries[0].payload["story_key"], "XXXX")
+
+
+class StateWriteHookTests(unittest.TestCase):
+    def test_state_write_records_path_and_sha256(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "state.json"
+            body = '{"k": 1}'
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(target, body)
+        self.assertEqual(len(rec.entries), 1)
+        entry = rec.entries[0]
+        self.assertEqual(entry.channel, "state")
+        self.assertEqual(entry.kind, "mutation")
+        self.assertEqual(entry.payload["path"], "state.json")
+        expected = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        self.assertEqual(entry.payload["sha256"], expected)
+
+    def test_state_write_passes_through(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "doc.md"
+            body = "# heading\n"
+            with GoldenTraceRecorder(repo_root=root):
+                _state_module.write_atomic_text(target, body)
+            self.assertEqual(target.read_text(encoding="utf-8"), body)
+
+    def test_state_hook_removed_on_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "a.txt"
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(target, "x")
+            _state_module.write_atomic_text(target, "y")
+        self.assertEqual(len(rec.entries), 1)
 
 
 if __name__ == "__main__":
