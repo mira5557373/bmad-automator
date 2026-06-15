@@ -423,5 +423,50 @@ class CompareTracesLengthMismatchTests(unittest.TestCase):
         self.assertEqual(diff.mismatches[1].seq, 1)
 
 
+class TraceDiffSummaryIntegrationTests(unittest.TestCase):
+    """End-to-end diagnostic check: produce a real diff, render its summary,
+    confirm a reader can localize the regression without the golden file.
+    """
+
+    def test_summary_localizes_payload_regression(self) -> None:
+        golden = [
+            TraceEntry(
+                seq=0, channel="event", kind="StoryStarted", payload={"epic": "1"}
+            ),
+            TraceEntry(
+                seq=1,
+                channel="event",
+                kind="StoryCompleted",
+                payload={"cost_usd": 0.42},
+            ),
+        ]
+        actual = [
+            golden[0],
+            TraceEntry(
+                seq=1,
+                channel="event",
+                kind="StoryCompleted",
+                payload={"cost_usd": 0.99},
+            ),
+        ]
+        diff = compare_traces(actual, golden)
+        text = diff.summary()
+        # Channel + kind + the diverging payload values must all be present
+        # so the reader can identify the regression without re-opening the
+        # golden fixture (NFR: Diagnostics).
+        self.assertIn("seq=1", text)
+        self.assertIn("payload", text)
+        self.assertIn("0.42", text)
+        self.assertIn("0.99", text)
+
+    def test_summary_localizes_length_mismatch(self) -> None:
+        golden: list[TraceEntry] = []
+        actual = [TraceEntry(seq=0, channel="event", kind="StoryStarted", payload={})]
+        diff = compare_traces(actual, golden)
+        text = diff.summary()
+        self.assertIn("seq=0", text)
+        self.assertIn("length", text)
+
+
 if __name__ == "__main__":
     unittest.main()
