@@ -14,6 +14,7 @@ from story_automator.core.common import compact_json
 from story_automator.core.telemetry_events import (
     BudgetAlert,
     CostCharged,
+    StoryCompleted,
     StoryStarted,
 )
 from tests._calibration_fixtures import (
@@ -96,15 +97,10 @@ class CalibrationEntryShapeTests(unittest.TestCase):
 class CalibrationTableShapeTests(unittest.TestCase):
     def test_construction(self) -> None:
         entry = _make_entry(
-            model_id="m",
-            task_kind="t",
-            success_rate=0.5,
-            sample_count=2,
+            model_id="m", task_kind="t", success_rate=0.5, sample_count=2
         )
         table = _make_table(
-            [entry],
-            source_path="/tmp/telemetry.jsonl",
-            total_events_scanned=2,
+            [entry], source_path="/tmp/telemetry.jsonl", total_events_scanned=2
         )
         self.assertEqual(table.entries[("m", "t")], entry)
         self.assertEqual(table.generated_at, "2026-06-14T13:00:00Z")
@@ -112,15 +108,9 @@ class CalibrationTableShapeTests(unittest.TestCase):
         self.assertEqual(table.total_events_scanned, 2)
 
     def test_table_is_kw_only_mutable(self) -> None:
-        table = CalibrationTable(
-            entries={},
-            generated_at="2026-06-14T13:00:00Z",
-            source_path="/tmp/empty.jsonl",
-            total_events_scanned=0,
-        )
+        table = _make_table(source_path="/tmp/empty.jsonl", total_events_scanned=0)
         table.total_events_scanned = 5
         self.assertEqual(table.total_events_scanned, 5)
-
         with self.assertRaises(TypeError):
             CalibrationTable({}, "x", "y", 0)  # type: ignore[misc]
 
@@ -180,10 +170,8 @@ class BuildCalibrationEmptyAndIgnoredTests(unittest.TestCase):
                 epic="EP-1",
                 story_key="S-1",
             )
-            _write_jsonl(
-                ledger,
-                [compact_json(e.to_dict()) for e in (started, cost, budget)],
-            )
+            lines = [compact_json(e.to_dict()) for e in (started, cost, budget)]
+            _write_jsonl(ledger, lines)
             table = build_calibration(ledger)
 
         self.assertEqual(table.entries, {})
@@ -342,8 +330,6 @@ class BuildCalibrationParsingTolerationTests(_ShimmedEventCase):
         self.assertEqual(set(table.entries.keys()), {("m", "t")})
 
     def test_non_string_model_id_or_task_kind_is_skipped(self) -> None:
-        from story_automator.core.telemetry_events import StoryCompleted
-
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
             good = _completed_line(
@@ -360,15 +346,10 @@ class BuildCalibrationParsingTolerationTests(_ShimmedEventCase):
                 tokens_out=10,
                 attempts=1,
             ).to_dict()
-            bad_model = dict(base)
-            bad_model["model_id"] = 42
-            bad_model["task_kind"] = "code"
-            bad_task = dict(base)
-            bad_task["model_id"] = "claude-opus-4"
-            bad_task["task_kind"] = None
+            bad_model = {**base, "model_id": 42, "task_kind": "code"}
+            bad_task = {**base, "model_id": "claude-opus-4", "task_kind": None}
             _write_jsonl(
-                ledger,
-                [good, compact_json(bad_model), compact_json(bad_task)],
+                ledger, [good, compact_json(bad_model), compact_json(bad_task)]
             )
             table = build_calibration(ledger)
 
@@ -398,9 +379,9 @@ class BuildCalibrationMalformedLineTests(_ShimmedEventCase):
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
             good = _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t")
-            from story_automator.core.common import compact_json as _cj
-
-            no_type = _cj({"timestamp": "2026-06-14T11:00:00Z", "run_id": "r2"})
+            no_type = compact_json(
+                {"timestamp": "2026-06-14T11:00:00Z", "run_id": "r2"}
+            )
             _write_jsonl(ledger, [no_type, good])
             table = build_calibration(ledger)
 
@@ -416,17 +397,16 @@ class LookupSuccessRateTests(unittest.TestCase):
         table = self._make_table()
         self.assertEqual(lookup_success_rate(table, "claude-opus-4", "code"), 0.8750)
 
-    def test_miss_returns_default_0_5(self) -> None:
+    def test_miss_returns_default(self) -> None:
         table = self._make_table()
-        self.assertEqual(lookup_success_rate(table, "gpt-5-codex", "code"), 0.5)
-        self.assertEqual(lookup_success_rate(table, "claude-opus-4", "docs"), 0.5)
-
-    def test_miss_returns_custom_default(self) -> None:
-        table = self._make_table()
-        self.assertEqual(
-            lookup_success_rate(table, "unknown", "unknown", default=0.123),
-            0.123,
-        )
+        cases = [
+            (("gpt-5-codex", "code"), {}, 0.5),
+            (("claude-opus-4", "docs"), {}, 0.5),
+            (("unknown", "unknown"), {"default": 0.123}, 0.123),
+        ]
+        for args, kwargs, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(lookup_success_rate(table, *args, **kwargs), expected)
 
 
 class FormatCalibrationReportTests(unittest.TestCase):
@@ -441,29 +421,21 @@ class FormatCalibrationReportTests(unittest.TestCase):
         self.assertEqual(text, expected)
 
     def test_rows_sorted_by_model_id_then_task_kind(self) -> None:
+        rows = [
+            ("claude-sonnet-4-5", "review", 0.5000, 4, "2026-06-14T10:00:00Z"),
+            ("claude-opus-4", "code", 0.8750, 8, "2026-06-14T11:00:00Z"),
+            ("claude-opus-4", "docs", 1.0000, 2, "2026-06-14T12:00:00Z"),
+        ]
         table = _make_table(
             [
                 _make_entry(
-                    model_id="claude-sonnet-4-5",
-                    task_kind="review",
-                    success_rate=0.5000,
-                    sample_count=4,
-                    last_seen_iso="2026-06-14T10:00:00Z",
-                ),
-                _make_entry(
-                    model_id="claude-opus-4",
-                    task_kind="code",
-                    success_rate=0.8750,
-                    sample_count=8,
-                    last_seen_iso="2026-06-14T11:00:00Z",
-                ),
-                _make_entry(
-                    model_id="claude-opus-4",
-                    task_kind="docs",
-                    success_rate=1.0000,
-                    sample_count=2,
-                    last_seen_iso="2026-06-14T12:00:00Z",
-                ),
+                    model_id=m,
+                    task_kind=t,
+                    success_rate=sr,
+                    sample_count=sc,
+                    last_seen_iso=ls,
+                )
+                for m, t, sr, sc, ls in rows
             ],
             source_path="/tmp/telemetry.jsonl",
         )
@@ -492,6 +464,34 @@ class FormatCalibrationReportTests(unittest.TestCase):
         )
         text = format_calibration_report(table)
         text.encode("ascii")
+
+
+class IterEventLinesTests(unittest.TestCase):
+    def test_blank_lines_and_crlf_are_stripped(self) -> None:
+        from story_automator.core.calibration import _iter_event_lines
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "raw.jsonl"
+            ledger.write_bytes(b"a\r\n\r\nb\n   \nc\r\n")
+            lines = list(_iter_event_lines(ledger))
+
+        self.assertEqual(lines, ["a", "b", "c"])
+
+
+class MaterializeEntriesTests(unittest.TestCase):
+    def test_buckets_round_to_four_decimals_and_aggregate(self) -> None:
+        from story_automator.core.calibration import _materialize_entries
+
+        buckets = {
+            ("m", "t"): [2, 1, "2026-06-14T12:00:00Z"],
+            ("m", "u"): [0, 4, "2026-06-14T11:00:00Z"],
+        }
+        entries = _materialize_entries(buckets)
+
+        self.assertEqual(entries[("m", "t")].success_rate, 0.6667)
+        self.assertEqual(entries[("m", "t")].sample_count, 3)
+        self.assertEqual(entries[("m", "u")].success_rate, 0.0)
+        self.assertEqual(entries[("m", "u")].sample_count, 4)
 
 
 if __name__ == "__main__":
