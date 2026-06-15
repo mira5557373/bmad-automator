@@ -3,8 +3,10 @@ from __future__ import annotations
 import ast
 import dataclasses
 import enum
+import os
 import tempfile
 import unittest
+import unittest.mock as mock
 from pathlib import Path
 
 from story_automator.core import budget_ceilings
@@ -971,6 +973,43 @@ class EvaluateCeilingsLineEndingTests(unittest.TestCase):
                 path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
             )
         self.assertIn("spent=3.0000", reason)
+
+
+class BypassAllowedTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._prior = os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        if self._prior is not None:
+            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = self._prior
+
+    def _run(self, env_value, isatty_value):
+        if env_value is None:
+            os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        else:
+            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = env_value
+        from story_automator.core.budget_ceilings import bypass_allowed
+
+        with mock.patch("sys.stdin.isatty", return_value=isatty_value):
+            return bypass_allowed()
+
+    def test_env_unset_and_no_tty_returns_false(self) -> None:
+        self.assertFalse(self._run(None, False))
+
+    def test_env_unset_with_tty_returns_false(self) -> None:
+        self.assertFalse(self._run(None, True))
+
+    def test_env_set_no_tty_returns_false(self) -> None:
+        self.assertFalse(self._run("1", False))
+
+    def test_env_set_with_tty_returns_true(self) -> None:
+        self.assertTrue(self._run("1", True))
+
+    def test_env_set_to_other_value_returns_false(self) -> None:
+        for value in ["0", "true", "yes", "TRUE", "01"]:
+            with self.subTest(env=value):
+                self.assertFalse(self._run(value, True))
 
 
 if __name__ == "__main__":

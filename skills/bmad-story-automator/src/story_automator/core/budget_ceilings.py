@@ -23,8 +23,8 @@ import datetime as dt
 import enum
 import json
 import math
-import os  # noqa: F401 — used by bypass_allowed in M03-M2 task T10
-import sys  # noqa: F401 — used by bypass_allowed in M03-M2 task T10
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -372,8 +372,13 @@ def evaluate_ceilings(
 def bypass_allowed() -> bool:
     """Check whether ceiling enforcement may be bypassed (REQ-11).
 
-    Returns ``True`` only when both ``BMAD_ALLOW_CEILING_BYPASS == "1"``
-    in the environment **and** ``sys.stdin.isatty()`` is true. Any other
-    combination returns ``False``. Never prompts and never reads stdin.
+    Returns ``True`` only when both the environment variable
+    ``BMAD_ALLOW_CEILING_BYPASS`` equals the exact string ``"1"`` and
+    ``sys.stdin.isatty()`` is true. Any other value (including ``"0"``,
+    ``"true"``, ``"yes"``) returns ``False``. Never prompts and never
+    reads stdin — callers that want operator confirmation must do that
+    themselves at the call site.
     """
-    raise NotImplementedError
+    if os.environ.get("BMAD_ALLOW_CEILING_BYPASS") != "1":
+        return False
+    return bool(sys.stdin.isatty())
