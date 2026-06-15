@@ -893,5 +893,85 @@ class EvaluateCeilingsMultiCeilingTests(unittest.TestCase):
         self.assertTrue(reason.startswith("alpha:"))
 
 
+class EvaluateCeilingsLineEndingTests(unittest.TestCase):
+    def _ceiling(self):
+        return BudgetCeiling(
+            name="c1",
+            window="per_run",
+            limit_usd=100.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+
+    def _event(self, cost):
+        return StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def test_crlf_line_endings_are_tolerated(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(2.0), self._event(3.0)], eol="\r\n")
+            _, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertIn("spent=5.0000", reason)
+
+    def test_trailing_blank_lines_are_tolerated(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(7.0)], trailing_blanks=5)
+            _, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertIn("spent=7.0000", reason)
+
+    def test_malformed_lines_are_skipped(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            valid = compact_json(self._event(4.0).to_dict())
+            path.write_text("not json\n{}\n[1,2,3]\n" + valid + "\n", encoding="utf-8")
+            _, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertIn("spent=4.0000", reason)
+
+    def test_event_without_cost_usd_attribute_contributes_zero(self) -> None:
+        """``StoryStarted`` has no ``cost_usd``; must not blow up or count."""
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+        from story_automator.core.telemetry_events import StoryStarted
+
+        events = [
+            StoryStarted(
+                timestamp="2026-06-15T00:00:00Z",
+                run_id="r1",
+                epic="E1",
+                story_key="S1",
+                agent="dev",
+                model="m",
+                complexity="L",
+            ),
+            self._event(3.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, events)
+            _, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertIn("spent=3.0000", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
