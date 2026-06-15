@@ -367,6 +367,95 @@ class EnvelopeParserErrorTests(unittest.TestCase):
         with self.assertRaisesRegex(ComplianceError, "model_invocation_ms"):
             _parse_envelope('{"verdicts": [], "model_invocation_ms": "fast"}')
 
+    def test_non_string_req_id_raises(self) -> None:
+        # REQ-10: ReqVerdict docstring promises _parse_envelope enforces
+        # req_id is a non-empty string. Silently coercing null -> "None"
+        # is exactly the kind of silent downgrade REQ-10 forbids.
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": null, "status": "implemented", '
+            '"evidence": "x", "confidence": 0.5}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, "req_id must be a string"):
+            _parse_envelope(payload)
+
+    def test_empty_req_id_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "", "status": "implemented", '
+            '"evidence": "x", "confidence": 0.5}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, "req_id must be non-empty"):
+            _parse_envelope(payload)
+
+    def test_non_string_evidence_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": 42, "confidence": 0.5}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, "evidence must be a string"):
+            _parse_envelope(payload)
+
+    def test_confidence_above_one_raises(self) -> None:
+        # ReqVerdict docstring promises confidence in [0.0, 1.0].
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": "x", "confidence": 1.5}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, r"\[0.0, 1.0\]"):
+            _parse_envelope(payload)
+
+    def test_confidence_below_zero_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": "x", "confidence": -0.1}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, r"\[0.0, 1.0\]"):
+            _parse_envelope(payload)
+
+    def test_confidence_at_boundary_zero_accepted(self) -> None:
+        from story_automator.core.spec_compliance import _parse_envelope
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "missing", '
+            '"evidence": "", "confidence": 0.0}], "model_invocation_ms": 0}'
+        )
+        verdicts, _ = _parse_envelope(payload)
+        self.assertEqual(verdicts[0].confidence, 0.0)
+
+    def test_confidence_at_boundary_one_accepted(self) -> None:
+        from story_automator.core.spec_compliance import _parse_envelope
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": "", "confidence": 1.0}], "model_invocation_ms": 0}'
+        )
+        verdicts, _ = _parse_envelope(payload)
+        self.assertEqual(verdicts[0].confidence, 1.0)
+
     def test_parser_never_silently_downgrades_to_missing(self) -> None:
         # REQ-10 explicit guarantee: a malformed envelope must NOT be
         # converted into a "missing" verdict. Assert by checking that

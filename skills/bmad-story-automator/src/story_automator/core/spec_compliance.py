@@ -189,6 +189,20 @@ def _parse_envelope(payload: str) -> tuple[list[ReqVerdict], int]:
         for key in _REQUIRED_VERDICT_KEYS:
             if key not in raw:
                 raise ComplianceError(f"verdicts[{index}] missing required key {key!r}")
+        req_id_raw = raw["req_id"]
+        if not isinstance(req_id_raw, str):
+            raise ComplianceError(
+                f"verdicts[{index}].req_id must be a string, got "
+                f"{type(req_id_raw).__name__}"
+            )
+        if req_id_raw == "":
+            raise ComplianceError(f"verdicts[{index}].req_id must be non-empty")
+        evidence_raw = raw["evidence"]
+        if not isinstance(evidence_raw, str):
+            raise ComplianceError(
+                f"verdicts[{index}].evidence must be a string, got "
+                f"{type(evidence_raw).__name__}"
+            )
         status = raw["status"]
         if status not in _ALLOWED_STATUSES:
             raise ComplianceError(
@@ -204,12 +218,18 @@ def _parse_envelope(payload: str) -> tuple[list[ReqVerdict], int]:
                 f"verdicts[{index}].confidence must be a number, got "
                 f"{type(confidence_raw).__name__}"
             )
+        confidence = float(confidence_raw)
+        if not 0.0 <= confidence <= 1.0:
+            raise ComplianceError(
+                f"verdicts[{index}].confidence must lie in [0.0, 1.0], got "
+                f"{confidence}"
+            )
         verdicts.append(
             ReqVerdict(
-                req_id=str(raw["req_id"]),
+                req_id=req_id_raw,
                 status=status,
-                evidence=str(raw["evidence"]),
-                confidence=float(confidence_raw),
+                evidence=evidence_raw,
+                confidence=confidence,
             )
         )
     return verdicts, ms
