@@ -1591,8 +1591,7 @@ class PlaceholderLeakQualityGateTests(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            f"unresolved 4-letter placeholder tokens in helper source: "
-            f"{offenders}",
+            f"unresolved 4-letter placeholder tokens in helper source: {offenders}",
         )
 
     def test_four_letter_placeholder_in_event_payload_survives_serialization(
@@ -1619,6 +1618,82 @@ class PlaceholderLeakQualityGateTests(unittest.TestCase):
             reloaded = load_golden(fixture)
         self.assertEqual(reloaded[0].payload["epic"], "EPIC")
         self.assertEqual(reloaded[0].payload["story_key"], "STRY")
+
+
+class HelperImportProducesNoObservablesTests(unittest.TestCase):
+    """Quality gate: importing tests.golden_trace_helpers emits no
+    telemetry events, performs no state mutations, and triggers no
+    claude_p invocations during the import itself.
+
+    Uses direct counter wrappers on the two surfaces that could leak
+    (state.write_atomic_text and TelemetryEmitter.emit) BEFORE the
+    helper imports. claude_p has no module-level call site (the hook
+    slot is just rebound to None), so it cannot fire at import time.
+    """
+
+    def test_cold_import_produces_no_state_writes_or_emits(self) -> None:
+        import subprocess
+        import sys
+
+        script = (
+            "import sys; sys.path.insert(0, 'skills/bmad-story-automator/src')\n"
+            "import json\n"
+            "from story_automator.commands import state as _state\n"
+            "from story_automator.core.telemetry_emitter import TelemetryEmitter\n"
+            "writes = []\n"
+            "emits = []\n"
+            "_orig_write = _state.write_atomic_text\n"
+            "_orig_emit = TelemetryEmitter.emit\n"
+            "def _counted_write(path, data, *, encoding='utf-8'):\n"
+            "    writes.append((str(path), data))\n"
+            "    return _orig_write(path, data, encoding=encoding)\n"
+            "def _counted_emit(self, event):\n"
+            "    emits.append(type(event).__name__)\n"
+            "    return _orig_emit(self, event)\n"
+            "_state.write_atomic_text = _counted_write\n"
+            "TelemetryEmitter.emit = _counted_emit\n"
+            "import tests.golden_trace_helpers as gh\n"
+            "out = {\n"
+            "    'writes': writes,\n"
+            "    'emits': emits,\n"
+            "    'claude_p_hook_is_none': gh._CLAUDE_P_HOOK is None,\n"
+            "    'active_recorder_is_none': gh._ACTIVE_RECORDER is None,\n"
+            "}\n"
+            "sys.stdout.write(json.dumps(out))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess exited {result.returncode}:\n"
+            f"stdout={result.stdout}\nstderr={result.stderr}",
+        )
+        import json as _json
+
+        payload = _json.loads(result.stdout)
+        self.assertEqual(
+            payload["writes"],
+            [],
+            msg=f"helper import triggered state writes: {payload['writes']}",
+        )
+        self.assertEqual(
+            payload["emits"],
+            [],
+            msg=f"helper import triggered telemetry emits: {payload['emits']}",
+        )
+        self.assertTrue(
+            payload["claude_p_hook_is_none"],
+            msg="helper import installed a non-None claude_p hook",
+        )
+        self.assertTrue(
+            payload["active_recorder_is_none"],
+            msg="helper import installed an active recorder",
+        )
 
 
 if __name__ == "__main__":
