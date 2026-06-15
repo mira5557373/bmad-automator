@@ -661,11 +661,13 @@ def _verify_code_review(args: list[str]) -> int:
     payload = verify_code_review_completion(
         get_project_root(), args[0], state_file=state_file or None
     )
+    norm = normalize_story_key(get_project_root(), args[0])
+    epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
     _telemetry_emitter().emit(
         ReviewCycle(
             timestamp=iso_now(),
             run_id="",
-            epic="",
+            epic=epic,
             story_key=args[0],
             cycle_num=int(payload.get("cycle") or 0),
             issues_found=int(payload.get("issuesFound") or 0),

@@ -1,0 +1,64 @@
+# tests/test_wire_orchestrator.py
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from story_automator.commands import orchestrator
+from story_automator.core.telemetry_emitter import TelemetryEmitter
+
+
+def _patched_emitter_factory(tmp: Path):
+    emitter = TelemetryEmitter(tmp / "events.jsonl")
+
+    def factory(_project_root):
+        return emitter
+
+    return emitter, factory
+
+
+def _read_lines(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+class VerifyCodeReviewWiringTests(unittest.TestCase):
+    def test_review_cycle_emit_derives_epic_from_story_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+                mock.patch.object(
+                    orchestrator,
+                    "verify_code_review_completion",
+                    return_value={"verified": True, "cycle": 2, "issuesFound": 0},
+                ),
+            ):
+                rc = orchestrator._verify_code_review(["1.3"])
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+            self.assertEqual(ev["event_type"], "review_cycle")
+            self.assertEqual(ev["story_key"], "1.3")
+            self.assertEqual(ev["epic"], "1")
+            self.assertEqual(ev["cycle_num"], 2)
+            self.assertFalse(ev["blocking"])
+
+
+if __name__ == "__main__":
+    unittest.main()
