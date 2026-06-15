@@ -17,7 +17,7 @@ __all__ = [  # noqa: F822
     "format_drift_report",
 ]
 
-from dataclasses import dataclass  # noqa: F401
+from dataclasses import dataclass
 from enum import Enum
 
 from .calibration import CalibrationTable  # noqa: F401
@@ -36,3 +36,20 @@ class DriftClassification(Enum):
     MINOR_DRIFT = "minor_drift"
     MAJOR_DRIFT = "major_drift"
     SEVERE_DRIFT = "severe_drift"
+
+
+@dataclass(kw_only=True, frozen=True)
+class DriftEntry:
+    """One row in a DriftReport.
+
+    `delta == current_success_rate - baseline_success_rate`, rounded to
+    four decimals by the producer (`compute_drift`). Stored verbatim
+    here so consumers can render without re-rounding.
+    """
+
+    model_id: str
+    task_kind: str
+    baseline_success_rate: float
+    current_success_rate: float
+    delta: float
+    classification: DriftClassification
