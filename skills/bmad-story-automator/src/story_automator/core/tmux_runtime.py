@@ -84,6 +84,22 @@ def resolve_command_shell() -> str:
     return "/bin/sh"
 
 
+_STORY_KEY_RE = re.compile(r"-e(\d+)-s(\d+)-(\d+)-")
+
+
+def _story_key_from_session_name(session: str) -> str:
+    """Extract dotted story_key (e.g. "2.7") from a session name produced by
+    generate_session_name(): `sa-{slug}-{stamp}-e{epic}-s{epic}-{story}-{step}`.
+
+    Returns "" when the pattern does not match — for legacy / hand-crafted
+    session names — so the emit path stays warning-free.
+    """
+    match = _STORY_KEY_RE.search(session)
+    if not match:
+        return ""
+    return f"{match.group(2)}.{match.group(3)}"
+
+
 def generate_session_name(step: str, epic: str, story_id: str, cycle: str = "") -> str:
     stamp = time.strftime("%y%m%d-%H%M%S", time.localtime())
     suffix = story_id.replace(".", "-")
