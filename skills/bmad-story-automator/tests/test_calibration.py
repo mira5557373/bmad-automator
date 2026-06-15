@@ -486,5 +486,72 @@ class BuildCalibrationMixedAggregationTests(unittest.TestCase):
         self.assertEqual(entry.last_seen_iso, "2026-06-14T15:00:00Z")
 
 
+class BuildCalibrationParsingTolerationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        _ExtendedEventShim.install()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _ExtendedEventShim.uninstall()
+
+    def test_crlf_line_endings_and_trailing_blanks_are_tolerated(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            line1 = _completed_line(
+                timestamp="2026-06-14T10:00:00Z",
+                run_id="r1",
+                epic="EP-1",
+                story_key="S-1",
+                model_id="m",
+                task_kind="t",
+            )
+            line2 = _completed_line(
+                timestamp="2026-06-14T10:01:00Z",
+                run_id="r2",
+                epic="EP-1",
+                story_key="S-2",
+                model_id="m",
+                task_kind="t",
+            )
+            ledger.write_bytes(
+                (line1 + "\r\n" + line2 + "\r\n" + "\r\n").encode("utf-8")
+            )
+            table = build_calibration(ledger)
+
+        entry = table.entries[("m", "t")]
+        self.assertEqual(entry.sample_count, 2)
+        self.assertEqual(table.total_events_scanned, 2)
+
+    def test_unknown_event_type_is_counted_but_skipped(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            unknown = compact_json(
+                {
+                    "event_type": "future_event_kind",
+                    "timestamp": "2026-06-14T13:00:00Z",
+                    "run_id": "r1",
+                    "some_field": 42,
+                }
+            )
+            good = _completed_line(
+                timestamp="2026-06-14T10:00:00Z",
+                run_id="r1",
+                epic="EP-1",
+                story_key="S-1",
+                model_id="m",
+                task_kind="t",
+            )
+            _write_jsonl(ledger, [unknown, good])
+            table = build_calibration(ledger)
+
+        self.assertEqual(table.total_events_scanned, 2)
+        self.assertEqual(set(table.entries.keys()), {("m", "t")})
+
+
 if __name__ == "__main__":
     unittest.main()
