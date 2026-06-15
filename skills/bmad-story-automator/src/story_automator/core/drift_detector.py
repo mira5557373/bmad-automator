@@ -64,6 +64,10 @@ class DriftReport:
     `current_source` echo the `source_path` of each input
     CalibrationTable so the report is self-describing without an
     out-of-band caller note.
+
+    `entries` is a mutable list (per REQ-05); mutating or reordering
+    it after construction breaks the documented sort invariant. Treat
+    it as read-only at consumer sites.
     """
 
     entries: list[DriftEntry]
@@ -145,6 +149,13 @@ def format_drift_report(report: DriftReport) -> str:
     with four decimal places, and `delta` with an explicit sign and
     four decimal places. The final character is a single trailing
     newline.
+
+    Precondition: `model_id`, `task_kind`, `baseline_source`, and
+    `current_source` must be ASCII strings free of literal tabs and
+    newlines. Telemetry-emitted model identifiers from M02 already
+    satisfy this; non-ASCII inputs would silently break the spec
+    REQ-10 plain-ASCII guarantee and could corrupt TSV column
+    alignment.
     """
 
     lines: list[str] = [

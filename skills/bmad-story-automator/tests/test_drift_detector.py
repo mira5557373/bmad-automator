@@ -466,6 +466,14 @@ class ModuleSurfaceTests(unittest.TestCase):
         self.assertLessEqual(line_count, 300, f"module is {line_count} lines (>300)")
 
 
+class CrossModuleConsistencyTests(unittest.TestCase):
+    def test_missing_rate_default_matches_lookup_success_rate(self) -> None:
+        from story_automator.core.calibration import lookup_success_rate
+
+        self.assertEqual(lookup_success_rate.__defaults__, (0.5,))
+        self.assertEqual(drift_module._MISSING_RATE_DEFAULT, 0.5)
+
+
 class GeneratedAtSourcingTests(unittest.TestCase):
     def test_compute_drift_calls_iso_now(self) -> None:
         baseline = _table(_entry("m", "t", 0.5))
