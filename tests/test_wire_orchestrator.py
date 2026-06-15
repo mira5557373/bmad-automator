@@ -60,5 +60,35 @@ class VerifyCodeReviewWiringTests(unittest.TestCase):
             self.assertFalse(ev["blocking"])
 
 
+class CommitReadyWiringTests(unittest.TestCase):
+    def test_story_completed_emit_derives_epic_from_story_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            fake_status = mock.MagicMock(done=True, status="done", story="2.4")
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+                mock.patch.object(
+                    orchestrator, "sprint_status_get", return_value=fake_status
+                ),
+                mock.patch.object(
+                    orchestrator, "run_cmd", return_value=("M file.py\n", 0)
+                ),
+            ):
+                rc = orchestrator._commit_ready(["2.4"])
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+            self.assertEqual(ev["event_type"], "story_completed")
+            self.assertEqual(ev["story_key"], "2.4")
+            self.assertEqual(ev["epic"], "2")
+
+
 if __name__ == "__main__":
     unittest.main()

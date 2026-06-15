@@ -531,11 +531,13 @@ def _commit_ready(args: list[str]) -> int:
     if status.done:
         out, _ = run_cmd("git", "-C", project_root, "status", "--porcelain")
         if out.strip():
+            norm = normalize_story_key(project_root, args[0])
+            epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
             _telemetry_emitter().emit(
                 StoryCompleted(
                     timestamp=iso_now(),
                     run_id="",
-                    epic="",
+                    epic=epic,
                     story_key=args[0],
                     duration_s=0.0,
                     cost_usd=0.0,
