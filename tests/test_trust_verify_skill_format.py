@@ -94,5 +94,69 @@ class InputFixtureShapeTests(unittest.TestCase):
             )
 
 
+_DECISION_VALUES = {"pass", "warn", "block"}
+_OUTPUT_REQUIRED_KEYS = {"layer1", "layer2", "layer3", "decision", "verified_at"}
+_LAYER1_KEYS = {"statuses", "overall_confidence", "validated_at"}
+_LAYER2_KEYS = {"verdicts", "spec_path", "diff_sha", "model_invocation_ms"}
+_LAYER3_ENTRY_KEYS = {
+    "req_id",
+    "existing_test_path",
+    "created_test_path",
+    "action",
+}
+_LAYER3_ACTIONS = {"found", "created", "skipped"}
+
+
+class OutputFixtureShapeTests(unittest.TestCase):
+    """REQ-13 + REQ-05: sample output fixture matches the chain emit shape."""
+
+    def setUp(self) -> None:
+        self.data = json.loads(OUTPUT_FIXTURE.read_text(encoding="utf-8"))
+
+    def test_top_level_has_exactly_required_keys(self) -> None:
+        self.assertEqual(set(self.data), _OUTPUT_REQUIRED_KEYS)
+
+    def test_decision_is_allowed_literal(self) -> None:
+        self.assertIn(self.data["decision"], _DECISION_VALUES)
+
+    def test_verified_at_is_iso8601_z_string(self) -> None:
+        verified_at = self.data["verified_at"]
+        self.assertIsInstance(verified_at, str)
+        self.assertRegex(
+            verified_at,
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$",
+        )
+
+    def test_layer1_has_validation_report_keys(self) -> None:
+        layer1 = self.data["layer1"]
+        self.assertIsInstance(layer1, dict)
+        self.assertEqual(set(layer1), _LAYER1_KEYS)
+        self.assertIsInstance(layer1["statuses"], list)
+        self.assertIsInstance(layer1["overall_confidence"], (int, float))
+        self.assertGreaterEqual(layer1["overall_confidence"], 0.0)
+        self.assertLessEqual(layer1["overall_confidence"], 1.0)
+
+    def test_layer2_has_compliance_report_keys(self) -> None:
+        layer2 = self.data["layer2"]
+        self.assertIsInstance(layer2, dict)
+        self.assertEqual(set(layer2), _LAYER2_KEYS)
+        self.assertIsInstance(layer2["verdicts"], list)
+        self.assertFalse(isinstance(layer2["model_invocation_ms"], bool))
+        self.assertIsInstance(layer2["model_invocation_ms"], int)
+        self.assertGreaterEqual(layer2["model_invocation_ms"], 0)
+
+    def test_layer3_is_list_of_plan_entries(self) -> None:
+        layer3 = self.data["layer3"]
+        self.assertIsInstance(layer3, list)
+        for index, entry in enumerate(layer3):
+            self.assertIsInstance(entry, dict, msg=f"layer3[{index}] not object")
+            self.assertEqual(
+                set(entry), _LAYER3_ENTRY_KEYS, msg=f"layer3[{index}] key set"
+            )
+            self.assertIn(
+                entry["action"], _LAYER3_ACTIONS, msg=f"layer3[{index}].action"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
