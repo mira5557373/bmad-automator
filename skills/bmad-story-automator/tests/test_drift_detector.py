@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import story_automator.core.drift_detector as drift_module
 from story_automator.core.calibration import CalibrationEntry, CalibrationTable
@@ -463,6 +464,19 @@ class ModuleSurfaceTests(unittest.TestCase):
     def test_module_under_300_lines(self) -> None:
         line_count = len(_module_source().splitlines())
         self.assertLessEqual(line_count, 300, f"module is {line_count} lines (>300)")
+
+
+class GeneratedAtSourcingTests(unittest.TestCase):
+    def test_compute_drift_calls_iso_now(self) -> None:
+        baseline = _table(_entry("m", "t", 0.5))
+        current = _table(_entry("m", "t", 0.5))
+        with mock.patch(
+            "story_automator.core.drift_detector.iso_now",
+            return_value="2099-01-01T00:00:00Z",
+        ) as patched:
+            report = compute_drift(baseline=baseline, current=current)
+        patched.assert_called_once()
+        self.assertEqual(report.generated_at, "2099-01-01T00:00:00Z")
 
 
 if __name__ == "__main__":
