@@ -380,6 +380,7 @@ class ImportAndSizeDisciplineTests(unittest.TestCase):
                 "FailureClass",
                 "IMPLIES_GRAPH",
                 "classify",
+                "classify_stream",
             },
         )
 

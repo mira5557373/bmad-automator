@@ -113,12 +113,26 @@ IMPLIES_GRAPH: dict[FailureClass, tuple[FailureClass, ...]] = {
 # `_classify_tmux_crash` (M07b), not encoded here.
 
 
+def classify_stream(events: Iterable[Event]) -> Iterator[Classification]:
+    """Stream-classify a sequence of events.
+
+    Thin generator over ``classify`` — does not buffer, does not consult
+    a clock, and does not catch the underlying iterator's exceptions
+    (they propagate verbatim per REQ-12). Consumers compose this with
+    ``TelemetryReader.iter_events`` (M02) to drive batch triage without
+    materialising the entire stream.
+    """
+    for event in events:
+        yield classify(event)
+
+
 __all__ = [
     "Classification",
     "Confidence",
     "FailureClass",
     "IMPLIES_GRAPH",
     "classify",
+    "classify_stream",
 ]
 
 
