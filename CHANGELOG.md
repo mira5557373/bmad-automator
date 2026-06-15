@@ -1,5 +1,8 @@
 ### Features
 
+- feat(m06b): link step-03ab from step-03a review preflight (REQ-06, REQ-10) (eb0667e)
+- feat(m06b): add step-03ab-spec-compliance step (REQ-06..REQ-09) (6dd0dff)
+- feat(m06b): add trust-but-verify SKILL.md bundle (REQ-01..REQ-05) (ef73e07)
 - feat(feature_tester): plan_feature_tests happy path (REQ-13) (ebd2ad9)
 - feat(feature_tester): ReqVerdictLike Protocol preserves runtime independence (bb0d838)
 - feat(feature_tester): _find_existing_test with word-boundary match (REQ-13) (1971aff)
@@ -137,6 +140,8 @@
 
 ### Documentation
 
+- docs(m06b): plan c-m02 skill and step wiring (0bd0544)
+- docs: update generated documentation (b1393c0)
 - docs(m06b): plan c-m01 fixtures and format tests (1e9cc5f)
 - docs: update generated documentation (33eeff1)
 - docs(plan): m06a-m3 feature-tester TDD plan + Phase A gap report (3b5bfa9)
