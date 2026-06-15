@@ -11,7 +11,7 @@ tests call ``self.skipTest`` so this file's unittest run stays clean.
 
 from __future__ import annotations
 
-import json  # noqa: F401
+import json
 import re  # noqa: F401
 import unittest
 from pathlib import Path
@@ -41,6 +41,57 @@ def _require_markdown(test_case: unittest.TestCase, path: Path) -> str:
     if not path.exists():
         test_case.skipTest(f"{path.relative_to(REPO_ROOT)} not yet present (c-m02+)")
     return path.read_text(encoding="utf-8")
+
+
+_ALLOWED_SEVERITIES = {"blocker", "major", "minor"}
+_GAP_REQUIRED_KEYS = ("file_path", "line", "symbol", "description", "severity")
+
+
+class InputFixtureShapeTests(unittest.TestCase):
+    """REQ-13: sample input fixture matches parse_gap_list's contract."""
+
+    def setUp(self) -> None:
+        self.data = json.loads(INPUT_FIXTURE.read_text(encoding="utf-8"))
+
+    def test_top_level_is_object_with_gaps_key(self) -> None:
+        self.assertIsInstance(self.data, dict)
+        self.assertIn("gaps", self.data)
+        self.assertIsInstance(self.data["gaps"], list)
+
+    def test_fixture_is_non_empty(self) -> None:
+        self.assertGreater(
+            len(self.data["gaps"]),
+            0,
+            "fixture must contain at least one sample gap",
+        )
+
+    def test_each_gap_has_required_keys(self) -> None:
+        for index, gap in enumerate(self.data["gaps"]):
+            self.assertIsInstance(gap, dict, msg=f"gaps[{index}] not an object")
+            for key in _GAP_REQUIRED_KEYS:
+                self.assertIn(key, gap, msg=f"gaps[{index}] missing {key!r}")
+
+    def test_each_gap_field_has_correct_type(self) -> None:
+        for index, gap in enumerate(self.data["gaps"]):
+            self.assertIsInstance(gap["file_path"], str, msg=f"gaps[{index}].file_path")
+            # bool is a subclass of int; reject explicitly to match parse_gap_list.
+            self.assertFalse(
+                isinstance(gap["line"], bool),
+                msg=f"gaps[{index}].line must not be a bool",
+            )
+            self.assertIsInstance(gap["line"], int, msg=f"gaps[{index}].line")
+            self.assertIsInstance(gap["symbol"], str, msg=f"gaps[{index}].symbol")
+            self.assertIsInstance(
+                gap["description"], str, msg=f"gaps[{index}].description"
+            )
+
+    def test_each_gap_severity_is_allowed(self) -> None:
+        for index, gap in enumerate(self.data["gaps"]):
+            self.assertIn(
+                gap["severity"],
+                _ALLOWED_SEVERITIES,
+                msg=f"gaps[{index}].severity {gap['severity']!r} outside allowed set",
+            )
 
 
 if __name__ == "__main__":
