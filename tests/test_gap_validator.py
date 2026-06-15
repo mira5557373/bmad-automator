@@ -176,3 +176,57 @@ class ValidationReportDataclassTests(unittest.TestCase):
             names,
             ["overall_confidence", "statuses", "validated_at"],
         )
+
+
+class ParseGapListHappyPathTests(unittest.TestCase):
+    """REQ-06: accepts {"gaps": [...]} and returns list[Gap]."""
+
+    def test_parses_single_gap(self) -> None:
+        from story_automator.core.gap_validator import Gap, parse_gap_list
+
+        payload = """
+        {
+          "gaps": [
+            {
+              "file_path": "src/a.py",
+              "line": 42,
+              "symbol": "do_thing",
+              "description": "missing nil check",
+              "severity": "major"
+            }
+          ]
+        }
+        """
+        gaps = parse_gap_list(payload)
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(
+            gaps[0],
+            Gap(
+                file_path="src/a.py",
+                line=42,
+                symbol="do_thing",
+                description="missing nil check",
+                severity="major",
+            ),
+        )
+
+    def test_parses_empty_gap_list(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        gaps = parse_gap_list('{"gaps": []}')
+        self.assertEqual(gaps, [])
+
+    def test_parses_multiple_gaps_preserving_order(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        payload = """{
+          "gaps": [
+            {"file_path": "a.py", "line": 1, "symbol": "x",
+             "description": "d1", "severity": "blocker"},
+            {"file_path": "b.py", "line": 2, "symbol": "y",
+             "description": "d2", "severity": "minor"}
+          ]
+        }"""
+        gaps = parse_gap_list(payload)
+        self.assertEqual([g.file_path for g in gaps], ["a.py", "b.py"])
+        self.assertEqual([g.severity for g in gaps], ["blocker", "minor"])

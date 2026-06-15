@@ -18,6 +18,7 @@ files outside `repo_root` — path-escape attempts (absolute paths,
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -81,3 +82,67 @@ class ValidationReport:
     statuses: list[GapStatus]
     overall_confidence: float
     validated_at: str
+
+
+_ALLOWED_SEVERITIES: frozenset[str] = frozenset({"blocker", "major", "minor"})
+_REQUIRED_GAP_KEYS: tuple[str, ...] = (
+    "file_path",
+    "line",
+    "symbol",
+    "description",
+    "severity",
+)
+
+
+def parse_gap_list(payload: str) -> list[Gap]:
+    """Parse a `{"gaps": [...]}` JSON document into a list of `Gap`.
+
+    Preconditions: `payload` must be valid JSON whose top-level value is
+        an object containing a `"gaps"` key holding a list of objects.
+        Each object must contain `file_path` (str), `line` (int),
+        `symbol` (str), `description` (str), and `severity` (one of
+        "blocker", "major", "minor").
+    Postconditions: returns a `list[Gap]` preserving input order.
+    Raises: ValueError with a field-locating message when a required
+        key is missing, when `line` is not an integer, or when
+        `severity` is outside the allowed set. json.JSONDecodeError
+        propagates for malformed JSON (it is itself a ValueError, so
+        callers catching ValueError catch both).
+    """
+    data = json.loads(payload)
+    if not isinstance(data, dict) or "gaps" not in data:
+        raise ValueError("payload must be a JSON object with a top-level 'gaps' key")
+    raw_gaps = data["gaps"]
+    if not isinstance(raw_gaps, list):
+        raise ValueError("'gaps' must be a JSON array")
+
+    out: list[Gap] = []
+    for index, raw in enumerate(raw_gaps):
+        if not isinstance(raw, dict):
+            raise ValueError(f"gaps[{index}] must be a JSON object")
+        for key in _REQUIRED_GAP_KEYS:
+            if key not in raw:
+                raise ValueError(f"gaps[{index}] missing required key {key!r}")
+        line_value = raw["line"]
+        # `bool` is a subclass of `int` in Python; reject it explicitly so
+        # `"line": true` does not silently parse as `line=1`.
+        if isinstance(line_value, bool) or not isinstance(line_value, int):
+            raise ValueError(
+                f"gaps[{index}].line must be an integer, got {type(line_value).__name__}"
+            )
+        severity = raw["severity"]
+        if severity not in _ALLOWED_SEVERITIES:
+            raise ValueError(
+                f"gaps[{index}].severity must be one of "
+                f"{sorted(_ALLOWED_SEVERITIES)!r}, got {severity!r}"
+            )
+        out.append(
+            Gap(
+                file_path=str(raw["file_path"]),
+                line=line_value,
+                symbol=str(raw["symbol"]),
+                description=str(raw["description"]),
+                severity=severity,
+            )
+        )
+    return out
