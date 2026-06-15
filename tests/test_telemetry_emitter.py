@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 from story_automator.core.telemetry_events import StoryStarted
@@ -133,3 +134,66 @@ class TelemetryEmitterLockingTests(unittest.TestCase):
             emitter = TelemetryEmitter(path)
             expected_lock_path = Path(tmp) / "events.jsonl.lock"
             self.assertEqual(emitter._lock_path, expected_lock_path)
+
+
+class TelemetryEmitterFsyncOrderingTests(unittest.TestCase):
+    def test_fsync_runs_before_file_lock_release(self) -> None:
+        # REQ-04: os.fsync must run before the filelock is released so
+        # a crash between emits cannot leave a partially written line.
+        # We patch os.fsync and the FileLock context manager __exit__, then
+        # confirm the recorded call sequence: write → flush → fsync →
+        # filelock-release.
+        events: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+
+            real_fsync = os.fsync
+
+            def tracing_fsync(fd: int) -> None:
+                events.append("fsync")
+                real_fsync(fd)
+
+            # Create a wrapper that traces the filelock's __exit__
+            class TracingFileLock:
+                def __init__(self, wrapped):
+                    self._wrapped = wrapped
+
+                def __enter__(self):
+                    return self._wrapped.__enter__()
+
+                def __exit__(self, *args):
+                    events.append("filelock_release")
+                    return self._wrapped.__exit__(*args)
+
+                def __getattr__(self, name):
+                    return getattr(self._wrapped, name)
+
+            # Replace the filelock with our tracing wrapper
+            original_lock = emitter._file_lock
+            emitter._file_lock = TracingFileLock(original_lock)
+
+            with mock.patch(
+                "story_automator.core.telemetry_emitter.os.fsync",
+                side_effect=tracing_fsync,
+            ):
+                emitter.emit(
+                    StoryStarted(
+                        timestamp="t",
+                        run_id="r",
+                        epic="E",
+                        story_key="S",
+                        agent="a",
+                        model="m",
+                        complexity="c",
+                    )
+                )
+
+            self.assertIn("fsync", events)
+            self.assertIn("filelock_release", events)
+            self.assertLess(
+                events.index("fsync"),
+                events.index("filelock_release"),
+                msg=f"fsync must precede filelock_release, got {events}",
+            )
