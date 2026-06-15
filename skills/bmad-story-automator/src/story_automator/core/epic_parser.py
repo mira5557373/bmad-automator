@@ -199,13 +199,26 @@ def parse_story_range(user_input: str, total: int, ids_csv: str = "") -> dict[st
     return {"ok": True, "indices": indices, "storyIds": story_ids, "count": len(indices)}
 
 
+def _epic_of(story_id: str) -> str:
+    return story_id.rpartition(".")[0]
+
+
 def epic_complete(epic_file: str | Path, range_csv: str) -> dict[str, Any]:
     stories = parse_epic_file(epic_file)["stories"]
     story_ids = [story["storyId"] for story in stories]
     if not story_ids:
         raise ValueError("no_stories_found")
-    max_epic_story = max(story_ids, key=_story_sort_key)
     selected = [_canonical_story_id(part.strip(), stories) for part in range_csv.split(",") if part.strip()]
+    # Scope completion to the epic(s) the requested range covers. In a
+    # multi-epic file, a later epic's higher story id must not mask this
+    # epic's completion (e.g. range "1.1,1.2" is complete even when "2.1"
+    # exists in the same file). Fall back to all stories when the range is
+    # empty or names epics absent from the file.
+    target_epics = {_epic_of(story_id) for story_id in selected}
+    scoped_ids = [story_id for story_id in story_ids if _epic_of(story_id) in target_epics]
+    if not scoped_ids:
+        scoped_ids = story_ids
+    max_epic_story = max(scoped_ids, key=_story_sort_key)
     max_range_story = max(selected, key=_story_sort_key) if selected else "0.0"
     return {"ok": True, "epicComplete": max_range_story == max_epic_story, "maxEpicStory": max_epic_story}
 

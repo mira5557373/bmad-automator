@@ -710,6 +710,13 @@ def _spawn_runner(
     command_shell = resolve_command_shell()
 
     root = Path(project_root or get_project_root()).resolve()
+    if tmux_has_session(session):
+        # A live tmux session already owns this name (a same-second respawn
+        # collision, since session names use 1s timestamp resolution). Refuse
+        # rather than run the unconditional cleanup below, which would unlink
+        # the running session's state/command/runner/output files and orphan
+        # it. The caller can retry with a distinct cycle suffix.
+        return (f"session already exists: {session}\n", 1)
     cleanup_stale_terminal_artifacts(str(root))
     paths = session_paths(session, str(root))
     cleanup_runtime_artifacts(session, str(root))
