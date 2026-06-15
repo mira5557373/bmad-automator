@@ -210,6 +210,55 @@ class SeedSoakDirExtraTests(unittest.TestCase):
 
         self.assertIs(seed_module.iso_now, expected_iso_now)
 
+    def test_seed_fallback_path_works_when_story_automator_missing(self) -> None:
+        # REQ-09: the inlined-stdlib fallback must produce a verify-passing
+        # arm when story_automator is unimportable (operator on a clean
+        # checkout). Without this test the fallback ships at 0% coverage.
+        import importlib
+
+        import scripts.seed_soak_dir as seed_module
+        from scripts.verify_soak_format import main as verify_main
+
+        blocked_names = (
+            "story_automator",
+            "story_automator.core",
+            "story_automator.core.common",
+        )
+        saved = {n: sys.modules[n] for n in list(sys.modules) if n in blocked_names}
+        try:
+            for name in blocked_names:
+                sys.modules[name] = None  # type: ignore[assignment]
+            reloaded = importlib.reload(seed_module)
+            # Fallback iso_now is defined inside the except branch of
+            # scripts.seed_soak_dir, not imported from story_automator.
+            self.assertEqual(reloaded.iso_now.__module__, "scripts.seed_soak_dir")
+            self.assertRegex(
+                reloaded.iso_now(),
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "soak"
+                rc = reloaded.main(
+                    [
+                        "--date",
+                        "2026-06-13",
+                        "--arm",
+                        "fallback",
+                        "--root",
+                        str(root),
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                self.assertEqual(verify_main([str(root)]), 0)
+        finally:
+            for name in blocked_names:
+                sys.modules.pop(name, None)
+            for name, mod in saved.items():
+                sys.modules[name] = mod
+            # Restore the primary path so subsequent tests see the
+            # story_automator-backed helpers again.
+            importlib.reload(seed_module)
+
 
 class ContributingGrepGateTests(unittest.TestCase):
     """Mirrors the CI grep gate from the M13 quality gates."""
