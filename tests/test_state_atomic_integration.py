@@ -329,5 +329,67 @@ class RunLockContentionTests(unittest.TestCase):
         self.assertEqual(payload, {"ok": False, "error": "run_lock_busy"})
 
 
+class CleanupBeforeLockOrderingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name)
+        self.output_dir = self.project_root / "_bmad-output" / "story-automator"
+        _install_bundle(self.project_root)
+        _install_required_skills(self.project_root)
+        self.template = (
+            self.project_root
+            / ".claude"
+            / "skills"
+            / "bmad-story-automator"
+            / "templates"
+            / "state-document.md"
+        )
+
+    def test_legacy_marker_cleanup_runs_before_lock_acquisition(self) -> None:
+        """REQ-11 ordering claim: legacy-marker cleanup happens at startup,
+        BEFORE acquire_run_lock is called. Verified by patching
+        ``acquire_run_lock`` to raise ``RunLockBusy`` immediately and
+        asserting the legacy file was already removed — which can only be
+        true if cleanup ran before the lock attempt.
+        """
+        from unittest.mock import patch
+
+        from story_automator.core.atomic_io import RunLockBusy
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        legacy = self.output_dir / ".state-build.marker"
+        legacy.write_text("garbage", encoding="utf-8")
+
+        def _busy(*args, **kwargs):
+            raise RunLockBusy("simulated contention")
+
+        stdout = io.StringIO()
+        with (
+            _PatchEnv(self.project_root),
+            redirect_stdout(stdout),
+            patch("story_automator.commands.state.acquire_run_lock", side_effect=_busy),
+        ):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(self.template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(_config()),
+                ]
+            )
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload, {"ok": False, "error": "run_lock_busy"})
+        self.assertFalse(
+            legacy.exists(),
+            "cleanup must happen BEFORE lock acquisition — RunLockBusy on "
+            "the first lock attempt must not skip the cleanup step",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
