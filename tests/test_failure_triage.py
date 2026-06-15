@@ -153,3 +153,55 @@ class ClassificationDataclassTests(unittest.TestCase):
         self.assertEqual(c.confidence, Confidence.HIGH)
         self.assertEqual(c.reason, "guardrail tripped")
         self.assertIsNone(c.event_id)
+
+
+class ImpliesGraphTests(unittest.TestCase):
+    def test_implies_graph_is_dict(self) -> None:
+        from story_automator.core.failure_triage import IMPLIES_GRAPH
+
+        self.assertIsInstance(IMPLIES_GRAPH, dict)
+
+    def test_implies_graph_keys_are_failure_class_members(self) -> None:
+        from story_automator.core.failure_triage import (
+            IMPLIES_GRAPH,
+            FailureClass,
+        )
+
+        for key in IMPLIES_GRAPH:
+            self.assertIsInstance(key, FailureClass)
+
+    def test_implies_graph_values_are_tuples_of_failure_class(self) -> None:
+        from story_automator.core.failure_triage import (
+            IMPLIES_GRAPH,
+            FailureClass,
+        )
+
+        for value in IMPLIES_GRAPH.values():
+            self.assertIsInstance(value, tuple)
+            for member in value:
+                self.assertIsInstance(member, FailureClass)
+
+    def test_implies_graph_required_edges(self) -> None:
+        from story_automator.core.failure_triage import (
+            IMPLIES_GRAPH,
+            FailureClass,
+        )
+
+        self.assertEqual(
+            IMPLIES_GRAPH[FailureClass.POLICY_VIOLATION],
+            (FailureClass.REVIEW_REJECTED,),
+        )
+        self.assertEqual(
+            IMPLIES_GRAPH[FailureClass.BUDGET_EXCEEDED],
+            (FailureClass.GATE_DEFER,),
+        )
+        self.assertEqual(
+            IMPLIES_GRAPH[FailureClass.REPEATED_RETRY],
+            (FailureClass.PLATEAU,),
+        )
+
+    def test_implies_graph_has_no_self_loops(self) -> None:
+        from story_automator.core.failure_triage import IMPLIES_GRAPH
+
+        for key, value in IMPLIES_GRAPH.items():
+            self.assertNotIn(key, value)
