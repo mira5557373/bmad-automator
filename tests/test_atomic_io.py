@@ -849,3 +849,122 @@ class IsStaleTrueBranchTests(unittest.TestCase):
             return_value=False,
         ):
             self.assertTrue(is_stale(identity, now=now))
+
+
+class IsStaleFalseBranchTests(unittest.TestCase):
+    """REQ-09 / REQ-13: each of the three False cells of the truth table."""
+
+    def _identity(self, *, pid: int, heartbeat_iso: str):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        return RunLockIdentity(
+            pid=pid,
+            start_time=0.0,
+            hostname="h",
+            heartbeat_iso=heartbeat_iso,
+            run_id="r",
+        )
+
+    def test_live_pid_with_aged_heartbeat_is_not_stale(self) -> None:
+        # A long-running process whose heartbeat is far behind must NOT be
+        # reclaimed if the PID is still alive — the runtime might be wedged
+        # but it has not actually died.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=os.getpid(),
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        now = 3600.0  # heartbeat parses to 0.0; age == now.
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists",
+            return_value=True,
+        ):
+            self.assertFalse(is_stale(identity, now=now))
+
+    def test_dead_pid_with_fresh_heartbeat_is_not_stale(self) -> None:
+        # A crashed process whose lock is less than 600s old must NOT be
+        # reclaimed — its successor may still be racing to acquire the lock.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        now = 60.0  # only 60s past the heartbeat
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists",
+            return_value=False,
+        ):
+            self.assertFalse(is_stale(identity, now=now))
+
+    def test_exactly_at_600s_threshold_is_not_stale(self) -> None:
+        # Strict ">" per REQ-09: age == 600.0 is still fresh. Off-by-one at
+        # the boundary would silently shrink the window.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        now = 600.0
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists",
+            return_value=False,
+        ):
+            self.assertFalse(is_stale(identity, now=now))
+
+    def test_just_past_threshold_with_dead_pid_is_stale(self) -> None:
+        # Symmetric to the boundary test: 600.001s past must flip to True
+        # when the PID is dead.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        now = 600.001
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists",
+            return_value=False,
+        ):
+            self.assertTrue(is_stale(identity, now=now))
+
+    def test_default_now_uses_time_time(self) -> None:
+        # REQ-09: now=None ⇒ time.time() at call site. Confirm by patching
+        # time.time inside the module to a controlled fixed value.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        with (
+            patch(
+                "story_automator.core.atomic_io.time.time",
+                return_value=3600.0,
+            ),
+            patch(
+                "story_automator.core.atomic_io.psutil.pid_exists",
+                return_value=False,
+            ),
+        ):
+            self.assertTrue(is_stale(identity))
+
+    def test_pid_exists_short_circuits_on_fresh_heartbeat(self) -> None:
+        # If the heartbeat is fresh, psutil.pid_exists must not be called —
+        # avoid a needless syscall on the common path. This is a perf
+        # contract, not a correctness contract, but it also locks the cheap-
+        # first ordering documented in the docstring.
+        from story_automator.core.atomic_io import is_stale
+
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        now = 60.0
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists"
+        ) as pid_exists_spy:
+            self.assertFalse(is_stale(identity, now=now))
+            pid_exists_spy.assert_not_called()
