@@ -1229,17 +1229,17 @@ class RecorderPerformanceTests(unittest.TestCase):
 
 class FixtureHelperContractTests(unittest.TestCase):
     def test_golden_dir_constant_points_to_tests_golden(self) -> None:
-        from tests.test_golden_trace_helpers import _GOLDEN_DIR  # type: ignore[attr-defined]
+        from tests.test_golden_trace_helpers import _GOLDEN_DIR
 
         self.assertEqual(_GOLDEN_DIR, Path(__file__).parent / "golden")
 
     def test_regen_env_var_constant(self) -> None:
-        from tests.test_golden_trace_helpers import _REGEN_ENV  # type: ignore[attr-defined]
+        from tests.test_golden_trace_helpers import _REGEN_ENV
 
         self.assertEqual(_REGEN_ENV, "BMA_GOLDEN_REGEN")
 
     def test_validate_or_regen_callable_present(self) -> None:
-        from tests.test_golden_trace_helpers import _validate_or_regen  # type: ignore[attr-defined]
+        from tests.test_golden_trace_helpers import _validate_or_regen
 
         self.assertTrue(callable(_validate_or_regen))
 
