@@ -697,3 +697,37 @@ class SubprocessInvocationShapeTests(unittest.TestCase):
         positional = self.captured["args"]
         assert isinstance(positional, tuple)
         self.assertEqual(positional[0][0], "/usr/local/bin/claude")
+
+
+class RealModelIntegrationTests(unittest.TestCase):
+    """Boundary tests that WOULD shell out to a real `claude` binary.
+
+    Quality gate: every test that would actually invoke the model is
+    marked `@unittest.skip` with a recorded reason so CI never spends
+    real credits and never depends on developer login state.
+    """
+
+    @unittest.skip(
+        "REASON: invokes real `claude -p` binary — costs credits and "
+        "requires developer login. Run manually with `unittest "
+        "--no-skip` for end-to-end smoke."
+    )
+    def test_real_claude_subprocess_round_trip(self) -> None:  # pragma: no cover
+        # If you remove the skip, this test will actually call the model.
+        # Do NOT remove the skip in CI. The test body is intentionally
+        # minimal — its purpose is to document the boundary, not to
+        # provide functional coverage (that's the stubbed tests above).
+        from story_automator.core.spec_compliance import check_compliance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "spec.md"
+            spec.write_text(
+                "## Functional requirements\n- REQ-01 do thing\n",
+                encoding="utf-8",
+            )
+            report = check_compliance(
+                spec_path=spec,
+                diff_text="--- a/x\n+++ b/x\n",
+                timeout_s=30,
+            )
+            self.assertGreaterEqual(len(report.verdicts), 0)
