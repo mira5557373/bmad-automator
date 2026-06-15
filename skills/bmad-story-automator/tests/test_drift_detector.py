@@ -440,6 +440,23 @@ class ModuleSurfaceTests(unittest.TestCase):
         self.assertEqual(future_node.module, "__future__")
         self.assertEqual([alias.name for alias in future_node.names], ["annotations"])
 
+    def test_test_module_starts_with_future_annotations(self) -> None:
+        test_path = Path(__file__)
+        source = test_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        body = tree.body
+        self.assertTrue(body, "test module body is empty")
+        first = body[0]
+        is_docstring = (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        )
+        future_node = body[1] if is_docstring else first
+        self.assertIsInstance(future_node, ast.ImportFrom)
+        self.assertEqual(future_node.module, "__future__")
+        self.assertEqual([alias.name for alias in future_node.names], ["annotations"])
+
     def test_import_allowlist(self) -> None:
         source = _module_source()
         for token in _FORBIDDEN_TOKENS:
