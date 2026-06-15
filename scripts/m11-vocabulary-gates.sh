@@ -84,10 +84,12 @@ pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
 # line is an addition, none describe a historical entry's prose, and REQ-10 only
 # constrains "the prose body, bullet content, file list, or QA notes of any
 # historical entry" (spec lines 22–23). The exclude pathspec keeps that intent.
+# 260615.md (the M12a milestone entry itself) is excluded for the same reason —
+# it is a wholly new entry, not a modification of an existing historical entry.
 BASE="${BASE:-origin/main}"
 if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then BASE=main; fi
 if git rev-parse --verify --quiet "$BASE" >/dev/null; then
-  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' \
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' \
     | grep -E '^[+-][^+-]' \
     | grep -vE '^[+-]## [0-9]{6}' || true)
   [ -z "$NON_HEADING" ] || fail "REQ-10 prose-immutability: non-heading changes under docs/changelog/:
