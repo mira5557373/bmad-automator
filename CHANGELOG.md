@@ -102,6 +102,7 @@
 
 ### Refactoring
 
+- refactor(m09): extract shared __future__ check helper to satisfy LOC ceiling (ffd54eb)
 - refactor(m08): move unrelated-events fixture out of test_calibration (87bffb3)
 - refactor(m08): split build_calibration into iter/accumulate/materialize helpers (56be50c)
 - refactor(m08): extract calibration test fixtures to sibling module (a8f7405)
@@ -111,6 +112,8 @@
 
 ### Documentation
 
+- docs(m09): add M2 (format + gates) implementation plan (bc0881b)
+- docs: update generated documentation (663c7ed)
 - docs: update generated documentation (4a128b6)
 - docs(m08): add m3-consumers implementation plan (e541a4e)
 - docs: update generated documentation (28a57dd)
@@ -142,6 +145,8 @@
 
 ### Tests
 
+- test(m09): enforce PEP 604 unions in source via grep (a16582e)
+- test(m09): pin __future__ annotations on the test module itself (ba22337)
 - test(m09): prove generated_at flows from iso_now via patched call (40a48ba)
 - test(m09): enforce __all__, future-annotations, allowlist, size invariants (e3e5500)
 - test(m09): lock sort order and bitwise determinism of compute_drift entries (c17d3c0)
@@ -208,6 +213,7 @@
 
 ### Style
 
+- style(m09): restore tuple semantics for forbidden-token constants (da2fc51)
 - style(m08): trim test_calibration to stay under 500 LOC cap (54ed65a)
 - style(m08): satisfy ruff + coverage quality gates (9b9f84d)
 
