@@ -471,3 +471,42 @@ class DeterministicOutputTests(unittest.TestCase):
                 # All three missing files → three findings per arm.
             findings = self._run_capture(root)
             self.assertEqual(findings, sorted(findings))
+
+
+class LineEndingTests(unittest.TestCase):
+    def test_crlf_report_md_is_accepted(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            crlf_report = (
+                "---\r\n"
+                "arm: control\r\n"
+                "date: 2026-06-13\r\n"
+                "run_id: r1\r\n"
+                "git_sha: abc1234\r\n"
+                "started_at: 2026-06-13T00:00:00Z\r\n"
+                "ended_at: 2026-06-13T01:00:00Z\r\n"
+                "---\r\n"
+                "Body.\r\n"
+            )
+            (arm_dir / "report.md").write_text(
+                crlf_report, encoding="utf-8", newline=""
+            )
+            self.assertEqual(main([str(root)]), 0)
+
+    def test_crlf_telemetry_jsonl_is_accepted(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '{"event_type":"X","ts":"2026-06-13T00:00:00Z"}\r\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 0)
