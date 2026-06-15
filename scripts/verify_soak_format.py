@@ -22,6 +22,19 @@ REQUIRED_FRONTMATTER_KEYS = (
 )
 _FRONTMATTER_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$")
 
+PLACEHOLDER_RE = re.compile(r"\[[A-Z]{4}\]")
+
+
+def _check_placeholders(path: Path, text: str) -> list[str]:
+    findings: list[str] = []
+    for idx, line in enumerate(text.replace("\r\n", "\n").split("\n"), start=1):
+        match = PLACEHOLDER_RE.search(line)
+        if match is not None:
+            findings.append(
+                f"{path}:{idx}: unresolved four-letter placeholder token {match.group(0)!r}"
+            )
+    return findings
+
 
 def _read_text_lf(path: Path) -> str:
     # NFR: treat CRLF and LF equivalently when reading.
@@ -80,6 +93,7 @@ def _validate_report_md(arm_dir: Path) -> list[str]:
         findings.append(
             f"{path}: frontmatter 'ended_at' does not parse as ISO datetime: {ended!r}"
         )
+    findings.extend(_check_placeholders(path, text))
     return findings
 
 
@@ -137,6 +151,7 @@ def _validate_config_json(arm_dir: Path) -> list[str]:
         findings.append(
             f"{path}: config 'arm' = {arm_value!r} does not match directory name {arm_dir.name!r}"
         )
+    findings.extend(_check_placeholders(path, raw))
     return findings
 
 

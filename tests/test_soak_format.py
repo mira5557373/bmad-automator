@@ -387,3 +387,63 @@ class TelemetryJsonlTests(unittest.TestCase):
                 newline="",
             )
             self.assertEqual(main([str(root)]), 1)
+
+
+class PlaceholderTokenTests(unittest.TestCase):
+    def test_placeholder_in_report_md_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n"
+                "Body with [TODO] left in it.\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_placeholder_in_config_json_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                '{"arm":"control","seed":1,"model":"m","concurrency":1,"notes":"[FIXM]"}',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_markdown_link_is_not_a_placeholder(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n"
+                "See [link](https://example.com) and [1234] for details.\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 0)
