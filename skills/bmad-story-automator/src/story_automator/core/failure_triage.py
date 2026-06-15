@@ -21,7 +21,7 @@ land in M07b.
 
 from __future__ import annotations
 
-
+from dataclasses import dataclass
 import enum
 
 
@@ -61,3 +61,32 @@ class Confidence(enum.Enum):
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
+
+
+@dataclass(frozen=True, kw_only=True)
+class Classification:
+    """Frozen verdict produced by ``classify`` (M07b) for one event.
+
+    Fields:
+
+    - ``primary`` — the leading ``FailureClass`` for this event.
+    - ``implies`` — additional ``FailureClass`` entries downstream policy
+      should treat as concurrently true (e.g. ``POLICY_VIOLATION``
+      always implies ``REVIEW_REJECTED``). Empty tuple when no
+      implications apply. Order is stable per-classifier to keep
+      ``Classification`` instances hashable-equivalent.
+    - ``confidence`` — operator-facing certainty level.
+    - ``reason`` — short snake-case string explaining the verdict.
+      Used by M10 retro summaries; never user-facing prose.
+    - ``event_id`` — the originating event's identifier when available,
+      else ``None``. M01 events do not yet carry an ``event_id`` field
+      so this is currently always ``None`` in practice; reserved so
+      downstream consumers can correlate verdicts back to source events
+      once the field lands.
+    """
+
+    primary: FailureClass
+    implies: tuple[FailureClass, ...]
+    confidence: Confidence
+    reason: str
+    event_id: str | None
