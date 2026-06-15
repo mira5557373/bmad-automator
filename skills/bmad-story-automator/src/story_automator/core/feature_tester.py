@@ -23,10 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
+from story_automator.core.atomic_io import write_atomic_text
+
 if TYPE_CHECKING:
     from story_automator.core.spec_compliance import ReqVerdict  # noqa: F401
 
-__all__ = [  # noqa: F822 — plan_feature_tests added in a subsequent task
+__all__ = [
     "TestPlanEntry",
     "plan_feature_tests",
 ]
@@ -157,3 +159,78 @@ def _find_existing_test(tests_dir: Path, req_id: str) -> str | None:
         if needle.search(path.read_text(encoding="utf-8")):
             return str(path.resolve())
     return None
+
+
+def _plan_for_verdict(
+    verdict: ReqVerdictLike,
+    *,
+    tests_dir: Path,
+    dry_run: bool,
+) -> TestPlanEntry:
+    """Plan a single verdict. Internal — `plan_feature_tests` is public."""
+    req_id = verdict.req_id
+    # Validate up front so a malformed id fails fast before any I/O.
+    req_id_lower_underscored, _ = _normalize_req_id(req_id)
+
+    existing = _find_existing_test(tests_dir, req_id)
+    if existing is not None:
+        return TestPlanEntry(
+            req_id=req_id,
+            existing_test_path=existing,
+            created_test_path=None,
+            action="found",
+        )
+
+    target = tests_dir / f"test_compliance_{req_id_lower_underscored}.py"
+
+    if dry_run:
+        return TestPlanEntry(
+            req_id=req_id,
+            existing_test_path=None,
+            created_test_path=str(target.resolve()),
+            action="skipped",
+        )
+
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    write_atomic_text(target, _render_skeleton(req_id))
+    return TestPlanEntry(
+        req_id=req_id,
+        existing_test_path=None,
+        created_test_path=str(target.resolve()),
+        action="created",
+    )
+
+
+def plan_feature_tests(
+    verdicts: list[ReqVerdictLike],
+    *,
+    tests_dir: Path,
+    dry_run: bool = False,
+) -> list[TestPlanEntry]:
+    """Plan feature tests for each `implemented` REQ verdict.
+
+    Preconditions: every `verdict.req_id` matches ``REQ-\\d+``;
+        `tests_dir` is a `Path` (need not exist — created on write);
+        `dry_run`, when True, suppresses all filesystem writes.
+    Postconditions: returns one `TestPlanEntry` per verdict whose
+        ``status == "implemented"`` (other statuses are silently dropped
+        per REQ-13). When `dry_run=False` and no existing test is found
+        for a REQ, a skeleton file is written via
+        ``core.atomic_io.write_atomic_text`` and `action="created"`. When
+        an existing test in ``tests_dir/test_compliance_*.py`` cites the
+        REQ id as a whole token, `action="found"` and no file is
+        written. When `dry_run=True` and no existing test is found,
+        `action="skipped"` and `created_test_path` is set to the path
+        that *would* have been written.
+    Raises: `ValueError` if any verdict's `req_id` is malformed;
+        ``OSError`` (and subclasses) propagated from the atomic-write
+        path on filesystem failure.
+    """
+    plan: list[TestPlanEntry] = []
+    for verdict in verdicts:
+        if verdict.status != "implemented":
+            continue
+        plan.append(
+            _plan_for_verdict(verdict, tests_dir=tests_dir, dry_run=dry_run)
+        )
+    return plan

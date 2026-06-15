@@ -356,5 +356,116 @@ class ReqVerdictLikeProtocolTests(unittest.TestCase):
         self.assertIsInstance(verdict, ReqVerdictLike)
 
 
+def _make_verdict(req_id: str, status: str = "implemented"):
+    """Local helper: build a minimal duck-typed verdict without importing
+    spec_compliance (keeps the runtime-independence invariant visible)."""
+
+    class _V:
+        pass
+
+    v = _V()
+    v.req_id = req_id
+    v.status = status
+    v.evidence = ""
+    v.confidence = 1.0
+    return v
+
+
+class PlanFeatureTestsHappyPathTests(unittest.TestCase):
+    """REQ-13: process implemented verdicts; locate or create per REQ."""
+
+    def test_returns_empty_list_for_empty_verdicts(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = plan_feature_tests([], tests_dir=Path(tmp))
+            self.assertEqual(plan, [])
+
+    def test_creates_skeleton_when_no_existing_test(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")], tests_dir=tests_dir
+            )
+            self.assertEqual(len(plan), 1)
+            entry = plan[0]
+            self.assertEqual(entry.req_id, "REQ-07")
+            self.assertEqual(entry.action, "created")
+            self.assertIsNone(entry.existing_test_path)
+            self.assertIsNotNone(entry.created_test_path)
+            written = Path(entry.created_test_path)
+            self.assertTrue(written.exists())
+            self.assertEqual(written.name, "test_compliance_req_07.py")
+            self.assertEqual(
+                written.read_text(encoding="utf-8"),
+                _GOLDEN_SKELETON_REQ_07,
+            )
+
+    def test_found_branch_when_existing_test_present(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            existing = tests_dir / "test_compliance_req_07.py"
+            existing.write_text(
+                '"""REQ-07 already covered."""\n', encoding="utf-8"
+            )
+            original_bytes = existing.read_bytes()
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")], tests_dir=tests_dir
+            )
+            self.assertEqual(len(plan), 1)
+            entry = plan[0]
+            self.assertEqual(entry.action, "found")
+            self.assertEqual(
+                entry.existing_test_path, str(existing.resolve())
+            )
+            self.assertIsNone(entry.created_test_path)
+            # Idempotency: existing file is not touched.
+            self.assertEqual(existing.read_bytes(), original_bytes)
+
+    def test_creates_tests_dir_when_missing(self) -> None:
+        """Operator-friendly: a missing tests_dir is created on write."""
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp) / "nested" / "tests"
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")], tests_dir=tests_dir
+            )
+            self.assertEqual(plan[0].action, "created")
+            self.assertTrue(tests_dir.is_dir())
+            self.assertTrue(
+                (tests_dir / "test_compliance_req_07.py").exists()
+            )
+
+    def test_processes_multiple_implemented_verdicts(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07"), _make_verdict("REQ-08")],
+                tests_dir=tests_dir,
+            )
+            req_ids = sorted(e.req_id for e in plan)
+            self.assertEqual(req_ids, ["REQ-07", "REQ-08"])
+            self.assertEqual(
+                sorted(p.name for p in tests_dir.glob("test_compliance_*.py")),
+                ["test_compliance_req_07.py", "test_compliance_req_08.py"],
+            )
+
+    def test_rejects_malformed_req_id_in_verdict(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                plan_feature_tests(
+                    [_make_verdict("not-a-req")], tests_dir=Path(tmp)
+                )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
