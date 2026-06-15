@@ -605,3 +605,95 @@ class CheckComplianceErrorMatrixTests(unittest.TestCase):
                 timeout_s=7,
             )
         self.assertEqual(captured.get("timeout"), 7)
+
+
+class SubprocessInvocationShapeTests(unittest.TestCase):
+    """NFR: list args, never shell=True, caller-supplied cwd defaulting
+    to Path.cwd(), LANG=C.UTF-8 propagated in child env."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.spec = self.root / "spec.md"
+        self.spec.write_text("# REQ-01\n", encoding="utf-8")
+        self.captured: dict[str, object] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> object:
+            self.captured["args"] = args
+            self.captured.update(kwargs)
+            return _ok_completed_process(_SAMPLE_ENVELOPE)
+
+        self._fake_run = fake_run
+
+    def test_subprocess_args_are_list_not_string(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+        positional = self.captured["args"]
+        assert isinstance(positional, tuple)
+        self.assertIsInstance(positional[0], list)
+        self.assertEqual(positional[0][0], "claude")
+        self.assertIn("-p", positional[0])
+
+    def test_subprocess_never_uses_shell(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+        # `shell` MUST NOT be set to True; we accept absent or False.
+        self.assertNotEqual(self.captured.get("shell"), True)
+
+    def test_subprocess_uses_check_false_and_captures_text_output(self) -> None:
+        # REQ-09 explicit: check=False, text=True, capture_output=True.
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+        self.assertEqual(self.captured.get("check"), False)
+        self.assertEqual(self.captured.get("text"), True)
+        self.assertEqual(self.captured.get("capture_output"), True)
+
+    def test_cwd_defaults_to_current_working_directory(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+        self.assertEqual(self.captured.get("cwd"), str(Path.cwd()))
+
+    def test_cwd_can_be_overridden_by_caller(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(
+                spec_path=self.spec,
+                diff_text="d",
+                cwd=self.root,
+            )
+        self.assertEqual(self.captured.get("cwd"), str(self.root))
+
+    def test_env_propagates_lang_c_utf8(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+        env = self.captured.get("env")
+        self.assertIsInstance(env, dict)
+        assert isinstance(env, dict)
+        self.assertEqual(env.get("LANG"), "C.UTF-8")
+        # PATH must still be present so the child can locate `claude`.
+        self.assertIn("PATH", env)
+
+    def test_claude_binary_argument_overrides_executable(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch("subprocess.run", side_effect=self._fake_run):
+            check_compliance(
+                spec_path=self.spec,
+                diff_text="d",
+                claude_binary="/usr/local/bin/claude",
+            )
+        positional = self.captured["args"]
+        assert isinstance(positional, tuple)
+        self.assertEqual(positional[0][0], "/usr/local/bin/claude")
