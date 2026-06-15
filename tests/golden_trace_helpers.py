@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -252,6 +253,26 @@ def _to_repo_relative_posix(path: Path, *, repo_root: Path) -> str:
     return rel.as_posix()
 
 
+def _find_repo_root(start: Path | None = None) -> Path:
+    """Walk up from ``start`` (or CWD) until we find a project marker.
+
+    Markers, in order of preference: ``pyproject.toml``, ``.git``. If
+    no marker is found, fall back to the start directory itself AND
+    warn — silent fallback would otherwise let CI runs with a wrong
+    CWD produce fixtures full of unstable absolute paths.
+    """
+    current = (start or Path.cwd()).resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / "pyproject.toml").exists() or (candidate / ".git").exists():
+            return candidate
+    warnings.warn(
+        f"GoldenTraceRecorder: no project marker (pyproject.toml or .git) "
+        f"found walking up from {current}; recorded paths may stay absolute",
+        stacklevel=2,
+    )
+    return current
+
+
 def notify_claude_p(argv: list[str]) -> None:
     """Hook surface for `claude -p` invocations.
 
@@ -275,7 +296,7 @@ class GoldenTraceRecorder:
     def __init__(self, *, repo_root: Path | None = None) -> None:
         self._entries: list[TraceEntry] = []
         self._lock = threading.Lock()
-        self._repo_root: Path | None = repo_root
+        self._repo_root: Path = repo_root.resolve() if repo_root else _find_repo_root()
         self._installed = False
 
     @property

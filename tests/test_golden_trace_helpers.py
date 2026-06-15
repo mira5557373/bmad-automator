@@ -573,5 +573,23 @@ class PathNormalizationTests(unittest.TestCase):
         self.assertEqual(out, "a/b.txt")
 
 
+class RecorderRepoRootResolutionTests(unittest.TestCase):
+    def test_explicit_repo_root_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            rec = GoldenTraceRecorder(repo_root=root)
+            self.assertEqual(rec._repo_root, root)  # type: ignore[attr-defined]
+
+    def test_default_repo_root_finds_project_root(self) -> None:
+        rec = GoldenTraceRecorder()
+        resolved = rec._repo_root  # type: ignore[attr-defined]
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertTrue(
+            (resolved / "pyproject.toml").exists() or (resolved / ".git").exists(),
+            f"resolved repo_root {resolved} contains no project marker",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
