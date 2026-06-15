@@ -677,3 +677,42 @@ class IdentityPopulationTests(unittest.TestCase):
             )
         finally:
             handle.release()
+
+
+class AcquireRunLockFailureCleanupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_payload_write_failure_releases_filelock(self) -> None:
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        lock_path = self.dir / "run.payload"
+        release_calls: list[bool] = []
+        original_acquire: list[bool] = []
+
+        class TrackingFileLock:
+            def __init__(self, p: str, *a: object, **kw: object) -> None:
+                self.p = p
+                self.acquired = False
+
+            def acquire(self, timeout: float = -1) -> None:
+                self.acquired = True
+                original_acquire.append(True)
+
+            def release(self, force: bool = False) -> None:
+                release_calls.append(self.acquired)
+
+        with (
+            patch("story_automator.core.atomic_io.FileLock", TrackingFileLock),
+            patch(
+                "story_automator.core.atomic_io.write_atomic_text",
+                side_effect=OSError("simulated disk full"),
+            ),
+        ):
+            with self.assertRaises(OSError):
+                acquire_run_lock(lock_path, run_id="run-fail")
+
+        self.assertEqual(original_acquire, [True])
+        self.assertEqual(release_calls, [True])
