@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import io
 import logging
+import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 
 class ModuleImportContractTests(unittest.TestCase):
@@ -379,3 +384,97 @@ class EnvelopeParserErrorTests(unittest.TestCase):
             "parser silently produced a verdict instead of raising "
             "ComplianceError on unparseable input — REQ-10 forbids that"
         )
+
+
+def _ok_completed_process(stdout: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["claude", "-p", "..."],
+        returncode=0,
+        stdout=stdout,
+        stderr="",
+    )
+
+
+_SAMPLE_ENVELOPE = (
+    '{"verdicts": ['
+    '{"req_id": "REQ-01", "status": "implemented", '
+    '"evidence": "core/a.py:1", "confidence": 0.9}'
+    '], "model_invocation_ms": 4231}'
+)
+
+
+class CheckComplianceHappyPathTests(unittest.TestCase):
+    """REQ-09: subprocess.run is invoked, stdout is parsed, report is built."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.spec = self.root / "spec.md"
+        self.spec.write_text("# REQ-01 do thing\n", encoding="utf-8")
+
+    def test_returns_compliance_report_with_parsed_verdicts(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceReport,
+            check_compliance,
+        )
+
+        with patch(
+            "subprocess.run",
+            return_value=_ok_completed_process(_SAMPLE_ENVELOPE),
+        ):
+            report = check_compliance(
+                spec_path=self.spec,
+                diff_text="--- a/x\n+++ b/x\n",
+            )
+
+        self.assertIsInstance(report, ComplianceReport)
+        self.assertEqual(len(report.verdicts), 1)
+        self.assertEqual(report.verdicts[0].req_id, "REQ-01")
+        self.assertEqual(report.verdicts[0].status, "implemented")
+        self.assertEqual(report.model_invocation_ms, 4231)
+
+    def test_spec_path_is_string_form_of_resolved_path(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with patch(
+            "subprocess.run",
+            return_value=_ok_completed_process(_SAMPLE_ENVELOPE),
+        ):
+            report = check_compliance(spec_path=self.spec, diff_text="d")
+        self.assertEqual(report.spec_path, str(self.spec.resolve()))
+
+    def test_diff_sha_is_sha256_of_diff_text(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        diff = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"
+        expected_sha = hashlib.sha256(diff.encode("utf-8")).hexdigest()
+        with patch(
+            "subprocess.run",
+            return_value=_ok_completed_process(_SAMPLE_ENVELOPE),
+        ):
+            report = check_compliance(spec_path=self.spec, diff_text=diff)
+        self.assertEqual(report.diff_sha, expected_sha)
+
+    def test_spec_text_is_read_from_disk_and_embedded_in_prompt(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        self.spec.write_text(
+            "# Spec body unique-marker-xyz\n",
+            encoding="utf-8",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> object:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            captured["input"] = kwargs.get("input")
+            return _ok_completed_process(_SAMPLE_ENVELOPE)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            check_compliance(spec_path=self.spec, diff_text="d")
+
+        prompt = captured["input"]
+        assert isinstance(prompt, str)
+        self.assertIn("unique-marker-xyz", prompt)
+        self.assertIn("```text\n", prompt)

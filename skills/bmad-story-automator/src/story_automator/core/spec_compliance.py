@@ -18,17 +18,17 @@ overlay that pins `LANG=C.UTF-8` for deterministic locale.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
-# Names below are populated by subsequent M06a-M2 tasks (T2-T7); ruff F822
-# flags them as undefined here, but plain `import` works because `__all__` is
-# only consulted by `from module import *`. Suppress the diagnostic with
-# rationale until later tasks define the symbols.
-__all__ = [  # noqa: F822
+__all__ = [
     "ComplianceError",
     "ComplianceReport",
     "ReqVerdict",
@@ -213,3 +213,73 @@ def _parse_envelope(payload: str) -> tuple[list[ReqVerdict], int]:
             )
         )
     return verdicts, ms
+
+
+_DEFAULT_TIMEOUT_S: int = 120
+
+
+def check_compliance(
+    *,
+    spec_path: Path,
+    diff_text: str,
+    timeout_s: int = _DEFAULT_TIMEOUT_S,
+    claude_binary: str = "claude",
+    cwd: Path | None = None,
+) -> ComplianceReport:
+    """Verify a candidate diff against the REQs declared in `spec_path`.
+
+    Preconditions: `spec_path` must point to a readable UTF-8 file
+        (typically a Markdown spec containing REQ-NN sections);
+        `diff_text` is the candidate diff as a string; `timeout_s` is a
+        positive integer; `claude_binary` is the executable name (or
+        path) of the `claude` CLI; `cwd`, when provided, is an existing
+        directory used as the subprocess working directory — otherwise
+        the current working directory is used.
+    Postconditions: returns a `ComplianceReport` whose `verdicts` reflect
+        the model's classification of each REQ; `spec_path` is the
+        resolved absolute path as a string; `diff_sha` is the SHA-256
+        hex digest of `diff_text` encoded as UTF-8; `model_invocation_ms`
+        is propagated verbatim from the subprocess envelope.
+    Raises: `ComplianceError` (REQ-10) when the subprocess exits
+        non-zero, when it times out, or when its stdout cannot be parsed
+        as the JSON envelope `_parse_envelope` expects. This function
+        NEVER silently downgrades a parse failure into a "missing"
+        verdict — REQ-10 forbids that.
+    """
+    resolved_spec = spec_path.resolve()
+    spec_text = resolved_spec.read_text(encoding="utf-8")
+    prompt = _render_prompt(spec_text=spec_text, diff_text=diff_text)
+
+    effective_cwd = cwd if cwd is not None else Path.cwd()
+    child_env = {**os.environ, "LANG": "C.UTF-8"}
+
+    try:
+        completed = subprocess.run(
+            [claude_binary, "-p"],
+            input=prompt,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=timeout_s,
+            cwd=str(effective_cwd),
+            env=child_env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ComplianceError(
+            f"`{claude_binary} -p` timed out after {timeout_s}s"
+        ) from exc
+
+    if completed.returncode != 0:
+        raise ComplianceError(
+            f"`{claude_binary} -p` exited {completed.returncode}: "
+            f"{(completed.stderr or '').strip()[:500]}"
+        )
+
+    verdicts, ms = _parse_envelope(completed.stdout)
+    diff_sha = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+    return ComplianceReport(
+        verdicts=verdicts,
+        spec_path=str(resolved_spec),
+        diff_sha=diff_sha,
+        model_invocation_ms=ms,
+    )
