@@ -75,5 +75,43 @@ class CalibrationEntryShapeTests(unittest.TestCase):
             CalibrationEntry("m", "t", 0.5, 1, "2026-06-14T12:00:00Z")  # type: ignore[misc]
 
 
+class CalibrationTableShapeTests(unittest.TestCase):
+    def test_construction(self) -> None:
+        from story_automator.core.calibration import CalibrationEntry, CalibrationTable
+
+        entry = CalibrationEntry(
+            model_id="m",
+            task_kind="t",
+            success_rate=0.5,
+            sample_count=2,
+            last_seen_iso="2026-06-14T12:00:00Z",
+        )
+        table = CalibrationTable(
+            entries={("m", "t"): entry},
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/telemetry.jsonl",
+            total_events_scanned=2,
+        )
+        self.assertEqual(table.entries[("m", "t")], entry)
+        self.assertEqual(table.generated_at, "2026-06-14T13:00:00Z")
+        self.assertEqual(table.source_path, "/tmp/telemetry.jsonl")
+        self.assertEqual(table.total_events_scanned, 2)
+
+    def test_table_is_kw_only_mutable(self) -> None:
+        from story_automator.core.calibration import CalibrationTable
+
+        table = CalibrationTable(
+            entries={},
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/empty.jsonl",
+            total_events_scanned=0,
+        )
+        table.total_events_scanned = 5
+        self.assertEqual(table.total_events_scanned, 5)
+
+        with self.assertRaises(TypeError):
+            CalibrationTable({}, "x", "y", 0)  # type: ignore[misc]
+
+
 if __name__ == "__main__":
     unittest.main()

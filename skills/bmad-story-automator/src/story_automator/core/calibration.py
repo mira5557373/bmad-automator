@@ -31,3 +31,21 @@ class CalibrationEntry:
     success_rate: float
     sample_count: int
     last_seen_iso: str
+
+
+@dataclass(kw_only=True)
+class CalibrationTable:
+    """An aggregated calibration table built from a telemetry JSONL ledger.
+
+    `entries` is keyed by `(model_id, task_kind)`. `generated_at` is the
+    `iso_now()` timestamp at the moment `build_calibration` finished;
+    `source_path` is the string form of the ledger path that was scanned
+    (even when the file did not exist); `total_events_scanned` counts
+    every successfully parsed line, including UnknownEvent and event
+    types unrelated to story completion.
+    """
+
+    entries: dict[tuple[str, str], CalibrationEntry]
+    generated_at: str
+    source_path: str
+    total_events_scanned: int
