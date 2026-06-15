@@ -7,7 +7,9 @@ import json
 import os
 import tempfile
 import threading as _threading
+import time
 import unittest
+import warnings
 from pathlib import Path
 
 from story_automator.commands import state as _state_module
@@ -1033,6 +1035,151 @@ class DeterminismE2ETests(unittest.TestCase):
                     )
                 )
         self.assertEqual(rec.entries[0].payload["timestamp"], "<ts>")
+
+
+class HookSafetyTests(unittest.TestCase):
+    """NFR Safety: a recording-side failure must not propagate into the
+    caller — the recorded operation itself has already completed."""
+
+    def test_emit_hook_swallows_recording_failure(self) -> None:
+        import tests.golden_trace_helpers as gh
+
+        def _raise(_payload: dict[str, object]) -> dict[str, object]:
+            raise RuntimeError("synthetic redaction failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(log)
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            orig_redact = gh._redact_event_payload
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    gh._redact_event_payload = _raise  # type: ignore[assignment]
+                    try:
+                        emitter.emit(event)
+                    finally:
+                        gh._redact_event_payload = orig_redact  # type: ignore[assignment]
+                emitter.emit(event)
+        # First emit lost its trace entry; second emit (after un-patch)
+        # records normally — passive-observer contract: a recording-side
+        # failure does NOT propagate to the caller of emit.
+        self.assertEqual(len(rec.entries), 1)
+        self.assertEqual(rec.entries[0].kind, "StoryStarted")
+        self.assertTrue(
+            any("emit-hook recording failed" in str(w.message) for w in caught)
+        )
+
+    def test_claude_p_hook_swallows_recording_failure(self) -> None:
+        import tests.golden_trace_helpers as gh
+
+        def _raise(_argv: list[str], *, repo_root: Path) -> list[str]:
+            raise RuntimeError("synthetic normalize failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig_norm = gh._normalize_argv
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    gh._normalize_argv = _raise  # type: ignore[assignment]
+                    try:
+                        gh.notify_claude_p(["claude", "-p", "boom"])
+                    finally:
+                        gh._normalize_argv = orig_norm  # type: ignore[assignment]
+                gh.notify_claude_p(["claude", "-p", "ok"])
+        self.assertEqual(len(rec.entries), 1)
+        self.assertEqual(rec.entries[0].payload["argv"], ["claude", "-p", "ok"])
+        self.assertTrue(
+            any("claude_p-hook recording failed" in str(w.message) for w in caught)
+        )
+
+
+class RecorderPerformanceTests(unittest.TestCase):
+    """NFR Performance: hook overhead must add no more than ~50us per
+    intercepted op on commodity hardware; the M02 five-event fixture
+    must record + serialize end-to-end in under 100ms.
+
+    The 50us bound is per-op steady-state; we use a generous 500us
+    upper bound here to absorb CI noise (Windows scheduler quanta,
+    GC pauses, antivirus). A breach above 500us-per-op signals an
+    O(N) or O(log N) regression in the hook path, which is what
+    this test is actually guarding against.
+    """
+
+    def test_five_event_record_and_serialize_under_100ms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter = TelemetryEmitter(root / "events.jsonl")
+            events = [
+                StoryStarted(
+                    timestamp="2026-06-15T01:02:03Z",
+                    run_id="r",
+                    epic="e",
+                    story_key=f"s{i}",
+                    agent="a",
+                    model="m",
+                    complexity="c",
+                )
+                for i in range(5)
+            ]
+            t0 = time.perf_counter()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                for ev in events:
+                    emitter.emit(ev)
+            serialized = serialize_trace(rec.entries)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.assertEqual(len(rec.entries), 5)
+        self.assertTrue(serialized.endswith("\n"))
+        self.assertLess(
+            elapsed_ms,
+            100.0,
+            f"5-event record+serialize took {elapsed_ms:.1f}ms; NFR budget is 100ms",
+        )
+
+    def test_emit_hook_overhead_per_op_within_budget(self) -> None:
+        # Measure per-op overhead by comparing 50 emits inside the recorder
+        # to 50 emits outside it. Spec budget is ~50us; we assert <500us
+        # to absorb CI variance. A regression that pushes overhead to
+        # milliseconds will still trip this gate.
+        N = 50
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter_a = TelemetryEmitter(root / "a.jsonl")
+            emitter_b = TelemetryEmitter(root / "b.jsonl")
+            event = StoryStarted(
+                timestamp="2026-06-15T01:02:03Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            t0 = time.perf_counter()
+            for _ in range(N):
+                emitter_a.emit(event)
+            baseline_ns = time.perf_counter() - t0
+
+            t1 = time.perf_counter()
+            with GoldenTraceRecorder(repo_root=root):
+                for _ in range(N):
+                    emitter_b.emit(event)
+            recorded_ns = time.perf_counter() - t1
+        overhead_us = max(0.0, (recorded_ns - baseline_ns) * 1_000_000 / N)
+        self.assertLess(
+            overhead_us,
+            500.0,
+            f"per-op overhead {overhead_us:.0f}us exceeds 500us guard "
+            f"(spec target is ~50us)",
+        )
 
 
 if __name__ == "__main__":

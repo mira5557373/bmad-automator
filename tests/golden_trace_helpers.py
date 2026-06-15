@@ -446,9 +446,16 @@ class GoldenTraceRecorder:
 
         def wrapper(emitter_self: TelemetryEmitter, event: object) -> None:
             orig(emitter_self, event)
-            raw_payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
-            payload = _redact_event_payload(raw_payload)
-            recorder._record("event", type(event).__name__, payload)
+            try:
+                raw_payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
+                payload = _redact_event_payload(raw_payload)
+                recorder._record("event", type(event).__name__, payload)
+            except Exception as exc:
+                warnings.warn(
+                    f"GoldenTraceRecorder: emit-hook recording failed for "
+                    f"{type(event).__name__}: {exc!r}",
+                    stacklevel=2,
+                )
 
         TelemetryEmitter.emit = wrapper
 
@@ -478,8 +485,14 @@ class GoldenTraceRecorder:
         recorder = self
 
         def hook(argv: list[str]) -> None:
-            normalized = _normalize_argv(list(argv), repo_root=recorder._repo_root)
-            recorder._record("claude_p", "invoke", {"argv": normalized})
+            try:
+                normalized = _normalize_argv(list(argv), repo_root=recorder._repo_root)
+                recorder._record("claude_p", "invoke", {"argv": normalized})
+            except Exception as exc:
+                warnings.warn(
+                    f"GoldenTraceRecorder: claude_p-hook recording failed: {exc!r}",
+                    stacklevel=2,
+                )
 
         _CLAUDE_P_HOOK = hook
 
