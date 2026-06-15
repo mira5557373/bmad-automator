@@ -78,3 +78,36 @@ def _normalize_req_id(req_id: str) -> tuple[str, str]:
             f"req_id must match 'REQ-<digits>'; got {req_id!r}"
         )
     return req_id.lower().replace("-", "_"), req_id.replace("-", "_")
+
+
+_SKELETON_TEMPLATE: str = (
+    '"""Feature test for {req_id}."""\n'
+    "\n"
+    "from __future__ import annotations\n"
+    "\n"
+    "import unittest\n"
+    "\n"
+    "\n"
+    "class TestCompliance{class_suffix}(unittest.TestCase):\n"
+    '    """{req_id}: skeleton — fill in once the feature is wired."""\n'
+    "\n"
+    "    def test_{req_id_lower_underscored}_skeleton(self) -> None:\n"
+    '        self.fail("{req_id} not yet covered by feature test")\n'
+)
+
+
+def _render_skeleton(req_id: str) -> str:
+    """Render the skeleton test file body for `req_id`.
+
+    Preconditions: `req_id` matches ``REQ-\\d+``.
+    Postconditions: returns a UTF-8 string with LF line endings;
+        byte-equal to a frozen golden test for ``REQ-07``.
+    Raises: ValueError when `req_id` is malformed
+        (propagated from `_normalize_req_id`).
+    """
+    req_id_lower_underscored, class_suffix = _normalize_req_id(req_id)
+    return _SKELETON_TEMPLATE.format(
+        req_id=req_id,
+        req_id_lower_underscored=req_id_lower_underscored,
+        class_suffix=class_suffix,
+    )

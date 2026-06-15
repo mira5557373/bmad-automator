@@ -166,5 +166,71 @@ class NormalizeReqIdTests(unittest.TestCase):
             _normalize_req_id("REQ-07 ")
 
 
+# Golden skeleton for REQ-07. ANY change to _SKELETON_TEMPLATE must
+# update this string verbatim — that's the entire point of the
+# byte-equality assertion.
+_GOLDEN_SKELETON_REQ_07 = (
+    '"""Feature test for REQ-07."""\n'
+    "\n"
+    "from __future__ import annotations\n"
+    "\n"
+    "import unittest\n"
+    "\n"
+    "\n"
+    "class TestComplianceREQ_07(unittest.TestCase):\n"
+    '    """REQ-07: skeleton — fill in once the feature is wired."""\n'
+    "\n"
+    "    def test_req_07_skeleton(self) -> None:\n"
+    '        self.fail("REQ-07 not yet covered by feature test")\n'
+)
+
+
+class SkeletonRenderGoldenTests(unittest.TestCase):
+    """REQ-14 + quality gate: byte-equality against a frozen golden string."""
+
+    def test_render_matches_golden_for_req_07(self) -> None:
+        from story_automator.core.feature_tester import _render_skeleton
+
+        rendered = _render_skeleton("REQ-07")
+        self.assertEqual(rendered, _GOLDEN_SKELETON_REQ_07)
+
+    def test_render_contains_req_id_verbatim_in_class_docstring(self) -> None:
+        """REQ-14: must place the REQ id verbatim in the class docstring."""
+        from story_automator.core.feature_tester import _render_skeleton
+
+        rendered = _render_skeleton("REQ-123")
+        # The class docstring is the line beginning with `    """REQ-`
+        self.assertIn('    """REQ-123: ', rendered)
+
+    def test_render_imports_future_annotations(self) -> None:
+        """REQ-14: must import from __future__ import annotations."""
+        from story_automator.core.feature_tester import _render_skeleton
+
+        rendered = _render_skeleton("REQ-07")
+        self.assertIn("from __future__ import annotations\n", rendered)
+
+    def test_render_calls_self_fail_with_exact_message(self) -> None:
+        """REQ-14: body is exactly self.fail("REQ-NN not yet covered ...")."""
+        from story_automator.core.feature_tester import _render_skeleton
+
+        rendered = _render_skeleton("REQ-42")
+        self.assertIn(
+            '        self.fail("REQ-42 not yet covered by feature test")\n',
+            rendered,
+        )
+
+    def test_render_method_name_uses_lower_underscored_id(self) -> None:
+        from story_automator.core.feature_tester import _render_skeleton
+
+        rendered = _render_skeleton("REQ-42")
+        self.assertIn("    def test_req_42_skeleton(self) -> None:\n", rendered)
+
+    def test_render_rejects_malformed_req_id(self) -> None:
+        from story_automator.core.feature_tester import _render_skeleton
+
+        with self.assertRaises(ValueError):
+            _render_skeleton("not-a-req")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
