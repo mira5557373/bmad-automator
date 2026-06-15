@@ -651,3 +651,65 @@ class ClassifyTmuxCrashTests(unittest.TestCase):
         result = classify(event)
         self.assertEqual(result.primary, FailureClass.CRASH)
         self.assertNotIn(FailureClass.NETWORK_ERROR, result.implies)
+
+
+class ClassifyStoryDeferredTests(unittest.TestCase):
+    def _make_event(
+        self, *, reason: str = "complexity cap", tasks_completed: int = 2
+    ) -> object:
+        from story_automator.core.telemetry_events import StoryDeferred
+
+        return StoryDeferred(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            reason=reason,
+            tasks_completed=tasks_completed,
+        )
+
+    def test_default_returns_gate_defer_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event())
+        self.assertEqual(result.primary, FailureClass.GATE_DEFER)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_plateau_substring_returns_repeated_retry_implies_plateau(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="plateau detected after 3 cycles"))
+        self.assertEqual(result.primary, FailureClass.REPEATED_RETRY)
+        self.assertIn(FailureClass.PLATEAU, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_attempt_count_over_three_returns_repeated_retry_implies_plateau(
+        self,
+    ) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        # Spec REQ-10 names ``attempt_count`` but M01 ships
+        # ``tasks_completed`` only. Inject the spec field via setattr.
+        event.attempt_count = 4  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.REPEATED_RETRY)
+        self.assertIn(FailureClass.PLATEAU, result.implies)
+
+    def test_attempt_count_three_does_not_trip_plateau_branch(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        event.attempt_count = 3  # type: ignore[attr-defined]
+        result = classify(event)
+        # Spec REQ-10 says "exceeds 3" — 3 itself stays in the default branch.
+        self.assertEqual(result.primary, FailureClass.GATE_DEFER)
