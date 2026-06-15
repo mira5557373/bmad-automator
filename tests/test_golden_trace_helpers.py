@@ -4,7 +4,12 @@ import dataclasses
 import importlib
 import unittest
 
-from tests.golden_trace_helpers import GoldenTraceError, TraceEntry, TraceMismatch
+from tests.golden_trace_helpers import (
+    GoldenTraceError,
+    TraceDiff,
+    TraceEntry,
+    TraceMismatch,
+)
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -95,6 +100,39 @@ class TraceMismatchTests(unittest.TestCase):
         m = TraceMismatch(seq=5, field="length", actual=None, expected={"x": 1})
         self.assertIsNone(m.actual)
         self.assertEqual(m.expected, {"x": 1})
+
+
+class TraceDiffTests(unittest.TestCase):
+    def test_is_kw_only_dataclass(self) -> None:
+        self.assertTrue(dataclasses.is_dataclass(TraceDiff))
+        params = TraceDiff.__dataclass_params__  # type: ignore[attr-defined]
+        self.assertTrue(params.kw_only)
+
+    def test_required_fields(self) -> None:
+        names = {f.name for f in dataclasses.fields(TraceDiff)}
+        self.assertEqual(names, {"matched", "mismatches", "ok"})
+
+    def test_empty_mismatches_is_ok(self) -> None:
+        d = TraceDiff(matched=3, mismatches=[], ok=True)
+        self.assertTrue(d.ok)
+
+    def test_summary_includes_seq_and_field_for_each_mismatch(self) -> None:
+        m1 = TraceMismatch(seq=2, field="payload", actual={"x": 1}, expected={"x": 2})
+        m2 = TraceMismatch(seq=4, field="kind", actual="A", expected="B")
+        d = TraceDiff(matched=2, mismatches=[m1, m2], ok=False)
+        text = d.summary()
+        # Each mismatch is mentioned by seq and field; field-context lets a
+        # reader localize the regression without consulting the golden file.
+        self.assertIn("seq=2", text)
+        self.assertIn("payload", text)
+        self.assertIn("seq=4", text)
+        self.assertIn("kind", text)
+
+    def test_summary_for_ok_diff_is_succinct(self) -> None:
+        d = TraceDiff(matched=5, mismatches=[], ok=True)
+        text = d.summary()
+        self.assertIn("ok", text.lower())
+        self.assertIn("5", text)
 
 
 if __name__ == "__main__":

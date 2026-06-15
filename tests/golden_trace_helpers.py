@@ -61,8 +61,30 @@ class TraceMismatch:
     expected: object | None
 
 
-class TraceDiff:  # pragma: no cover - replaced in Task 5
-    pass
+@dataclass(kw_only=True)
+class TraceDiff:
+    """Result of comparing two traces. ``ok=True`` iff lengths match and no
+    arrival position diverged."""
+
+    matched: int
+    mismatches: list[TraceMismatch]
+    ok: bool
+
+    def summary(self) -> str:
+        """Human-readable summary including the arrival position and the
+        diverging field of each mismatch (NFR: Diagnostics).
+        """
+        if self.ok:
+            return f"trace ok ({self.matched} entries matched)"
+        lines = [
+            f"trace mismatch: {self.matched} matched, {len(self.mismatches)} mismatch(es)",
+        ]
+        for m in self.mismatches:
+            lines.append(
+                f"  seq={m.seq} field={m.field} "
+                f"actual={m.actual!r} expected={m.expected!r}"
+            )
+        return "\n".join(lines)
 
 
 def serialize_trace(entries: list[TraceEntry]) -> str:  # pragma: no cover - replaced
