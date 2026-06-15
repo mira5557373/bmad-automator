@@ -56,6 +56,24 @@ def _run_raw(text):
         return parse_ceilings_config(path)
 
 
+def _write_ledger(tmp, events, *, eol="\n", trailing_blanks=0):
+    """Write M01 ``events`` to ``events.jsonl`` under ``tmp``.
+
+    Each event is serialized through ``compact_json(event.to_dict())``
+    per REQ-15. ``eol`` defaults to ``\\n`` but tests can pass ``\\r\\n``
+    to exercise the NFR line-ending tolerance. ``trailing_blanks``
+    appends N blank lines to the end of the file to exercise the same.
+    """
+    ensure_dir(tmp)
+    path = Path(tmp) / "events.jsonl"
+    body = eol.join(compact_json(ev.to_dict()) for ev in events)
+    if events:
+        body += eol
+    body += eol * trailing_blanks
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 class ModuleImportTests(unittest.TestCase):
     def test_module_imports(self) -> None:
         self.assertTrue(hasattr(budget_ceilings, "parse_ceilings_config"))
