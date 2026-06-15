@@ -96,6 +96,12 @@ _WINDOW_SECONDS: dict[str, int] = {
     "30d": 2592000,
 }
 
+_RANK: dict[CeilingDecision, int] = {
+    CeilingDecision.ALLOW: 0,
+    CeilingDecision.WARN: 1,
+    CeilingDecision.BLOCK: 2,
+}
+
 
 def _parse_iso_timestamp(value: str) -> dt.datetime | None:
     """Parse an ``iso_now()``-style timestamp (REQ-08 anchor).
@@ -345,10 +351,22 @@ def evaluate_ceilings(
     applicable = [c for c in resolved if gate_name in c.gate_names]
     if not applicable:
         return CeilingDecision.ALLOW, "no_ceilings_configured"
-    # Multi-ceiling severity merge lands in Task 8 — pick first for now.
-    ceiling = applicable[0]
-    spent = _compute_spent(events_path, ceiling.window, now_iso)
-    return _decide(ceiling, spent)
+    # Compute every applicable verdict in declaration order so the
+    # tiebreak rule (REQ-10) emerges naturally from iteration order.
+    verdicts: list[tuple[CeilingDecision, str]] = []
+    for ceiling in applicable:
+        spent = _compute_spent(events_path, ceiling.window, now_iso)
+        verdicts.append(_decide(ceiling, spent))
+    # Manual scan for stability across Python versions — first index
+    # with the maximum rank wins (declaration-order tiebreak).
+    worst_index = 0
+    worst_rank = _RANK[verdicts[0][0]]
+    for i in range(1, len(verdicts)):
+        rank = _RANK[verdicts[i][0]]
+        if rank > worst_rank:
+            worst_index = i
+            worst_rank = rank
+    return verdicts[worst_index]
 
 
 def bypass_allowed() -> bool:

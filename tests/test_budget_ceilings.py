@@ -778,5 +778,120 @@ class EvaluateCeilingsGateFilterTests(unittest.TestCase):
                     self.assertIn("any_gate", reason)
 
 
+class EvaluateCeilingsMultiCeilingTests(unittest.TestCase):
+    def _event(self, cost):
+        return StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def test_block_outranks_warn(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        c1 = BudgetCeiling(
+            name="cap_a",
+            window="per_run",
+            limit_usd=2.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        c2 = BudgetCeiling(
+            name="cap_b",
+            window="per_run",
+            limit_usd=1.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(1.5)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
+            )
+        self.assertEqual(verdict, CeilingDecision.BLOCK)
+        self.assertIn("cap_b", reason)
+
+    def test_warn_outranks_allow(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        c1 = BudgetCeiling(
+            name="cap_a",
+            window="per_run",
+            limit_usd=100.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        c2 = BudgetCeiling(
+            name="cap_b",
+            window="per_run",
+            limit_usd=10.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(6.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
+            )
+        self.assertEqual(verdict, CeilingDecision.WARN)
+        self.assertIn("cap_b", reason)
+
+    def test_tie_break_uses_declaration_order(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        c1 = BudgetCeiling(
+            name="first",
+            window="per_run",
+            limit_usd=1.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        c2 = BudgetCeiling(
+            name="second",
+            window="per_run",
+            limit_usd=1.0,
+            warn_at=0.5,
+            gate_names=("init",),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(2.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
+            )
+        self.assertEqual(verdict, CeilingDecision.BLOCK)
+        self.assertTrue(reason.startswith("first:"))
+
+    def test_all_ceilings_below_warn_returns_allow_with_first_reason(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        c1 = BudgetCeiling(
+            name="alpha",
+            window="per_run",
+            limit_usd=100.0,
+            warn_at=0.9,
+            gate_names=("init",),
+        )
+        c2 = BudgetCeiling(
+            name="beta",
+            window="per_run",
+            limit_usd=200.0,
+            warn_at=0.9,
+            gate_names=("init",),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(1.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertTrue(reason.startswith("alpha:"))
+
+
 if __name__ == "__main__":
     unittest.main()
