@@ -875,5 +875,64 @@ class ClaudePArgvNormalizationTests(unittest.TestCase):
         )
 
 
+class RecorderRestorationOnExceptionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._baseline_emit = TelemetryEmitter.emit
+        self._baseline_state_write = _state_module.write_atomic_text
+
+    def tearDown(self) -> None:
+        TelemetryEmitter.emit = self._baseline_emit  # type: ignore[method-assign]
+        _state_module.write_atomic_text = self._baseline_state_write  # type: ignore[assignment]
+
+    def test_emit_restored_when_block_raises(self) -> None:
+        import tests.golden_trace_helpers as gh
+        orig_emit = TelemetryEmitter.emit
+        orig_state_write = _state_module.write_atomic_text
+        orig_hook = gh._CLAUDE_P_HOOK  # type: ignore[attr-defined]
+
+        class _MyError(RuntimeError):
+            pass
+
+        with self.assertRaises(_MyError):
+            with GoldenTraceRecorder(repo_root=Path(".")):
+                raise _MyError("synthetic")
+
+        self.assertIs(TelemetryEmitter.emit, orig_emit)
+        self.assertIs(_state_module.write_atomic_text, orig_state_write)
+        self.assertIs(gh._CLAUDE_P_HOOK, orig_hook)  # type: ignore[attr-defined]
+
+    def test_two_sequential_with_blocks_yield_independent_traces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z", run_id="r",
+                epic="e", story_key="s", agent="a", model="m", complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as r1:
+                emitter.emit(event)
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as r2:
+                emitter.emit(event)
+                emitter.emit(event)
+        self.assertEqual(len(r1.entries), 1)
+        self.assertEqual(len(r2.entries), 2)
+        self.assertEqual(r1.entries[0].seq, 0)
+        self.assertEqual(r2.entries[0].seq, 0)
+
+    def test_nested_recorders_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = GoldenTraceRecorder(repo_root=Path(tmp))
+            with rec:
+                with self.assertRaises(RuntimeError):
+                    with rec:
+                        pass
+
+    def test_second_distinct_recorder_rejected_while_first_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with GoldenTraceRecorder(repo_root=Path(tmp)):
+                with self.assertRaises(RuntimeError):
+                    with GoldenTraceRecorder(repo_root=Path(tmp)):
+                        pass
+
+
 if __name__ == "__main__":
     unittest.main()
