@@ -57,25 +57,25 @@ Critical rule:
 ## Orchestrator Helper Commands
 
 - `orchestrator-helper sprint-status get|exists|check-epic`
-- `orchestrator-helper parse-output`
+- `orchestrator-helper parse-output <file> <step> [--state-file F]`
 - `orchestrator-helper state-list`
 - `orchestrator-helper state-latest`
 - `orchestrator-helper state-latest-incomplete`
 - `orchestrator-helper state-summary`
 - `orchestrator-helper state-update`
-- `orchestrator-helper marker create|remove|check|heartbeat`
-- `orchestrator-helper normalize-key`
-- `orchestrator-helper story-file-status`
+- `orchestrator-helper marker path|create|remove|check|heartbeat`
+- `orchestrator-helper escalate <trigger> <context> [--state-file F]`
+- `orchestrator-helper commit-ready <story_id>`
+- `orchestrator-helper normalize-key <input> [--to id|key|prefix|json]`
+- `orchestrator-helper story-file-status <story>`
 - `orchestrator-helper verify-step`
 - `orchestrator-helper verify-code-review`
 - `orchestrator-helper get-epic-stories`
 - `orchestrator-helper check-epic-complete`
-- `orchestrator-helper check-blocking`
+- `orchestrator-helper check-blocking <story_id>`
 - `orchestrator-helper agents-build`
 - `orchestrator-helper agents-resolve`
-- `orchestrator-helper escalate session-crash <context>`
-- `orchestrator-helper commit-ready <story-key>`
-- `orchestrator-helper retro-agent`
+- `orchestrator-helper retro-agent --state-file <path>`
 
 These commands are the orchestration control plane. `escalate`, `commit-ready`,
 `marker create`, `verify-code-review`, `check-blocking`, `agents-resolve`, and
@@ -86,8 +86,8 @@ correlation key derived from the active marker.
 
 - `agent-config list`
 - `agent-config save`
-- `agent-config load`
-- `agent-config delete`
+- `agent-config load --file F --name N`
+- `agent-config delete --file F --name N`
 
 These support saved presets and generated agent plans.
 

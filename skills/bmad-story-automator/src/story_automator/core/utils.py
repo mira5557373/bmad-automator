@@ -76,6 +76,7 @@ def write_atomic(path: str | Path, data: str | bytes) -> None:
         # UnicodeEncodeError on non-Latin-1 content, and applies newline
         # translation that can double-CR text already containing \r\n. Binary
         # UTF-8 is portable and byte-exact, matching common.write_atomic.
+        # (Supersedes eb0b964's text-mode UTF-8 pin — same goal, stronger guarantee.)
         payload = data.encode("utf-8") if isinstance(data, str) else data
         with os.fdopen(fd, "wb") as handle:
             handle.write(payload)

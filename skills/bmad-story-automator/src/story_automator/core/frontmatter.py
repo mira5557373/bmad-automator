@@ -8,20 +8,31 @@ from typing import Any
 from .utils import parse_string_list_literal, read_text, trim_lines, unquote_scalar, write_atomic
 
 
-def extract_frontmatter(text: str) -> str:
-    if not text.startswith("---"):
-        return ""
-    parts = text.split("---", 2)
+_FENCE_LINE = re.compile(r"(?m)^---[ \t]*$")
+
+
+def _split_fenced(text: str) -> list[str] | None:
+    # The document must OPEN with a fence line that is exactly "---"
+    # (plus optional trailing whitespace). Splitting on the bare substring
+    # "---" would incorrectly terminate the frontmatter at the first "---"
+    # appearing inside a quoted value (e.g. customInstructions), silently
+    # dropping every key after it. Anchoring to whole lines avoids that.
+    if not re.match(r"^---[ \t]*(?:\n|$)", text):
+        return None
+    parts = _FENCE_LINE.split(text, maxsplit=2)
     if len(parts) < 3:
-        return ""
-    return parts[1].lstrip("\n")
+        return None
+    return parts
+
+
+def extract_frontmatter(text: str) -> str:
+    parts = _split_fenced(text)
+    return "" if parts is None else parts[1].lstrip("\n")
 
 
 def split_frontmatter(text: str) -> tuple[str, str]:
-    if not text.startswith("---"):
-        return "", text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    parts = _split_fenced(text)
+    if parts is None:
         return "", text
     return parts[1].lstrip("\n"), parts[2].lstrip("\n")
 

@@ -133,7 +133,7 @@ def review_completion(
                 "story_file_status": story_status,
                 "source": "story-file",
             }
-            if review_contract["syncSprintStatus"] and not sprint.done:
+            if review_contract["syncSprintStatus"] and sprint.status.lower() not in done_values:
                 payload["note"] = "sprint_status_not_updated"
             return payload
     return {
@@ -204,7 +204,11 @@ def _story_artifact_path(
     allow_prefix_fallback: bool = True,
 ) -> Path | None:
     artifacts = implementation_artifacts_dir(project_root)
-    if preferred_story:
+    # preferred_story originates from sprint-status.yaml keys, which are not
+    # trusted. Only accept a bare filename component so a crafted key like
+    # "../../etc/passwd" cannot escape the implementation-artifacts dir; any
+    # separator/".."-bearing value falls through to the safe prefix glob.
+    if preferred_story and Path(preferred_story).name == preferred_story and preferred_story not in {".", ".."}:
         preferred = artifacts / f"{preferred_story}.md"
         if preferred.is_file():
             return preferred

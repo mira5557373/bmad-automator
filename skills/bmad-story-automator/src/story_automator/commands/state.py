@@ -13,7 +13,7 @@ from ..core.runtime_policy import (
     snapshot_effective_policy,
 )
 from ..core.agent_config import normalize_model as _model_or_none
-from ..core.sprint import sprint_status_done_in_text
+from ..core.sprint import sprint_status_done_in_text, sprint_status_in_text
 from ..core.utils import (
     count_matches,
     ensure_dir,
@@ -49,6 +49,23 @@ def _yaml_value(value: Any) -> str:
     # WITHOUT JSON-decoding, so an ensure_ascii escape would round-trip as the
     # literal text "\uXXXX" and corrupt the value.
     return json.dumps(value, ensure_ascii=False)
+
+
+def _max_parallel(overrides: dict[str, Any]) -> int | None:
+    """Coerce overrides.maxParallel to a positive int, or None if invalid.
+
+    Returns 1 when the key is absent/None, clamps values below 1 up to 1, and
+    returns None for non-numeric input so the caller can emit the standard
+    ``{ok: false}`` error contract instead of crashing with a ValueError.
+    """
+    raw = overrides.get("maxParallel", 1)
+    if raw is None:
+        return 1
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 1 else 1
 
 
 def cmd_build_state_doc(args: list[str]) -> int:
@@ -118,11 +135,15 @@ def cmd_build_state_doc(args: list[str]) -> int:
     overrides = (
         config.get("overrides", {}) if isinstance(config.get("overrides"), dict) else {}
     )
+    max_parallel = _max_parallel(overrides)
+    if max_parallel is None:
+        write_json({"ok": False, "error": "invalid_max_parallel"})
+        return 1
     text = re.sub(
         r"(?m)^overrides:\n(?:(?:\s{2}.*\n)*)",
         "overrides:\n"
         f"  skipAutomate: {str(bool(overrides.get('skipAutomate', False))).lower()}\n"
-        f"  maxParallel: {int(overrides.get('maxParallel', 1) or 1)}\n",
+        f"  maxParallel: {max_parallel}\n",
         text,
     )
     custom_instructions = _yaml_value(config.get("customInstructions", ""))
@@ -236,7 +257,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
         "{{overrides.skipAutomate}}": str(
             bool(overrides.get("skipAutomate", False))
         ).lower(),
-        "{{overrides.maxParallel}}": str(int(overrides.get("maxParallel", 1) or 1)),
+        "{{overrides.maxParallel}}": str(max_parallel),
         "{{customInstructions}}": str(config.get("customInstructions", "")),
     }
     for key, value in body.items():
@@ -244,7 +265,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
     # Keep our M05 atomic-locked write: write_atomic_text already defaults to
     # encoding="utf-8" so it is strictly stronger than upstream's bare
-    # output_path.write_text(text, encoding="utf-8") fix from 605554f. The
+    # output_path.write_text(text, encoding="utf-8") fix from eb0b964. The
     # locked-atomic semantics MUST be preserved.
     lock_path = Path(output_folder).resolve() / _STATE_BUILD_LOCK_NAME
     try:
@@ -283,7 +304,15 @@ def cmd_sprint_compare(args: list[str]) -> int:
         before = story_range[: story_range.index(current_story)]
     sprint_text = read_text(sprint)
     project_root = get_project_root()
-    incomplete = [sid for sid in before if not sprint_status_done_in_text(sprint_text, sid, project_root)]
+    incomplete = []
+    for story_id in before:
+        # storyRange holds dotted ids ("1.2") while sprint-status rows use
+        # dashed prefixes / full keys ("1-2-password-reset"). Resolve through
+        # the shared normalizer instead of matching the dotted id literally,
+        # which would never match a real row and flag every prior story as
+        # incomplete. See sprint_status_in_text.
+        if not sprint_status_in_text(project_root, sprint_text, story_id).done:
+            incomplete.append(story_id)
     write_json({"ok": True, "incomplete": incomplete, "checked": before})
     return 0
 

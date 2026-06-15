@@ -118,6 +118,19 @@ jobs:
         run: |
           python -m story_automator --help >/dev/null
           story-automator --help >/dev/null
+          # Exercise a real command from a clean directory (outside the source
+          # tree) so a wheel that omits its bundled data/ is caught. --help
+          # alone short-circuits before any data load and hides such breakage.
+          workdir="$(mktemp -d)"
+          (cd "$workdir" && story-automator orchestrator-helper normalize-key 1.2 --to prefix >/dev/null)
+          # Guard against the bundled policy/data going missing from the wheel:
+          # build-cmd loads the bundled policy before anything else, so a broken
+          # package surfaces "bundled policy not found" here.
+          out="$(cd "$workdir" && story-automator tmux-wrapper build-cmd create 5.3 --agent claude 2>&1 || true)"
+          if printf '%s' "$out" | grep -q "bundled policy not found"; then
+            echo "Installed wheel is missing bundled policy/data: $out"
+            exit 1
+          fi
 
       - name: Check source-tree CLIs
         run: npm run test:cli

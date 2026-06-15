@@ -16,7 +16,23 @@ class SprintStatus:
     reason: str = ""
 
 
-def _status_from_content(project_root: str, content: str, story_key: str) -> SprintStatus:
+def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
+    status_file = sprint_status_file(project_root)
+    if not file_exists(status_file):
+        return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
+    return sprint_status_in_text(project_root, read_text(status_file), story_key)
+
+
+def sprint_status_in_text(project_root: str, content: str, story_key: str) -> SprintStatus:
+    """Resolve a story's status against an explicit sprint-status *content* blob.
+
+    Mirrors ``sprint_status_get`` but matches against the supplied content
+    instead of always reading the configured sprint-status file. This lets
+    callers that already hold a specific sprint-status file (e.g.
+    ``sprint-compare --sprint``) reuse the dotted-id -> dashed-prefix ->
+    full-key normalization machinery rather than matching dotted ids
+    literally against full-key rows.
+    """
     norm = normalize_story_key(project_root, story_key)
     if norm is not None:
         result = _best_status_match(project_root, content, story_key, norm)
@@ -29,17 +45,8 @@ def _status_from_content(project_root: str, content: str, story_key: str) -> Spr
     return SprintStatus(False, story_key, "not_found", False)
 
 
-def sprint_status_get(project_root: str, story_key: str) -> SprintStatus:
-    status_file = sprint_status_file(project_root)
-    if not file_exists(status_file):
-        return SprintStatus(False, story_key, "unknown", False, "sprint-status.yaml not found")
-    return _status_from_content(project_root, read_text(status_file), story_key)
-
-
 def sprint_status_done_in_text(content: str, story_id: str, project_root: str = "") -> bool:
-    # Text-based variant of sprint_status_get for callers that already hold the
-    # sprint-status content and an explicit path (e.g. sprint-compare).
-    return _status_from_content(project_root, content, story_id).done
+    return sprint_status_in_text(project_root, content, story_id).done
 
 
 def sprint_status_epic(project_root: str, epic: str) -> tuple[list[str], int]:

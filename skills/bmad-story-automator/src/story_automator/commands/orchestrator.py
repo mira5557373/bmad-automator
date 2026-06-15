@@ -161,6 +161,33 @@ def _emit_safe(event) -> None:
         logger.warning("telemetry emit failed for %s: %s", type(event).__name__, exc)
 
 
+def _coerce_int(value: object, default: int) -> int | None:
+    """Parse an int from CLI input. Empty/None -> default; non-numeric -> None.
+
+    Returning None lets the caller emit a structured error instead of crashing
+    with an uncaught ValueError on corrupted/non-numeric marker input.
+    """
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return default
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _scalar_or_empty(value: object) -> str:
+    """Render a frontmatter scalar, mapping YAML/JSON null sentinels to "".
+
+    currentStory/currentStep are persisted as JSON null when unset; the simple
+    frontmatter parser surfaces that as the literal string "null", which would
+    otherwise leak into the human-facing state summary.
+    """
+    if value is None or value in ("null", "~"):
+        return ""
+    return str(value)
+
+
 def cmd_orchestrator_helper(args: list[str]) -> int:
     if not args:
         return _usage(1)
@@ -424,14 +451,19 @@ def _marker(args: list[str]) -> int:
                 )
                 return 1
         ensure_dir(marker_file.parent)
+        remaining = _coerce_int(options["remaining"], 0)
+        pid = _coerce_int(options["pid"], 0)
+        if remaining is None or pid is None:
+            print_json({"ok": False, "error": "invalid_int"})
+            return 1
         payload = {
             "epic": options["epic"],
             "currentStory": options["story"],
-            "storiesRemaining": safe_int(options["remaining"], 0),
+            "storiesRemaining": remaining,
             "stateFile": options["state-file"],
             "createdAt": iso_now(),
             "heartbeat": options["heartbeat"] or iso_now(),
-            "pid": safe_int(options["pid"], 0),
+            "pid": pid,
             "projectSlug": options["project-slug"],
         }
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
@@ -564,8 +596,8 @@ def _state_summary(args: list[str]) -> int:
         "ok": True,
         "epic": str(fields.get("epic") or ""),
         "epicName": str(fields.get("epicName") or ""),
-        "currentStory": str(fields.get("currentStory") or ""),
-        "currentStep": str(fields.get("currentStep") or ""),
+        "currentStory": _scalar_or_empty(fields.get("currentStory")),
+        "currentStep": _scalar_or_empty(fields.get("currentStep")),
         "status": str(fields.get("status") or ""),
         "lastUpdated": str(fields.get("lastUpdated") or ""),
         "policyVersion": policy_version,
@@ -617,6 +649,7 @@ def _state_update(args: list[str]) -> int:
     # state doc in place, so a crash mid-write or a concurrent reader can see a
     # half-written/empty state document. Every other durable write in this
     # codebase goes through atomic_write (temp file + fsync + os.replace).
+    # (Supersedes eb0b964's bare atomic_write — adds the M04 audit-trail hook.)
     atomic_write(Path(args[0]), text)
 
     # REQ-12: audit after the write succeeds. Failures from append are

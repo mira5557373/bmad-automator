@@ -207,12 +207,11 @@ def _cmd_parse_story(args: list[str]) -> int:
 
 def _cmd_parse_story_range(args: list[str]) -> int:
     user_input = _arg_value(args, "--input")
-    # safe_int funnels a non-numeric --total (e.g. an unexpanded shell var) to 0,
-    # which parse_story_range rejects with ValueError -> the existing structured
-    # error below, instead of an uncaught traceback that breaks the JSON contract.
-    total = safe_int(_arg_value(args, "--total"), 0)
     ids = _arg_value(args, "--ids") or ""
     try:
+        # int() inside the try so a non-numeric --total returns the structured
+        # error instead of crashing with an uncaught ValueError.
+        total = int(_arg_value(args, "--total") or 0)
         print_json(parse_story_range(user_input, total, ids))
         return 0
     except ValueError:
