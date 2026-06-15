@@ -408,5 +408,17 @@ class LedgerFixturePatternTests(unittest.TestCase):
         self.assertEqual(getattr(parsed, "cost_usd"), 0.25)
 
 
+class EvaluatorSurfaceTests(unittest.TestCase):
+    def test_evaluate_ceilings_is_importable(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings  # noqa: F401
+
+    def test_bypass_allowed_is_importable(self) -> None:
+        from story_automator.core.budget_ceilings import bypass_allowed  # noqa: F401
+
+    def test_exports_include_new_callables(self) -> None:
+        self.assertIn("evaluate_ceilings", budget_ceilings.__all__)
+        self.assertIn("bypass_allowed", budget_ceilings.__all__)
+
+
 if __name__ == "__main__":
     unittest.main()

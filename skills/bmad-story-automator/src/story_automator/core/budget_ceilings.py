@@ -19,13 +19,22 @@ Those land in M03-M2 (evaluator) and M03-M3 (BMAD wiring).
 
 from __future__ import annotations
 
+import datetime as dt  # noqa: F401 — used by evaluate_ceilings in M03-M2 tasks T6+
 import enum
 import json
 import math
+import os  # noqa: F401 — used by bypass_allowed in M03-M2 task T10
+import sys  # noqa: F401 — used by bypass_allowed in M03-M2 task T10
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["BudgetCeiling", "CeilingDecision", "parse_ceilings_config"]
+__all__ = [
+    "BudgetCeiling",
+    "CeilingDecision",
+    "bypass_allowed",
+    "evaluate_ceilings",
+    "parse_ceilings_config",
+]
 
 
 class CeilingDecision(enum.Enum):
@@ -209,3 +218,33 @@ def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]
         if ceiling is not None:
             parsed.append(ceiling)
     return parsed
+
+
+def evaluate_ceilings(
+    events_path: str | Path,
+    gate_name: str,
+    now_iso: str,
+    *,
+    ceilings: list[BudgetCeiling] | None = None,
+    workflow_json_path: str | Path | None = None,
+) -> tuple[CeilingDecision, str]:
+    """Evaluate budget ceilings against a JSONL ledger (REQ-06).
+
+    Returns the most severe ``CeilingDecision`` across all ceilings whose
+    ``gate_names`` tuple contains ``gate_name``, along with a reason
+    string describing the deciding ceiling. When both ``ceilings`` and
+    ``workflow_json_path`` are ``None`` the function returns the
+    ``(ALLOW, "no_ceilings_configured")`` sentinel rather than reading
+    anything (REQ-06).
+    """
+    raise NotImplementedError
+
+
+def bypass_allowed() -> bool:
+    """Check whether ceiling enforcement may be bypassed (REQ-11).
+
+    Returns ``True`` only when both ``BMAD_ALLOW_CEILING_BYPASS == "1"``
+    in the environment **and** ``sys.stdin.isatty()`` is true. Any other
+    combination returns ``False``. Never prompts and never reads stdin.
+    """
+    raise NotImplementedError
