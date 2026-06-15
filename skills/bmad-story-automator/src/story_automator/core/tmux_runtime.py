@@ -25,6 +25,30 @@ from .utils import (
     run_cmd,
 )
 from .runtime_layout import runtime_provider
+from .telemetry_emitter import TelemetryEmitter
+from .telemetry_events import (
+    TmuxSessionCompleted,
+    TmuxSessionCrashed,
+    TmuxSessionSpawned,
+)
+
+_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
+
+
+def _telemetry_path(project_root: str | None) -> Path:
+    base = Path(project_root) if project_root else Path(get_project_root())
+    return (base / "telemetry" / "events.jsonl").resolve()
+
+
+def _telemetry_emitter(project_root: str | None) -> TelemetryEmitter:
+    path = _telemetry_path(project_root)
+    cached = _EMITTER_CACHE.get(path)
+    if cached is not None:
+        return cached
+    emitter = TelemetryEmitter(path)
+    _EMITTER_CACHE[path] = emitter
+    return emitter
+
 
 STATE_SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 200
@@ -244,8 +268,36 @@ def spawn_session(
 ) -> tuple[str, int]:
     resolved_mode = _resolve_spawn_mode(mode)
     if resolved_mode == "legacy":
-        return _spawn_legacy(session, command, selected_agent, project_root)
-    return _spawn_runner(session, command, selected_agent, project_root)
+        output, code = _spawn_legacy(session, command, selected_agent, project_root)
+    else:
+        output, code = _spawn_runner(session, command, selected_agent, project_root)
+    if code == 0:
+        _emit_tmux_spawned(session, project_root)
+    return output, code
+
+
+def _emit_tmux_spawned(session: str, project_root: str | None) -> None:
+    pid = _safe_int(_session_pid(session))
+    geom_out, geom_code = run_cmd(
+        "tmux", "display-message", "-p", "-t", session,
+        "#{pane_width}x#{pane_height}",
+    )
+    geometry = geom_out.strip() if geom_code == 0 else ""
+    _telemetry_emitter(project_root).emit(TmuxSessionSpawned(
+        timestamp=iso_now(),
+        run_id="",
+        session_name=session,
+        story_key="",
+        pid=pid,
+        pane_geometry=geometry,
+    ))
+
+
+def _session_pid(session: str) -> str:
+    out, code = run_cmd(
+        "tmux", "display-message", "-p", "-t", session, "#{pane_pid}",
+    )
+    return out.strip() if code == 0 else ""
 
 
 def heartbeat_check(
@@ -270,7 +322,9 @@ def heartbeat_check(
 
     if _is_terminal_state(state):
         pid = str(state.get("childPid") or "")
-        status = "completed" if str(state.get("result") or "") == "success" else "dead"
+        result = str(state.get("result") or "")
+        status = "completed" if result == "success" else "dead"
+        _emit_heartbeat_terminal(session, state, status, project_root)
         return (status, 0.0, pid, prompt)
 
     child_pid = _safe_int(state.get("childPid"))
@@ -285,10 +339,51 @@ def heartbeat_check(
     status = session_status(session, full=False, codex=selected_agent == "codex", project_root=project_root, mode=resolved_mode)
     public = str(status["session_state"])
     if public == "completed":
+        _emit_tmux_completed(session, state, project_root)
         return ("completed", 0.0, str(child_pid), prompt)
     if public in {"crashed", "stuck", "not_found"}:
+        _emit_tmux_crashed(session, state, project_root)
         return ("dead", 0.0, str(child_pid), prompt)
     return ("idle", 0.0, str(child_pid), prompt)
+
+
+def _emit_heartbeat_terminal(
+    session: str, state: dict, status: str, project_root: str | None,
+) -> None:
+    if status == "completed":
+        _emit_tmux_completed(session, state, project_root)
+    else:
+        _emit_tmux_crashed(session, state, project_root)
+
+
+def _emit_tmux_completed(
+    session: str, state: dict, project_root: str | None,
+) -> None:
+    exit_code = _safe_int(state.get("exitCode"))
+    duration_s = float(state.get("durationSeconds") or 0.0)
+    _telemetry_emitter(project_root).emit(TmuxSessionCompleted(
+        timestamp=iso_now(),
+        run_id="",
+        session_name=session,
+        story_key="",
+        exit_code=exit_code,
+        duration_s=duration_s,
+    ))
+
+
+def _emit_tmux_crashed(
+    session: str, state: dict, project_root: str | None,
+) -> None:
+    exit_code = _safe_int(state.get("exitCode"))
+    last_capture = _safe_int(state.get("lastCaptureChars"))
+    _telemetry_emitter(project_root).emit(TmuxSessionCrashed(
+        timestamp=iso_now(),
+        run_id="",
+        session_name=session,
+        story_key="",
+        exit_code=exit_code,
+        last_capture_chars=last_capture,
+    ))
 
 
 def session_status(

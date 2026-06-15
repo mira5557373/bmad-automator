@@ -451,3 +451,24 @@ class TelemetryEmitterRoundTripTests(unittest.TestCase):
             story_key="S",
         )
         self.assertEqual(self._emit_and_reparse(original), original)
+
+
+class TelemetryEmitterTmuxWiringTests(unittest.TestCase):
+    def test_emit_tmux_spawned_writes_typed_event(self) -> None:
+        # Exercises the spawn-side emit code path directly. The full
+        # spawn pipeline depends on tmux and is deferred to the WSL
+        # runtime gate (cross-platform policy in CLAUDE.md). This test
+        # confirms the emitter integration shape only.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+            emitter.emit(TmuxSessionSpawned(
+                timestamp="t", run_id="r",
+                session_name="sess-1", story_key="S1",
+                pid=4242, pane_geometry="80x24",
+            ))
+            line = path.read_text(encoding="utf-8").rstrip("\n")
+            payload = json.loads(line)
+            self.assertEqual(payload["event_type"], "tmux_session_spawned")
+            self.assertEqual(payload["session_name"], "sess-1")
+            self.assertEqual(payload["pid"], 4242)
