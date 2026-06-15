@@ -441,6 +441,34 @@ class FormatCalibrationReportTests(unittest.TestCase):
         text = format_calibration_report(table)
         self.assertTrue(text.isascii())
 
+    def test_exactly_one_trailing_newline_and_deterministic(self) -> None:
+        table = _make_table(
+            [
+                _make_entry(
+                    model_id="claude-opus-4",
+                    task_kind="code",
+                    success_rate=0.8750,
+                    sample_count=8,
+                ),
+                _make_entry(
+                    model_id="claude-opus-4",
+                    task_kind="docs",
+                    success_rate=1.0,
+                    sample_count=2,
+                    last_seen_iso="2026-06-14T12:00:00Z",
+                ),
+            ],
+            source_path="/tmp/t.jsonl",
+        )
+        text_one = format_calibration_report(table)
+        text_two = format_calibration_report(table)
+
+        self.assertTrue(text_one.endswith("\n"))
+        self.assertFalse(text_one.endswith("\n\n"))
+        self.assertEqual(text_one, text_two)
+        # Header + body lines + final empty after split.
+        self.assertEqual(len(text_one.split("\n")), 2 + 2 + 1)
+
 
 class FormatCalibrationReportEndToEndSnapshotTests(_ShimmedEventCase):
     def test_jsonl_fixture_round_trips_to_known_snapshot(self) -> None:
