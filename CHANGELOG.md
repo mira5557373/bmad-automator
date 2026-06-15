@@ -101,6 +101,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (6cd84c6)
 - docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
@@ -126,6 +127,7 @@
 
 ### Tests
 
+- test(m13): cover seed_soak_dir fallback path when story_automator missing (67e3253)
 - test(m13): pin verifier stdlib-only import allowlist (0b92570)
 - test(m13): pin CRLF/LF portability in verifier reads (60677c9)
 - test(m13): pin deterministic sorted finding output (35d39f2)
@@ -173,6 +175,7 @@
 
 ### Other
 
+- plan(m13): integration-m2 seed + docs implementation plan (d65c466)
 - plan(m13): foundation-m1 verify-format implementation plan (c284e3d)
 - spec(m13-soak): copy spec into worktree (e03bcb5)
 - build: gitignore sw init outputs (78f54c6)
