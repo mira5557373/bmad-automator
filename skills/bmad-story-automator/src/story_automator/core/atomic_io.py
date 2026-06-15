@@ -16,6 +16,7 @@ from story_automator.core.common import compact_json, iso_now
 
 __all__ = [
     "AtomicWriteRetryExhausted",
+    "HeartbeatThread",
     "RunLockBusy",
     "RunLockHandle",
     "RunLockIdentity",
@@ -329,3 +330,45 @@ def is_stale(
     if age <= _STALE_HEARTBEAT_WINDOW_S:
         return False
     return not psutil.pid_exists(identity.pid)
+
+
+class HeartbeatThread(threading.Thread):
+    """Daemon thread that refreshes a run lock's heartbeat field.
+
+    REQ-08: subclasses ``threading.Thread`` with ``daemon=True``; the
+    class-level ``interval`` constant is 60.0 seconds. ``stop()`` sets a
+    ``threading.Event`` that the ``run()`` loop polls between writes, so
+    shutdown is observed within at most one tick rather than waiting up
+    to a full interval.
+
+    The constructor accepts an optional ``interval`` argument so unit
+    tests can run with sub-second tick rates without mutating the class
+    constant. The on-disk payload is refreshed via ``write_atomic_text``,
+    inheriting the same per-path serialization the rest of the module
+    uses — concurrent writes through ``write_atomic_text`` on the same
+    path never interleave.
+    """
+
+    interval: float = 60.0
+
+    def __init__(
+        self,
+        *,
+        lock_path: Path,
+        identity: RunLockIdentity,
+        interval: float | None = None,
+    ) -> None:
+        super().__init__(daemon=True)
+        self._lock_path = Path(lock_path)
+        self._identity = identity
+        if interval is not None:
+            self.interval = interval
+        self._stop_event = threading.Event()
+        self.write_errors: int = 0
+
+    def stop(self) -> None:
+        """Signal the loop to exit at its next wake-up."""
+        self._stop_event.set()
+
+    def run(self) -> None:  # pragma: no cover - filled in Task 6
+        return None

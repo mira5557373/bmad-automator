@@ -968,3 +968,67 @@ class IsStaleFalseBranchTests(unittest.TestCase):
         ) as pid_exists_spy:
             self.assertFalse(is_stale(identity, now=now))
             pid_exists_spy.assert_not_called()
+
+
+class HeartbeatThreadConstructorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def _identity(self):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        return RunLockIdentity(
+            pid=os.getpid(),
+            start_time=0.0,
+            hostname="h",
+            heartbeat_iso="2026-06-15T00:00:00Z",
+            run_id="r",
+        )
+
+    def test_subclasses_threading_thread(self) -> None:
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        self.assertTrue(issubclass(HeartbeatThread, threading.Thread))
+
+    def test_class_interval_constant_is_60_seconds(self) -> None:
+        # REQ-08: "an `interval` constant of 60.0 seconds". The class-level
+        # attribute is the spec'd surface; instances may override via the
+        # constructor for testing without mutating the class default.
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        self.assertEqual(HeartbeatThread.interval, 60.0)
+
+    def test_instance_is_daemon(self) -> None:
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        thread = HeartbeatThread(
+            lock_path=self.dir / "x.payload",
+            identity=self._identity(),
+        )
+        self.assertTrue(thread.daemon)
+
+    def test_stop_method_exists_and_returns_none(self) -> None:
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        thread = HeartbeatThread(
+            lock_path=self.dir / "x.payload",
+            identity=self._identity(),
+        )
+        # stop() must be safe to call before start() — it just sets an Event.
+        self.assertIsNone(thread.stop())
+
+    def test_constructor_accepts_optional_interval_override(self) -> None:
+        # Tests need sub-second intervals to avoid 60s waits. The class
+        # constant stays 60.0 per REQ-08; per-instance override does not
+        # mutate the class attribute.
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        thread = HeartbeatThread(
+            lock_path=self.dir / "x.payload",
+            identity=self._identity(),
+            interval=0.05,
+        )
+        self.assertEqual(thread.interval, 0.05)
+        self.assertEqual(HeartbeatThread.interval, 60.0)
