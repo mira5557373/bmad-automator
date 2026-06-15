@@ -482,16 +482,20 @@ def _escalate(args: list[str]) -> int:
         retries = _parse_context_int(context, "retries")
         limit = crash_max_retries(policy)
         if retries >= limit:
+            story = _parse_context_str(context, "story")
+            session = _parse_context_str(context, "session")
+            norm = normalize_story_key(get_project_root(), story) if story else None
+            epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
             _telemetry_emitter().emit(
                 StoryFailed(
                     timestamp=iso_now(),
                     run_id="",
-                    epic="",
-                    story_key="",
+                    epic=epic,
+                    story_key=story,
                     error_class="session_crash",
                     reason=f"Session crashed after {retries} retries",
                     attempts=retries,
-                    final_session="",
+                    final_session=session,
                 )
             )
             print_json(
@@ -736,6 +740,11 @@ def _verify_step(args: list[str]) -> int:
 def _parse_context_int(context: str, key: str) -> int:
     match = re.search(rf"{re.escape(key)}=(\d+)", context)
     return int(match.group(1)) if match else 0
+
+
+def _parse_context_str(context: str, key: str) -> str:
+    match = re.search(rf"{re.escape(key)}=(\S+)", context)
+    return match.group(1) if match else ""
 
 
 def _flag_value(args: list[str], idx: int, flag: str) -> str:

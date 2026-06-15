@@ -90,5 +90,38 @@ class CommitReadyWiringTests(unittest.TestCase):
             self.assertEqual(ev["epic"], "2")
 
 
+class EscalateSessionCrashWiringTests(unittest.TestCase):
+    def test_session_crash_emit_extracts_story_and_epic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            fake_policy = {"max_retries": 2}
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+                mock.patch.object(
+                    orchestrator, "load_runtime_policy", return_value=fake_policy
+                ),
+                mock.patch.object(orchestrator, "crash_max_retries", return_value=2),
+            ):
+                rc = orchestrator._escalate(
+                    ["session-crash", "retries=3 story=3.7 session=sess-abc"]
+                )
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+            self.assertEqual(ev["event_type"], "story_failed")
+            self.assertEqual(ev["story_key"], "3.7")
+            self.assertEqual(ev["epic"], "3")
+            self.assertEqual(ev["attempts"], 3)
+            self.assertEqual(ev["final_session"], "sess-abc")
+            self.assertEqual(ev["error_class"], "session_crash")
+
+
 if __name__ == "__main__":
     unittest.main()
