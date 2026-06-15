@@ -593,3 +593,36 @@ class SymbolPresentTests(unittest.TestCase):
 
         report = validate_gaps([self._gap("")], repo_root=self.root)
         self.assertFalse(report.statuses[0].symbol_present)
+
+
+class AllSymbolsActuallyDefinedTests(unittest.TestCase):
+    """REQ-16: every name in `__all__` must actually be defined.
+
+    The Task 1 import-contract test only checks `__all__` membership;
+    this test closes the gap by asserting each declared name resolves
+    to a real attribute on the module.
+    """
+
+    def test_each_all_symbol_resolves(self) -> None:
+        from story_automator.core import gap_validator
+
+        for name in gap_validator.__all__:
+            self.assertTrue(
+                hasattr(gap_validator, name),
+                f"__all__ advertises {name!r} but the module has no such attribute",
+            )
+
+    def test_no_unrelated_layer_imports(self) -> None:
+        """Quality gate: no import from other M06a layers or from commands/."""
+        import inspect
+
+        from story_automator.core import gap_validator
+
+        source = inspect.getsource(gap_validator)
+        for forbidden in (
+            "from .spec_compliance",
+            "from .feature_tester",
+            "from story_automator.commands",
+            "from ..commands",
+        ):
+            self.assertNotIn(forbidden, source)
