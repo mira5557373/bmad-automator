@@ -12,6 +12,7 @@ from tests.golden_trace_helpers import (
     TraceDiff,
     TraceEntry,
     TraceMismatch,
+    compare_traces,
     load_golden,
     serialize_trace,
 )
@@ -275,6 +276,40 @@ class LoadGoldenRejectionTests(unittest.TestCase):
         self.assertIn("malformed JSON", str(ctx.exception))
         # JSONDecodeError must be chained as __cause__ for diagnostics.
         self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
+
+
+class CompareTracesEqualTests(unittest.TestCase):
+    def test_identical_lists_yield_ok_true(self) -> None:
+        entries = [
+            TraceEntry(seq=0, channel="event", kind="A", payload={"x": 1}),
+            TraceEntry(seq=1, channel="state", kind="mutation", payload={"path": "p"}),
+        ]
+        # Deliberate copy to ensure object identity isn't being relied on.
+        actual = [
+            TraceEntry(
+                seq=e.seq, channel=e.channel, kind=e.kind, payload=dict(e.payload)
+            )
+            for e in entries
+        ]
+        diff = compare_traces(actual, entries)
+        self.assertTrue(diff.ok)
+        self.assertEqual(diff.matched, 2)
+        self.assertEqual(diff.mismatches, [])
+
+    def test_empty_lists_yield_ok_true(self) -> None:
+        diff = compare_traces([], [])
+        self.assertTrue(diff.ok)
+        self.assertEqual(diff.matched, 0)
+        self.assertEqual(diff.mismatches, [])
+
+    def test_payload_key_order_irrelevant_for_equality(self) -> None:
+        # Two payloads with the same keys/values but different insertion order
+        # must compare equal (dict equality is order-insensitive, and we want
+        # the byte-equal serialization to imply byte-equal comparison too).
+        a = [TraceEntry(seq=0, channel="event", kind="X", payload={"a": 1, "b": 2})]
+        g = [TraceEntry(seq=0, channel="event", kind="X", payload={"b": 2, "a": 1})]
+        diff = compare_traces(a, g)
+        self.assertTrue(diff.ok)
 
 
 if __name__ == "__main__":

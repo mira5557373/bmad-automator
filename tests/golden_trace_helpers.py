@@ -152,7 +152,65 @@ def load_golden(path: Path) -> list[TraceEntry]:
     return entries
 
 
-def compare_traces(  # pragma: no cover - replaced
-    actual: list[TraceEntry], golden: list[TraceEntry]
-) -> TraceDiff:
-    raise NotImplementedError
+def compare_traces(actual: list[TraceEntry], golden: list[TraceEntry]) -> TraceDiff:
+    """Positional comparison of two traces (REQ-09).
+
+    Walks both lists in arrival order, recording a TraceMismatch at the
+    first diverging field per index. Length divergence appends "length"
+    mismatches for the tail of whichever list is longer.
+    """
+    mismatches: list[TraceMismatch] = []
+    matched = 0
+    common = min(len(actual), len(golden))
+    for i in range(common):
+        a = actual[i]
+        g = golden[i]
+        field = _first_diverging_field(a, g)
+        if field is None:
+            matched += 1
+            continue
+        mismatches.append(
+            TraceMismatch(
+                seq=i,
+                field=field,
+                actual=_field_value(a, field),
+                expected=_field_value(g, field),
+            )
+        )
+    # Tail-length mismatches (one side is longer).
+    for i in range(common, len(actual)):
+        mismatches.append(
+            TraceMismatch(seq=i, field="length", actual=actual[i], expected=None)
+        )
+    for i in range(common, len(golden)):
+        mismatches.append(
+            TraceMismatch(seq=i, field="length", actual=None, expected=golden[i])
+        )
+    ok = not mismatches and len(actual) == len(golden)
+    return TraceDiff(matched=matched, mismatches=mismatches, ok=ok)
+
+
+def _first_diverging_field(a: TraceEntry, g: TraceEntry) -> MismatchField | None:
+    """Return the first field name where two entries differ, in the order
+    channel -> kind -> payload. ``seq`` is the arrival index, not a value
+    to compare. Returns None if entries are equal.
+    """
+    if a.channel != g.channel:
+        return "channel"
+    if a.kind != g.kind:
+        return "kind"
+    if a.payload != g.payload:
+        return "payload"
+    return None
+
+
+def _field_value(entry: TraceEntry, field: MismatchField) -> object | None:
+    """Look up the value of a diverging field for diagnostics."""
+    if field == "channel":
+        return entry.channel
+    if field == "kind":
+        return entry.kind
+    if field == "payload":
+        return entry.payload
+    # "length" is handled by the caller (one side has no entry).
+    return None
