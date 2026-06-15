@@ -296,6 +296,42 @@ class BuildCalibrationMixedAggregationTests(unittest.TestCase):
         entry = table.entries[("m", "t")]
         self.assertEqual(entry.last_seen_iso, "2026-06-14T15:00:00Z")
 
+    def test_two_distinct_keys_aggregate_independently(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            lines = [
+                _completed_line(
+                    "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
+                ),
+                _failed_line(
+                    "2026-06-14T10:01:00Z", "r2", "S-2", "claude-opus-4", "code"
+                ),
+                _completed_line(
+                    "2026-06-14T10:02:00Z", "r3", "S-3", "gpt-5-codex", "review"
+                ),
+                _completed_line(
+                    "2026-06-14T10:03:00Z", "r4", "S-4", "gpt-5-codex", "review"
+                ),
+            ]
+            _write_jsonl(ledger, lines)
+            table = build_calibration(ledger)
+
+        self.assertEqual(
+            set(table.entries.keys()),
+            {("claude-opus-4", "code"), ("gpt-5-codex", "review")},
+        )
+        opus = table.entries[("claude-opus-4", "code")]
+        gpt = table.entries[("gpt-5-codex", "review")]
+        self.assertEqual(opus.success_rate, 0.5)
+        self.assertEqual(opus.sample_count, 2)
+        self.assertEqual(opus.last_seen_iso, "2026-06-14T10:01:00Z")
+        self.assertEqual(gpt.success_rate, 1.0)
+        self.assertEqual(gpt.sample_count, 2)
+        self.assertEqual(gpt.last_seen_iso, "2026-06-14T10:03:00Z")
+        self.assertEqual(table.total_events_scanned, 4)
+
 
 class BuildCalibrationParsingTolerationTests(unittest.TestCase):
     @classmethod
