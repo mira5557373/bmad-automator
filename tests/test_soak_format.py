@@ -304,3 +304,86 @@ class ConfigJsonTests(unittest.TestCase):
                 "{not json", encoding="utf-8", newline=""
             )
             self.assertEqual(main([str(root)]), 1)
+
+
+class TelemetryJsonlTests(unittest.TestCase):
+    def test_empty_file_passes(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text("", encoding="utf-8", newline="")
+            self.assertEqual(main([str(root)]), 0)
+
+    def test_blank_lines_are_skipped(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '{"event_type":"X","ts":"2026-06-13T00:00:00Z"}\n\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 0)
+
+    def test_invalid_json_line_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '{"event_type":"X","ts":"2026-06-13T00:00:00Z"}\nnot-json\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_missing_event_type_fails(self) -> None:
+        # REQ-13(d)
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '{"ts":"2026-06-13T00:00:00Z"}\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_missing_ts_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '{"event_type":"X"}\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_non_object_line_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "telemetry.jsonl").write_text(
+                '["not","object"]\n',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)

@@ -140,6 +140,34 @@ def _validate_config_json(arm_dir: Path) -> list[str]:
     return findings
 
 
+def _validate_telemetry_jsonl(arm_dir: Path) -> list[str]:
+    path = arm_dir / "telemetry.jsonl"
+    findings: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"{path}: cannot read: {exc}"]
+    # NFR: normalize CRLF to LF before splitting so behavior matches
+    # across OSes.
+    for idx, raw_line in enumerate(text.replace("\r\n", "\n").split("\n"), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as exc:
+            findings.append(f"{path}:{idx}: invalid JSON: {exc.msg}")
+            continue
+        if not isinstance(obj, dict):
+            findings.append(f"{path}:{idx}: line is not a JSON object")
+            continue
+        if not isinstance(obj.get("event_type"), str):
+            findings.append(f"{path}:{idx}: missing string field 'event_type'")
+        if not isinstance(obj.get("ts"), str):
+            findings.append(f"{path}:{idx}: missing string field 'ts'")
+    return findings
+
+
 def _validate_arm_dir(arm_dir: Path) -> list[str]:
     findings: list[str] = []
     for name in REQUIRED_FILES:
@@ -149,6 +177,8 @@ def _validate_arm_dir(arm_dir: Path) -> list[str]:
         findings.extend(_validate_report_md(arm_dir))
     if (arm_dir / "config.json").is_file():
         findings.extend(_validate_config_json(arm_dir))
+    if (arm_dir / "telemetry.jsonl").is_file():
+        findings.extend(_validate_telemetry_jsonl(arm_dir))
     return findings
 
 
