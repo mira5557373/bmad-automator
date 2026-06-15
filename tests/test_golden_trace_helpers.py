@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,6 +221,60 @@ class LoadGoldenHappyPathTests(unittest.TestCase):
             path.write_text("[]\n", encoding="utf-8")
             loaded = load_golden(path)
         self.assertEqual(loaded, [])
+
+
+class LoadGoldenRejectionTests(unittest.TestCase):
+    def _write(self, body: str) -> Path:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        tmp.write(body)
+        tmp.close()
+        path = Path(tmp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_unknown_channel_raises(self) -> None:
+        path = self._write('[{"seq":0,"channel":"file","kind":"x","payload":{}}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("unknown channel", str(ctx.exception))
+        self.assertIn("'file'", str(ctx.exception))
+
+    def test_missing_seq_raises(self) -> None:
+        path = self._write('[{"channel":"event","kind":"x","payload":{}}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("seq", str(ctx.exception))
+
+    def test_missing_payload_raises(self) -> None:
+        path = self._write('[{"seq":0,"channel":"event","kind":"x"}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("payload", str(ctx.exception))
+
+    def test_top_level_not_a_list_raises(self) -> None:
+        path = self._write('{"seq":0}')
+        with self.assertRaises(GoldenTraceError):
+            load_golden(path)
+
+    def test_entry_not_a_dict_raises(self) -> None:
+        path = self._write('["not-an-object"]')
+        with self.assertRaises(GoldenTraceError):
+            load_golden(path)
+
+    def test_payload_not_a_dict_raises(self) -> None:
+        path = self._write('[{"seq":0,"channel":"event","kind":"x","payload":[]}]')
+        with self.assertRaises(GoldenTraceError):
+            load_golden(path)
+
+    def test_malformed_json_raises_golden_trace_error(self) -> None:
+        path = self._write("not json at all")
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("malformed JSON", str(ctx.exception))
+        # JSONDecodeError must be chained as __cause__ for diagnostics.
+        self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
 
 
 if __name__ == "__main__":
