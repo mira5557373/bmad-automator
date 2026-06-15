@@ -1,5 +1,12 @@
 ### Features
 
+- feat(m13): add seed_soak_dir + CONTRIBUTING soak section, close M13 gates (247e602)
+- feat(m13): reject unresolved four-letter placeholder tokens (f05d268)
+- feat(m13): validate telemetry.jsonl per-line JSON with event_type/ts (d971005)
+- feat(m13): validate config.json schema and arm consistency (8c09101)
+- feat(m13): validate report.md frontmatter keys and datetimes (c36cd99)
+- feat(m13): require telemetry.jsonl, report.md, config.json (f07cbe1)
+- feat(m13): validate ISO date dirs and arm slugs (814a167)
 - feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
 - feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
 - feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
@@ -87,12 +94,14 @@
 
 ### Refactoring
 
+- refactor(m13): split soak verifier tests under 500 LOC ceiling (580a6f7)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
 - refactor: repackage automator as self-contained skills (c845938)
 - refactor: route create validation through verifier (5ea8540)
 
 ### Documentation
 
+- docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
@@ -117,6 +126,10 @@
 
 ### Tests
 
+- test(m13): pin verifier stdlib-only import allowlist (0b92570)
+- test(m13): pin CRLF/LF portability in verifier reads (60677c9)
+- test(m13): pin deterministic sorted finding output (35d39f2)
+- test(m13): scaffold verify_soak_format with exit-code contract (e37f741)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
 - test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
@@ -160,6 +173,9 @@
 
 ### Other
 
+- plan(m13): foundation-m1 verify-format implementation plan (c284e3d)
+- spec(m13-soak): copy spec into worktree (e03bcb5)
+- build: gitignore sw init outputs (78f54c6)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
