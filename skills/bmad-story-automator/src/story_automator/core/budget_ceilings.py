@@ -58,6 +58,108 @@ module-level, not part of the function return, so callers that care
 about warnings can opt in without complicating the happy-path
 signature."""
 
+_VALID_WINDOWS: frozenset[str] = frozenset({"per_run", "24h", "7d", "30d"})
+_REQUIRED_KEYS: tuple[str, ...] = (
+    "name",
+    "window",
+    "limit_usd",
+    "warn_at",
+    "gate_names",
+)
+
+
+def _validate_ceiling_dict(index: int, raw: object) -> BudgetCeiling | None:
+    """Validate one ceiling object; return ``None`` and record a warning
+    if the entry is malformed (REQ-05).
+
+    Validation covers: dict shape, presence of all five required keys,
+    string type for ``name`` and ``window``, ``window`` membership in
+    ``_VALID_WINDOWS``, numeric and strictly-positive ``limit_usd``,
+    numeric ``warn_at`` in the half-open interval ``(0.0, 1.0]``, and
+    ``gate_names`` being a list of strings.
+    """
+    if not isinstance(raw, dict):
+        _PARSE_WARNINGS.append(
+            {"index": str(index), "reason": "not_object", "detail": type(raw).__name__}
+        )
+        return None
+    missing = [k for k in _REQUIRED_KEYS if k not in raw]
+    if missing:
+        _PARSE_WARNINGS.append(
+            {"index": str(index), "reason": "missing_keys", "detail": ",".join(missing)}
+        )
+        return None
+    name = raw["name"]
+    window = raw["window"]
+    limit_usd = raw["limit_usd"]
+    warn_at = raw["warn_at"]
+    gate_names = raw["gate_names"]
+    if not isinstance(name, str) or not name:
+        _PARSE_WARNINGS.append(
+            {"index": str(index), "reason": "bad_name", "detail": repr(name)[:40]}
+        )
+        return None
+    if not isinstance(window, str) or window not in _VALID_WINDOWS:
+        _PARSE_WARNINGS.append(
+            {"index": str(index), "reason": "bad_window", "detail": repr(window)[:40]}
+        )
+        return None
+    if not isinstance(limit_usd, (int, float)) or isinstance(limit_usd, bool):
+        _PARSE_WARNINGS.append(
+            {
+                "index": str(index),
+                "reason": "bad_limit_usd_type",
+                "detail": type(limit_usd).__name__,
+            }
+        )
+        return None
+    if float(limit_usd) <= 0.0:
+        _PARSE_WARNINGS.append(
+            {
+                "index": str(index),
+                "reason": "bad_limit_usd_value",
+                "detail": repr(limit_usd)[:40],
+            }
+        )
+        return None
+    if not isinstance(warn_at, (int, float)) or isinstance(warn_at, bool):
+        _PARSE_WARNINGS.append(
+            {
+                "index": str(index),
+                "reason": "bad_warn_at_type",
+                "detail": type(warn_at).__name__,
+            }
+        )
+        return None
+    warn_at_f = float(warn_at)
+    if not (0.0 < warn_at_f <= 1.0):
+        _PARSE_WARNINGS.append(
+            {
+                "index": str(index),
+                "reason": "bad_warn_at_value",
+                "detail": repr(warn_at)[:40],
+            }
+        )
+        return None
+    if not isinstance(gate_names, list) or not all(
+        isinstance(g, str) for g in gate_names
+    ):
+        _PARSE_WARNINGS.append(
+            {
+                "index": str(index),
+                "reason": "bad_gate_names",
+                "detail": repr(gate_names)[:40],
+            }
+        )
+        return None
+    return BudgetCeiling(
+        name=name,
+        window=window,
+        limit_usd=float(limit_usd),
+        warn_at=warn_at_f,
+        gate_names=tuple(gate_names),
+    )
+
 
 def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]:
     """Read ``policy.cost_ceilings`` from ``workflow.json`` (REQ-04, REQ-05).
@@ -88,4 +190,9 @@ def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]
     raw_ceilings = policy.get("cost_ceilings")
     if not isinstance(raw_ceilings, list):
         return []
-    return []
+    parsed: list[BudgetCeiling] = []
+    for index, raw in enumerate(raw_ceilings):
+        ceiling = _validate_ceiling_dict(index, raw)
+        if ceiling is not None:
+            parsed.append(ceiling)
+    return parsed

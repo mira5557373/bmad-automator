@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from story_automator.core.common import compact_json
+from story_automator.core.common import compact_json, ensure_dir
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -170,6 +170,117 @@ class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
             path = Path(tmp) / "workflow.json"
             path.write_text("not json {", encoding="utf-8")
             self.assertEqual(parse_ceilings_config(path), [])
+
+
+class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
+    def _write(self, tmp: str, ceilings: list[dict[str, object]]) -> Path:
+        ensure_dir(tmp)
+        path = Path(tmp) / "workflow.json"
+        path.write_text(
+            compact_json({"policy": {"cost_ceilings": ceilings}}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_single_well_formed_ceiling_parses(self) -> None:
+        from story_automator.core.budget_ceilings import (
+            BudgetCeiling,
+            parse_ceilings_config,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "per_run_cap",
+                        "window": "per_run",
+                        "limit_usd": 25.0,
+                        "warn_at": 0.8,
+                        "gate_names": ["init", "story_start"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+            self.assertEqual(len(result), 1)
+            self.assertIsInstance(result[0], BudgetCeiling)
+            self.assertEqual(result[0].name, "per_run_cap")
+            self.assertEqual(result[0].window, "per_run")
+            self.assertEqual(result[0].limit_usd, 25.0)
+            self.assertEqual(result[0].warn_at, 0.8)
+            self.assertEqual(result[0].gate_names, ("init", "story_start"))
+
+    def test_gate_names_become_tuple_not_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "c1",
+                        "window": "24h",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+            self.assertIsInstance(result[0].gate_names, tuple)
+
+    def test_multiple_ceilings_preserve_file_order(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "first",
+                        "window": "per_run",
+                        "limit_usd": 5.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    },
+                    {
+                        "name": "second",
+                        "window": "24h",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.6,
+                        "gate_names": ["story_start"],
+                    },
+                    {
+                        "name": "third",
+                        "window": "7d",
+                        "limit_usd": 50.0,
+                        "warn_at": 0.9,
+                        "gate_names": ["retry_start"],
+                    },
+                ],
+            )
+            result = parse_ceilings_config(path)
+            self.assertEqual([c.name for c in result], ["first", "second", "third"])
+
+    def test_happy_path_leaves_parse_warnings_empty(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "c1",
+                        "window": "30d",
+                        "limit_usd": 100.0,
+                        "warn_at": 0.75,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            parse_ceilings_config(path)
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
 if __name__ == "__main__":
