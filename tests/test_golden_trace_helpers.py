@@ -968,5 +968,43 @@ class ImportSafetyTests(unittest.TestCase):
         self.assertIsNone(gh._CLAUDE_P_HOOK)  # type: ignore[attr-defined]
 
 
+class DeterminismE2ETests(unittest.TestCase):
+    """NFR primary criterion: a given recorded session must serialize
+    byte-identically across runs."""
+
+    def _record_five_events(self, tmp: Path) -> bytes:
+        emitter = TelemetryEmitter(tmp / "events.jsonl")
+        events = [
+            StoryStarted(
+                timestamp="2026-06-15T01:02:03Z", run_id="r",
+                epic="e", story_key=f"s{i}", agent="a", model="m", complexity="c",
+            )
+            for i in range(5)
+        ]
+        with GoldenTraceRecorder(repo_root=tmp) as rec:
+            for ev in events:
+                emitter.emit(ev)
+        return serialize_trace(rec.entries).encode("utf-8")
+
+    def test_two_recordings_byte_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp1:
+            first = self._record_five_events(Path(tmp1).resolve())
+        with tempfile.TemporaryDirectory() as tmp2:
+            second = self._record_five_events(Path(tmp2).resolve())
+        self.assertEqual(first, second)
+
+    def test_real_iso_timestamp_collapsed_to_ts(self) -> None:
+        from story_automator.core.common import iso_now
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter = TelemetryEmitter(root / "events.jsonl")
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                emitter.emit(StoryStarted(
+                    timestamp=iso_now(), run_id="r",
+                    epic="e", story_key="s", agent="a", model="m", complexity="c",
+                ))
+        self.assertEqual(rec.entries[0].payload["timestamp"], "<ts>")
+
+
 if __name__ == "__main__":
     unittest.main()
