@@ -1351,5 +1351,53 @@ class M01FixtureTests(unittest.TestCase):
         self.assertEqual(entries[0].payload["timestamp"], "<ts>")
 
 
+def _build_m02_recording(root: Path) -> list[TraceEntry]:
+    """M02 fixture: five StoryStarted events emitted in order, captured.
+
+    The emitter routes each event through write_atomic_text on its
+    backing JSONL log, but that file lives in ``root`` (the tempdir) and
+    is OUTSIDE the recorder's interest — the recorder only intercepts
+    ``state.write_atomic_text``, not ``atomic_io.write_atomic_text``
+    directly. So only the five event entries appear in the trace,
+    matching the spec's "five emitted events read back" description.
+    """
+    emitter = TelemetryEmitter(root / "events.jsonl")
+    events = [
+        StoryStarted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="m02-fixture-run",
+            epic="e1",
+            story_key=f"s{i}",
+            agent="dev",
+            model="opus",
+            complexity="M",
+        )
+        for i in range(5)
+    ]
+    with GoldenTraceRecorder(repo_root=root) as rec:
+        for ev in events:
+            emitter.emit(ev)
+    return rec.entries
+
+
+class M02FixtureTests(unittest.TestCase):
+    """REQ-11 + REQ-12(e): m02_emitter_smoke.json round-trip."""
+
+    def test_m02_fixture_matches_fresh_recording(self) -> None:
+        _validate_or_regen("m02_emitter_smoke.json", _build_m02_recording)
+
+    def test_m02_fixture_records_five_events_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = _build_m02_recording(Path(tmp).resolve())
+        self.assertEqual(len(entries), 5)
+        self.assertEqual([e.seq for e in entries], [0, 1, 2, 3, 4])
+        self.assertEqual([e.channel for e in entries], ["event"] * 5)
+        self.assertEqual([e.kind for e in entries], ["StoryStarted"] * 5)
+        self.assertEqual(
+            [e.payload["story_key"] for e in entries],
+            ["s0", "s1", "s2", "s3", "s4"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
