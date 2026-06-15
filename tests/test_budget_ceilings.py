@@ -1053,5 +1053,69 @@ class EvaluateCeilingsDeterminismTests(unittest.TestCase):
         self.assertTrue(reason.startswith("c0:"))
 
 
+class EvaluateCeilingsConfigSourceTests(unittest.TestCase):
+    def test_workflow_json_path_is_read_through_parser(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "workflow.json"
+            workflow.write_text(
+                compact_json(
+                    {
+                        "policy": {
+                            "cost_ceilings": [
+                                {
+                                    "name": "from_disk",
+                                    "window": "per_run",
+                                    "limit_usd": 5.0,
+                                    "warn_at": 0.5,
+                                    "gate_names": ["init"],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            events = StoryCompleted(
+                timestamp="2026-06-15T00:00:00Z",
+                run_id="r1",
+                epic="E1",
+                story_key="S1",
+                duration_s=1.0,
+                cost_usd=6.0,
+                tokens_in=0,
+                tokens_out=0,
+                attempts=1,
+            )
+            ledger = _write_ledger(tmp, [events])
+            verdict, reason = evaluate_ceilings(
+                ledger,
+                "init",
+                "2026-06-15T00:00:00Z",
+                workflow_json_path=workflow,
+            )
+        self.assertEqual(verdict, CeilingDecision.BLOCK)
+        self.assertTrue(reason.startswith("from_disk:"))
+
+    def test_workflow_json_path_with_no_ceilings_returns_sentinel(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "workflow.json"
+            workflow.write_text(
+                compact_json({"policy": {"cost_ceilings": []}}),
+                encoding="utf-8",
+            )
+            verdict, reason = evaluate_ceilings(
+                "irrelevant.jsonl",
+                "init",
+                "2026-06-15T00:00:00Z",
+                workflow_json_path=workflow,
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "no_ceilings_configured")
+
+
 if __name__ == "__main__":
     unittest.main()
