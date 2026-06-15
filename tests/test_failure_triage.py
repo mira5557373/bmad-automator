@@ -376,3 +376,36 @@ class ImportAndSizeDisciplineTests(unittest.TestCase):
             set(failure_triage.__all__),
             {"Classification", "Confidence", "FailureClass", "IMPLIES_GRAPH"},
         )
+
+
+class ClassifyDispatchSkeletonTests(unittest.TestCase):
+    def test_classify_is_callable(self) -> None:
+        from story_automator.core.failure_triage import classify
+
+        self.assertTrue(callable(classify))
+
+    def test_classify_returns_unknown_for_non_failure_event(self) -> None:
+        from story_automator.core.failure_triage import (
+            Classification,
+            Confidence,
+            FailureClass,
+            classify,
+        )
+        from story_automator.core.telemetry_events import StoryStarted
+
+        event = StoryStarted(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            agent="dev",
+            model="claude-opus-4-7",
+            complexity="medium",
+        )
+        result = classify(event)
+        self.assertIsInstance(result, Classification)
+        self.assertEqual(result.primary, FailureClass.UNKNOWN)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.LOW)
+        self.assertEqual(result.reason, "non_failure_event")
+        self.assertIsNone(result.event_id)
