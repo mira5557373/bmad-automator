@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 import json
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,6 +57,81 @@ class CalibrationTable:
     total_events_scanned: int
 
 
+def _iter_event_lines(path: Path) -> Iterator[str]:
+    """Yield non-blank decoded JSONL lines, tolerating CRLF and blanks.
+
+    The caller is responsible for parsing; this helper is pure I/O.
+    """
+
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.rstrip("\r\n")
+            if not line.strip():
+                continue
+            yield line
+
+
+def _accumulate_buckets(
+    lines: Iterable[str],
+) -> tuple[int, dict[tuple[str, str], list]]:
+    """Aggregate decoded JSONL lines into per-key buckets.
+
+    Returns `(total_scanned, buckets)` where `buckets[key]` is a
+    `[completed_count, failed_count, last_seen_iso]` triple. Lines that
+    fail `parse_event` (malformed JSON, missing event_type, unknown
+    typed fields) are silently dropped and do NOT increment
+    `total_scanned`. Unknown event types parse successfully (they
+    become `UnknownEvent`) and DO increment `total_scanned` but do not
+    contribute to any bucket.
+    """
+
+    total_scanned = 0
+    buckets: dict[tuple[str, str], list] = {}
+    for line in lines:
+        try:
+            event = parse_event(line)
+        except (ValueError, json.JSONDecodeError, TypeError):
+            continue
+        total_scanned += 1
+        if not isinstance(event, (StoryCompleted, StoryFailed)):
+            continue
+        model_id = getattr(event, "model_id", None)
+        task_kind = getattr(event, "task_kind", None)
+        if not isinstance(model_id, str) or not isinstance(task_kind, str):
+            continue
+        key = (model_id, task_kind)
+        bucket = buckets.setdefault(key, [0, 0, ""])
+        if isinstance(event, StoryCompleted):
+            bucket[0] += 1
+        else:
+            bucket[1] += 1
+        if event.timestamp > bucket[2]:
+            bucket[2] = event.timestamp
+    return total_scanned, buckets
+
+
+def _materialize_entries(
+    buckets: dict[tuple[str, str], list],
+) -> dict[tuple[str, str], CalibrationEntry]:
+    """Convert raw bucket triples into immutable CalibrationEntry rows.
+
+    Rounds success_rate to four decimal places per REQ-07.
+    """
+
+    entries: dict[tuple[str, str], CalibrationEntry] = {}
+    for (model_id, task_kind), (completed, failed, last_seen) in buckets.items():
+        sample_count = completed + failed
+        success_rate = round(completed / sample_count, 4)
+        entries[(model_id, task_kind)] = CalibrationEntry(
+            model_id=model_id,
+            task_kind=task_kind,
+            success_rate=success_rate,
+            sample_count=sample_count,
+            last_seen_iso=last_seen,
+        )
+    return entries
+
+
 def build_calibration(jsonl_path: str | Path) -> CalibrationTable:
     """Build a CalibrationTable by streaming a JSONL telemetry ledger.
 
@@ -74,49 +150,9 @@ def build_calibration(jsonl_path: str | Path) -> CalibrationTable:
             source_path=source_path,
             total_events_scanned=0,
         )
-
-    total_scanned = 0
-    buckets: dict[tuple[str, str], list] = {}
-
-    with open(path, encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.rstrip("\r\n")
-            if not line.strip():
-                continue
-            try:
-                event = parse_event(line)
-            except (ValueError, json.JSONDecodeError, TypeError):
-                continue
-            total_scanned += 1
-            if not isinstance(event, (StoryCompleted, StoryFailed)):
-                continue
-            model_id = getattr(event, "model_id", None)
-            task_kind = getattr(event, "task_kind", None)
-            if not isinstance(model_id, str) or not isinstance(task_kind, str):
-                continue
-            key = (model_id, task_kind)
-            bucket = buckets.setdefault(key, [0, 0, ""])
-            if isinstance(event, StoryCompleted):
-                bucket[0] += 1
-            else:
-                bucket[1] += 1
-            if event.timestamp > bucket[2]:
-                bucket[2] = event.timestamp
-
-    entries: dict[tuple[str, str], CalibrationEntry] = {}
-    for (model_id, task_kind), (completed, failed, last_seen) in buckets.items():
-        sample_count = completed + failed
-        success_rate = round(completed / sample_count, 4)
-        entries[(model_id, task_kind)] = CalibrationEntry(
-            model_id=model_id,
-            task_kind=task_kind,
-            success_rate=success_rate,
-            sample_count=sample_count,
-            last_seen_iso=last_seen,
-        )
-
+    total_scanned, buckets = _accumulate_buckets(_iter_event_lines(path))
     return CalibrationTable(
-        entries=entries,
+        entries=_materialize_entries(buckets),
         generated_at=iso_now(),
         source_path=source_path,
         total_events_scanned=total_scanned,
