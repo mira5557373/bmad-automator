@@ -403,7 +403,9 @@ class BuildCalibrationMixedAggregationTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         _ExtendedEventShim.uninstall()
 
-    def test_mixed_completed_and_failed_for_same_key_rounds_to_four_places(self) -> None:
+    def test_mixed_completed_and_failed_for_same_key_rounds_to_four_places(
+        self,
+    ) -> None:
         from story_automator.core.calibration import build_calibration
 
         with _fixture_dir() as tmpdir:
@@ -575,20 +577,14 @@ class LookupSuccessRateTests(unittest.TestCase):
         from story_automator.core.calibration import lookup_success_rate
 
         table = self._make_table()
-        self.assertEqual(
-            lookup_success_rate(table, "claude-opus-4", "code"), 0.8750
-        )
+        self.assertEqual(lookup_success_rate(table, "claude-opus-4", "code"), 0.8750)
 
     def test_miss_returns_default_0_5(self) -> None:
         from story_automator.core.calibration import lookup_success_rate
 
         table = self._make_table()
-        self.assertEqual(
-            lookup_success_rate(table, "gpt-5-codex", "code"), 0.5
-        )
-        self.assertEqual(
-            lookup_success_rate(table, "claude-opus-4", "docs"), 0.5
-        )
+        self.assertEqual(lookup_success_rate(table, "gpt-5-codex", "code"), 0.5)
+        self.assertEqual(lookup_success_rate(table, "claude-opus-4", "docs"), 0.5)
 
     def test_miss_returns_custom_default(self) -> None:
         from story_automator.core.calibration import lookup_success_rate
