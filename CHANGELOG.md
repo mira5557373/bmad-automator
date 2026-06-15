@@ -1,5 +1,12 @@
 ### Features
 
+- feat(m09): add format_drift_report with signed delta and ASCII guarantee (98fa717)
+- feat(m09): implement compute_drift over key-union with rounded deltas (cfa1c95)
+- feat(m09): add _classify helper covering all four severity bands (d4784e7)
+- feat(m09): add DriftReport kw_only dataclass (c7437c5)
+- feat(m09): add DriftEntry frozen kw_only dataclass (c7d7934)
+- feat(m09): add DriftClassification enum with four severity tiers (e566bd9)
+- feat(m09): stub drift_detector module with __all__ and boundary constants (02a6f22)
 - feat(m08): deterministic plain-ASCII calibration report (4071886)
 - feat(m08): lookup_success_rate with 0.5 default (c80224b)
 - feat(m08): stream JSONL ledger and ignore non-story events (eacec2b)
@@ -48,6 +55,7 @@
 
 ### Bug Fixes
 
+- fix(m09): post-impl review docstring + cross-module consistency test (2b5f79a)
 - fix(m08): post-impl review fixes for m1-types (d3cc6c8)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
@@ -103,6 +111,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (4a128b6)
 - docs(m08): add m3-consumers implementation plan (e541a4e)
 - docs: update generated documentation (28a57dd)
 - docs(m08): add m2-aggregation TDD plan (fedfdcc)
@@ -133,6 +142,12 @@
 
 ### Tests
 
+- test(m09): prove generated_at flows from iso_now via patched call (40a48ba)
+- test(m09): enforce __all__, future-annotations, allowlist, size invariants (e3e5500)
+- test(m09): lock sort order and bitwise determinism of compute_drift entries (c17d3c0)
+- test(m09): cover missing-side defaults and empty-input cases (d905c2c)
+- test(m09): cover every classification boundary from below and above (95b5f27)
+- test(m09): add in-memory CalibrationTable fixture builders for drift tests (21051d9)
 - test(m08): lock format_calibration_report trailing-newline + determinism (REQ-10) (499a6ba)
 - test(m08): lock lookup_success_rate default=0.5 signature contract (9f83177)
 - test(m08): runtime guardrail asserting no disk writes (REQ-12) (91b2c14)
@@ -198,6 +213,9 @@
 
 ### Other
 
+- plan(m09): add TDD implementation plan for drift detector core (7035594)
+- build: gitignore sw init outputs (11fa33a)
+- spec: copy m09-drift-detector spec into worktree (6ad1e52)
 - spec(m08): copy spec into worktree (876f280)
 - build: gitignore sw init outputs (78f54c6)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
