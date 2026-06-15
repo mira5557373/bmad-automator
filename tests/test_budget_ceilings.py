@@ -13,6 +13,8 @@ from story_automator.core import budget_ceilings
 from story_automator.core.budget_ceilings import (
     BudgetCeiling,
     CeilingDecision,
+    bypass_allowed,
+    evaluate_ceilings,
     parse_ceilings_config,
 )
 from story_automator.core.common import compact_json, ensure_dir
@@ -32,40 +34,23 @@ def _c(name="bad", window="per_run", limit_usd=10.0, warn_at=0.5, gate_names=Non
     return d
 
 
-def _run_ceilings(ceilings):
-    """Write ``ceilings`` into a temp workflow.json and run the parser."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "workflow.json"
-        path.write_text(
-            compact_json({"policy": {"cost_ceilings": ceilings}}), encoding="utf-8"
-        )
-        return parse_ceilings_config(path)
-
-
-def _run_payload(payload):
-    """Write arbitrary JSON-serializable ``payload`` and run the parser."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "workflow.json"
-        path.write_text(compact_json(payload), encoding="utf-8")
-        return parse_ceilings_config(path)
-
-
 def _run_raw(text):
-    """Write raw ``text`` (may be invalid JSON) and run the parser."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "workflow.json"
         path.write_text(text, encoding="utf-8")
         return parse_ceilings_config(path)
 
 
-def _write_ledger(tmp, events, *, eol="\n", trailing_blanks=0):
-    """Write M01 ``events`` to ``events.jsonl`` under ``tmp``.
+def _run_payload(payload):
+    return _run_raw(compact_json(payload))
 
-    Each event is serialized through ``compact_json(event.to_dict())``
-    per REQ-15. ``eol`` defaults to ``\\n`` but tests can pass ``\\r\\n``
-    to exercise the NFR line-ending tolerance. ``trailing_blanks``
-    appends N blank lines to the end of the file to exercise the same.
-    """
+
+def _run_ceilings(ceilings):
+    return _run_payload({"policy": {"cost_ceilings": ceilings}})
+
+
+def _write_ledger(tmp, events, *, eol="\n", trailing_blanks=0):
+    """Write M01 ``events`` (REQ-15 compact_json) with chosen line ending."""
     ensure_dir(tmp)
     path = Path(tmp) / "events.jsonl"
     body = eol.join(compact_json(ev.to_dict()) for ev in events)
@@ -74,6 +59,43 @@ def _write_ledger(tmp, events, *, eol="\n", trailing_blanks=0):
     body += eol * trailing_blanks
     path.write_text(body, encoding="utf-8")
     return path
+
+
+_DEFAULT_TS = "2026-06-15T00:00:00Z"
+_COMPLETED_BASE = StoryCompleted(
+    timestamp=_DEFAULT_TS,
+    run_id="r1",
+    epic="E1",
+    story_key="S1",
+    duration_s=1.0,
+    cost_usd=0.0,
+    tokens_in=0,
+    tokens_out=0,
+    attempts=1,
+)
+
+
+def _completed(cost, ts=_DEFAULT_TS):
+    return dataclasses.replace(_COMPLETED_BASE, cost_usd=cost, timestamp=ts)
+
+
+def _ceiling(name="c1", window="per_run", limit_usd=10.0, warn_at=0.5, gates=("init",)):
+    return BudgetCeiling(
+        name=name,
+        window=window,
+        limit_usd=limit_usd,
+        warn_at=warn_at,
+        gate_names=gates,
+    )
+
+
+def _eval_events(
+    events, ceilings, *, gate="init", now=_DEFAULT_TS, eol="\n", trailing_blanks=0
+):
+    """Write ``events`` to a temp ledger and evaluate ``ceilings`` against it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_ledger(tmp, events, eol=eol, trailing_blanks=trailing_blanks)
+        return evaluate_ceilings(path, gate, now, ceilings=ceilings)
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -90,9 +112,8 @@ class CeilingDecisionTests(unittest.TestCase):
         self.assertEqual(names, ["ALLOW", "WARN", "BLOCK"])
 
     def test_member_values_match_names(self) -> None:
-        self.assertEqual(CeilingDecision.ALLOW.value, "ALLOW")
-        self.assertEqual(CeilingDecision.WARN.value, "WARN")
-        self.assertEqual(CeilingDecision.BLOCK.value, "BLOCK")
+        for name in ["ALLOW", "WARN", "BLOCK"]:
+            self.assertEqual(CeilingDecision[name].value, name)
 
     def test_is_enum_subclass(self) -> None:
         self.assertTrue(issubclass(CeilingDecision, enum.Enum))
@@ -111,18 +132,17 @@ class BudgetCeilingShapeTests(unittest.TestCase):
         )
 
     def test_can_construct_with_keywords(self) -> None:
-        ceiling = BudgetCeiling(
+        c = BudgetCeiling(
             name="per_run_cap",
             window="per_run",
             limit_usd=25.0,
             warn_at=0.8,
             gate_names=("init", "story_start"),
         )
-        self.assertEqual(ceiling.name, "per_run_cap")
-        self.assertEqual(ceiling.window, "per_run")
-        self.assertEqual(ceiling.limit_usd, 25.0)
-        self.assertEqual(ceiling.warn_at, 0.8)
-        self.assertEqual(ceiling.gate_names, ("init", "story_start"))
+        self.assertEqual(
+            (c.name, c.window, c.limit_usd, c.warn_at, c.gate_names),
+            ("per_run_cap", "per_run", 25.0, 0.8, ("init", "story_start")),
+        )
 
 
 class ParseWarningsModuleStateTests(unittest.TestCase):
@@ -146,7 +166,7 @@ class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
 
     def test_missing_file_clears_parse_warnings(self) -> None:
         budget_ceilings._PARSE_WARNINGS.append(
-            {"index": "0", "reason": "stale", "detail": "from prior test"}
+            {"index": "0", "reason": "stale", "detail": "stale"}
         )
         with tempfile.TemporaryDirectory() as tmp:
             parse_ceilings_config(Path(tmp) / "missing.json")
@@ -164,9 +184,7 @@ class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
         self.assertEqual(_run_payload({"policy": {"unrelated": 1}}), [])
 
     def test_cost_ceilings_not_a_list_returns_empty_list(self) -> None:
-        self.assertEqual(
-            _run_payload({"policy": {"cost_ceilings": {"not": "a list"}}}), []
-        )
+        self.assertEqual(_run_payload({"policy": {"cost_ceilings": {"x": 1}}}), [])
 
     def test_top_level_not_object_returns_empty_list(self) -> None:
         self.assertEqual(_run_payload([1, 2, 3]), [])
@@ -176,6 +194,12 @@ class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
 
 
 class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
+    def _assert_skipped(self, kwarg, val, reason):
+        """Build a ceiling with kwarg=val and assert it's skipped with ``reason``."""
+        result = _run_ceilings([_c(**{kwarg: val})])
+        self.assertEqual(result, [])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], reason)
+
     def test_missing_required_key_is_skipped(self) -> None:
         result = _run_ceilings([_c(name="bad", warn_at=None), _c(name="good")])
         self.assertEqual([c.name for c in result], ["good"])
@@ -187,22 +211,39 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
         """Negative and zero limits are rejected."""
         for limit_val in [-1.0, 0.0]:
             with self.subTest(limit_usd=limit_val):
-                result = _run_ceilings([_c(limit_usd=limit_val)])
-                self.assertEqual(result, [])
-                self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_value"
-                )
+                self._assert_skipped("limit_usd", limit_val, "bad_limit_usd_value")
+
+    def test_bad_limit_usd_type(self) -> None:
+        """bool and str types rejected; True is int in Python."""
+        for val in [True, "10.0"]:
+            with self.subTest(limit_usd=val):
+                self._assert_skipped("limit_usd", val, "bad_limit_usd_type")
+
+    def test_bad_warn_at_type(self) -> None:
+        """bool and str types rejected."""
+        for val in [True, "0.5"]:
+            with self.subTest(warn_at=val):
+                self._assert_skipped("warn_at", val, "bad_warn_at_type")
+
+    def test_bad_name(self) -> None:
+        """Non-string and empty string names are rejected."""
+        for val in [42, ""]:
+            with self.subTest(name=val):
+                self._assert_skipped("name", val, "bad_name")
+
+    def test_bad_window(self) -> None:
+        """Non-string and invalid window strings are rejected."""
+        for val in [42, "1h"]:
+            with self.subTest(window=val):
+                self._assert_skipped("window", val, "bad_window")
 
     def test_warn_at_out_of_range_is_skipped(self) -> None:
         for warn_at in [0.0, -0.1, 1.5]:
             with self.subTest(warn_at=warn_at):
                 result = _run_ceilings([_c(warn_at=warn_at)])
                 self.assertEqual(result, [])
-                self.assertTrue(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"].startswith(
-                        "bad_warn_at"
-                    )
-                )
+                reason = budget_ceilings._PARSE_WARNINGS[0]["reason"]
+                self.assertTrue(reason.startswith("bad_warn_at"))
 
     def test_boundary_warn_at_one_is_allowed(self) -> None:
         result = _run_ceilings([_c(name="ok", warn_at=1.0)])
@@ -229,46 +270,6 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
         self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
         _run_ceilings([_c(name="ok")])
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
-
-    def test_bad_limit_usd_type(self) -> None:
-        """bool and str types rejected; True is int in Python."""
-        for val in [True, "10.0"]:
-            with self.subTest(limit_usd=val):
-                result = _run_ceilings([_c(limit_usd=val)])
-                self.assertEqual(result, [])
-                self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_type"
-                )
-
-    def test_bad_warn_at_type(self) -> None:
-        """bool and str types rejected."""
-        for val in [True, "0.5"]:
-            with self.subTest(warn_at=val):
-                result = _run_ceilings([_c(warn_at=val)])
-                self.assertEqual(result, [])
-                self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_warn_at_type"
-                )
-
-    def test_bad_name(self) -> None:
-        """Non-string and empty string names are rejected."""
-        for val in [42, ""]:
-            with self.subTest(name=val):
-                result = _run_ceilings([_c(name=val)])
-                self.assertEqual(result, [])
-                self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_name"
-                )
-
-    def test_bad_window(self) -> None:
-        """Non-string and invalid window strings are rejected."""
-        for val in [42, "1h"]:
-            with self.subTest(window=val):
-                result = _run_ceilings([_c(window=val)])
-                self.assertEqual(result, [])
-                self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_window"
-                )
 
     def test_utf8_non_ascii_name_round_trips(self) -> None:
         """REQ-04 says UTF-8 reading; confirm non-ASCII names survive."""
@@ -300,23 +301,20 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
 
 class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
     def test_single_well_formed_ceiling_parses(self) -> None:
-        result = _run_ceilings(
-            [
-                _c(
-                    name="per_run_cap",
-                    limit_usd=25.0,
-                    warn_at=0.8,
-                    gate_names=["init", "story_start"],
-                )
-            ]
+        entry = _c(
+            name="per_run_cap",
+            limit_usd=25.0,
+            warn_at=0.8,
+            gate_names=["init", "story_start"],
         )
+        result = _run_ceilings([entry])
         self.assertEqual(len(result), 1)
-        self.assertIsInstance(result[0], BudgetCeiling)
-        self.assertEqual(result[0].name, "per_run_cap")
-        self.assertEqual(result[0].window, "per_run")
-        self.assertEqual(result[0].limit_usd, 25.0)
-        self.assertEqual(result[0].warn_at, 0.8)
-        self.assertEqual(result[0].gate_names, ("init", "story_start"))
+        c = result[0]
+        self.assertIsInstance(c, BudgetCeiling)
+        self.assertEqual(
+            (c.name, c.window, c.limit_usd, c.warn_at, c.gate_names),
+            ("per_run_cap", "per_run", 25.0, 0.8, ("init", "story_start")),
+        )
 
     def test_gate_names_become_tuple_not_list(self) -> None:
         result = _run_ceilings([_c(name="c1", window="24h")])
@@ -326,20 +324,8 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
         result = _run_ceilings(
             [
                 _c(name="first", limit_usd=5.0),
-                _c(
-                    name="second",
-                    window="24h",
-                    limit_usd=10.0,
-                    warn_at=0.6,
-                    gate_names=["story_start"],
-                ),
-                _c(
-                    name="third",
-                    window="7d",
-                    limit_usd=50.0,
-                    warn_at=0.9,
-                    gate_names=["retry_start"],
-                ),
+                _c(name="second", window="24h", limit_usd=10.0, warn_at=0.6),
+                _c(name="third", window="7d", limit_usd=50.0, warn_at=0.9),
             ]
         )
         self.assertEqual([c.name for c in result], ["first", "second", "third"])
@@ -356,9 +342,8 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
 class SpecReq01PreludeTests(unittest.TestCase):
     """REQ-01: future annotations required."""
 
-    def _has_future_import_after_optional_docstring(self, src: str) -> bool:
-        tree = ast.parse(src)
-        body = tree.body
+    def _has_future_import(self, src: str) -> bool:
+        body = ast.parse(src).body
         first = body[0] if body else None
         if (
             isinstance(first, ast.Expr)
@@ -366,74 +351,44 @@ class SpecReq01PreludeTests(unittest.TestCase):
             and isinstance(first.value.value, str)
         ):
             body = body[1:]
-        if not body:
-            return False
-        head = body[0]
-        if not isinstance(head, ast.ImportFrom):
-            return False
-        return head.module == "__future__" and any(
-            alias.name == "annotations" for alias in head.names
+        head = body[0] if body else None
+        return (
+            isinstance(head, ast.ImportFrom)
+            and head.module == "__future__"
+            and any(a.name == "annotations" for a in head.names)
         )
 
     def test_source_file_has_future_annotations(self) -> None:
         src_path = (
             Path(__file__).resolve().parents[1]
-            / "skills"
-            / "bmad-story-automator"
-            / "src"
-            / "story_automator"
-            / "core"
-            / "budget_ceilings.py"
+            / "skills/bmad-story-automator/src/story_automator/core/budget_ceilings.py"
         )
-        self.assertTrue(
-            self._has_future_import_after_optional_docstring(
-                src_path.read_text(encoding="utf-8")
-            ),
-            f"REQ-01 violated for {src_path}",
-        )
+        self.assertTrue(self._has_future_import(src_path.read_text(encoding="utf-8")))
 
     def test_test_file_has_future_annotations(self) -> None:
         test_path = Path(__file__).resolve()
-        self.assertTrue(
-            self._has_future_import_after_optional_docstring(
-                test_path.read_text(encoding="utf-8")
-            ),
-            f"REQ-01 violated for {test_path}",
-        )
+        self.assertTrue(self._has_future_import(test_path.read_text(encoding="utf-8")))
 
 
 class LedgerFixturePatternTests(unittest.TestCase):
     """REQ-15: compact_json serialization round-trips via parse_event."""
 
     def test_event_fixture_round_trips_via_compact_json(self) -> None:
-        event = StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=0.25,
-            tokens_in=10,
-            tokens_out=10,
-            attempts=1,
-        )
+        event = _completed(0.25)
         with tempfile.TemporaryDirectory() as tmp:
-            ensure_dir(tmp)
             ledger = Path(tmp) / "events.jsonl"
             ledger.write_text(compact_json(event.to_dict()) + "\n", encoding="utf-8")
-            with ledger.open("r", encoding="utf-8") as handle:
-                first = handle.readline().rstrip("\n")
-            parsed = parse_event(first)
+            parsed = parse_event(ledger.read_text(encoding="utf-8").rstrip("\n"))
         self.assertEqual(parsed.run_id, "r1")
         self.assertEqual(getattr(parsed, "cost_usd"), 0.25)
 
 
 class EvaluatorSurfaceTests(unittest.TestCase):
     def test_evaluate_ceilings_is_importable(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings  # noqa: F401
+        self.assertTrue(callable(evaluate_ceilings))
 
     def test_bypass_allowed_is_importable(self) -> None:
-        from story_automator.core.budget_ceilings import bypass_allowed  # noqa: F401
+        self.assertTrue(callable(bypass_allowed))
 
     def test_exports_include_new_callables(self) -> None:
         self.assertIn("evaluate_ceilings", budget_ceilings.__all__)
@@ -441,556 +396,229 @@ class EvaluatorSurfaceTests(unittest.TestCase):
 
 
 class EvaluateCeilingsNoConfigTests(unittest.TestCase):
-    def test_both_none_returns_allow_no_ceilings_sentinel(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
+    SENTINEL = (CeilingDecision.ALLOW, "no_ceilings_configured")
 
-        verdict, reason = evaluate_ceilings(
-            "events.jsonl", "init", "2026-06-15T00:00:00Z"
-        )
-        self.assertEqual(verdict, CeilingDecision.ALLOW)
-        self.assertEqual(reason, "no_ceilings_configured")
+    def test_both_none_returns_allow_no_ceilings_sentinel(self) -> None:
+        out = evaluate_ceilings("events.jsonl", "init", _DEFAULT_TS)
+        self.assertEqual(out, self.SENTINEL)
 
     def test_empty_ceilings_list_returns_allow_no_ceilings_sentinel(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        verdict, reason = evaluate_ceilings(
-            "events.jsonl", "init", "2026-06-15T00:00:00Z", ceilings=[]
-        )
-        self.assertEqual(verdict, CeilingDecision.ALLOW)
-        self.assertEqual(reason, "no_ceilings_configured")
+        out = evaluate_ceilings("events.jsonl", "init", _DEFAULT_TS, ceilings=[])
+        self.assertEqual(out, self.SENTINEL)
 
     def test_no_config_path_does_not_touch_ledger(self) -> None:
         """Sentinel must short-circuit before any file I/O."""
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        verdict, reason = evaluate_ceilings(
-            "/nonexistent/path/to/events.jsonl",
-            "init",
-            "2026-06-15T00:00:00Z",
+        out = evaluate_ceilings(
+            "/nonexistent/path/to/events.jsonl", "init", _DEFAULT_TS
         )
-        self.assertEqual(verdict, CeilingDecision.ALLOW)
-        self.assertEqual(reason, "no_ceilings_configured")
+        self.assertEqual(out, self.SENTINEL)
 
 
 class EvaluateCeilingsEmptyLedgerTests(unittest.TestCase):
-    def _ceiling(self):
-        return BudgetCeiling(
-            name="c1",
-            window="per_run",
-            limit_usd=10.0,
-            warn_at=0.8,
-            gate_names=("init",),
-        )
-
     def test_missing_ledger_file_returns_allow(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
         with tempfile.TemporaryDirectory() as tmp:
-            missing = Path(tmp) / "events.jsonl"
             verdict, reason = evaluate_ceilings(
-                missing, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+                Path(tmp) / "events.jsonl",
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[_ceiling(warn_at=0.8)],
             )
         self.assertEqual(verdict, CeilingDecision.ALLOW)
         self.assertEqual(reason, "c1:per_run:spent=0.0000:limit=10.0000")
 
     def test_empty_ledger_file_returns_allow(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
+        verdict, reason = _eval_events([], [_ceiling(warn_at=0.8)])
         self.assertEqual(verdict, CeilingDecision.ALLOW)
         self.assertEqual(reason, "c1:per_run:spent=0.0000:limit=10.0000")
 
 
 class EvaluateCeilingsDecisionRuleTests(unittest.TestCase):
-    def _ceiling(self):
-        return BudgetCeiling(
-            name="c1",
-            window="per_run",
-            limit_usd=10.0,
-            warn_at=0.8,
-            gate_names=("init",),
-        )
-
-    def _event(self, cost):
-        return StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
+    def _assert(self, costs, expected_verdict, expected_spent):
+        events = [_completed(c) for c in costs]
+        verdict, reason = _eval_events(events, [_ceiling(warn_at=0.8)])
+        self.assertEqual(verdict, expected_verdict)
+        self.assertEqual(reason, f"c1:per_run:spent={expected_spent}:limit=10.0000")
 
     def test_below_warn_threshold_returns_allow(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(1.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
-        self.assertEqual(verdict, CeilingDecision.ALLOW)
-        self.assertEqual(reason, "c1:per_run:spent=1.0000:limit=10.0000")
+        self._assert([1.0], CeilingDecision.ALLOW, "1.0000")
 
     def test_at_warn_threshold_returns_warn(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            # 10.0 * 0.8 = 8.0 exactly
-            path = _write_ledger(tmp, [self._event(8.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
-        self.assertEqual(verdict, CeilingDecision.WARN)
-        self.assertEqual(reason, "c1:per_run:spent=8.0000:limit=10.0000")
+        # 10.0 * 0.8 = 8.0 exactly
+        self._assert([8.0], CeilingDecision.WARN, "8.0000")
 
     def test_between_warn_and_limit_returns_warn(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(5.0), self._event(4.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
-        self.assertEqual(verdict, CeilingDecision.WARN)
-        self.assertEqual(reason, "c1:per_run:spent=9.0000:limit=10.0000")
+        self._assert([5.0, 4.0], CeilingDecision.WARN, "9.0000")
 
     def test_at_limit_returns_block(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(10.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
-        self.assertEqual(verdict, CeilingDecision.BLOCK)
-        self.assertEqual(reason, "c1:per_run:spent=10.0000:limit=10.0000")
+        self._assert([10.0], CeilingDecision.BLOCK, "10.0000")
 
     def test_above_limit_returns_block(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(12.5)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
-        self.assertEqual(verdict, CeilingDecision.BLOCK)
-        self.assertEqual(reason, "c1:per_run:spent=12.5000:limit=10.0000")
+        self._assert([12.5], CeilingDecision.BLOCK, "12.5000")
 
 
 class EvaluateCeilingsWindowTests(unittest.TestCase):
-    def _event(self, ts, cost):
-        return StoryCompleted(
-            timestamp=ts,
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
-
-    def _ceiling(self, window):
-        return BudgetCeiling(
-            name="c1",
-            window=window,
-            limit_usd=100.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
+    def _spent(self, pairs, window, expected, **kw):
+        """``pairs``: iterable of (cost, ts). Run and assert spent=``expected``."""
+        events = [_completed(c, ts=t) for c, t in pairs]
+        ceilings = [_ceiling(window=window, limit_usd=100.0)]
+        _, reason = _eval_events(events, ceilings, **kw)
+        self.assertIn(f"spent={expected}", reason)
 
     def test_per_run_sums_all_events_regardless_of_timestamp(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("1996-01-01T00:00:00Z", 3.0),
-            self._event("2026-06-15T00:00:00Z", 4.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("per_run")],
-            )
-        self.assertIn("spent=7.0000", reason)
+        pairs = [(3.0, "1996-01-01T00:00:00Z"), (4.0, "2026-06-15T00:00:00Z")]
+        self._spent(pairs, "per_run", "7.0000")
 
     def test_24h_excludes_events_older_than_86400_seconds(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("2026-06-13T23:59:59Z", 5.0),
-            self._event("2026-06-14T01:00:00Z", 7.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("24h")],
-            )
-        self.assertIn("spent=7.0000", reason)
+        pairs = [(5.0, "2026-06-13T23:59:59Z"), (7.0, "2026-06-14T01:00:00Z")]
+        self._spent(pairs, "24h", "7.0000")
 
     def test_7d_excludes_events_older_than_604800_seconds(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("2026-06-07T23:59:59Z", 5.0),
-            self._event("2026-06-10T00:00:00Z", 9.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("7d")],
-            )
-        self.assertIn("spent=9.0000", reason)
+        pairs = [(5.0, "2026-06-07T23:59:59Z"), (9.0, "2026-06-10T00:00:00Z")]
+        self._spent(pairs, "7d", "9.0000")
 
     def test_30d_excludes_events_older_than_2592000_seconds(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("2026-05-15T23:59:59Z", 5.0),
-            self._event("2026-05-20T00:00:00Z", 11.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("30d")],
-            )
-        self.assertIn("spent=11.0000", reason)
+        pairs = [(5.0, "2026-05-15T23:59:59Z"), (11.0, "2026-05-20T00:00:00Z")]
+        self._spent(pairs, "30d", "11.0000")
 
     def test_unparseable_event_timestamp_is_skipped_in_windowed_modes(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("not-a-timestamp", 99.0),
-            self._event("2026-06-14T12:00:00Z", 3.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("24h")],
-            )
-        self.assertIn("spent=3.0000", reason)
+        pairs = [(99.0, "not-a-timestamp"), (3.0, "2026-06-14T12:00:00Z")]
+        self._spent(pairs, "24h", "3.0000")
 
     def test_future_event_beyond_window_is_excluded(self) -> None:
         """REQ-08 'within N seconds' is symmetric."""
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [
-            self._event("2026-12-31T00:00:00Z", 50.0),
-            self._event("2026-06-14T12:00:00Z", 3.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "2026-06-15T00:00:00Z",
-                ceilings=[self._ceiling("24h")],
-            )
-        self.assertIn("spent=3.0000", reason)
+        pairs = [(50.0, "2026-12-31T00:00:00Z"), (3.0, "2026-06-14T12:00:00Z")]
+        self._spent(pairs, "24h", "3.0000")
 
     def test_unparseable_now_iso_short_circuits_to_zero_in_windowed_modes(self) -> None:
         """A bad now_iso plus a windowed ceiling counts zero spend."""
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        events = [self._event("2026-06-14T12:00:00Z", 50.0)]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path,
-                "init",
-                "not-a-timestamp",
-                ceilings=[self._ceiling("24h")],
-            )
-        self.assertIn("spent=0.0000", reason)
+        self._spent(
+            [(50.0, "2026-06-14T12:00:00Z")], "24h", "0.0000", now="not-a-timestamp"
+        )
 
 
 class EvaluateCeilingsGateFilterTests(unittest.TestCase):
-    def _event(self, cost):
-        return StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
-
     def test_ceiling_not_listing_gate_is_ignored(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        ceiling = BudgetCeiling(
-            name="only_story_start",
-            window="per_run",
-            limit_usd=1.0,
-            warn_at=0.5,
-            gate_names=("story_start",),
+        ceiling = _ceiling(
+            name="only_story_start", limit_usd=1.0, gates=("story_start",)
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(99.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[ceiling]
-            )
+        verdict, reason = _eval_events([_completed(99.0)], [ceiling])
         self.assertEqual(verdict, CeilingDecision.ALLOW)
         self.assertEqual(reason, "no_ceilings_configured")
 
     def test_ceiling_listing_gate_is_applied(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        ceiling = BudgetCeiling(
+        ceiling = _ceiling(
             name="any_gate",
-            window="per_run",
-            limit_usd=10.0,
             warn_at=0.8,
-            gate_names=("init", "story_start", "retry_start"),
+            gates=("init", "story_start", "retry_start"),
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(11.0)])
-            for gate in ("init", "story_start", "retry_start"):
-                with self.subTest(gate=gate):
-                    verdict, reason = evaluate_ceilings(
-                        path, gate, "2026-06-15T00:00:00Z", ceilings=[ceiling]
-                    )
-                    self.assertEqual(verdict, CeilingDecision.BLOCK)
-                    self.assertIn("any_gate", reason)
+        for gate in ("init", "story_start", "retry_start"):
+            with self.subTest(gate=gate):
+                verdict, reason = _eval_events([_completed(11.0)], [ceiling], gate=gate)
+                self.assertEqual(verdict, CeilingDecision.BLOCK)
+                self.assertIn("any_gate", reason)
 
 
 class EvaluateCeilingsMultiCeilingTests(unittest.TestCase):
-    def _event(self, cost):
-        return StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
+    def _run(self, ceilings, cost):
+        return _eval_events([_completed(cost)], ceilings)
 
     def test_block_outranks_warn(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        c1 = BudgetCeiling(
-            name="cap_a",
-            window="per_run",
-            limit_usd=2.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        c2 = BudgetCeiling(
-            name="cap_b",
-            window="per_run",
-            limit_usd=1.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(1.5)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
-            )
+        cs = [
+            _ceiling(name="cap_a", limit_usd=2.0),
+            _ceiling(name="cap_b", limit_usd=1.0),
+        ]
+        verdict, reason = self._run(cs, 1.5)
         self.assertEqual(verdict, CeilingDecision.BLOCK)
         self.assertIn("cap_b", reason)
 
     def test_warn_outranks_allow(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        c1 = BudgetCeiling(
-            name="cap_a",
-            window="per_run",
-            limit_usd=100.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        c2 = BudgetCeiling(
-            name="cap_b",
-            window="per_run",
-            limit_usd=10.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(6.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
-            )
+        cs = [
+            _ceiling(name="cap_a", limit_usd=100.0),
+            _ceiling(name="cap_b", limit_usd=10.0),
+        ]
+        verdict, reason = self._run(cs, 6.0)
         self.assertEqual(verdict, CeilingDecision.WARN)
         self.assertIn("cap_b", reason)
 
     def test_tie_break_uses_declaration_order(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        c1 = BudgetCeiling(
-            name="first",
-            window="per_run",
-            limit_usd=1.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        c2 = BudgetCeiling(
-            name="second",
-            window="per_run",
-            limit_usd=1.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(2.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
-            )
+        cs = [
+            _ceiling(name="first", limit_usd=1.0),
+            _ceiling(name="second", limit_usd=1.0),
+        ]
+        verdict, reason = self._run(cs, 2.0)
         self.assertEqual(verdict, CeilingDecision.BLOCK)
         self.assertTrue(reason.startswith("first:"))
 
     def test_all_ceilings_below_warn_returns_allow_with_first_reason(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        c1 = BudgetCeiling(
-            name="alpha",
-            window="per_run",
-            limit_usd=100.0,
-            warn_at=0.9,
-            gate_names=("init",),
-        )
-        c2 = BudgetCeiling(
-            name="beta",
-            window="per_run",
-            limit_usd=200.0,
-            warn_at=0.9,
-            gate_names=("init",),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(1.0)])
-            verdict, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[c1, c2]
-            )
+        cs = [
+            _ceiling(name="alpha", limit_usd=100.0, warn_at=0.9),
+            _ceiling(name="beta", limit_usd=200.0, warn_at=0.9),
+        ]
+        verdict, reason = self._run(cs, 1.0)
         self.assertEqual(verdict, CeilingDecision.ALLOW)
         self.assertTrue(reason.startswith("alpha:"))
 
 
 class EvaluateCeilingsLineEndingTests(unittest.TestCase):
-    def _ceiling(self):
-        return BudgetCeiling(
-            name="c1",
-            window="per_run",
-            limit_usd=100.0,
-            warn_at=0.5,
-            gate_names=("init",),
-        )
-
-    def _event(self, cost):
-        return StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
-
     def test_crlf_line_endings_are_tolerated(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(2.0), self._event(3.0)], eol="\r\n")
-            _, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
+        evs = [_completed(2.0), _completed(3.0)]
+        _, reason = _eval_events(evs, [_ceiling(limit_usd=100.0)], eol="\r\n")
         self.assertIn("spent=5.0000", reason)
 
     def test_trailing_blank_lines_are_tolerated(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(7.0)], trailing_blanks=5)
-            _, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
+        _, reason = _eval_events(
+            [_completed(7.0)], [_ceiling(limit_usd=100.0)], trailing_blanks=5
+        )
         self.assertIn("spent=7.0000", reason)
 
     def test_malformed_lines_are_skipped(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "events.jsonl"
-            valid = compact_json(self._event(4.0).to_dict())
+            valid = compact_json(_completed(4.0).to_dict())
             path.write_text("not json\n{}\n[1,2,3]\n" + valid + "\n", encoding="utf-8")
             _, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+                path,
+                "init",
+                "2026-06-15T00:00:00Z",
+                ceilings=[_ceiling(limit_usd=100.0)],
             )
         self.assertIn("spent=4.0000", reason)
 
     def test_event_without_cost_usd_attribute_contributes_zero(self) -> None:
         """``StoryStarted`` has no ``cost_usd``; must not blow up or count."""
-        from story_automator.core.budget_ceilings import evaluate_ceilings
         from story_automator.core.telemetry_events import StoryStarted
 
-        events = [
-            StoryStarted(
-                timestamp="2026-06-15T00:00:00Z",
-                run_id="r1",
-                epic="E1",
-                story_key="S1",
-                agent="dev",
-                model="m",
-                complexity="L",
-            ),
-            self._event(3.0),
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, events)
-            _, reason = evaluate_ceilings(
-                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
-            )
+        started = StoryStarted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            agent="dev",
+            model="m",
+            complexity="L",
+        )
+        _, reason = _eval_events(
+            [started, _completed(3.0)], [_ceiling(limit_usd=100.0)]
+        )
         self.assertIn("spent=3.0000", reason)
 
 
 class BypassAllowedTests(unittest.TestCase):
+    ENV = "BMAD_ALLOW_CEILING_BYPASS"
+
     def setUp(self) -> None:
-        self._prior = os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        self._prior = os.environ.pop(self.ENV, None)
 
     def tearDown(self) -> None:
-        os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        os.environ.pop(self.ENV, None)
         if self._prior is not None:
-            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = self._prior
+            os.environ[self.ENV] = self._prior
 
     def _run(self, env_value, isatty_value):
         if env_value is None:
-            os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+            os.environ.pop(self.ENV, None)
         else:
-            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = env_value
-        from story_automator.core.budget_ceilings import bypass_allowed
-
+            os.environ[self.ENV] = env_value
         with mock.patch("sys.stdin.isatty", return_value=isatty_value):
             return bypass_allowed()
 
@@ -1013,40 +641,11 @@ class BypassAllowedTests(unittest.TestCase):
 
 
 class EvaluateCeilingsDeterminismTests(unittest.TestCase):
-    def _event(self, cost):
-        return StoryCompleted(
-            timestamp="2026-06-15T00:00:00Z",
-            run_id="r1",
-            epic="E1",
-            story_key="S1",
-            duration_s=1.0,
-            cost_usd=cost,
-            tokens_in=0,
-            tokens_out=0,
-            attempts=1,
-        )
-
     def test_one_hundred_calls_byte_identical(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
-        ceilings = [
-            BudgetCeiling(
-                name=f"c{i}",
-                window="per_run",
-                limit_usd=10.0,
-                warn_at=0.5,
-                gate_names=("init",),
-            )
-            for i in range(4)
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _write_ledger(tmp, [self._event(6.0), self._event(2.5)])
-            outputs = {
-                evaluate_ceilings(
-                    path, "init", "2026-06-15T00:00:00Z", ceilings=ceilings
-                )
-                for _ in range(100)
-            }
+        cs = [_ceiling(name=f"c{i}") for i in range(4)]
+        outputs = {
+            _eval_events([_completed(6.0), _completed(2.5)], cs) for _ in range(100)
+        }
         self.assertEqual(len(outputs), 1)
         verdict, reason = outputs.pop()
         self.assertEqual(verdict, CeilingDecision.WARN)
@@ -1054,59 +653,26 @@ class EvaluateCeilingsDeterminismTests(unittest.TestCase):
 
 
 class EvaluateCeilingsConfigSourceTests(unittest.TestCase):
-    def test_workflow_json_path_is_read_through_parser(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
+    def _write_workflow(self, tmp, ceilings_list):
+        path = Path(tmp) / "workflow.json"
+        path.write_text(
+            compact_json({"policy": {"cost_ceilings": ceilings_list}}), encoding="utf-8"
+        )
+        return path
 
+    def test_workflow_json_path_is_read_through_parser(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            workflow = Path(tmp) / "workflow.json"
-            workflow.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                {
-                                    "name": "from_disk",
-                                    "window": "per_run",
-                                    "limit_usd": 5.0,
-                                    "warn_at": 0.5,
-                                    "gate_names": ["init"],
-                                }
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            events = StoryCompleted(
-                timestamp="2026-06-15T00:00:00Z",
-                run_id="r1",
-                epic="E1",
-                story_key="S1",
-                duration_s=1.0,
-                cost_usd=6.0,
-                tokens_in=0,
-                tokens_out=0,
-                attempts=1,
-            )
-            ledger = _write_ledger(tmp, [events])
+            workflow = self._write_workflow(tmp, [_c(name="from_disk", limit_usd=5.0)])
+            ledger = _write_ledger(tmp, [_completed(6.0)])
             verdict, reason = evaluate_ceilings(
-                ledger,
-                "init",
-                "2026-06-15T00:00:00Z",
-                workflow_json_path=workflow,
+                ledger, "init", "2026-06-15T00:00:00Z", workflow_json_path=workflow
             )
         self.assertEqual(verdict, CeilingDecision.BLOCK)
         self.assertTrue(reason.startswith("from_disk:"))
 
     def test_workflow_json_path_with_no_ceilings_returns_sentinel(self) -> None:
-        from story_automator.core.budget_ceilings import evaluate_ceilings
-
         with tempfile.TemporaryDirectory() as tmp:
-            workflow = Path(tmp) / "workflow.json"
-            workflow.write_text(
-                compact_json({"policy": {"cost_ceilings": []}}),
-                encoding="utf-8",
-            )
+            workflow = self._write_workflow(tmp, [])
             verdict, reason = evaluate_ceilings(
                 "irrelevant.jsonl",
                 "init",
