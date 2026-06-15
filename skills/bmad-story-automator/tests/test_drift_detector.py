@@ -277,13 +277,11 @@ class ComputeDriftMissingKeyTests(unittest.TestCase):
 class ComputeDriftSortOrderTests(unittest.TestCase):
     def test_entries_sorted_by_abs_delta_then_model_then_task(self) -> None:
         baseline = _table(
-            _entry("alpha", "story", 0.50),  # delta = +0.30 -> severe
-            _entry("beta", "story", 0.50),  # delta = +0.05 -> minor
-            _entry("gamma", "review", 0.50),  # delta = -0.15 -> major
-            _entry(
-                "alpha", "review", 0.50
-            ),  # delta = +0.30 -> severe (ties on |delta|)
-            _entry("beta", "review", 0.50),  # delta = 0.00 -> stable
+            _entry("alpha", "story", 0.50),
+            _entry("beta", "story", 0.50),
+            _entry("gamma", "review", 0.50),
+            _entry("alpha", "review", 0.50),
+            _entry("beta", "review", 0.50),
         )
         current = _table(
             _entry("alpha", "story", 0.80),
@@ -329,8 +327,8 @@ class FormatDriftReportTests(unittest.TestCase):
             source_path="/fixtures/base.jsonl",
         )
         current = _table(
-            _entry("alpha", "story", 0.60),  # delta = -0.20 -> severe
-            _entry("beta", "review", 0.93),  # delta = +0.03 -> stable
+            _entry("alpha", "story", 0.60),
+            _entry("beta", "review", 0.93),
             source_path="/fixtures/now.jsonl",
         )
         report = compute_drift(baseline=baseline, current=current)
@@ -383,21 +381,9 @@ class FormatDriftReportTests(unittest.TestCase):
 
 
 _FORBIDDEN_TOKENS = (
-    "requests",
-    "httpx",
-    "aiohttp",
-    "subprocess",
-    "os.system",
-    "psutil",
-    "filelock",
+    "requests httpx aiohttp subprocess os.system psutil filelock".split()
 )
-_FORBIDDEN_WRITE_PATTERNS = (
-    "open(",
-    "write_text",
-    "read_text",
-    "Path.mkdir",
-    "write_atomic",
-)
+_FORBIDDEN_WRITE_PATTERNS = "open( write_text read_text Path.mkdir write_atomic".split()
 _FORBIDDEN_TYPING_TOKENS = (
     "typing.Optional",
     "typing.Union",
@@ -411,6 +397,24 @@ _FORBIDDEN_TYPING_TOKENS = (
 def _module_source() -> str:
     path = Path(drift_module.__file__)
     return path.read_text(encoding="utf-8")
+
+
+def _assert_future_annotations_first(
+    testcase: unittest.TestCase, source: str, label: str
+) -> None:
+    tree = ast.parse(source)
+    body = tree.body
+    testcase.assertTrue(body, f"{label} body is empty")
+    first = body[0]
+    is_docstring = (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    )
+    future_node = body[1] if is_docstring else first
+    testcase.assertIsInstance(future_node, ast.ImportFrom)
+    testcase.assertEqual(future_node.module, "__future__")
+    testcase.assertEqual([alias.name for alias in future_node.names], ["annotations"])
 
 
 class ModuleSurfaceTests(unittest.TestCase):
@@ -427,43 +431,14 @@ class ModuleSurfaceTests(unittest.TestCase):
         )
 
     def test_starts_with_future_annotations(self) -> None:
-        source = _module_source()
-        tree = ast.parse(source)
-        body = tree.body
-        self.assertTrue(body, "module body is empty")
-        first = body[0]
-        is_docstring = (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
-        )
-        if is_docstring:
-            self.assertGreaterEqual(
-                len(body), 2, "docstring present but no __future__ import follows"
-            )
-            future_node = body[1]
-        else:
-            future_node = first
-        self.assertIsInstance(future_node, ast.ImportFrom)
-        self.assertEqual(future_node.module, "__future__")
-        self.assertEqual([alias.name for alias in future_node.names], ["annotations"])
+        _assert_future_annotations_first(self, _module_source(), "module")
 
     def test_test_module_starts_with_future_annotations(self) -> None:
-        test_path = Path(__file__)
-        source = test_path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        body = tree.body
-        self.assertTrue(body, "test module body is empty")
-        first = body[0]
-        is_docstring = (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
+        _assert_future_annotations_first(
+            self,
+            Path(__file__).read_text(encoding="utf-8"),
+            "test module",
         )
-        future_node = body[1] if is_docstring else first
-        self.assertIsInstance(future_node, ast.ImportFrom)
-        self.assertEqual(future_node.module, "__future__")
-        self.assertEqual([alias.name for alias in future_node.names], ["annotations"])
 
     def test_import_allowlist(self) -> None:
         source = _module_source()
