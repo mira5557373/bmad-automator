@@ -66,5 +66,116 @@ class CheckBlockingWiringTests(unittest.TestCase):
             self.assertIn("blocked by", ev["message"])
 
 
+class AgentsResolveRetryWiringTests(unittest.TestCase):
+    def test_retry_attempt_emitted_on_attempt_two(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            agents_file = tmp / "agents.md"
+            agents_file.write_text(
+                "```json\n"
+                + json.dumps(
+                    {
+                        "stories": [
+                            {
+                                "storyId": "4.2",
+                                "complexity": "medium",
+                                "tasks": {
+                                    "dev": {
+                                        "primary": "claude",
+                                        "fallback": "false",
+                                        "model": "sonnet",
+                                    }
+                                },
+                            }
+                        ]
+                    }
+                )
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    epic_agents, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    epic_agents, "get_project_root", return_value=str(tmp)
+                ),
+            ):
+                rc = epic_agents.agents_resolve_action(
+                    [
+                        "--agents-file",
+                        str(agents_file),
+                        "--story",
+                        "4.2",
+                        "--task",
+                        "dev",
+                        "--attempt",
+                        "2",
+                        "--prev-error-class",
+                        "test_fail",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            retries = [e for e in events if e["event_type"] == "retry_attempt"]
+            self.assertEqual(len(retries), 1)
+            ev = retries[0]
+            self.assertEqual(ev["epic"], "4")
+            self.assertEqual(ev["story_key"], "4.2")
+            self.assertEqual(ev["attempt_num"], 2)
+            self.assertEqual(ev["agent"], "claude")
+            self.assertEqual(ev["model"], "sonnet")
+            self.assertEqual(ev["prev_error_class"], "test_fail")
+
+    def test_no_retry_attempt_emitted_on_attempt_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            agents_file = tmp / "agents.md"
+            agents_file.write_text(
+                "```json\n"
+                + json.dumps(
+                    {
+                        "stories": [
+                            {
+                                "storyId": "4.2",
+                                "complexity": "medium",
+                                "tasks": {
+                                    "dev": {"primary": "claude", "fallback": "false"}
+                                },
+                            }
+                        ]
+                    }
+                )
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    epic_agents, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    epic_agents, "get_project_root", return_value=str(tmp)
+                ),
+            ):
+                epic_agents.agents_resolve_action(
+                    [
+                        "--agents-file",
+                        str(agents_file),
+                        "--story",
+                        "4.2",
+                        "--task",
+                        "dev",
+                        "--attempt",
+                        "1",
+                    ]
+                )
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(
+                [e for e in events if e["event_type"] == "retry_attempt"], []
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
