@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from story_automator.core.common import compact_json
+
 
 class ModuleImportTests(unittest.TestCase):
     def test_module_imports(self) -> None:
@@ -117,6 +119,57 @@ class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             parse_ceilings_config(Path(tmp) / "missing.json")
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
+
+
+class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
+    def _write(self, tmp: str, payload: object) -> Path:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(compact_json(payload), encoding="utf-8")
+        return path
+
+    def test_empty_object_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, {})
+            self.assertEqual(parse_ceilings_config(path), [])
+
+    def test_no_policy_key_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, {"other": {"foo": "bar"}})
+            self.assertEqual(parse_ceilings_config(path), [])
+
+    def test_no_cost_ceilings_key_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, {"policy": {"unrelated": 1}})
+            self.assertEqual(parse_ceilings_config(path), [])
+
+    def test_cost_ceilings_not_a_list_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, {"policy": {"cost_ceilings": {"not": "a list"}}})
+            self.assertEqual(parse_ceilings_config(path), [])
+
+    def test_top_level_not_object_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(compact_json([1, 2, 3]), encoding="utf-8")
+            self.assertEqual(parse_ceilings_config(path), [])
+
+    def test_invalid_json_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text("not json {", encoding="utf-8")
+            self.assertEqual(parse_ceilings_config(path), [])
 
 
 if __name__ == "__main__":

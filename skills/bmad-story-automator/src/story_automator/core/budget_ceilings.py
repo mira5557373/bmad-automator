@@ -9,6 +9,7 @@ helper, and BMAD step wiring are scheduled for M03-M2 / M03-M3.
 from __future__ import annotations
 
 import enum
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,15 +62,30 @@ signature."""
 def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]:
     """Read ``policy.cost_ceilings`` from ``workflow.json`` (REQ-04, REQ-05).
 
-    Tolerant by design: missing file, empty JSON, missing ``policy`` key,
-    and missing ``cost_ceilings`` key all return an empty list. Malformed
-    individual ceiling entries are skipped silently while a structured
-    warning is appended to ``_PARSE_WARNINGS``; the warning list is
-    cleared at the start of every call so callers can inspect just the
-    warnings produced by the most recent invocation.
+    Tolerant by design: missing file, empty JSON, malformed JSON, missing
+    ``policy`` key, missing ``cost_ceilings`` key, and ``cost_ceilings``
+    not being a list all return an empty list. Individual malformed
+    ceiling entries are skipped while a structured warning is appended
+    to ``_PARSE_WARNINGS`` (cleared at the start of every call).
     """
     _PARSE_WARNINGS.clear()
     path = Path(workflow_json_path)
     if not path.is_file():
+        return []
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    policy = payload.get("policy")
+    if not isinstance(policy, dict):
+        return []
+    raw_ceilings = policy.get("cost_ceilings")
+    if not isinstance(raw_ceilings, list):
         return []
     return []
