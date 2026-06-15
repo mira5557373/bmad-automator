@@ -143,3 +143,27 @@ def lookup_success_rate(
     if entry is None:
         return default
     return entry.success_rate
+
+
+def format_calibration_report(table: CalibrationTable) -> str:
+    """Emit a deterministic plain-ASCII calibration report.
+
+    Line 1: `source: <path>`.
+    Line 2: tab-separated column header.
+    Body: one row per entry, sorted by `(model_id, task_kind)`.
+    Trailing newline (single).
+
+    Caller note: `last_seen_iso` is rendered verbatim. The aggregator
+    guarantees ASCII when the timestamps come from `iso_now()`, which
+    is the only producer M02 uses.
+    """
+
+    lines: list[str] = [f"source: {table.source_path}"]
+    lines.append("model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso")
+    for key in sorted(table.entries.keys()):
+        entry = table.entries[key]
+        lines.append(
+            f"{entry.model_id}\t{entry.task_kind}\t{entry.success_rate:.4f}\t"
+            f"{entry.sample_count}\t{entry.last_seen_iso}"
+        )
+    return "\n".join(lines) + "\n"

@@ -600,5 +600,96 @@ class LookupSuccessRateTests(unittest.TestCase):
         )
 
 
+class FormatCalibrationReportTests(unittest.TestCase):
+    def test_empty_table_emits_header_and_trailing_newline(self) -> None:
+        from story_automator.core.calibration import (
+            CalibrationTable,
+            format_calibration_report,
+        )
+
+        table = CalibrationTable(
+            entries={},
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/telemetry.jsonl",
+            total_events_scanned=0,
+        )
+        text = format_calibration_report(table)
+
+        self.assertTrue(text.endswith("\n"))
+        self.assertIn("/tmp/telemetry.jsonl", text.splitlines()[0])
+
+    def test_rows_sorted_by_model_id_then_task_kind(self) -> None:
+        from story_automator.core.calibration import (
+            CalibrationEntry,
+            CalibrationTable,
+            format_calibration_report,
+        )
+
+        entries = {
+            ("claude-sonnet-4-5", "review"): CalibrationEntry(
+                model_id="claude-sonnet-4-5",
+                task_kind="review",
+                success_rate=0.5000,
+                sample_count=4,
+                last_seen_iso="2026-06-14T10:00:00Z",
+            ),
+            ("claude-opus-4", "code"): CalibrationEntry(
+                model_id="claude-opus-4",
+                task_kind="code",
+                success_rate=0.8750,
+                sample_count=8,
+                last_seen_iso="2026-06-14T11:00:00Z",
+            ),
+            ("claude-opus-4", "docs"): CalibrationEntry(
+                model_id="claude-opus-4",
+                task_kind="docs",
+                success_rate=1.0000,
+                sample_count=2,
+                last_seen_iso="2026-06-14T12:00:00Z",
+            ),
+        }
+        table = CalibrationTable(
+            entries=entries,
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/telemetry.jsonl",
+            total_events_scanned=14,
+        )
+        text = format_calibration_report(table)
+
+        expected = (
+            "source: /tmp/telemetry.jsonl\n"
+            "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
+            "claude-opus-4\tcode\t0.8750\t8\t2026-06-14T11:00:00Z\n"
+            "claude-opus-4\tdocs\t1.0000\t2\t2026-06-14T12:00:00Z\n"
+            "claude-sonnet-4-5\treview\t0.5000\t4\t2026-06-14T10:00:00Z\n"
+        )
+        self.assertEqual(text, expected)
+
+    def test_report_is_plain_ascii(self) -> None:
+        from story_automator.core.calibration import (
+            CalibrationEntry,
+            CalibrationTable,
+            format_calibration_report,
+        )
+
+        entries = {
+            ("m", "t"): CalibrationEntry(
+                model_id="m",
+                task_kind="t",
+                success_rate=0.6667,
+                sample_count=3,
+                last_seen_iso="2026-06-14T12:00:00Z",
+            ),
+        }
+        table = CalibrationTable(
+            entries=entries,
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/t.jsonl",
+            total_events_scanned=3,
+        )
+        text = format_calibration_report(table)
+        text.encode("ascii")
+
+
 if __name__ == "__main__":
     unittest.main()
