@@ -12,7 +12,7 @@ tests call ``self.skipTest`` so this file's unittest run stays clean.
 from __future__ import annotations
 
 import json
-import re  # noqa: F401
+import re
 import unittest
 from pathlib import Path
 
@@ -250,6 +250,52 @@ class SkillMdReq03Tests(unittest.TestCase):
             [],
             msg=f"SKILL.md ## Pre-conditions missing references: {missing}",
         )
+
+
+class SkillMdReq04Tests(unittest.TestCase):
+    """REQ-04: ## Invocation contract section shows the exact CLI pattern."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, SKILL_MD)
+
+    def test_invocation_contract_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## Invocation contract\s*$",
+            msg="SKILL.md must include a level-2 '## Invocation contract' heading",
+        )
+
+    def test_cli_pattern_present(self) -> None:
+        # The spec mandates this exact pattern; match the spine of the
+        # command line plus each required flag.
+        for needle in (
+            "python -m story_automator.cli trust_verify",
+            "--gaps .claude/trust-verify-input/gaps.json",
+            "--spec",
+            "--diff",
+        ):
+            self.assertIn(
+                needle,
+                self.text,
+                msg=f"SKILL.md ## Invocation contract missing {needle!r}",
+            )
+
+    def test_no_unexpected_cli_flags(self) -> None:
+        # Scope the flag-set check to lines that ARE the CLI invocation
+        # (start with `python -m story_automator.cli trust_verify`), not
+        # every prose mention of trust_verify. This avoids false positives
+        # on sentences like "the trust_verify skill supports --verbose
+        # logging upstream" where --verbose belongs to a different tool.
+        allowed = {"--gaps", "--spec", "--diff"}
+        invocation_re = re.compile(r"python -m story_automator\.cli trust_verify[^\n]*")
+        for match in invocation_re.finditer(self.text):
+            flags = set(re.findall(r"--[a-z][a-z0-9_-]*", match.group(0)))
+            extra = flags - allowed
+            self.assertEqual(
+                extra,
+                set(),
+                msg=f"Unexpected CLI flag(s) in invocation line: {extra}",
+            )
 
 
 if __name__ == "__main__":
