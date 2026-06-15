@@ -1,5 +1,12 @@
 ### Features
 
+- feat(budget-ceilings): bypass_allowed env + isatty truth table (M03 REQ-11) (0c1575e)
+- feat(budget-ceilings): merge multi-ceiling verdicts by severity (M03 REQ-10) (9af152c)
+- feat(budget-ceilings): filter ceilings by gate_name (M03 REQ-07) (327b723)
+- feat(budget-ceilings): window-aware spend summation (M03 REQ-08) (34dc866)
+- feat(budget-ceilings): _compute_spent streams JSONL and skips bad lines (M03 REQ-08) (fbf0493)
+- feat(budget-ceilings): evaluate_ceilings returns no-config sentinel (M03 REQ-06) (60d3567)
+- feat(budget-ceilings): scaffold evaluate_ceilings and bypass_allowed (M03-M2) (4268a04)
 - feat(budget-ceilings): parse well-formed ceilings preserving order (M03 REQ-03/04) (857725d)
 - feat(budget-ceilings): tolerate missing policy/cost_ceilings keys (M03 REQ-04) (dfa7936)
 - feat(budget-ceilings): parse_ceilings_config skeleton handles missing file (M03 REQ-04) (32db967)
@@ -49,6 +56,7 @@
 
 ### Bug Fixes
 
+- fix(budget-ceilings): skip non-finite cost values in ledger summation (45a4421)
 - fix(budget-ceilings): post-impl review fixes for M03-M1 (b7a22dc)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
@@ -95,6 +103,8 @@
 
 ### Refactoring
 
+- refactor(budget-ceilings): further compact evaluator tests under 500 LOC (4501367)
+- refactor(budget-ceilings): compact evaluator tests via hoisted helpers (b58dec1)
 - refactor(budget-ceilings): inline temp-dir helpers to satisfy 500-LOC test gate (5742d46)
 - refactor(budget-ceilings): compact tests via hoisted imports and shared fixtures (6b0e0bc)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
@@ -103,6 +113,8 @@
 
 ### Documentation
 
+- docs(budget-ceilings): TDD plan for M03-M2 evaluator core (e056f4a)
+- docs: update generated documentation (0a0c369)
 - docs(budget-ceilings): finalize module docstring and add REQ-01 prelude tests (d1fb1d5)
 - docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
@@ -129,6 +141,11 @@
 
 ### Tests
 
+- test(budget-ceilings): workflow_json_path source path round-trip (M03 REQ-06) (b2edf9e)
+- test(budget-ceilings): determinism gate — 100 calls byte-identical (M03 NFR) (cfd5674)
+- test(budget-ceilings): tolerate CRLF and malformed ledger lines (M03 NFR) (c8b847c)
+- test(budget-ceilings): cover ALLOW/WARN/BLOCK boundary cases (M03 REQ-09) (feac29e)
+- test(budget-ceilings): hoist _write_ledger helper for evaluator fixtures (437911e)
 - test(budget-ceilings): establish REQ-15 ledger-fixture pattern via compact_json (f370c0a)
 - test(budget-ceilings): cover malformed entry skipping and warnings (M03 REQ-05/14) (65e3c02)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
