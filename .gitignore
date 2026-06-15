@@ -58,3 +58,9 @@ htmlcov/
 .claude/settings.local.json
 .claude/skills/
 .claude/commands/
+
+# sw init outputs
+.claude/workflow.json
+.claude/settings.local.json
+.claude/skills/
+.claude/commands/
