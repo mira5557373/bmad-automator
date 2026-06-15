@@ -1,5 +1,10 @@
 ### Features
 
+- feat(m10c): ship m05_atomic_write_smoke golden fixture (275e497)
+- feat(m10c): ship m02_emitter_smoke golden fixture (dd82294)
+- feat(m10c): ship m01_event_basics golden fixture (816c20c)
+- feat(m10c): add fixture-path and validate-or-regen helpers (b9dad0f)
+- feat(m10c): create tests/golden/ fixture directory (21cdbea)
 - feat(m10b): normalize claude_p argv paths, preserve placeholders (0a6587f)
 - feat(m10b): hook notify_claude_p for invoke recording (44ae05e)
 - feat(m10b): exclude heartbeat-driven lock writes from trace (4236d29)
@@ -75,6 +80,7 @@
 
 ### Bug Fixes
 
+- fix(m10c): drop unused type-ignore comments in fixture-helper contract tests (25b2d55)
 - fix(m10b): post-impl review fixes for recorder hooks (7bf94e7)
 - fix(m10b): satisfy ruff + mypy --strict (d077bb2)
 - fix(m10a): reject non-int seq and non-string kind in load_golden (3dc3f14)
@@ -133,6 +139,8 @@
 
 ### Documentation
 
+- docs(m10c): plan fixtures + validation milestone (783b6d3)
+- docs: update generated documentation (9a6371b)
 - docs(m10b): add recorder + hooks implementation plan (67854bd)
 - docs: update generated documentation (7096bed)
 - docs(m10a): plan for golden-trace data types (127593c)
@@ -169,6 +177,11 @@
 
 ### Tests
 
+- test(m10c): cover subprocess import-cleanliness quality gate (9f309cb)
+- test(m10c): add placeholder-token leak quality gate (f815437)
+- test(m10c): cover REQ-12(b) end-to-end regression localization (d193f05)
+- test(m10c): lock M05 ten-run byte-identical determinism gate (b33d8ed)
+- test(m10c): cover REQ-12(a) recorder self-comparison (665c5d6)
 - test(m10b): lock end-to-end determinism contract (489cfbb)
 - test(m10b): lock import-time safety contract (e50ac3f)
 - test(m10b): lock hook restoration on exception (0ca2d87)
