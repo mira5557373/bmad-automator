@@ -588,3 +588,66 @@ class ClassifyStoryFailedTests(unittest.TestCase):
         # pins the substring behaviour so the spec change is deliberate.
         result = classify(self._make_event(reason="latest model build"))
         self.assertEqual(result.primary, FailureClass.TEST_FAILURE)
+
+
+class ClassifyTmuxCrashTests(unittest.TestCase):
+    def _make_event(self, *, exit_code: int = 137) -> object:
+        from story_automator.core.telemetry_events import TmuxSessionCrashed
+
+        return TmuxSessionCrashed(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            session_name="sess",
+            story_key="S1",
+            exit_code=exit_code,
+            last_capture_chars=0,
+        )
+
+    def test_plain_crash_returns_crash_high_no_implies(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event())
+        self.assertEqual(result.primary, FailureClass.CRASH)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_sigpipe_exit_signal_implies_network_error(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        # Spec REQ-09 references an ``exit_signal`` field; M01 does not
+        # define one. The M01 dataclass is not frozen and not slotted,
+        # so injecting the spec field via setattr is sound.
+        event.exit_signal = "SIGPIPE"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.CRASH)
+        self.assertIn(FailureClass.NETWORK_ERROR, result.implies)
+
+    def test_sighup_exit_signal_implies_network_error(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        event.exit_signal = "SIGHUP"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertIn(FailureClass.NETWORK_ERROR, result.implies)
+
+    def test_network_substring_in_exit_signal_implies_network_error(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        event.exit_signal = "network-unreachable"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertIn(FailureClass.NETWORK_ERROR, result.implies)
+
+    def test_unrelated_exit_signal_does_not_imply_network_error(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        event.exit_signal = "SIGTERM"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.CRASH)
+        self.assertNotIn(FailureClass.NETWORK_ERROR, result.implies)
