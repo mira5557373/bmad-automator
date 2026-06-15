@@ -694,5 +694,42 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
+class LedgerFixturePatternTests(unittest.TestCase):
+    """REQ-15: fixtures must be built by serializing M01 event instances
+    through ``compact_json``. This sub-milestone has no evaluator yet,
+    but the fixture-building utility is exercised here so M03-M2 can
+    rely on it. The test asserts only that the fixture round-trips
+    through ``parse_event`` — no ceiling evaluation runs."""
+
+    def test_event_fixture_round_trips_via_compact_json(self) -> None:
+        from story_automator.core.telemetry_events import (
+            StoryCompleted,
+            parse_event,
+        )
+
+        event = StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=0.25,
+            tokens_in=10,
+            tokens_out=10,
+            attempts=1,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            ensure_dir(tmp)
+            ledger = Path(tmp) / "events.jsonl"
+            line = compact_json(event.to_dict())
+            ledger.write_text(line + "\n", encoding="utf-8")
+
+            with ledger.open("r", encoding="utf-8") as handle:
+                first = handle.readline().rstrip("\n")
+            parsed = parse_event(first)
+        self.assertEqual(parsed.run_id, "r1")
+        self.assertEqual(getattr(parsed, "cost_usd"), 0.25)
+
+
 if __name__ == "__main__":
     unittest.main()
