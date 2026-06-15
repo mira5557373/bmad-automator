@@ -77,3 +77,49 @@ class EmitTmuxSpawnedWiringTests(unittest.TestCase):
             self.assertEqual(ev["story_key"], "4.9")
             self.assertEqual(ev["pid"], 99)
             self.assertEqual(ev["pane_geometry"], "200x50")
+
+
+class EmitTmuxCompletedWiringTests(unittest.TestCase):
+    def test_emit_completed_populates_story_key_and_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            state = {"exitCode": 0, "durationSeconds": 12.5}
+            with mock.patch.object(
+                tmux_runtime, "emitter_for_project_root", side_effect=factory
+            ):
+                tmux_runtime._emit_tmux_completed(
+                    "sa-acme-251215-104500-e5-s5-2-review",
+                    state,
+                    str(tmp),
+                )
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+            self.assertEqual(ev["event_type"], "tmux_session_completed")
+            self.assertEqual(ev["story_key"], "5.2")
+            self.assertEqual(ev["exit_code"], 0)
+            self.assertEqual(ev["duration_s"], 12.5)
+
+
+class EmitTmuxCrashedWiringTests(unittest.TestCase):
+    def test_emit_crashed_populates_story_key_and_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            state = {"exitCode": 137, "lastCaptureChars": 1024}
+            with mock.patch.object(
+                tmux_runtime, "emitter_for_project_root", side_effect=factory
+            ):
+                tmux_runtime._emit_tmux_crashed(
+                    "sa-acme-251215-104500-e6-s6-1-create",
+                    state,
+                    str(tmp),
+                )
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+            self.assertEqual(ev["event_type"], "tmux_session_crashed")
+            self.assertEqual(ev["story_key"], "6.1")
+            self.assertEqual(ev["exit_code"], 137)
+            self.assertEqual(ev["last_capture_chars"], 1024)

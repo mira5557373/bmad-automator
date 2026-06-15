@@ -412,7 +412,7 @@ def _emit_tmux_completed(
             timestamp=iso_now(),
             run_id="",
             session_name=session,
-            story_key="",
+            story_key=_story_key_from_session_name(session),
             exit_code=exit_code,
             duration_s=duration_s,
         )
@@ -431,7 +431,7 @@ def _emit_tmux_crashed(
             timestamp=iso_now(),
             run_id="",
             session_name=session,
-            story_key="",
+            story_key=_story_key_from_session_name(session),
             exit_code=exit_code,
             last_capture_chars=last_capture,
         )
