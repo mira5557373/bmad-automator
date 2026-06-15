@@ -237,5 +237,37 @@ class ComputeDriftBoundaryTests(unittest.TestCase):
         self.assertIs(at.classification, DriftClassification.SEVERE_DRIFT)
 
 
+class ComputeDriftMissingKeyTests(unittest.TestCase):
+    def test_key_only_in_baseline_gets_current_default(self) -> None:
+        baseline = _table(_entry("gpt-4o-mini", "story", 0.95))
+        current = _table()
+        report = compute_drift(baseline=baseline, current=current)
+        self.assertEqual(len(report.entries), 1)
+        entry = report.entries[0]
+        self.assertEqual(entry.model_id, "gpt-4o-mini")
+        self.assertEqual(entry.task_kind, "story")
+        self.assertEqual(entry.baseline_success_rate, 0.95)
+        self.assertEqual(entry.current_success_rate, 0.5)
+        self.assertEqual(entry.delta, round(0.5 - 0.95, 4))
+        self.assertIs(entry.classification, DriftClassification.SEVERE_DRIFT)
+
+    def test_key_only_in_current_gets_baseline_default(self) -> None:
+        baseline = _table()
+        current = _table(_entry("opus-4-1", "review", 0.30))
+        report = compute_drift(baseline=baseline, current=current)
+        self.assertEqual(len(report.entries), 1)
+        entry = report.entries[0]
+        self.assertEqual(entry.model_id, "opus-4-1")
+        self.assertEqual(entry.task_kind, "review")
+        self.assertEqual(entry.baseline_success_rate, 0.5)
+        self.assertEqual(entry.current_success_rate, 0.30)
+        self.assertEqual(entry.delta, round(0.30 - 0.5, 4))
+        self.assertIs(entry.classification, DriftClassification.SEVERE_DRIFT)
+
+    def test_empty_inputs_produce_empty_entries(self) -> None:
+        report = compute_drift(baseline=_table(), current=_table())
+        self.assertEqual(report.entries, [])
+
+
 if __name__ == "__main__":
     unittest.main()
