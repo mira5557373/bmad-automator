@@ -175,3 +175,74 @@ class TelemetryReaderCostByEpicTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(TelemetryReader(path).cost_by_epic(), {})
+
+
+class TelemetryReaderAttemptsByStoryTests(unittest.TestCase):
+    def _write(self, path: Path, events: list[dict]) -> None:
+        with open(path, "w", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    def test_attempts_by_story_counts_retry_attempt_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._write(
+                path,
+                [
+                    {
+                        "event_type": "retry_attempt",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S1",
+                        "attempt_num": 2,
+                        "agent": "a",
+                        "model": "m",
+                        "prev_error_class": "x",
+                    },
+                    {
+                        "event_type": "retry_attempt",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S1",
+                        "attempt_num": 3,
+                        "agent": "a",
+                        "model": "m",
+                        "prev_error_class": "x",
+                    },
+                    {
+                        "event_type": "retry_attempt",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E2",
+                        "story_key": "S9",
+                        "attempt_num": 2,
+                        "agent": "a",
+                        "model": "m",
+                        "prev_error_class": "x",
+                    },
+                    # Other types must not contribute:
+                    {
+                        "event_type": "cost_charged",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S1",
+                        "phase": "dev",
+                        "cost_usd": 0.01,
+                        "tokens_in": 1,
+                        "tokens_out": 1,
+                        "model": "m",
+                    },
+                ],
+            )
+            reader = TelemetryReader(path)
+            result = reader.attempts_by_story()
+            self.assertEqual(result, {("E1", "S1"): 2, ("E2", "S9"): 1})
+
+    def test_attempts_by_story_empty_when_no_retry_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            path.touch()
+            self.assertEqual(TelemetryReader(path).attempts_by_story(), {})

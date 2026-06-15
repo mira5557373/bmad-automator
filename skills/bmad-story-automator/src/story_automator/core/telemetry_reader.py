@@ -17,7 +17,7 @@ from .telemetry_events import (
     CostCharged,
     Event,
     RetroFired,  # noqa: F401
-    RetryAttempt,  # noqa: F401
+    RetryAttempt,
     parse_event,
 )
 
@@ -42,6 +42,14 @@ class TelemetryReader:
             if isinstance(event, CostCharged):
                 totals[event.epic] = totals.get(event.epic, 0.0) + event.cost_usd
         return totals
+
+    def attempts_by_story(self) -> dict[tuple[str, str], int]:
+        counts: dict[tuple[str, str], int] = {}
+        for event in self.iter_events():
+            if isinstance(event, RetryAttempt):
+                key = (event.epic, event.story_key)
+                counts[key] = counts.get(key, 0) + 1
+        return counts
 
 
 __all__ = ["TelemetryReader"]
