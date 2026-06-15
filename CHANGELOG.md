@@ -1,5 +1,10 @@
 ### Features
 
+- feat(failure-triage): add IMPLIES_GRAPH static edges + module __all__ (REQ-05) (8bb0810)
+- feat(failure-triage): add frozen Classification dataclass (REQ-04) (6e815a2)
+- feat(failure-triage): add Confidence enum (REQ-03) (c62ef0f)
+- feat(failure-triage): add FailureClass 13-member taxonomy (REQ-02) (73d282b)
+- feat(failure-triage): add empty m07a module skeleton (8db1c0f)
 - feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
 - feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
 - feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
@@ -42,6 +47,7 @@
 
 ### Bug Fixes
 
+- fix(failure-triage): tighten frozen-dataclass exception + rename enum-subclass test (6b670ee)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
 - fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
@@ -93,6 +99,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
@@ -117,6 +124,13 @@
 
 ### Tests
 
+- test(failure-triage): add import-allowlist + line-count discipline gates (f55435d)
+- test(failure-triage): add taxonomy-completeness + placeholder-token gates (8c05864)
+- test(failure-triage): add failing IMPLIES_GRAPH tests for REQ-05 (d4ca3be)
+- test(failure-triage): add failing Classification dataclass tests for REQ-04 (12ec2fe)
+- test(failure-triage): add failing Confidence tests for REQ-03 (0ef5eaf)
+- test(failure-triage): add failing FailureClass tests for REQ-02 (bf6a261)
+- test(failure-triage): add failing module-import scaffold for m07a (42ea1b1)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
 - test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
@@ -160,6 +174,9 @@
 
 ### Other
 
+- plan(m07a-taxonomy-foundation): TDD plan for failure-triage data substrate (0e225da)
+- spec(m07-failure): copy spec into worktree (425f977)
+- build: gitignore sw init outputs (100c147)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
