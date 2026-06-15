@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from story_automator.core.drift_detector import DriftClassification, DriftEntry
+from story_automator.core.drift_detector import (
+    DriftClassification,
+    DriftEntry,
+    DriftReport,
+)
 
 
 class DriftClassificationTests(unittest.TestCase):
@@ -58,6 +62,39 @@ class DriftEntryTests(unittest.TestCase):
                 0.0,
                 DriftClassification.STABLE,
             )
+
+
+class DriftReportTests(unittest.TestCase):
+    def test_construct_with_kw_only_fields(self) -> None:
+        report = DriftReport(
+            entries=[],
+            generated_at="2026-06-15T00:00:00Z",
+            baseline_source="/tmp/base.jsonl",
+            current_source="/tmp/now.jsonl",
+        )
+        self.assertEqual(report.entries, [])
+        self.assertEqual(report.generated_at, "2026-06-15T00:00:00Z")
+        self.assertEqual(report.baseline_source, "/tmp/base.jsonl")
+        self.assertEqual(report.current_source, "/tmp/now.jsonl")
+
+    def test_entries_is_mutable_list(self) -> None:
+        report = DriftReport(
+            entries=[],
+            generated_at="2026-06-15T00:00:00Z",
+            baseline_source="b",
+            current_source="c",
+        )
+        report.entries.append(
+            DriftEntry(
+                model_id="m",
+                task_kind="t",
+                baseline_success_rate=0.0,
+                current_success_rate=0.0,
+                delta=0.0,
+                classification=DriftClassification.STABLE,
+            )
+        )
+        self.assertEqual(len(report.entries), 1)
 
 
 if __name__ == "__main__":

@@ -53,3 +53,20 @@ class DriftEntry:
     current_success_rate: float
     delta: float
     classification: DriftClassification
+
+
+@dataclass(kw_only=True)
+class DriftReport:
+    """Output of `compute_drift`.
+
+    `entries` is ordered by descending `abs(delta)`, then ascending
+    `model_id`, then ascending `task_kind`. `baseline_source` and
+    `current_source` echo the `source_path` of each input
+    CalibrationTable so the report is self-describing without an
+    out-of-band caller note.
+    """
+
+    entries: list[DriftEntry]
+    generated_at: str
+    baseline_source: str
+    current_source: str
