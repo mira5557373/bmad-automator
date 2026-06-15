@@ -269,5 +269,52 @@ class ComputeDriftMissingKeyTests(unittest.TestCase):
         self.assertEqual(report.entries, [])
 
 
+class ComputeDriftSortOrderTests(unittest.TestCase):
+    def test_entries_sorted_by_abs_delta_then_model_then_task(self) -> None:
+        baseline = _table(
+            _entry("alpha", "story", 0.50),  # delta = +0.30 -> severe
+            _entry("beta", "story", 0.50),  # delta = +0.05 -> minor
+            _entry("gamma", "review", 0.50),  # delta = -0.15 -> major
+            _entry(
+                "alpha", "review", 0.50
+            ),  # delta = +0.30 -> severe (ties on |delta|)
+            _entry("beta", "review", 0.50),  # delta = 0.00 -> stable
+        )
+        current = _table(
+            _entry("alpha", "story", 0.80),
+            _entry("beta", "story", 0.55),
+            _entry("gamma", "review", 0.35),
+            _entry("alpha", "review", 0.80),
+            _entry("beta", "review", 0.50),
+        )
+        report = compute_drift(baseline=baseline, current=current)
+        observed = [(e.model_id, e.task_kind, e.delta) for e in report.entries]
+        self.assertEqual(
+            observed,
+            [
+                ("alpha", "review", 0.30),
+                ("alpha", "story", 0.30),
+                ("gamma", "review", -0.15),
+                ("beta", "story", 0.05),
+                ("beta", "review", 0.0),
+            ],
+        )
+
+    def test_repeated_calls_return_identical_entries_modulo_generated_at(self) -> None:
+        baseline = _table(
+            _entry("alpha", "story", 0.60),
+            _entry("beta", "review", 0.40),
+        )
+        current = _table(
+            _entry("alpha", "story", 0.80),
+            _entry("beta", "review", 0.10),
+        )
+        first = compute_drift(baseline=baseline, current=current)
+        second = compute_drift(baseline=baseline, current=current)
+        self.assertEqual(first.entries, second.entries)
+        self.assertEqual(first.baseline_source, second.baseline_source)
+        self.assertEqual(first.current_source, second.current_source)
+
+
 if __name__ == "__main__":
     unittest.main()
