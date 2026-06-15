@@ -553,5 +553,52 @@ class BuildCalibrationParsingTolerationTests(unittest.TestCase):
         self.assertEqual(set(table.entries.keys()), {("m", "t")})
 
 
+class LookupSuccessRateTests(unittest.TestCase):
+    def _make_table(self):
+        from story_automator.core.calibration import CalibrationEntry, CalibrationTable
+
+        entry = CalibrationEntry(
+            model_id="claude-opus-4",
+            task_kind="code",
+            success_rate=0.8750,
+            sample_count=8,
+            last_seen_iso="2026-06-14T12:00:00Z",
+        )
+        return CalibrationTable(
+            entries={("claude-opus-4", "code"): entry},
+            generated_at="2026-06-14T13:00:00Z",
+            source_path="/tmp/t.jsonl",
+            total_events_scanned=8,
+        )
+
+    def test_hit_returns_stored_rate(self) -> None:
+        from story_automator.core.calibration import lookup_success_rate
+
+        table = self._make_table()
+        self.assertEqual(
+            lookup_success_rate(table, "claude-opus-4", "code"), 0.8750
+        )
+
+    def test_miss_returns_default_0_5(self) -> None:
+        from story_automator.core.calibration import lookup_success_rate
+
+        table = self._make_table()
+        self.assertEqual(
+            lookup_success_rate(table, "gpt-5-codex", "code"), 0.5
+        )
+        self.assertEqual(
+            lookup_success_rate(table, "claude-opus-4", "docs"), 0.5
+        )
+
+    def test_miss_returns_custom_default(self) -> None:
+        from story_automator.core.calibration import lookup_success_rate
+
+        table = self._make_table()
+        self.assertEqual(
+            lookup_success_rate(table, "unknown", "unknown", default=0.123),
+            0.123,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

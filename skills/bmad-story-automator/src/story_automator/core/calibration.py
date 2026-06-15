@@ -123,3 +123,23 @@ def build_calibration(jsonl_path: str | Path) -> CalibrationTable:
         source_path=source_path,
         total_events_scanned=total_scanned,
     )
+
+
+def lookup_success_rate(
+    table: CalibrationTable,
+    model_id: str,
+    task_kind: str,
+    default: float = 0.5,
+) -> float:
+    """Return the stored success rate for `(model_id, task_kind)`.
+
+    The default is 0.5, which models maximum uncertainty for an
+    unseen pair — see REQ-09. Callers (e.g. M03's `sw estimate`) rely
+    on this exact default; changing it without coordinating with M03
+    would silently shift cost-estimate confidence bands.
+    """
+
+    entry = table.entries.get((model_id, task_kind))
+    if entry is None:
+        return default
+    return entry.success_rate
