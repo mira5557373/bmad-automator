@@ -478,3 +478,130 @@ class CheckComplianceHappyPathTests(unittest.TestCase):
         assert isinstance(prompt, str)
         self.assertIn("unique-marker-xyz", prompt)
         self.assertIn("```text\n", prompt)
+
+
+class CheckComplianceErrorMatrixTests(unittest.TestCase):
+    """REQ-10: non-zero exit, timeout, and parse failure raise
+    ComplianceError. Never silently downgrade."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.spec = self.root / "spec.md"
+        self.spec.write_text("# REQ-01\n", encoding="utf-8")
+
+    def test_non_zero_exit_raises_compliance_error(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            check_compliance,
+        )
+
+        failed = subprocess.CompletedProcess(
+            args=["claude", "-p"],
+            returncode=2,
+            stdout="",
+            stderr="boom",
+        )
+        with (
+            patch("subprocess.run", return_value=failed),
+            self.assertRaisesRegex(ComplianceError, "exited 2"),
+        ):
+            check_compliance(spec_path=self.spec, diff_text="d")
+
+    def test_non_zero_exit_includes_stderr_excerpt(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            check_compliance,
+        )
+
+        failed = subprocess.CompletedProcess(
+            args=["claude", "-p"],
+            returncode=1,
+            stdout="",
+            stderr="auth failed: please login",
+        )
+        with patch("subprocess.run", return_value=failed):
+            try:
+                check_compliance(spec_path=self.spec, diff_text="d")
+            except ComplianceError as exc:
+                self.assertIn("auth failed", str(exc))
+            else:
+                self.fail("expected ComplianceError")
+
+    def test_timeout_raises_compliance_error(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            check_compliance,
+        )
+
+        def fake_run(*args: object, **kwargs: object) -> object:
+            raise subprocess.TimeoutExpired(
+                cmd=["claude", "-p"],
+                timeout=120,
+            )
+
+        with (
+            patch("subprocess.run", side_effect=fake_run),
+            self.assertRaisesRegex(ComplianceError, "timed out"),
+        ):
+            check_compliance(spec_path=self.spec, diff_text="d")
+
+    def test_unparseable_stdout_raises_compliance_error(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            check_compliance,
+        )
+
+        ok_but_bad = subprocess.CompletedProcess(
+            args=["claude", "-p"],
+            returncode=0,
+            stdout="not json at all",
+            stderr="",
+        )
+        with (
+            patch("subprocess.run", return_value=ok_but_bad),
+            self.assertRaisesRegex(ComplianceError, "not valid JSON"),
+        ):
+            check_compliance(spec_path=self.spec, diff_text="d")
+
+    def test_parse_failure_never_downgrades_to_missing_verdict(self) -> None:
+        # REQ-10 explicit guarantee. We verified _parse_envelope in
+        # Task 6; here we verify the public surface honours the same.
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            check_compliance,
+        )
+
+        ok_but_bad = subprocess.CompletedProcess(
+            args=["claude", "-p"],
+            returncode=0,
+            stdout='{"unrelated": "shape"}',
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=ok_but_bad):
+            try:
+                check_compliance(spec_path=self.spec, diff_text="d")
+            except ComplianceError:
+                return
+        self.fail(
+            "check_compliance silently produced a report instead of "
+            "raising on unparseable envelope — REQ-10 forbids that"
+        )
+
+    def test_timeout_propagates_configured_timeout_seconds(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        captured: dict[str, object] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> object:
+            captured.update(kwargs)
+            return _ok_completed_process(_SAMPLE_ENVELOPE)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            check_compliance(
+                spec_path=self.spec,
+                diff_text="d",
+                timeout_s=7,
+            )
+        self.assertEqual(captured.get("timeout"), 7)
