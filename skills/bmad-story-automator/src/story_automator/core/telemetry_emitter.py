@@ -30,10 +30,12 @@ class TelemetryEmitter:
     def emit(self, event: Event) -> None:
         ensure_dir(self._path.parent)
         line = event.to_json_line() + "\n"
-        with open(self._path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-            fh.flush()
-            os.fsync(fh.fileno())
+        with self._thread_lock:
+            with self._file_lock:
+                with open(self._path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                    fh.flush()
+                    os.fsync(fh.fileno())
 
 
 __all__ = ["TelemetryEmitter"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -89,3 +90,46 @@ class TelemetryEmitterAppendTests(unittest.TestCase):
             )
             self.assertTrue(path.parent.is_dir())
             self.assertTrue(path.is_file())
+
+
+class TelemetryEmitterLockingTests(unittest.TestCase):
+    def test_concurrent_threads_do_not_interleave_lines(self) -> None:
+        # REQ-03 + NFR cross-process concurrency: 50 threads x 20 events
+        # must produce 1000 well-formed JSONL lines (no partial writes,
+        # no fragment splices).
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+
+            def worker(tid: int) -> None:
+                for i in range(20):
+                    emitter.emit(
+                        StoryStarted(
+                            timestamp="2026-06-14T00:00:00Z",
+                            run_id=f"t{tid}",
+                            epic="E",
+                            story_key=f"S{tid}-{i}",
+                            agent="a",
+                            model="m",
+                            complexity="c",
+                        )
+                    )
+
+            threads = [threading.Thread(target=worker, args=(t,)) for t in range(50)]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1000)
+            for line in lines:
+                payload = json.loads(line)  # raises if any line is corrupt
+                self.assertEqual(payload["event_type"], "story_started")
+
+    def test_lock_file_path_is_path_dot_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+            expected_lock_path = Path(tmp) / "events.jsonl.lock"
+            self.assertEqual(emitter._lock_path, expected_lock_path)
