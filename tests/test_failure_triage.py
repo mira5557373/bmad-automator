@@ -771,3 +771,112 @@ class ClassifyEscalationTests(unittest.TestCase):
         event.trigger = "review:manual"  # type: ignore[attr-defined]
         result = classify(event)
         self.assertEqual(result.primary, FailureClass.REVIEW_REJECTED)
+
+
+class ClassifyStreamTests(unittest.TestCase):
+    def test_classify_stream_is_a_generator_function(self) -> None:
+        import inspect
+
+        from story_automator.core.failure_triage import classify_stream
+
+        self.assertTrue(inspect.isgeneratorfunction(classify_stream))
+
+    def test_classify_stream_yields_one_classification_per_event(self) -> None:
+        from story_automator.core.failure_triage import (
+            Classification,
+            FailureClass,
+            classify_stream,
+        )
+        from story_automator.core.telemetry_events import (
+            StoryDeferred,
+            StoryFailed,
+            StoryStarted,
+            TmuxSessionCrashed,
+        )
+
+        events = [
+            StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="run-1",
+                epic="E1",
+                story_key="S1",
+                agent="dev",
+                model="claude-opus-4-7",
+                complexity="medium",
+            ),
+            StoryFailed(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="run-1",
+                epic="E1",
+                story_key="S2",
+                error_class="",
+                reason="timeout 600s",
+                attempts=1,
+                final_session="sess",
+            ),
+            StoryDeferred(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="run-1",
+                epic="E1",
+                story_key="S3",
+                reason="plateau",
+                tasks_completed=1,
+            ),
+            TmuxSessionCrashed(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="run-1",
+                session_name="sess",
+                story_key="S4",
+                exit_code=137,
+                last_capture_chars=0,
+            ),
+        ]
+        results = list(classify_stream(events))
+        self.assertEqual(len(results), 4)
+        for r in results:
+            self.assertIsInstance(r, Classification)
+        self.assertEqual(results[0].primary, FailureClass.UNKNOWN)
+        self.assertEqual(results[1].primary, FailureClass.TIMEOUT)
+        self.assertEqual(results[2].primary, FailureClass.REPEATED_RETRY)
+        self.assertEqual(results[3].primary, FailureClass.CRASH)
+
+    def test_classify_stream_does_not_buffer_lazy_iteration(self) -> None:
+        from story_automator.core.failure_triage import classify_stream
+        from story_automator.core.telemetry_events import StoryStarted
+
+        consumed: list[int] = []
+
+        def source() -> object:
+            for i in range(3):
+                consumed.append(i)
+                yield StoryStarted(
+                    timestamp="2026-01-01T00:00:00Z",
+                    run_id="run-1",
+                    epic="E1",
+                    story_key=f"S{i}",
+                    agent="dev",
+                    model="claude-opus-4-7",
+                    complexity="medium",
+                )
+
+        gen = classify_stream(source())
+        # Nothing consumed yet.
+        self.assertEqual(consumed, [])
+        next(gen)
+        self.assertEqual(consumed, [0])
+        next(gen)
+        self.assertEqual(consumed, [0, 1])
+
+    def test_classify_stream_propagates_iterator_exception(self) -> None:
+        from story_automator.core.failure_triage import classify_stream
+
+        class Boom(RuntimeError):
+            pass
+
+        def source() -> object:
+            yield from ()
+            raise Boom("source exploded")
+
+        gen = classify_stream(source())
+        with self.assertRaises(Boom):
+            list(gen)
