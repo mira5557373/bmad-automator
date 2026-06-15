@@ -4,7 +4,9 @@ import dataclasses
 import io
 import logging
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 
 class ModuleImportContractTests(unittest.TestCase):
@@ -230,6 +232,92 @@ class SkeletonRenderGoldenTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             _render_skeleton("not-a-req")
+
+
+class FindExistingTestTests(unittest.TestCase):
+    """REQ-13: searches `tests/test_compliance_*.py` for a docstring or
+    comment matching the REQ id."""
+
+    def _write(self, dir_path: Path, name: str, body: str) -> Path:
+        target = dir_path / name
+        target.write_text(body, encoding="utf-8")
+        return target
+
+    def test_returns_none_when_dir_missing(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist"
+            self.assertIsNone(_find_existing_test(missing, "REQ-07"))
+
+    def test_returns_none_when_no_matching_file(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(
+                Path(tmp), "test_compliance_req_99.py", '"""REQ-99 done."""'
+            )
+            self.assertIsNone(_find_existing_test(Path(tmp), "REQ-07"))
+
+    def test_finds_match_in_docstring(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                Path(tmp),
+                "test_compliance_req_07.py",
+                '"""REQ-07 happy-path test."""\n',
+            )
+            found = _find_existing_test(Path(tmp), "REQ-07")
+            self.assertEqual(found, str(path.resolve()))
+
+    def test_finds_match_in_comment(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                Path(tmp),
+                "test_compliance_misc.py",
+                "# REQ-07 covered here\nimport unittest\n",
+            )
+            found = _find_existing_test(Path(tmp), "REQ-07")
+            self.assertEqual(found, str(path.resolve()))
+
+    def test_only_searches_test_compliance_glob(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(
+                Path(tmp),
+                "test_other_req_07.py",
+                '"""REQ-07 lives in the wrong file."""\n',
+            )
+            self.assertIsNone(_find_existing_test(Path(tmp), "REQ-07"))
+
+    def test_first_hit_is_deterministic_by_lex_order(self) -> None:
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(
+                Path(tmp), "test_compliance_b.py", '"""REQ-07 in B."""\n'
+            )
+            first = self._write(
+                Path(tmp), "test_compliance_a.py", '"""REQ-07 in A."""\n'
+            )
+            found = _find_existing_test(Path(tmp), "REQ-07")
+            self.assertEqual(found, str(first.resolve()))
+
+    def test_skips_files_with_partial_substring_collisions(self) -> None:
+        """A file containing 'REQ-070' must NOT match a search for 'REQ-07'."""
+        from story_automator.core.feature_tester import _find_existing_test
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(
+                Path(tmp),
+                "test_compliance_req_070.py",
+                '"""REQ-070 unrelated."""\n',
+            )
+            self.assertIsNone(_find_existing_test(Path(tmp), "REQ-07"))
 
 
 if __name__ == "__main__":  # pragma: no cover

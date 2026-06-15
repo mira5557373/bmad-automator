@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -111,3 +112,25 @@ def _render_skeleton(req_id: str) -> str:
         req_id_lower_underscored=req_id_lower_underscored,
         class_suffix=class_suffix,
     )
+
+
+def _find_existing_test(tests_dir: Path, req_id: str) -> str | None:
+    """Return the resolved absolute path of the first `test_compliance_*.py`
+    file under `tests_dir` whose contents contain `req_id` as a whole token,
+    or ``None`` when no such file exists.
+
+    Preconditions: `req_id` matches ``REQ-\\d+``; `tests_dir` may or may
+        not exist (a missing directory yields ``None``).
+    Postconditions: scans files matching ``test_compliance_*.py`` in
+        lexicographic order; returns the first whose UTF-8 contents
+        contain `req_id` bounded by non-word characters (so ``REQ-07``
+        does NOT match a file mentioning ``REQ-070``).
+    Raises: nothing — file-read errors propagate naturally as ``OSError``.
+    """
+    if not tests_dir.exists():
+        return None
+    needle = re.compile(rf"(?<!\w){re.escape(req_id)}(?!\w)")
+    for path in sorted(tests_dir.glob("test_compliance_*.py")):
+        if needle.search(path.read_text(encoding="utf-8")):
+            return str(path.resolve())
+    return None
