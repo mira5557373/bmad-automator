@@ -205,3 +205,51 @@ class ImpliesGraphTests(unittest.TestCase):
 
         for key, value in IMPLIES_GRAPH.items():
             self.assertNotIn(key, value)
+
+
+class TaxonomyCompletenessGateTests(unittest.TestCase):
+    def test_exactly_thirteen_failure_class_members(self) -> None:
+        from story_automator.core.failure_triage import FailureClass
+
+        self.assertEqual(
+            len(list(FailureClass)),
+            13,
+            "FailureClass must have exactly 13 members; "
+            "silent additions break downstream M08/M09/M10 contracts.",
+        )
+
+    def test_failure_class_member_set_matches_agreed_taxonomy(self) -> None:
+        from story_automator.core.failure_triage import FailureClass
+
+        expected = {
+            "CRASH",
+            "TIMEOUT",
+            "POLICY_VIOLATION",
+            "REVIEW_REJECTED",
+            "TEST_FAILURE",
+            "BUDGET_EXCEEDED",
+            "PARSE_ERROR",
+            "AGENT_REFUSED",
+            "NETWORK_ERROR",
+            "GATE_DEFER",
+            "PLATEAU",
+            "REPEATED_RETRY",
+            "UNKNOWN",
+        }
+        self.assertEqual({m.name for m in FailureClass}, expected)
+
+    def test_no_unresolved_four_letter_placeholder_tokens_in_source(self) -> None:
+        import pathlib
+
+        from story_automator.core import failure_triage
+
+        source_path = pathlib.Path(failure_triage.__file__)
+        text = source_path.read_text(encoding="utf-8")
+        forbidden = ("TODO", "FIXM", "XXXX", "HACK", "TKTK")
+        for token in forbidden:
+            self.assertNotIn(
+                token,
+                text,
+                f"unresolved placeholder token {token!r} found in "
+                f"{source_path}; resolve or remove before shipping.",
+            )
