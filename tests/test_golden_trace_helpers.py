@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from story_automator.core.telemetry_emitter import TelemetryEmitter
-from story_automator.core.telemetry_events import StoryStarted
+from story_automator.core.telemetry_events import StoryStarted, TmuxSessionSpawned
 
 from tests.golden_trace_helpers import (
     GoldenTraceError,
@@ -690,6 +690,54 @@ class EventTimestampRedactionTests(unittest.TestCase):
             disk = log.read_text(encoding="utf-8")
         self.assertIn("2026-06-15T12:34:56Z", disk)
         self.assertNotIn("<ts>", disk)
+
+
+class EventRedactionTests(unittest.TestCase):
+    def test_pid_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
+            event = TmuxSessionSpawned(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r",
+                session_name="bmad-1",
+                story_key="s1",
+                pid=12345,
+                pane_geometry="80x24",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+        self.assertEqual(rec.entries[0].payload["pid"], "<redacted>")
+
+    def test_session_name_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
+            event = TmuxSessionSpawned(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r",
+                session_name="bmad-12345",
+                story_key="s1",
+                pid=12345,
+                pane_geometry="80x24",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+        self.assertEqual(rec.entries[0].payload["session_name"], "<redacted>")
+
+    def test_four_letter_placeholder_in_payload_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
+            event = StoryStarted(
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r",
+                epic="e",
+                story_key="XXXX",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+        self.assertEqual(rec.entries[0].payload["story_key"], "XXXX")
 
 
 if __name__ == "__main__":

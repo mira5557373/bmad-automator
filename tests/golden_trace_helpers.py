@@ -22,6 +22,16 @@ MismatchField = Literal["channel", "kind", "payload", "length"]
 _VALID_CHANNELS: frozenset[str] = frozenset({"event", "state", "claude_p"})
 _REQUIRED_KEYS: tuple[str, ...] = ("seq", "channel", "kind", "payload")
 _TS_SENTINEL = "<ts>"
+_REDACTED_SENTINEL = "<redacted>"
+_REDACTED_EVENT_FIELDS: frozenset[str] = frozenset(
+    {
+        "pid",
+        "session_name",
+        "final_session",
+        "lock_token",
+        "heartbeat_counter",
+    }
+)
 
 __all__ = [
     "Channel",
@@ -237,6 +247,25 @@ def _field_value(entry: TraceEntry, field: MismatchField) -> object | None:
     return None
 
 
+def _redact_event_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Apply REQ-13 redaction to an event payload.
+
+    Replaces non-deterministic fields with their sentinel:
+    - ``timestamp`` -> ``"<ts>"`` (REQ-03 narrower contract)
+    - ``pid``/``session_name``/``final_session``/``lock_token``/``heartbeat_counter`` -> ``"<redacted>"`` (REQ-13)
+
+    Four-letter placeholder tokens are intentionally NOT substituted --
+    REQ-13's last clause requires them to flow through verbatim.
+    """
+    out = dict(payload)
+    if "timestamp" in out:
+        out["timestamp"] = _TS_SENTINEL
+    for key in _REDACTED_EVENT_FIELDS:
+        if key in out:
+            out[key] = _REDACTED_SENTINEL
+    return out
+
+
 def _to_repo_relative_posix(path: Path, *, repo_root: Path) -> str:
     """Return a repo-relative POSIX path string for ``path`` (REQ-04/05).
 
@@ -333,9 +362,8 @@ class GoldenTraceRecorder:
 
         def wrapper(emitter_self: TelemetryEmitter, event: object) -> None:
             result = orig(emitter_self, event)
-            payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
-            if "timestamp" in payload:
-                payload["timestamp"] = _TS_SENTINEL
+            raw_payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
+            payload = _redact_event_payload(raw_payload)
             recorder._record("event", type(event).__name__, payload)
             return result
 
