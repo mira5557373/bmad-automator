@@ -629,3 +629,51 @@ class AcquireRunLockTimeoutTests(unittest.TestCase):
             self.assertLess(elapsed, 2.0)
         finally:
             outer.release()
+
+
+class IdentityPopulationTests(unittest.TestCase):
+    """REQ-07: heartbeat_iso via iso_now(), start_time via time.time(),
+    hostname via socket.gethostname(), pid via os.getpid()."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_identity_fields_populated_from_canonical_helpers(self) -> None:
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        lock_path = self.dir / "run.payload"
+
+        with (
+            patch("story_automator.core.atomic_io.os.getpid", return_value=9999),
+            patch("story_automator.core.atomic_io.time.time", return_value=12345.5),
+            patch(
+                "story_automator.core.atomic_io.socket.gethostname",
+                return_value="fake-host",
+            ),
+            patch(
+                "story_automator.core.atomic_io.iso_now",
+                return_value="2026-06-15T01:02:03Z",
+            ),
+        ):
+            handle = acquire_run_lock(lock_path, run_id="run-pop")
+
+        try:
+            self.assertEqual(handle.identity.pid, 9999)
+            self.assertEqual(handle.identity.start_time, 12345.5)
+            self.assertEqual(handle.identity.hostname, "fake-host")
+            self.assertEqual(handle.identity.heartbeat_iso, "2026-06-15T01:02:03Z")
+            self.assertEqual(handle.identity.run_id, "run-pop")
+            self.assertEqual(
+                json.loads(lock_path.read_text(encoding="utf-8")),
+                {
+                    "pid": 9999,
+                    "start_time": 12345.5,
+                    "hostname": "fake-host",
+                    "heartbeat_iso": "2026-06-15T01:02:03Z",
+                    "run_id": "run-pop",
+                },
+            )
+        finally:
+            handle.release()
