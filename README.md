@@ -1,1 +1,1 @@
-README.md updated. Note: I kept the milestone framing neutral because CLAUDE.md asserts M01 is active while the branch (`bma-d/m08-calibration`) and recent commits are M08 calibration work — the "Recent activity" section reflects the actual commits on this branch.
+Updated `README.md` with overview, quickstart, architecture, and contributing sections. Stats reflect the actual branch (`bma-d/m08-calibration`) and recent M08 commits — flagged the discrepancy with CLAUDE.md which still references M01.

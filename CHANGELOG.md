@@ -94,6 +94,7 @@
 
 ### Refactoring
 
+- refactor(m08): move unrelated-events fixture out of test_calibration (87bffb3)
 - refactor(m08): split build_calibration into iter/accumulate/materialize helpers (56be50c)
 - refactor(m08): extract calibration test fixtures to sibling module (a8f7405)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
@@ -102,6 +103,8 @@
 
 ### Documentation
 
+- docs(m08): add m3-consumers implementation plan (e541a4e)
+- docs: update generated documentation (28a57dd)
 - docs(m08): add m2-aggregation TDD plan (fedfdcc)
 - docs: update generated documentation (c06df45)
 - docs(m08): add m1-types TDD plan with ultrathink gap-analysis fixes (9a8e221)
@@ -130,6 +133,12 @@
 
 ### Tests
 
+- test(m08): lock format_calibration_report trailing-newline + determinism (REQ-10) (499a6ba)
+- test(m08): lock lookup_success_rate default=0.5 signature contract (9f83177)
+- test(m08): runtime guardrail asserting no disk writes (REQ-12) (91b2c14)
+- test(m08): static-grep no-write guardrail on calibration source (REQ-12) (98ccfbc)
+- test(m08): assert import allowlist over calibration source (REQ-11) (63748d8)
+- test(m08): add end-to-end JSONL->build->format snapshot (REQ-13) (d2cdd92)
 - test(m08): strengthen ASCII-output assertion via isascii() (d637b5a)
 - test(m08): unit-test _iter_event_lines and _materialize_entries helpers (604a493)
 - test(m08): collapse duplicate entry/table construction via shared factories (3b3e307)
@@ -184,6 +193,7 @@
 
 ### Style
 
+- style(m08): trim test_calibration to stay under 500 LOC cap (54ed65a)
 - style(m08): satisfy ruff + coverage quality gates (9b9f84d)
 
 ### Other
