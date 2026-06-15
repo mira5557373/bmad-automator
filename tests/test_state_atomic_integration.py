@@ -204,5 +204,81 @@ class AtomicWriteIntegrationTests(unittest.TestCase):
         self.assertIn(payload["path"], targets)
 
 
+class RunLockGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name)
+        self.output_dir = self.project_root / "_bmad-output" / "story-automator"
+        _install_bundle(self.project_root)
+        _install_required_skills(self.project_root)
+        self.template = (
+            self.project_root
+            / ".claude"
+            / "skills"
+            / "bmad-story-automator"
+            / "templates"
+            / "state-document.md"
+        )
+
+    def test_cmd_build_state_doc_acquires_run_lock(self) -> None:
+        """REQ-11: the run-lock API must guard the write."""
+        from unittest.mock import patch
+        from story_automator.core.atomic_io import acquire_run_lock as _real
+
+        captured: list[Path] = []
+
+        def _spy(lock_path: Path, *, run_id: str, timeout: float = 0.0):
+            captured.append(Path(lock_path))
+            return _real(lock_path, run_id=run_id, timeout=timeout)
+
+        stdout = io.StringIO()
+        with (
+            _PatchEnv(self.project_root),
+            redirect_stdout(stdout),
+            patch("story_automator.commands.state.acquire_run_lock", side_effect=_spy),
+        ):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(self.template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(_config()),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(captured), 1, "exactly one run-lock acquisition expected")
+        self.assertEqual(captured[0].name, ".state-build.lock")
+        self.assertEqual(captured[0].parent, self.output_dir.resolve())
+
+    def test_cmd_build_state_doc_releases_run_lock_after_success(self) -> None:
+        """The lock-identity payload at lock_path must be deleted on release;
+        the sibling FileLock sentinel (``.state-build.lock.lock``) may remain
+        — filelock owns its lifecycle.
+        """
+        stdout = io.StringIO()
+        with _PatchEnv(self.project_root), redirect_stdout(stdout):
+            code = cmd_build_state_doc(
+                [
+                    "--template",
+                    str(self.template),
+                    "--output-folder",
+                    str(self.output_dir),
+                    "--config-json",
+                    json.dumps(_config()),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        lock_payload = self.output_dir / ".state-build.lock"
+        self.assertFalse(
+            lock_payload.exists(),
+            "RunLockHandle.release must unlink the identity payload",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
