@@ -1,5 +1,10 @@
 ### Features
 
+- feat(atomic_io): HeartbeatThread rejects non-positive interval at construction (8935e44)
+- feat(atomic_io): HeartbeatThread.run loop refreshes payload until stopped (036c5a4)
+- feat(atomic_io): add HeartbeatThread class skeleton with daemon flag and stop() (3b048b0)
+- feat(atomic_io): is_stale returns True for dead PID with aged heartbeat (75ee608)
+- feat(atomic_io): add parse_iso_seconds helper for heartbeat math (eaf9aef)
 - feat(atomic_io): add acquire_run_lock returning RunLockHandle context manager (8f4d1a7)
 - feat(atomic_io): add RunLockIdentity dataclass with deterministic JSON encoding (602c815)
 - feat(atomic_io): add RunLockBusy typed exception for acquire timeout (040ce76)
@@ -102,6 +107,8 @@
 
 ### Documentation
 
+- docs(plan): add M05-M3 heartbeat & staleness implementation plan (0782fe2)
+- docs: update generated documentation (ade5326)
 - docs(plan): add M05-M2 run lock identity implementation plan (d592914)
 - docs: update generated documentation (b4385cc)
 - docs(plan): add M05-M1 atomic-write foundation implementation plan (bea07cc)
@@ -130,6 +137,8 @@
 
 ### Tests
 
+- test(atomic_io): pin is_stale False-branch truth table and threshold (afac3d9)
+- test(atomic_io): pin import allowlist to stdlib + filelock + psutil (9fc5bd1)
 - test(atomic_io): release FileLock when payload write fails (28a94f7)
 - test(atomic_io): verify RunLockIdentity fields sourced from canonical helpers (528e7e0)
 - test(atomic_io): cover RunLockBusy translation and zero-timeout contention (8a24679)
