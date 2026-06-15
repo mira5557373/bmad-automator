@@ -68,3 +68,88 @@ class ConfidenceTests(unittest.TestCase):
         self.assertTrue(issubclass(Confidence, enum.Enum))
         with self.assertRaises(KeyError):
             Confidence["high"]
+
+
+class ClassificationDataclassTests(unittest.TestCase):
+    def test_classification_is_a_dataclass(self) -> None:
+        from dataclasses import is_dataclass
+
+        from story_automator.core.failure_triage import Classification
+
+        self.assertTrue(is_dataclass(Classification))
+
+    def test_classification_is_frozen(self) -> None:
+        from story_automator.core.failure_triage import (
+            Classification,
+            Confidence,
+            FailureClass,
+        )
+
+        c = Classification(
+            primary=FailureClass.UNKNOWN,
+            implies=(),
+            confidence=Confidence.LOW,
+            reason="x",
+            event_id=None,
+        )
+        with self.assertRaises(Exception):
+            c.reason = "y"  # type: ignore[misc]
+
+    def test_classification_field_names_and_order(self) -> None:
+        from dataclasses import fields
+
+        from story_automator.core.failure_triage import Classification
+
+        names = [f.name for f in fields(Classification)]
+        self.assertEqual(
+            names,
+            ["primary", "implies", "confidence", "reason", "event_id"],
+        )
+
+    def test_classification_field_types_are_pep604_strings(self) -> None:
+        from dataclasses import fields
+
+        from story_automator.core.failure_triage import Classification
+
+        types_by_name = {f.name: f.type for f in fields(Classification)}
+        self.assertEqual(types_by_name["primary"], "FailureClass")
+        self.assertEqual(types_by_name["implies"], "tuple[FailureClass, ...]")
+        self.assertEqual(types_by_name["confidence"], "Confidence")
+        self.assertEqual(types_by_name["reason"], "str")
+        self.assertEqual(types_by_name["event_id"], "str | None")
+
+    def test_classification_requires_kw_only_construction(self) -> None:
+        from story_automator.core.failure_triage import (
+            Classification,
+            Confidence,
+            FailureClass,
+        )
+
+        with self.assertRaises(TypeError):
+            Classification(  # type: ignore[misc]
+                FailureClass.UNKNOWN,
+                (),
+                Confidence.LOW,
+                "x",
+                None,
+            )
+
+    def test_classification_round_trip_construction(self) -> None:
+        from story_automator.core.failure_triage import (
+            Classification,
+            Confidence,
+            FailureClass,
+        )
+
+        c = Classification(
+            primary=FailureClass.POLICY_VIOLATION,
+            implies=(FailureClass.REVIEW_REJECTED,),
+            confidence=Confidence.HIGH,
+            reason="guardrail tripped",
+            event_id=None,
+        )
+        self.assertEqual(c.primary, FailureClass.POLICY_VIOLATION)
+        self.assertEqual(c.implies, (FailureClass.REVIEW_REJECTED,))
+        self.assertEqual(c.confidence, Confidence.HIGH)
+        self.assertEqual(c.reason, "guardrail tripped")
+        self.assertIsNone(c.event_id)
