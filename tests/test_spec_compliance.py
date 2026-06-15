@@ -119,3 +119,47 @@ class ReqVerdictDataclassTests(unittest.TestCase):
                 dataclasses.is_dataclass(base),
                 f"ReqVerdict unexpectedly inherits from dataclass {base!r}",
             )
+
+
+class ComplianceReportDataclassTests(unittest.TestCase):
+    """REQ-08: frozen kw_only @dataclass with four fields."""
+
+    def test_compliance_report_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.spec_compliance import ComplianceReport
+
+        self.assertTrue(dataclasses.is_dataclass(ComplianceReport))
+        params = ComplianceReport.__dataclass_params__
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_compliance_report_field_names(self) -> None:
+        from story_automator.core.spec_compliance import ComplianceReport
+
+        names = sorted(f.name for f in dataclasses.fields(ComplianceReport))
+        self.assertEqual(
+            names,
+            ["diff_sha", "model_invocation_ms", "spec_path", "verdicts"],
+        )
+
+    def test_compliance_report_construction(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceReport,
+            ReqVerdict,
+        )
+
+        v = ReqVerdict(
+            req_id="REQ-01",
+            status="implemented",
+            evidence="seen",
+            confidence=0.9,
+        )
+        r = ComplianceReport(
+            verdicts=[v],
+            spec_path="docs/foo.md",
+            diff_sha="deadbeef",
+            model_invocation_ms=4231,
+        )
+        self.assertEqual(r.verdicts, [v])
+        self.assertEqual(r.spec_path, "docs/foo.md")
+        self.assertEqual(r.diff_sha, "deadbeef")
+        self.assertEqual(r.model_invocation_ms, 4231)

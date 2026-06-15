@@ -71,3 +71,23 @@ class ReqVerdict:
     status: Literal["implemented", "missing", "partial"]
     evidence: str
     confidence: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class ComplianceReport:
+    """Aggregate report from `check_compliance`.
+
+    Preconditions: `verdicts` is a list (possibly empty); `spec_path` is
+        the string form of the spec file path (typically the resolved
+        absolute path); `diff_sha` is the SHA-256 hex digest of the diff
+        text passed to `check_compliance`; `model_invocation_ms` is a
+        non-negative integer reported by the subprocess.
+    Postconditions: instance is frozen. Note: `frozen=True` does not
+        deep-freeze `verdicts` — callers must treat it as read-only.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    verdicts: list[ReqVerdict]
+    spec_path: str
+    diff_sha: str
+    model_invocation_ms: int
