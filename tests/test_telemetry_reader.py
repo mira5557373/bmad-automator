@@ -8,9 +8,9 @@ from pathlib import Path
 
 from story_automator.core.telemetry_reader import TelemetryReader
 from story_automator.core.telemetry_events import (
-    CostCharged,  # noqa: F401
-    RetroFired,  # noqa: F401
-    RetryAttempt,  # noqa: F401
+    CostCharged,
+    RetroFired,
+    RetryAttempt,
     StoryStarted,
 )
 
@@ -326,3 +326,72 @@ class TelemetryReaderRetroInputsTests(unittest.TestCase):
             path = Path(tmp) / "events.jsonl"
             path.touch()
             self.assertEqual(TelemetryReader(path).retro_inputs("E1"), {})
+
+
+class TelemetryReaderEmitReadIntegrationTests(unittest.TestCase):
+    def test_mixed_events_aggregations_only_count_relevant_types(self) -> None:
+        # REQ-13 mixed-event case: only relevant types contribute to
+        # each rollup. We emit through the real TelemetryEmitter to
+        # confirm the integration with M02's write path.
+        from story_automator.core.telemetry_emitter import TelemetryEmitter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            em = TelemetryEmitter(path)
+            em.emit(
+                StoryStarted(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    story_key="S1",
+                    agent="a",
+                    model="m",
+                    complexity="c",
+                )
+            )
+            em.emit(
+                CostCharged(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    story_key="S1",
+                    phase="dev",
+                    cost_usd=0.5,
+                    tokens_in=1,
+                    tokens_out=1,
+                    model="m",
+                )
+            )
+            em.emit(
+                RetryAttempt(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    story_key="S1",
+                    attempt_num=2,
+                    agent="a",
+                    model="m",
+                    prev_error_class="x",
+                )
+            )
+            em.emit(
+                RetroFired(
+                    timestamp="t",
+                    run_id="r",
+                    epic="E1",
+                    stories_completed=2,
+                    total_cost_usd=0.5,
+                    duration_s=60.0,
+                )
+            )
+            reader = TelemetryReader(path)
+            self.assertEqual(reader.cost_by_epic(), {"E1": 0.5})
+            self.assertEqual(reader.attempts_by_story(), {("E1", "S1"): 1})
+            self.assertEqual(
+                reader.retro_inputs("E1"),
+                {
+                    "stories_completed": 2,
+                    "total_cost_usd": 0.5,
+                    "duration_s": 60.0,
+                },
+            )
