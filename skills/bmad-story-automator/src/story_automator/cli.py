@@ -14,11 +14,27 @@ from .commands.basic import (
 )
 from .commands.ceiling_check import cmd_ceiling_check
 from .commands.orchestrator import cmd_orchestrator_helper
-from .commands.state import cmd_build_state_doc, cmd_sprint_compare, cmd_state_metrics, cmd_validate_state
-from .commands.tmux import cmd_codex_status_check, cmd_heartbeat_check, cmd_monitor_session, cmd_tmux_status_check, cmd_tmux_wrapper
+from .commands.state import (
+    cmd_build_state_doc,
+    cmd_sprint_compare,
+    cmd_state_metrics,
+    cmd_validate_state,
+)
+from .commands.tmux import (
+    cmd_codex_status_check,
+    cmd_heartbeat_check,
+    cmd_monitor_session,
+    cmd_tmux_status_check,
+    cmd_tmux_wrapper,
+)
 from .commands.validate_story_creation import cmd_validate_story_creation
 from .core.common import help_flag, print_json
-from .core.epic_parser import epic_complete, parse_epic_file, parse_story, parse_story_range
+from .core.epic_parser import (
+    epic_complete,
+    parse_epic_file,
+    parse_story,
+    parse_story_range,
+)
 
 
 Command = Callable[[list[str]], int]
@@ -126,7 +142,12 @@ def _cmd_parse_story(args: list[str]) -> int:
         print_json(parse_story(epic, story, rules))
         return 0
     except FileNotFoundError:
-        print_json({"ok": False, "error": "missing_epic_or_story" if epic else "rules_file_not_found"})
+        print_json(
+            {
+                "ok": False,
+                "error": "missing_epic_or_story" if epic else "rules_file_not_found",
+            }
+        )
         return 1
     except ValueError as exc:
         print_json({"ok": False, "error": str(exc)})
