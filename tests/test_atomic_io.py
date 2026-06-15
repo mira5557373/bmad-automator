@@ -1183,3 +1183,52 @@ class HeartbeatThreadRefreshTests(unittest.TestCase):
             finally:
                 thread.stop()
                 thread.join(timeout=2.0)
+
+
+class HeartbeatThreadInputValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def _identity(self):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        return RunLockIdentity(
+            pid=os.getpid(),
+            start_time=0.0,
+            hostname="h",
+            heartbeat_iso="2026-06-15T00:00:00Z",
+            run_id="r",
+        )
+
+    def test_zero_interval_is_rejected(self) -> None:
+        # An interval of 0 would tight-loop the CPU and never honor stop().
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        with self.assertRaises(ValueError):
+            HeartbeatThread(
+                lock_path=self.dir / "x.payload",
+                identity=self._identity(),
+                interval=0.0,
+            )
+
+    def test_negative_interval_is_rejected(self) -> None:
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        with self.assertRaises(ValueError):
+            HeartbeatThread(
+                lock_path=self.dir / "x.payload",
+                identity=self._identity(),
+                interval=-0.1,
+            )
+
+    def test_default_interval_is_accepted(self) -> None:
+        # Sanity: omitting interval leaves the class constant (60.0) in place.
+        from story_automator.core.atomic_io import HeartbeatThread
+
+        thread = HeartbeatThread(
+            lock_path=self.dir / "x.payload",
+            identity=self._identity(),
+        )
+        self.assertEqual(thread.interval, 60.0)

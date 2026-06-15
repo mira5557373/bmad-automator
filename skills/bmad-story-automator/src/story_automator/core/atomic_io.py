@@ -362,6 +362,10 @@ class HeartbeatThread(threading.Thread):
         self._lock_path = Path(lock_path)
         self._identity = identity
         if interval is not None:
+            if interval <= 0:
+                raise ValueError(
+                    f"HeartbeatThread interval must be > 0; got {interval!r}"
+                )
             self.interval = interval
         self._stop_event = threading.Event()
         self.write_errors: int = 0
