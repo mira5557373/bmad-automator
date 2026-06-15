@@ -584,5 +584,54 @@ class PlanFeatureTestsDryRunTests(unittest.TestCase):
             )
 
 
+class PublicAPIDocstringTests(unittest.TestCase):
+    """NFR: public-API docstrings must mention pre/post/raises."""
+
+    def test_plan_feature_tests_docstring_covers_contracts(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        doc = plan_feature_tests.__doc__ or ""
+        for needle in ("Preconditions", "Postconditions", "Raises"):
+            self.assertIn(needle, doc, f"missing {needle} in docstring")
+
+    def test_test_plan_entry_docstring_covers_contracts(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        doc = TestPlanEntry.__doc__ or ""
+        for needle in ("Preconditions", "Postconditions", "Raises"):
+            self.assertIn(needle, doc)
+
+
+class AtomicWriteContractTests(unittest.TestCase):
+    """REQ-13: skeleton creation MUST go through core.atomic_io."""
+
+    def test_plan_feature_tests_writes_via_atomic_io(self) -> None:
+        from unittest.mock import patch
+
+        from story_automator.core import feature_tester
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+
+            captured: list[tuple[Path, str]] = []
+
+            def fake_write(path: Path, data: str, **kwargs: object) -> None:
+                captured.append((path, data))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(data, encoding="utf-8")
+
+            with patch.object(
+                feature_tester, "write_atomic_text", side_effect=fake_write
+            ):
+                feature_tester.plan_feature_tests(
+                    [_make_verdict("REQ-07")], tests_dir=tests_dir
+                )
+
+            self.assertEqual(len(captured), 1)
+            written_path, written_data = captured[0]
+            self.assertEqual(written_path.name, "test_compliance_req_07.py")
+            self.assertEqual(written_data, _GOLDEN_SKELETON_REQ_07)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
