@@ -36,6 +36,7 @@
 
 ### Bug Fixes
 
+- fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
 - fix: post-impl review fixes for M02 telemetry emitter (9a611a4)
 - fix: post-impl review fixes for m01-m3-concrete-events (7ae1072)
 - fix(story-keys): complete non-numeric epic support (#23) (51a3cbc)
@@ -84,6 +85,7 @@
 
 ### Documentation
 
+- docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
 - docs(m01-m4): make Task 1 baseline resumable across Prior Work Handling range (4329a23)
 - docs(m01-m4): plan for tests and quality gates (REQ-08, REQ-09, REQ-10, REQ-11, NFR) (84d9c49)
@@ -145,6 +147,7 @@
 
 ### Other
 
+- plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
 - spec(m14): SECURITY.md rewrite spec (sw lint-spec 100/100 after placeholder-word indirection) (79020b3)
 - spec(m02,m04,m05,m11): port milestone specs (sw lint-spec 100/100) (ff6bd6c)

@@ -1,1 +1,1 @@
-Updated README.md: status/branch to M02, overview reflects the new emitter wiring, milestone table marks M01 done and M02 current, and recent-commits hook now points at the M02 commits. Existing overview, quickstart, architecture, and contributing sections preserved.
+Updated README.md with overview (project goal + milestone table showing M01 done / M02 current), quickstart (test/lint/coverage/verify commands), architecture (module map + dependency allowlist + cross-platform notes), and contributing (style, commit conventions, milestone discipline, recent M02 commits).
