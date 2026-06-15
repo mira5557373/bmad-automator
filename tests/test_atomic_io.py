@@ -714,3 +714,52 @@ class AcquireRunLockFailureCleanupTests(unittest.TestCase):
 
         self.assertEqual(original_acquire, [True])
         self.assertEqual(release_calls, [True])
+
+
+class ParseIsoSecondsTests(unittest.TestCase):
+    def test_epoch_zero(self) -> None:
+        from story_automator.core.atomic_io import parse_iso_seconds
+
+        # 1970-01-01T00:00:00Z is the Unix epoch — easiest exact-value pin.
+        self.assertEqual(parse_iso_seconds("1970-01-01T00:00:00Z"), 0.0)
+
+    def test_one_second_past_epoch(self) -> None:
+        from story_automator.core.atomic_io import parse_iso_seconds
+
+        # Pins second resolution and ordering — if a future refactor
+        # accidentally parses milliseconds, this immediately surfaces.
+        self.assertEqual(parse_iso_seconds("1970-01-01T00:00:01Z"), 1.0)
+
+    def test_inverse_of_datetime_utc(self) -> None:
+        # Cross-check against the stdlib so the exact epoch value used in
+        # later is_stale tests cannot drift. Using datetime() directly keeps
+        # the assertion independent of any mental arithmetic.
+        from datetime import datetime, timezone
+
+        from story_automator.core.atomic_io import parse_iso_seconds
+
+        expected = datetime(2026, 6, 15, 12, 34, 56, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(parse_iso_seconds("2026-06-15T12:34:56Z"), expected)
+
+    def test_rejects_non_utc_format(self) -> None:
+        # The format must match iso_now() exactly. A trailing offset like
+        # "+00:00" or a missing "Z" indicates the value did not come from
+        # our own iso_now() helper and must not be silently coerced.
+        from story_automator.core.atomic_io import parse_iso_seconds
+
+        with self.assertRaises(ValueError):
+            parse_iso_seconds("2026-06-15T12:34:56+00:00")
+        with self.assertRaises(ValueError):
+            parse_iso_seconds("2026-06-15T12:34:56")
+
+    def test_round_trip_with_iso_now(self) -> None:
+        # iso_now() is the canonical producer; parse_iso_seconds must accept
+        # any value it emits without raising. Drift in either direction would
+        # silently break is_stale arithmetic.
+        from story_automator.core.atomic_io import parse_iso_seconds
+        from story_automator.core.common import iso_now
+
+        sample = iso_now()
+        result = parse_iso_seconds(sample)
+        self.assertIsInstance(result, float)
+        self.assertGreater(result, 0.0)

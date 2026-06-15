@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -18,6 +19,7 @@ __all__ = [
     "RunLockHandle",
     "RunLockIdentity",
     "acquire_run_lock",
+    "parse_iso_seconds",
     "write_atomic_text",
 ]
 
@@ -26,6 +28,21 @@ __all__ = [
 # (i+1)-th retry. With 5 entries this gives 1 initial attempt + 5 retries =
 # 6 total attempts on Windows; on POSIX exactly 1 attempt.
 _WINDOWS_REPLACE_BACKOFFS_S: tuple[float, ...] = (0.050, 0.100, 0.200, 0.400, 0.800)
+
+
+def parse_iso_seconds(value: str) -> float:
+    """Parse an ``iso_now()``-formatted UTC timestamp into epoch seconds.
+
+    The expected format is exactly ``"%Y-%m-%dT%H:%M:%SZ"`` — the same string
+    ``iso_now`` in ``core/common.py`` emits. ``is_stale`` (REQ-09) uses this
+    to subtract from ``time.time()`` and compare against the 600-second
+    stale window. Strings in any other shape (offset suffix, missing ``Z``,
+    fractional seconds) raise ``ValueError`` rather than being silently
+    coerced — a malformed heartbeat must surface as a parse failure, not as
+    a phantom "fresh" reading.
+    """
+    parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 _registry_lock: threading.Lock = threading.Lock()
