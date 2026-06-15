@@ -48,7 +48,10 @@ from .orchestrator_epic_agents import (
     retro_agent_action,
 )
 from .orchestrator_parse import parse_output_action
-from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.core.telemetry_emitter import (
+    TelemetryEmitter,
+    emitter_for_project_root,
+)
 from story_automator.core.telemetry_events import (
     ReviewCycle,
     StoryCompleted,
@@ -56,17 +59,9 @@ from story_automator.core.telemetry_events import (
     StoryStarted,
 )
 
-_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
-
 
 def _telemetry_emitter() -> TelemetryEmitter:
-    path = (Path(get_project_root()) / "telemetry" / "events.jsonl").resolve()
-    cached = _EMITTER_CACHE.get(path)
-    if cached is not None:
-        return cached
-    emitter = TelemetryEmitter(path)
-    _EMITTER_CACHE[path] = emitter
-    return emitter
+    return emitter_for_project_root(get_project_root())
 
 
 def cmd_orchestrator_helper(args: list[str]) -> int:

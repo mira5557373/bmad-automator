@@ -25,29 +25,16 @@ from .utils import (
     run_cmd,
 )
 from .runtime_layout import runtime_provider
-from .telemetry_emitter import TelemetryEmitter
+from .telemetry_emitter import TelemetryEmitter, emitter_for_project_root
 from .telemetry_events import (
     TmuxSessionCompleted,
     TmuxSessionCrashed,
     TmuxSessionSpawned,
 )
 
-_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
-
-
-def _telemetry_path(project_root: str | None) -> Path:
-    base = Path(project_root) if project_root else Path(get_project_root())
-    return (base / "telemetry" / "events.jsonl").resolve()
-
 
 def _telemetry_emitter(project_root: str | None) -> TelemetryEmitter:
-    path = _telemetry_path(project_root)
-    cached = _EMITTER_CACHE.get(path)
-    if cached is not None:
-        return cached
-    emitter = TelemetryEmitter(path)
-    _EMITTER_CACHE[path] = emitter
-    return emitter
+    return emitter_for_project_root(project_root or get_project_root())
 
 
 STATE_SCHEMA_VERSION = 1
@@ -347,7 +334,9 @@ def heartbeat_check(
         pid = str(state.get("childPid") or "")
         result = str(state.get("result") or "")
         status = "completed" if result == "success" else "dead"
-        _emit_heartbeat_terminal(session, state, status, project_root)
+        if not bool(state.get("telemetryEmitted")):
+            _emit_heartbeat_terminal(session, state, status, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return (status, 0.0, pid, prompt)
 
     child_pid = _safe_int(state.get("childPid"))
@@ -359,6 +348,9 @@ def heartbeat_check(
         return (("alive" if cpu > 0.1 else "idle"), cpu, str(child_pid), prompt)
 
     _wait_for_terminal_state(state_path)
+    # Reload after the wait — fields like exitCode/durationSeconds are only
+    # populated once the runner finalizes the state file.
+    state = load_session_state(state_path) or state
     status = session_status(
         session,
         full=False,
@@ -368,10 +360,14 @@ def heartbeat_check(
     )
     public = str(status["session_state"])
     if public == "completed":
-        _emit_tmux_completed(session, state, project_root)
+        if not bool(state.get("telemetryEmitted")):
+            _emit_tmux_completed(session, state, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return ("completed", 0.0, str(child_pid), prompt)
     if public in {"crashed", "stuck", "not_found"}:
-        _emit_tmux_crashed(session, state, project_root)
+        if not bool(state.get("telemetryEmitted")):
+            _emit_tmux_crashed(session, state, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return ("dead", 0.0, str(child_pid), prompt)
     return ("idle", 0.0, str(child_pid), prompt)
 

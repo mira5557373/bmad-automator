@@ -48,4 +48,19 @@ class TelemetryEmitter:
         return compact_json(data)
 
 
-__all__ = ["TelemetryEmitter"]
+_PROJECT_EMITTERS: dict[Path, TelemetryEmitter] = {}
+
+
+def emitter_for_project_root(project_root: str | Path) -> TelemetryEmitter:
+    # Shared cache keyed by the resolved telemetry file path so every wiring
+    # call site in the same process serializes through the same threading.Lock.
+    path = (Path(project_root) / "telemetry" / "events.jsonl").resolve()
+    cached = _PROJECT_EMITTERS.get(path)
+    if cached is not None:
+        return cached
+    emitter = TelemetryEmitter(path)
+    _PROJECT_EMITTERS[path] = emitter
+    return emitter
+
+
+__all__ = ["TelemetryEmitter", "emitter_for_project_root"]

@@ -27,24 +27,19 @@ from story_automator.core.utils import (
     trim_lines,
     unquote_scalar,
 )
-from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.core.telemetry_emitter import (
+    TelemetryEmitter,
+    emitter_for_project_root,
+)
 from story_automator.core.telemetry_events import (
     EscalationTriggered,
     RetroFired,
     RetryAttempt,
 )
 
-_EMITTER_CACHE: dict[Path, TelemetryEmitter] = {}
-
 
 def _telemetry_emitter() -> TelemetryEmitter:
-    path = (Path(get_project_root()) / "telemetry" / "events.jsonl").resolve()
-    cached = _EMITTER_CACHE.get(path)
-    if cached is not None:
-        return cached
-    emitter = TelemetryEmitter(path)
-    _EMITTER_CACHE[path] = emitter
-    return emitter
+    return emitter_for_project_root(get_project_root())
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -417,11 +412,17 @@ def agents_resolve_action(args: list[str]) -> int:
         model = _normalize_model_value(selection.get("model"))
         attempt_num = int(options.get("attempt") or 0)
         if attempt_num >= 2:
+            norm = normalize_story_key(get_project_root(), options["story"])
+            epic = (
+                norm.id.rsplit(".", 1)[0]
+                if norm is not None
+                else options["story"].split(".", 1)[0]
+            )
             _telemetry_emitter().emit(
                 RetryAttempt(
                     timestamp=iso_now(),
                     run_id="",
-                    epic=options["story"].split(".", 1)[0],
+                    epic=epic,
                     story_key=options["story"],
                     attempt_num=attempt_num,
                     agent=selection.get("primary", ""),
