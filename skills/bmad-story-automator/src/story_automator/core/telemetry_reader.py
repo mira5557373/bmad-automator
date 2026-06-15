@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any  # noqa: F401
 
 from .telemetry_events import (
-    CostCharged,  # noqa: F401
+    CostCharged,
     Event,
     RetroFired,  # noqa: F401
     RetryAttempt,  # noqa: F401
@@ -35,6 +35,13 @@ class TelemetryReader:
                 if not line.strip():
                     continue
                 yield parse_event(line)
+
+    def cost_by_epic(self) -> dict[str, float]:
+        totals: dict[str, float] = {}
+        for event in self.iter_events():
+            if isinstance(event, CostCharged):
+                totals[event.epic] = totals.get(event.epic, 0.0) + event.cost_usd
+        return totals
 
 
 __all__ = ["TelemetryReader"]

@@ -87,3 +87,91 @@ class TelemetryReaderLineHandlingTests(unittest.TestCase):
             # Ensure file is properly closed before temp dir cleanup
             del it
             del reader
+
+
+class TelemetryReaderCostByEpicTests(unittest.TestCase):
+    def _write(self, path: Path, events: list[dict]) -> None:
+        with open(path, "w", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    def test_cost_by_epic_sums_only_cost_charged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._write(
+                path,
+                [
+                    {
+                        "event_type": "cost_charged",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S1",
+                        "phase": "dev",
+                        "cost_usd": 0.10,
+                        "tokens_in": 10,
+                        "tokens_out": 20,
+                        "model": "m",
+                    },
+                    {
+                        "event_type": "cost_charged",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S2",
+                        "phase": "dev",
+                        "cost_usd": 0.25,
+                        "tokens_in": 10,
+                        "tokens_out": 20,
+                        "model": "m",
+                    },
+                    {
+                        "event_type": "cost_charged",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E2",
+                        "story_key": "S3",
+                        "phase": "dev",
+                        "cost_usd": 1.00,
+                        "tokens_in": 10,
+                        "tokens_out": 20,
+                        "model": "m",
+                    },
+                    # Non-cost event must not contribute:
+                    {
+                        "event_type": "story_started",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "Sx",
+                        "agent": "a",
+                        "model": "m",
+                        "complexity": "c",
+                    },
+                ],
+            )
+            reader = TelemetryReader(path)
+            result = reader.cost_by_epic()
+            self.assertEqual(set(result.keys()), {"E1", "E2"})
+            self.assertAlmostEqual(result["E1"], 0.35, places=6)
+            self.assertAlmostEqual(result["E2"], 1.00, places=6)
+
+    def test_cost_by_epic_returns_empty_when_no_cost_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._write(
+                path,
+                [
+                    {
+                        "event_type": "story_started",
+                        "timestamp": "t",
+                        "run_id": "r",
+                        "epic": "E1",
+                        "story_key": "S",
+                        "agent": "a",
+                        "model": "m",
+                        "complexity": "c",
+                    },
+                ],
+            )
+            self.assertEqual(TelemetryReader(path).cost_by_epic(), {})
