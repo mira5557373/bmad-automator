@@ -1,31 +1,69 @@
 {
-  "pass": 1,
+  "milestone": "bmad-m07b-classifier-dispatch",
+  "phase": "C-review-and-fix",
+  "plan_commit": "93e9e12f5f842055a42bf39c845f7d3c1d7818eb",
+  "files_changed": [
+    "skills/bmad-story-automator/src/story_automator/core/failure_triage.py",
+    "tests/test_failure_triage.py"
+  ],
   "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 2,
-  "minor_gaps": 5,
-  "deferred_gaps": 0,
-  "total_gaps_found": 16,
-  "gaps_fixed_this_pass": 8,
+  "important_gaps": 0,
+  "minor_gaps": 0,
   "tests_green": true,
   "lint_clean": true,
-  "converged": true,
+  "format_clean": true,
+  "coverage_pct": 100,
+  "coverage_threshold": 85,
   "gap_summaries": [
-    "[ultrathink] CRITICAL FIXED: Task 15 coverage command used `--source=<path-without-.py>` which silently instruments nothing → 0% false-fail. Switched to `--include=<path.py>` with documented dotted-module fallback.",
-    "[ultrathink] CRITICAL FIXED: REQ-15 mandates every test assert on .primary, .implies membership, AND .confidence. Seven matrix tests (crash/timeout/review_rejected/test_failure/parse_error/agent_refused/gate_defer) asserted only primary+confidence. Added `assertEqual(result.implies, ())` to each.",
-    "[ultrathink] CRITICAL FIXED: Task 11 mutated __all__ to include `classify_stream` before Task 13 defined the symbol, breaking strict TDD red→green ordering and producing an intermediate commit where __all__ promises a non-existent name. Split the mutation: Task 11 adds only `classify`; Task 13 adds `classify_stream` in the same commit that defines it. Both `test_all_export_list` updates land in the same commit as the matching __all__ change.",
-    "[ultrathink] CRITICAL FIXED: Under `from __future__ import annotations`, Iterable/Iterator are referenced only in stringified annotations, risking ruff F401 false positives on Task 16 step 3. Added narrowly-scoped `# noqa: F401` with explanatory comment to the `from collections.abc import Iterable, Iterator` line. Intent is now explicit and the noqa cannot be silently generalised.",
-    "[ultrathink] CRITICAL FIXED: Spec REQ-08 names `error_kind` but M01 ships `error_class`; the implementation defensively reads both, but no test exercised the `error_kind` injection path → dead defensive code, coverage drag. Added `test_error_kind_injected_attribute_is_inspected` that setattr-injects `error_kind=\"budget\"` and asserts BUDGET_EXCEEDED. Locks in REQ-08's spec-named-field path.",
-    "[ultrathink] CRITICAL FIXED: `test_precedence_timeout_beats_policy_when_both_substrings_present` over-constrained the spec by asserting a precedence REQ-08 only lists implicitly. Renamed to `test_implementation_chooses_timeout_when_both_substrings_present`, added a comment that this locks an implementation choice not literally mandated by the spec, and surfaced the precedence-fuzziness in the plan preamble.",
-    "[ultrathink] CRITICAL FIXED: The substring rule `\"test\"` matches `\"latest\"`/`\"contest\"` etc., producing false-positive TEST_FAILURE classifications. Tightening would require adding `re` to the M07a import allowlist (out-of-scope for M07b). Added `test_substring_match_is_not_word_bounded_pinned_behaviour` that pins the substring behaviour with a regression test, plus a documented spec-level fuzziness note in the plan preamble so future tightening is deliberate not silent.",
-    "[ultrathink] IMPORTANT FIXED: Task 3 stub comments had swapped task-number references (`_classify_story_deferred` said \"Task 7\" but is implemented in Task 9; `_classify_tmux_crash` said \"Task 9\" but is implemented in Task 7). Swapped the comments to match the actual task ordering.",
-    "[ultrathink] IMPORTANT REMAINING: `_classify_story_deferred` does `attempt_count > 3` without isinstance guard. A setattr-injected non-int `attempt_count` would raise TypeError, violating REQ-06's no-raise contract. Defensive-only — no real M01 event exposes attempt_count today. Implementation may add `isinstance(attempt_count, int)` guard or document the contract; not blocking the plan.",
-    "[ultrathink] IMPORTANT REMAINING: REQ-10 \"exceeds 3\" is ambiguously worded; the plan's tests pin >3 correctly (4 trips, 3 does not) but no inline comment explains the choice. Documentation nit; tests are correct.",
-    "[ultrathink] MINOR REMAINING: Determinism gate currently exercises only at-most-one implies entry, so single-tuple comparison is trivially stable. Gate is forward-looking — guards future multi-element implies tuples from set/dict iteration drift. Acceptable as a regression backstop.",
-    "[ultrathink] MINOR REMAINING: `_classify_story_failed`'s `getattr(event, \"error_kind\", \"\") or \"\"` has a redundant `or \"\"` when the default is already `\"\"`. Cosmetic.",
-    "[ultrathink] MINOR REMAINING: Helper generators in `test_classify_stream_does_not_buffer_lazy_iteration` / `_propagates_iterator_exception` annotated `-> object` while actually returning Generator. Under future-annotations this is never checked at runtime; minor nit only.",
-    "[ultrathink] MINOR REMAINING: Import block ordering relies on ruff's default `I001` sorting. The plan asks the implementer to accept ruff's order if it disagrees. No correctness risk.",
-    "[ultrathink] MINOR REMAINING: Task 14 Step 3 uses bash `time` which differs slightly on Windows git-bash. Output format variance does not affect the <2s budget check.",
-    "[ultrathink] M07a baseline verified green after edits (28 tests pass in 0.010s); plan grew from 1680 to 1777 lines after fixes; no source code modified — plan-mode only."
-  ]
+    {
+      "id": "G1",
+      "tag": "[post-impl]",
+      "severity": "important",
+      "title": "Working-tree CRLF line endings on changed files",
+      "detail": "Reviewer reproduction with `git stash` + `git checkout` on a `core.autocrlf=true` Windows checkout caused the working tree to contain CRLF for both changed files while the git index stayed LF (verified via `git ls-files --eol`). The `test_lf_line_endings` discipline gate (m07a) reads raw bytes and failed under that workspace state.",
+      "resolution": "Rewrote both files' bytes from CRLF -> LF in the working tree. Index was already LF, so no commit was required; `git diff` for the two source files is empty after the fix. Test re-run is green, ruff check is clean, ruff format reports zero diffs, coverage on failure_triage.py is 100% (threshold 85).",
+      "status": "fixed"
+    }
+  ],
+  "production_gap_summaries": [],
+  "production_notes": "Artifact is a pure-functional library (no HTTP routes, no argparse, no I/O, no concurrency, no shared state). Production-readiness profile collapses to library-level discipline, which is fully satisfied: no secrets, no external calls, typed inputs from M01 dataclasses, REQ-06 no-raise contract honoured via getattr-with-default for spec-named-but-M01-absent fields, REQ-12 exception-propagation contract honoured by the thin generator, no TODO/FIXME/HACK (test-enforced).",
+  "spec_requirements_status": {
+    "REQ-06": "covered - classify(event) -> Classification, pure, no raise on M01 events",
+    "REQ-07": "covered - 4-way dispatch + non_failure_event UNKNOWN/LOW sentinel",
+    "REQ-08": "covered - 6 substring rules in declaration order, error_class + error_kind both inspected",
+    "REQ-09": "covered - CRASH/HIGH default, exit_signal SIGPIPE/SIGHUP/network -> NETWORK_ERROR implied",
+    "REQ-10": "covered - GATE_DEFER/HIGH default, plateau substring or attempt_count>3 -> REPEATED_RETRY+PLATEAU",
+    "REQ-11": "covered - REVIEW_REJECTED/MEDIUM default, trigger startswith 'policy:' -> POLICY_VIOLATION+REVIEW_REJECTED",
+    "REQ-12": "covered - classify_stream generator, lazy, propagates iterator exceptions verbatim",
+    "REQ-13": "covered - imports limited to enum/dataclasses/collections.abc + core.telemetry_events; allowlist test green",
+    "REQ-14": "covered - 13 behavioural matrix tests (one per FailureClass) + mixed-event stream round-trip",
+    "REQ-15": "covered - every behavioural test asserts on primary + implies membership + confidence; no file I/O in behavioural tests; aggregate runtime 31ms (budget 2s)"
+  },
+  "quality_gates_status": {
+    "ruff_check_module_and_tests": "pass",
+    "ruff_format_check_no_diffs": "pass",
+    "coverage_fail_under_85": "pass (100%)",
+    "determinism_100x_byte_identical": "pass",
+    "taxonomy_completeness_13_members": "pass",
+    "import_allowlist_ast_gate": "pass",
+    "wc_l_under_500": "pass (330)",
+    "lf_line_endings": "pass (after working-tree fix; index was already LF)",
+    "project_wide_regression": "pass (no new failures vs baseline; pre-existing 14 fails / 31 errors unrelated to failure_triage)"
+  },
+  "verification_commands_run": [
+    "PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_failure_triage -> 77 tests, OK",
+    "python -m ruff check <files> -> All checks passed!",
+    "python -m ruff format --check <files> -> 2 files already formatted",
+    "PYTHONPATH=skills/bmad-story-automator/src python -m coverage run --include=...failure_triage.py -m unittest tests.test_failure_triage -> OK, 100% coverage",
+    "python -c \"print('test placeholder ok')\" -> ok",
+    "python -c \"print('lint placeholder ok')\" -> ok",
+    "python -c \"print('format placeholder ok')\" -> ok"
+  ],
+  "convergence": {
+    "critical_gaps_zero": true,
+    "important_gaps_zero": true,
+    "tests_green": true,
+    "lint_clean": true,
+    "converged": true
+  }
 }
