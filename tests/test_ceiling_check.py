@@ -37,5 +37,31 @@ class CmdCeilingCheckSurfaceTests(unittest.TestCase):
         self.assertNotIn("Unknown command: ceiling-check", err.getvalue())
 
 
+class CmdCeilingCheckFlagParseTests(unittest.TestCase):
+    def test_missing_gate_returns_structured_error(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        code, payload = _capture(cmd_ceiling_check, [])
+        self.assertEqual(code, 1)
+        self.assertFalse(payload.get("ok"))
+        self.assertEqual(payload.get("error"), "missing_gate")
+
+    def test_invalid_gate_returns_structured_error(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        code, payload = _capture(
+            cmd_ceiling_check, ["--gate", "bogus", "--events", "events.jsonl"]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(payload.get("error"), "invalid_gate")
+
+    def test_missing_events_path_returns_structured_error(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        code, payload = _capture(cmd_ceiling_check, ["--gate", "init"])
+        self.assertEqual(code, 1)
+        self.assertEqual(payload.get("error"), "missing_events")
+
+
 if __name__ == "__main__":
     unittest.main()
