@@ -46,3 +46,25 @@ class FailureClassTests(unittest.TestCase):
         from story_automator.core.failure_triage import FailureClass
 
         self.assertTrue(issubclass(FailureClass, enum.Enum))
+
+
+class ConfidenceTests(unittest.TestCase):
+    def test_confidence_members_are_high_medium_low(self) -> None:
+        from story_automator.core.failure_triage import Confidence
+
+        self.assertEqual([m.name for m in Confidence], ["HIGH", "MEDIUM", "LOW"])
+
+    def test_confidence_values_equal_names(self) -> None:
+        from story_automator.core.failure_triage import Confidence
+
+        for member in Confidence:
+            self.assertEqual(member.value, member.name)
+
+    def test_confidence_is_case_sensitive_enum(self) -> None:
+        import enum
+
+        from story_automator.core.failure_triage import Confidence
+
+        self.assertTrue(issubclass(Confidence, enum.Enum))
+        with self.assertRaises(KeyError):
+            Confidence["high"]
