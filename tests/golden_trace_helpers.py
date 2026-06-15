@@ -16,8 +16,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from story_automator.commands import state as _state_module
-from story_automator.core.telemetry_emitter import TelemetryEmitter
+from story_automator.commands import state as _state_module  # type: ignore[import-untyped]
+from story_automator.core.telemetry_emitter import TelemetryEmitter  # type: ignore[import-untyped]
 
 Channel = Literal["event", "state", "claude_p"]
 MismatchField = Literal["channel", "kind", "payload", "length"]
@@ -35,10 +35,12 @@ _REDACTED_EVENT_FIELDS: frozenset[str] = frozenset(
         "heartbeat_counter",
     }
 )
-_HEARTBEAT_LOCK_BASENAMES: frozenset[str] = frozenset({
-    ".run.lock",
-    ".state-build.lock",
-})
+_HEARTBEAT_LOCK_BASENAMES: frozenset[str] = frozenset(
+    {
+        ".run.lock",
+        ".state-build.lock",
+    }
+)
 
 _CLAUDE_P_HOOK: Callable[[list[str]], None] | None = None
 _ACTIVE_RECORDER: "GoldenTraceRecorder | None" = None
@@ -54,6 +56,7 @@ def _is_heartbeat_lock_path(rel_posix_path: str) -> bool:
     """
     basename = rel_posix_path.rsplit("/", 1)[-1]
     return basename in _HEARTBEAT_LOCK_BASENAMES
+
 
 __all__ = [
     "Channel",
@@ -415,10 +418,11 @@ class GoldenTraceRecorder:
     ) -> None:
         global _CLAUDE_P_HOOK, _ACTIVE_RECORDER
         errors: list[BaseException] = []
-        for restore in (
+        restorers: tuple[Callable[[], None], ...] = (
             lambda: setattr(TelemetryEmitter, "emit", self._orig_emit),
             lambda: setattr(_state_module, "write_atomic_text", self._orig_state_write),
-        ):
+        )
+        for restore in restorers:
             try:
                 restore()
             except BaseException as restore_err:
@@ -441,24 +445,23 @@ class GoldenTraceRecorder:
         recorder = self
 
         def wrapper(emitter_self: TelemetryEmitter, event: object) -> None:
-            result = orig(emitter_self, event)
+            orig(emitter_self, event)
             raw_payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
             payload = _redact_event_payload(raw_payload)
             recorder._record("event", type(event).__name__, payload)
-            return result
 
-        TelemetryEmitter.emit = wrapper  # type: ignore[method-assign]
+        TelemetryEmitter.emit = wrapper
 
     def _install_state_hook(self) -> None:
         orig = self._orig_state_write
         recorder = self
 
         def wrapper(path: Path, data: str, *, encoding: str = "utf-8") -> None:
-            result = orig(path, data, encoding=encoding)
+            orig(path, data, encoding=encoding)
             try:
                 rel = _to_repo_relative_posix(Path(path), repo_root=recorder._repo_root)
                 if _is_heartbeat_lock_path(rel):
-                    return result
+                    return
                 sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
                 recorder._record("state", "mutation", {"path": rel, "sha256": sha})
             except Exception as exc:
@@ -467,9 +470,8 @@ class GoldenTraceRecorder:
                     f"{path!r}: {exc!r}",
                     stacklevel=2,
                 )
-            return result
 
-        _state_module.write_atomic_text = wrapper  # type: ignore[assignment]
+        _state_module.write_atomic_text = wrapper
 
     def _install_claude_p_hook(self) -> None:
         global _CLAUDE_P_HOOK

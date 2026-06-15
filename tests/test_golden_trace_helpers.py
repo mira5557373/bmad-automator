@@ -815,6 +815,7 @@ class StateLockExclusionTests(unittest.TestCase):
 class ClaudePHookTests(unittest.TestCase):
     def test_notify_claude_p_records_invoke_entry(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
                 gh.notify_claude_p(["claude", "-p", "Run story s1"])
@@ -826,6 +827,7 @@ class ClaudePHookTests(unittest.TestCase):
 
     def test_notify_claude_p_outside_recorder_is_noop(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             with GoldenTraceRecorder(repo_root=Path(tmp)):
                 pass
@@ -833,6 +835,7 @@ class ClaudePHookTests(unittest.TestCase):
 
     def test_claude_p_hook_removed_on_exit(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
                 gh.notify_claude_p(["claude", "-p", "a"])
@@ -843,6 +846,7 @@ class ClaudePHookTests(unittest.TestCase):
 class ClaudePArgvNormalizationTests(unittest.TestCase):
     def test_absolute_repo_path_normalized_to_relative_posix(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             (root / "stories").mkdir()
@@ -850,10 +854,13 @@ class ClaudePArgvNormalizationTests(unittest.TestCase):
             story.write_text("body", encoding="utf-8")
             with GoldenTraceRecorder(repo_root=root) as rec:
                 gh.notify_claude_p(["claude", "-p", str(story)])
-        self.assertEqual(rec.entries[0].payload["argv"], ["claude", "-p", "stories/s1.md"])
+        self.assertEqual(
+            rec.entries[0].payload["argv"], ["claude", "-p", "stories/s1.md"]
+        )
 
     def test_four_letter_placeholder_token_preserved(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             with GoldenTraceRecorder(repo_root=root) as rec:
@@ -865,6 +872,7 @@ class ClaudePArgvNormalizationTests(unittest.TestCase):
 
     def test_non_path_token_passes_through_unchanged(self) -> None:
         import tests.golden_trace_helpers as gh
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             with GoldenTraceRecorder(repo_root=root) as rec:
@@ -886,6 +894,7 @@ class RecorderRestorationOnExceptionTests(unittest.TestCase):
 
     def test_emit_restored_when_block_raises(self) -> None:
         import tests.golden_trace_helpers as gh
+
         orig_emit = TelemetryEmitter.emit
         orig_state_write = _state_module.write_atomic_text
         orig_hook = gh._CLAUDE_P_HOOK  # type: ignore[attr-defined]
@@ -905,8 +914,13 @@ class RecorderRestorationOnExceptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
             event = StoryStarted(
-                timestamp="2026-01-01T00:00:00Z", run_id="r",
-                epic="e", story_key="s", agent="a", model="m", complexity="c",
+                timestamp="2026-01-01T00:00:00Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
             )
             with GoldenTraceRecorder(repo_root=Path(tmp)) as r1:
                 emitter.emit(event)
@@ -941,6 +955,7 @@ class ImportSafetyTests(unittest.TestCase):
         # with a concurrently-active recorder in another test thread).
         import subprocess
         import sys
+
         result = subprocess.run(
             [
                 sys.executable,
@@ -965,6 +980,7 @@ class ImportSafetyTests(unittest.TestCase):
 
     def test_module_level_claude_p_hook_is_none(self) -> None:
         import tests.golden_trace_helpers as gh
+
         self.assertIsNone(gh._CLAUDE_P_HOOK)  # type: ignore[attr-defined]
 
 
@@ -976,8 +992,13 @@ class DeterminismE2ETests(unittest.TestCase):
         emitter = TelemetryEmitter(tmp / "events.jsonl")
         events = [
             StoryStarted(
-                timestamp="2026-06-15T01:02:03Z", run_id="r",
-                epic="e", story_key=f"s{i}", agent="a", model="m", complexity="c",
+                timestamp="2026-06-15T01:02:03Z",
+                run_id="r",
+                epic="e",
+                story_key=f"s{i}",
+                agent="a",
+                model="m",
+                complexity="c",
             )
             for i in range(5)
         ]
@@ -995,14 +1016,22 @@ class DeterminismE2ETests(unittest.TestCase):
 
     def test_real_iso_timestamp_collapsed_to_ts(self) -> None:
         from story_automator.core.common import iso_now
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             emitter = TelemetryEmitter(root / "events.jsonl")
             with GoldenTraceRecorder(repo_root=root) as rec:
-                emitter.emit(StoryStarted(
-                    timestamp=iso_now(), run_id="r",
-                    epic="e", story_key="s", agent="a", model="m", complexity="c",
-                ))
+                emitter.emit(
+                    StoryStarted(
+                        timestamp=iso_now(),
+                        run_id="r",
+                        epic="e",
+                        story_key="s",
+                        agent="a",
+                        model="m",
+                        complexity="c",
+                    )
+                )
         self.assertEqual(rec.entries[0].payload["timestamp"], "<ts>")
 
 
