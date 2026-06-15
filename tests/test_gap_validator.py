@@ -85,6 +85,8 @@ class GapDataclassTests(unittest.TestCase):
         from story_automator.core.gap_validator import Gap
 
         with self.assertRaises(TypeError):
+            # type: ignore[misc] suppresses the static error so the
+            # runtime check (kw_only-only constructor) can be exercised.
             Gap("a", 1, "s", "d", "minor")  # type: ignore[misc]
 
     def test_gap_instances_are_immutable(self) -> None:
@@ -98,6 +100,8 @@ class GapDataclassTests(unittest.TestCase):
             severity="minor",
         )
         with self.assertRaises(dataclasses.FrozenInstanceError):
+            # type: ignore[misc] suppresses the static error so the
+            # runtime frozen-dataclass guard can be exercised.
             g.line = 2  # type: ignore[misc]
 
     def test_gap_does_not_subclass_other_dataclasses(self) -> None:
@@ -360,6 +364,36 @@ class ValidateGapsAggregationTests(unittest.TestCase):
             self.assertAlmostEqual(status.confidence, 0.8)
         self.assertAlmostEqual(report.overall_confidence, 0.8)
 
+    def test_overall_confidence_is_mean_of_heterogeneous_per_gap_values(self) -> None:
+        # One gap fully passes (0.95), one gap fully fails (0.8) → mean
+        # = (0.95 + 0.8) / 2 = 0.875. Exercises non-trivial averaging
+        # so a future bug that returns max/min/first wouldn't slip.
+        from story_automator.core.gap_validator import Gap, validate_gaps
+
+        (self.root / "good.py").write_text(
+            "def keep_me():\n    return 1\n", encoding="utf-8"
+        )
+        gaps = [
+            Gap(
+                file_path="good.py",
+                line=1,
+                symbol="keep_me",
+                description="d",
+                severity="minor",
+            ),
+            Gap(
+                file_path="missing.py",
+                line=1,
+                symbol="x",
+                description="d",
+                severity="minor",
+            ),
+        ]
+        report = validate_gaps(gaps, repo_root=self.root)
+        self.assertAlmostEqual(report.statuses[0].confidence, 0.95)
+        self.assertAlmostEqual(report.statuses[1].confidence, 0.8)
+        self.assertAlmostEqual(report.overall_confidence, 0.875)
+
 
 class PathExistsAndEscapeTests(unittest.TestCase):
     """REQ-04 (path_exists bonus) + REQ-05 (escape rejection)."""
@@ -593,6 +627,108 @@ class SymbolPresentTests(unittest.TestCase):
 
         report = validate_gaps([self._gap("")], repo_root=self.root)
         self.assertFalse(report.statuses[0].symbol_present)
+
+
+class IOErrorBranchTests(unittest.TestCase):
+    """REQ-04 robustness: line/symbol checks must degrade gracefully
+    when the source tree is torn (unreadable / non-UTF-8 file) rather
+    than raising and aborting the whole report."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+
+    def _gap(self, file_path: str, symbol: str = "x", line: int = 1) -> Gap:
+        from story_automator.core.gap_validator import Gap
+
+        return Gap(
+            file_path=file_path,
+            line=line,
+            symbol=symbol,
+            description="d",
+            severity="minor",
+        )
+
+    def test_non_utf8_file_yields_false_with_decode_note(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        # Latin-1 bytes that are NOT valid UTF-8 (0xff is never a UTF-8
+        # start byte). The check should report False with a "decode" note
+        # rather than letting UnicodeDecodeError escape.
+        target = self.root / "binary.py"
+        target.write_bytes(b"\xff\xfe not utf-8\n")
+
+        report = validate_gaps(
+            [self._gap("binary.py", symbol="not_utf_8")], repo_root=self.root
+        )
+        s = report.statuses[0]
+        self.assertTrue(s.path_exists)
+        self.assertFalse(s.line_in_range)
+        self.assertFalse(s.symbol_present)
+        joined = " | ".join(s.notes)
+        self.assertIn("decode", joined.lower())
+        # Per-gap confidence is base 0.8 + 0.05 (path_exists) = 0.85.
+        self.assertAlmostEqual(s.confidence, 0.85)
+
+
+class OversizedSourceTests(unittest.TestCase):
+    """Production hardening: refuse to read files larger than the cap so
+    an adversarial gap citing a huge file cannot OOM the verifier."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+
+    def test_oversized_file_is_refused_with_note(self) -> None:
+        from story_automator.core import gap_validator
+        from story_automator.core.gap_validator import Gap, validate_gaps
+
+        target = self.root / "huge.py"
+        target.write_bytes(b"x" * (gap_validator._MAX_SOURCE_BYTES + 1))
+
+        report = validate_gaps(
+            [
+                Gap(
+                    file_path="huge.py",
+                    line=1,
+                    symbol="x",
+                    description="d",
+                    severity="minor",
+                )
+            ],
+            repo_root=self.root,
+        )
+        s = report.statuses[0]
+        self.assertTrue(s.path_exists)
+        self.assertFalse(s.line_in_range)
+        self.assertFalse(s.symbol_present)
+        joined = " | ".join(s.notes)
+        self.assertIn("cap", joined)
+        self.assertIn("huge.py", joined)
+
+
+class RepoRootPreconditionTests(unittest.TestCase):
+    """Production hardening: precondition violation raises early instead
+    of silently producing a report full of opaque escape notes."""
+
+    def test_nonexistent_repo_root_raises_not_a_directory_error(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ghost = Path(tmp) / "does-not-exist"
+            with self.assertRaises(NotADirectoryError):
+                validate_gaps([], repo_root=ghost)
+
+    def test_repo_root_pointing_at_a_file_raises_not_a_directory_error(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        with tempfile.TemporaryDirectory() as tmp:
+            file_root = Path(tmp) / "im-a-file"
+            file_root.write_text("x", encoding="utf-8")
+            with self.assertRaises(NotADirectoryError):
+                validate_gaps([], repo_root=file_root)
 
 
 class AllSymbolsActuallyDefinedTests(unittest.TestCase):

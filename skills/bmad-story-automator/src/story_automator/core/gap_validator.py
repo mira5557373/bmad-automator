@@ -60,6 +60,10 @@ class GapStatus:
     Preconditions: `confidence` must lie in `[0.0, 1.0]`; `notes` must be
         a list of human-readable strings explaining failed checks.
     Postconditions: instance is frozen; `gap` is the original `Gap`.
+        Note: `frozen=True` prevents attribute reassignment but does not
+        deep-freeze the `notes` list — callers must not mutate it after
+        construction. The spec mandates `list[str]`, so a defensive
+        `tuple` copy is intentionally not used.
     Raises: TypeError if constructed with positional args (kw_only).
     """
 
@@ -78,7 +82,8 @@ class ValidationReport:
     Preconditions: `statuses` must be a list (possibly empty);
         `overall_confidence` in `[0.0, 1.0]`; `validated_at` is an
         ISO-8601 timestamp produced by `core.common.iso_now()`.
-    Postconditions: instance is frozen.
+    Postconditions: instance is frozen. Note: `frozen=True` does not
+        deep-freeze `statuses` — callers must treat it as read-only.
     Raises: TypeError if constructed with positional args (kw_only).
     """
 
@@ -155,6 +160,28 @@ _BASE_CONFIDENCE: float = 0.8
 _PASS_BONUS: float = 0.05
 _CONFIDENCE_CEILING: float = 1.0
 
+_MAX_SOURCE_BYTES: int = 5 * 1024 * 1024
+
+
+def _refuse_oversized(resolved_path: Path) -> str | None:
+    """Return a note if the file exceeds `_MAX_SOURCE_BYTES`, else None.
+
+    Layer 1 verifies citations against Python source files; legitimate
+    sources are well under 5 MiB. Capping the read defends against an
+    adversarial gap citing a multi-gigabyte file that would OOM the
+    verifier on `read_text()`.
+    """
+    try:
+        size = resolved_path.stat().st_size
+    except OSError as exc:
+        return f"could not stat {resolved_path.name}: {exc}"
+    if size > _MAX_SOURCE_BYTES:
+        return (
+            f"{resolved_path.name} is {size} bytes, exceeding the "
+            f"{_MAX_SOURCE_BYTES}-byte source cap; refusing to read"
+        )
+    return None
+
 
 def _resolve_inside_root(
     file_path: str,
@@ -193,6 +220,9 @@ def _check_line_in_range(
     """
     if resolved_path is None:
         return False, None
+    too_large_note = _refuse_oversized(resolved_path)
+    if too_large_note is not None:
+        return False, too_large_note
     try:
         text = resolved_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -223,6 +253,9 @@ def _check_symbol_present(
         return False, None
     if not symbol:
         return False, "symbol '' is empty; refusing to claim presence"
+    too_large_note = _refuse_oversized(resolved_path)
+    if too_large_note is not None:
+        return False, too_large_note
     try:
         text = resolved_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -257,13 +290,19 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
         contribute one note each. Aggregate `overall_confidence` is the
         arithmetic mean of per-gap confidence rounded to 6 dp, or 1.0
         when `gaps` is empty.
-    Raises: nothing under normal operation — IO errors during the
-        line-range or symbol checks are converted into `False` results
-        with an explanatory note, so a torn source tree degrades
-        gracefully rather than aborting the report.
+    Raises: `NotADirectoryError` when `repo_root` is not an existing
+        directory (precondition violation). Otherwise nothing under
+        normal operation — IO errors during the line-range or symbol
+        checks are converted into `False` results with an explanatory
+        note, so a torn source tree degrades gracefully rather than
+        aborting the report.
     """
-    statuses: list[GapStatus] = []
     root_resolved = Path(repo_root).resolve()
+    if not root_resolved.is_dir():
+        raise NotADirectoryError(
+            f"repo_root must be an existing directory: {repo_root}"
+        )
+    statuses: list[GapStatus] = []
     for gap in gaps:
         notes: list[str] = []
         resolved, escape_note = _resolve_inside_root(gap.file_path, root_resolved)
@@ -282,7 +321,7 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
         confidence = _BASE_CONFIDENCE + _PASS_BONUS * sum(
             [path_exists, line_in_range, symbol_present]
         )
-        confidence = min(confidence, _CONFIDENCE_CEILING)
+        confidence = round(min(confidence, _CONFIDENCE_CEILING), 6)
         statuses.append(
             GapStatus(
                 gap=gap,
