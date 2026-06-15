@@ -11,6 +11,7 @@ from story_automator.core.drift_detector import (
     DriftEntry,
     DriftReport,
     _classify,
+    compute_drift,
 )
 
 
@@ -158,6 +159,37 @@ def _table(
         source_path=source_path,
         total_events_scanned=sum(e.sample_count for e in entries),
     )
+
+
+class ComputeDriftBaselineTests(unittest.TestCase):
+    def test_identical_tables_produce_all_stable(self) -> None:
+        baseline = _table(
+            _entry("gpt-4o-mini", "story", 0.80),
+            _entry("opus-4-1", "review", 0.92),
+            source_path="/fixtures/base.jsonl",
+        )
+        current = _table(
+            _entry("gpt-4o-mini", "story", 0.80),
+            _entry("opus-4-1", "review", 0.92),
+            source_path="/fixtures/now.jsonl",
+        )
+        report = compute_drift(baseline=baseline, current=current)
+        self.assertEqual(report.baseline_source, "/fixtures/base.jsonl")
+        self.assertEqual(report.current_source, "/fixtures/now.jsonl")
+        self.assertEqual(len(report.entries), 2)
+        for entry in report.entries:
+            self.assertEqual(entry.delta, 0.0)
+            self.assertIs(entry.classification, DriftClassification.STABLE)
+        self.assertRegex(report.generated_at, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_inputs_not_mutated(self) -> None:
+        baseline = _table(_entry("m", "t", 0.5))
+        current = _table(_entry("m", "t", 0.6))
+        baseline_snapshot = dict(baseline.entries)
+        current_snapshot = dict(current.entries)
+        compute_drift(baseline=baseline, current=current)
+        self.assertEqual(baseline.entries, baseline_snapshot)
+        self.assertEqual(current.entries, current_snapshot)
 
 
 if __name__ == "__main__":

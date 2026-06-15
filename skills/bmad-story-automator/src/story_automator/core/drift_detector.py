@@ -20,8 +20,8 @@ __all__ = [  # noqa: F822
 from dataclasses import dataclass
 from enum import Enum
 
-from .calibration import CalibrationTable  # noqa: F401
-from .common import iso_now  # noqa: F401
+from .calibration import CalibrationTable
+from .common import iso_now
 
 STABLE_MAX = 0.05
 MINOR_MAX = 0.10
@@ -88,3 +88,50 @@ def _classify(delta: float) -> DriftClassification:
     if magnitude < MAJOR_MAX:
         return DriftClassification.MAJOR_DRIFT
     return DriftClassification.SEVERE_DRIFT
+
+
+def compute_drift(
+    baseline: CalibrationTable,
+    current: CalibrationTable,
+) -> DriftReport:
+    """Compare two CalibrationTable snapshots, return a DriftReport.
+
+    Signature is positional per REQ-06. Per REQ-08, any key missing on
+    one side is filled with 0.5 (matches `lookup_success_rate`'s
+    default).
+    """
+
+    keys = set(baseline.entries.keys()) | set(current.entries.keys())
+    entries: list[DriftEntry] = []
+    for key in keys:
+        baseline_entry = baseline.entries.get(key)
+        current_entry = current.entries.get(key)
+        baseline_rate = (
+            baseline_entry.success_rate
+            if baseline_entry is not None
+            else _MISSING_RATE_DEFAULT
+        )
+        current_rate = (
+            current_entry.success_rate
+            if current_entry is not None
+            else _MISSING_RATE_DEFAULT
+        )
+        delta = round(current_rate - baseline_rate, 4)
+        model_id, task_kind = key
+        entries.append(
+            DriftEntry(
+                model_id=model_id,
+                task_kind=task_kind,
+                baseline_success_rate=baseline_rate,
+                current_success_rate=current_rate,
+                delta=delta,
+                classification=_classify(delta),
+            )
+        )
+    entries.sort(key=lambda e: (-abs(e.delta), e.model_id, e.task_kind))
+    return DriftReport(
+        entries=entries,
+        generated_at=iso_now(),
+        baseline_source=baseline.source_path,
+        current_source=current.source_path,
+    )
