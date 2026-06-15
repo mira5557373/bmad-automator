@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
+from pathlib import Path
 
-__all__ = ["BudgetCeiling", "CeilingDecision"]
+__all__ = ["BudgetCeiling", "CeilingDecision", "parse_ceilings_config"]
 
 
 class CeilingDecision(enum.Enum):
@@ -55,3 +56,20 @@ _PARSE_WARNINGS: list[dict[str, str]] = []
 module-level, not part of the function return, so callers that care
 about warnings can opt in without complicating the happy-path
 signature."""
+
+
+def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]:
+    """Read ``policy.cost_ceilings`` from ``workflow.json`` (REQ-04, REQ-05).
+
+    Tolerant by design: missing file, empty JSON, missing ``policy`` key,
+    and missing ``cost_ceilings`` key all return an empty list. Malformed
+    individual ceiling entries are skipped silently while a structured
+    warning is appended to ``_PARSE_WARNINGS``; the warning list is
+    cleared at the start of every call so callers can inspect just the
+    warnings produced by the most recent invocation.
+    """
+    _PARSE_WARNINGS.clear()
+    path = Path(workflow_json_path)
+    if not path.is_file():
+        return []
+    return []

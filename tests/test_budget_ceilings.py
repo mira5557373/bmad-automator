@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -86,6 +88,35 @@ class ParseWarningsModuleStateTests(unittest.TestCase):
         first = budget_ceilings._PARSE_WARNINGS
         second = budget_ceilings._PARSE_WARNINGS
         self.assertIs(first, second)
+
+
+class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
+    def test_missing_file_returns_empty_list(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist.json"
+            result = parse_ceilings_config(missing)
+            self.assertEqual(result, [])
+
+    def test_missing_file_accepts_str_path(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = str(Path(tmp) / "does-not-exist.json")
+            result = parse_ceilings_config(missing)
+            self.assertEqual(result, [])
+
+    def test_missing_file_clears_parse_warnings(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        budget_ceilings._PARSE_WARNINGS.append(
+            {"index": "0", "reason": "stale", "detail": "from prior test"}
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            parse_ceilings_config(Path(tmp) / "missing.json")
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
 if __name__ == "__main__":
