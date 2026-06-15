@@ -155,5 +155,66 @@ class CmdCeilingCheckAllowTests(unittest.TestCase):
         self.assertIn("limit=10.0000", payload["reason"])
 
 
+class CmdCeilingCheckWarnBlockTests(unittest.TestCase):
+    def _run(self, cost: float, gate: str = "init", warn_at: float = 0.8):
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = _write_workflow(
+                tmp,
+                [
+                    {
+                        "name": "cap",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": warn_at,
+                        "gate_names": [gate],
+                    }
+                ],
+            )
+            ledger = _write_ledger(tmp, [_completed(cost)])
+            return _capture(
+                cmd_ceiling_check,
+                [
+                    "--gate",
+                    gate,
+                    "--events",
+                    str(ledger),
+                    "--workflow",
+                    str(wf),
+                    "--now",
+                    "2026-06-15T00:00:00Z",
+                ],
+            )
+
+    def test_warn_at_threshold(self) -> None:
+        code, payload = self._run(8.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["verdict"], "WARN")
+        self.assertIn("spent=8.0000", payload["reason"])
+
+    def test_warn_between_threshold_and_limit(self) -> None:
+        code, payload = self._run(9.0)
+        self.assertEqual(payload["verdict"], "WARN")
+
+    def test_block_at_limit(self) -> None:
+        code, payload = self._run(10.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["verdict"], "BLOCK")
+        self.assertIn("spent=10.0000", payload["reason"])
+
+    def test_block_above_limit(self) -> None:
+        code, payload = self._run(99.0)
+        self.assertEqual(payload["verdict"], "BLOCK")
+        self.assertIn("spent=99.0000", payload["reason"])
+
+    def test_block_carries_ok_true(self) -> None:
+        """BLOCK is a successful evaluation, not a CLI error — ``ok``
+        stays true so callers don't conflate a real verdict with a
+        flag-parsing failure."""
+        _, payload = self._run(99.0)
+        self.assertTrue(payload["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
