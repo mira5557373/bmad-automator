@@ -1,0 +1,25 @@
+{
+  "gaps": [
+    {
+      "file_path": "skills/bmad-story-automator/src/story_automator/core/gap_validator.py",
+      "line": 105,
+      "symbol": "parse_gap_list",
+      "description": "Sample Layer-1 input citing parse_gap_list as the entry point the chain consumes.",
+      "severity": "major"
+    },
+    {
+      "file_path": "skills/bmad-story-automator/src/story_automator/core/spec_compliance.py",
+      "line": 241,
+      "symbol": "check_compliance",
+      "description": "Sample claim that the Layer-2 entry point is reachable from the chain runner.",
+      "severity": "blocker"
+    },
+    {
+      "file_path": "skills/bmad-story-automator/src/story_automator/core/feature_tester.py",
+      "line": 209,
+      "symbol": "plan_feature_tests",
+      "description": "Sample claim that the Layer-3 planner is invoked after Layer 2 succeeds.",
+      "severity": "minor"
+    }
+  ]
+}
