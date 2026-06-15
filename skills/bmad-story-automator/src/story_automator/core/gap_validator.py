@@ -156,6 +156,31 @@ _PASS_BONUS: float = 0.05
 _CONFIDENCE_CEILING: float = 1.0
 
 
+def _resolve_inside_root(
+    file_path: str,
+    root_resolved: Path,
+) -> tuple[Path | None, str | None]:
+    """Return `(resolved_path, None)` if `file_path` lives inside the root.
+
+    Returns `(None, note)` if the candidate escapes the root — including
+    absolute paths outside the root, `..` traversal escaping the root,
+    and symlinks whose `resolve()` lands outside the root. `note` is a
+    human-readable reason mentioning the rejected path.
+    """
+    candidate = Path(file_path)
+    if candidate.is_absolute():
+        resolved = candidate.resolve(strict=False)
+    else:
+        resolved = (root_resolved / candidate).resolve(strict=False)
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError:
+        return None, f"path does not exist or escapes repo_root: {file_path}"
+    if not resolved.is_file():
+        return None, f"path does not exist or escapes repo_root: {file_path}"
+    return resolved, None
+
+
 def _empty_overall_confidence() -> float:
     """Overall confidence when no gaps were submitted.
 
@@ -188,17 +213,21 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
     root_resolved = Path(repo_root).resolve()
     for gap in gaps:
         notes: list[str] = []
-        path_exists = False  # Placeholder — Task 8 implements path resolution.
+        resolved, escape_note = _resolve_inside_root(gap.file_path, root_resolved)
+        path_exists = resolved is not None
+        if escape_note is not None:
+            notes.append(escape_note)
+
         line_in_range = False  # Placeholder — Task 9 implements line check.
         symbol_present = False  # Placeholder — Task 10 implements symbol check.
-        if not path_exists:
-            notes.append(f"path does not exist or escapes repo_root: {gap.file_path}")
+
         if not line_in_range:
             notes.append(
                 f"line {gap.line} could not be verified in range for {gap.file_path}"
             )
         if not symbol_present:
             notes.append(f"symbol {gap.symbol!r} not found in {gap.file_path}")
+
         confidence = _BASE_CONFIDENCE + _PASS_BONUS * sum(
             [path_exists, line_in_range, symbol_present]
         )
@@ -220,10 +249,6 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
         )
     else:
         overall = _empty_overall_confidence()
-    # `root_resolved` is computed up front so Tasks 8–11 can pass it
-    # through to the per-gap path resolver; reference it here so ruff's
-    # F841 does not flag it as unused on this intermediate revision.
-    del root_resolved
     return ValidationReport(
         statuses=statuses,
         overall_confidence=overall,

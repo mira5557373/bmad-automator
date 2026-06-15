@@ -3,10 +3,15 @@ from __future__ import annotations
 import dataclasses
 import io
 import logging
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from story_automator.core.gap_validator import Gap
 
 
 class ModuleImportContractTests(unittest.TestCase):
@@ -354,3 +359,90 @@ class ValidateGapsAggregationTests(unittest.TestCase):
             self.assertFalse(status.symbol_present)
             self.assertAlmostEqual(status.confidence, 0.8)
         self.assertAlmostEqual(report.overall_confidence, 0.8)
+
+
+class PathExistsAndEscapeTests(unittest.TestCase):
+    """REQ-04 (path_exists bonus) + REQ-05 (escape rejection)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+
+    def _gap(self, file_path: str) -> Gap:
+        from story_automator.core.gap_validator import Gap
+
+        return Gap(
+            file_path=file_path,
+            line=1,
+            symbol="anything",
+            description="d",
+            severity="minor",
+        )
+
+    def test_relative_path_existing_inside_root_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+        report = validate_gaps([self._gap("src/a.py")], repo_root=self.root)
+        self.assertTrue(report.statuses[0].path_exists)
+        # The path-exists note must NOT appear when path_exists is True.
+        joined = " | ".join(report.statuses[0].notes)
+        self.assertNotIn("path does not exist", joined)
+
+    def test_missing_relative_path_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap("missing.py")], repo_root=self.root)
+        self.assertFalse(report.statuses[0].path_exists)
+        joined = " | ".join(report.statuses[0].notes)
+        self.assertIn("missing.py", joined)
+
+    def test_absolute_path_outside_root_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        outside = self.root.parent / "definitely-outside.py"
+        report = validate_gaps([self._gap(str(outside))], repo_root=self.root)
+        self.assertFalse(report.statuses[0].path_exists)
+        joined = " | ".join(report.statuses[0].notes)
+        self.assertIn("escapes repo_root", joined)
+
+    def test_parent_traversal_escaping_root_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps(
+            [self._gap("../../../etc/passwd")],
+            repo_root=self.root,
+        )
+        self.assertFalse(report.statuses[0].path_exists)
+
+    def test_parent_traversal_resolving_inside_root_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+        report = validate_gaps(
+            [self._gap("src/../src/a.py")],
+            repo_root=self.root,
+        )
+        self.assertTrue(report.statuses[0].path_exists)
+
+    @unittest.skipIf(os.name == "nt", "symlink creation requires admin on Windows")
+    def test_symlink_pointing_outside_root_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        outside_dir = self.root.parent / "outside-symlink-target"
+        outside_dir.mkdir(exist_ok=True)
+        outside_file = outside_dir / "leak.py"
+        outside_file.write_text("secret = 1\n", encoding="utf-8")
+        self.addCleanup(lambda: outside_file.unlink(missing_ok=True))
+        self.addCleanup(lambda: outside_dir.rmdir())
+
+        link = self.root / "leak.py"
+        link.symlink_to(outside_file)
+
+        report = validate_gaps([self._gap("leak.py")], repo_root=self.root)
+        self.assertFalse(report.statuses[0].path_exists)
