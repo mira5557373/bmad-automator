@@ -277,6 +277,27 @@ class LoadGoldenRejectionTests(unittest.TestCase):
         # JSONDecodeError must be chained as __cause__ for diagnostics.
         self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
 
+    def test_non_integer_seq_raises_golden_trace_error(self) -> None:
+        # REQ-08 contract: all malformed input must surface as GoldenTraceError,
+        # not as TypeError leaking from int(None) or ValueError from int("abc").
+        path = self._write('[{"seq":null,"channel":"event","kind":"x","payload":{}}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("seq", str(ctx.exception))
+
+    def test_string_seq_raises_golden_trace_error(self) -> None:
+        path = self._write('[{"seq":"zero","channel":"event","kind":"x","payload":{}}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("seq", str(ctx.exception))
+
+    def test_non_string_kind_raises_golden_trace_error(self) -> None:
+        # Silently coercing kind=123 to "123" would mask malformed fixtures.
+        path = self._write('[{"seq":0,"channel":"event","kind":123,"payload":{}}]')
+        with self.assertRaises(GoldenTraceError) as ctx:
+            load_golden(path)
+        self.assertIn("kind", str(ctx.exception))
+
 
 class CompareTracesEqualTests(unittest.TestCase):
     def test_identical_lists_yield_ok_true(self) -> None:

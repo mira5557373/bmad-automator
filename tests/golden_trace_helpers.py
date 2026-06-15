@@ -141,11 +141,25 @@ def load_golden(path: Path) -> list[TraceEntry]:
                 f"{path}: entry #{idx} payload must be an object, "
                 f"got {type(payload).__name__}"
             )
+        seq_value = item["seq"]
+        # bool is an int subclass in Python; reject it explicitly so {"seq": true}
+        # doesn't silently become seq=1.
+        if not isinstance(seq_value, int) or isinstance(seq_value, bool):
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} seq must be an integer, "
+                f"got {type(seq_value).__name__}"
+            )
+        kind_value = item["kind"]
+        if not isinstance(kind_value, str):
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} kind must be a string, "
+                f"got {type(kind_value).__name__}"
+            )
         entries.append(
             TraceEntry(
-                seq=int(item["seq"]),
+                seq=seq_value,
                 channel=cast(Channel, channel),
-                kind=str(item["kind"]),
+                kind=kind_value,
                 payload=cast("dict[str, object]", dict(payload)),
             )
         )
