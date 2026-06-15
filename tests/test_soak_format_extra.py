@@ -106,3 +106,118 @@ class ImportAllowlistTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "scripts" / "verify_soak_format.py"
         text = path.read_text(encoding="utf-8")
         self.assertNotIn("story_automator", text)
+
+
+# REQ-12: verifier rejects unresolved four-letter bracketed placeholder tokens.
+# The literal tokens are kept out of CONTRIBUTING.md and the verifier source
+# (which is grep-gated in CI) and live only inside this test module.
+_PLACEHOLDER_TOKEN = "[" + "T" + "O" + "D" + "O" + "]"
+_FIXME_TOKEN = "[" + "F" + "I" + "X" + "M" + "]"
+
+
+class PlaceholderTokenTests(unittest.TestCase):
+    def test_placeholder_in_report_md_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n"
+                f"Body with {_PLACEHOLDER_TOKEN} left in it.\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_placeholder_in_config_json_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                '{"arm":"control","seed":1,"model":"m","concurrency":1,'
+                f'"notes":"{_FIXME_TOKEN}"' + "}",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_markdown_link_is_not_a_placeholder(self) -> None:
+        # Numeric brackets like [1234] are footnote-style references and must
+        # not be flagged; only uppercase four-letter bracketed tokens are.
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: 2026-06-13T01:00:00Z\n"
+                "---\n"
+                "See [link](https://example.com) and [1234] for details.\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 0)
+
+
+class SeedSoakDirExtraTests(unittest.TestCase):
+    """Coverage and NFR pin-down tests for seed_soak_dir; supplements REQ-13."""
+
+    def test_seed_missing_required_arg_returns_two(self) -> None:
+        from scripts.seed_soak_dir import main as seed_main
+
+        self.assertEqual(seed_main([]), 2)
+
+    def test_seed_writes_lf_line_endings(self) -> None:
+        # NFR line-ending portability: report.md bytes must be LF on all OSes.
+        from scripts.seed_soak_dir import main as seed_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            self.assertEqual(
+                seed_main(
+                    ["--date", "2026-06-13", "--arm", "control", "--root", str(root)]
+                ),
+                0,
+            )
+            arm_dir = root / "2026-06-13" / "control"
+            report_bytes = (arm_dir / "report.md").read_bytes()
+            self.assertNotIn(b"\r\n", report_bytes)
+            self.assertIn(b"\n", report_bytes)
+
+    def test_seed_uses_story_automator_helpers_when_importable(self) -> None:
+        # REQ-09: prefer story_automator helpers; only fall back on ImportError.
+        import scripts.seed_soak_dir as seed_module
+        from story_automator.core.common import iso_now as expected_iso_now
+
+        self.assertIs(seed_module.iso_now, expected_iso_now)
+
+
+class ContributingGrepGateTests(unittest.TestCase):
+    """Mirrors the CI grep gate from the M13 quality gates."""
+
+    def test_contributing_md_has_no_placeholder_tokens(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        text = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        self.assertIsNone(
+            stdlib_re.search(r"\[[A-Z]{4}\]", text),
+            "CONTRIBUTING.md contains an unresolved four-letter placeholder token",
+        )

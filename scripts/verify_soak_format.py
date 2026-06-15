@@ -89,7 +89,9 @@ def _validate_report_md(arm_dir: Path) -> list[str]:
             f"{path}: frontmatter 'started_at' does not parse as ISO datetime: {started!r}"
         )
     ended = fm.get("ended_at")
-    if ended is not None and not _parse_iso_datetime(ended):
+    # REQ-10/Self-verification carve-out: ended_at may be the literal sentinel
+    # "pending" while the run is in flight. Any other non-ISO value is rejected.
+    if ended is not None and ended != "pending" and not _parse_iso_datetime(ended):
         findings.append(
             f"{path}: frontmatter 'ended_at' does not parse as ISO datetime: {ended!r}"
         )

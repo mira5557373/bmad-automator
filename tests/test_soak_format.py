@@ -203,8 +203,31 @@ class FrontmatterTests(unittest.TestCase):
             self.assertEqual(main([str(root)]), 1)
 
     def test_unparseable_ended_at_fails(self) -> None:
-        # REQ-05 is literal: ended_at must parse via fromisoformat. No
-        # 'pending' carve-out here — that tension is M2 scope.
+        # 'pending' is an accepted sentinel for ended_at (REQ-10); any other
+        # non-ISO value is rejected.
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "report.md").write_text(
+                "---\n"
+                "arm: control\n"
+                "date: 2026-06-13\n"
+                "run_id: r1\n"
+                "git_sha: abc1234\n"
+                "started_at: 2026-06-13T00:00:00Z\n"
+                "ended_at: not-a-date\n"
+                "---\n",
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_ended_at_pending_sentinel_is_accepted(self) -> None:
+        # REQ-10 carve-out: freshly seeded archives leave ended_at = "pending"
+        # until the operator finalizes the run; verify must accept this.
         from scripts.verify_soak_format import main
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -223,7 +246,7 @@ class FrontmatterTests(unittest.TestCase):
                 encoding="utf-8",
                 newline="",
             )
-            self.assertEqual(main([str(root)]), 1)
+            self.assertEqual(main([str(root)]), 0)
 
 
 class ConfigJsonTests(unittest.TestCase):
@@ -389,61 +412,74 @@ class TelemetryJsonlTests(unittest.TestCase):
             self.assertEqual(main([str(root)]), 1)
 
 
-class PlaceholderTokenTests(unittest.TestCase):
-    def test_placeholder_in_report_md_fails(self) -> None:
-        from scripts.verify_soak_format import main
+class SeedSoakDirTests(unittest.TestCase):
+    # REQ-13(e), REQ-13(f), REQ-09 (idempotence).
+
+    def test_seed_then_verify_passes(self) -> None:
+        from scripts.seed_soak_dir import main as seed_main
+        from scripts.verify_soak_format import main as verify_main
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "soak"
-            root.mkdir()
-            arm_dir = _write_minimal_arm(root)
-            (arm_dir / "report.md").write_text(
+            rc_seed = seed_main(
+                ["--date", "2026-06-13", "--arm", "gate-check", "--root", str(root)]
+            )
+            self.assertEqual(rc_seed, 0)
+            arm_dir = root / "2026-06-13" / "gate-check"
+            self.assertTrue((arm_dir / "telemetry.jsonl").is_file())
+            self.assertTrue((arm_dir / "config.json").is_file())
+            self.assertTrue((arm_dir / "report.md").is_file())
+            self.assertEqual(verify_main([str(root)]), 0)
+
+    def test_seed_is_idempotent(self) -> None:
+        from scripts.seed_soak_dir import main as seed_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            args = ["--date", "2026-06-13", "--arm", "control", "--root", str(root)]
+            self.assertEqual(seed_main(args), 0)
+            arm_dir = root / "2026-06-13" / "control"
+            # Operator-edited content the second seed must not clobber.
+            edited_report = (
                 "---\n"
                 "arm: control\n"
                 "date: 2026-06-13\n"
-                "run_id: r1\n"
-                "git_sha: abc1234\n"
+                "run_id: r-final\n"
+                "git_sha: deadbee\n"
                 "started_at: 2026-06-13T00:00:00Z\n"
                 "ended_at: 2026-06-13T01:00:00Z\n"
                 "---\n"
-                "Body with [TODO] left in it.\n",
-                encoding="utf-8",
-                newline="",
+                "Operator notes.\n"
             )
-            self.assertEqual(main([str(root)]), 1)
-
-    def test_placeholder_in_config_json_fails(self) -> None:
-        from scripts.verify_soak_format import main
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "soak"
-            root.mkdir()
-            arm_dir = _write_minimal_arm(root)
-            (arm_dir / "config.json").write_text(
-                '{"arm":"control","seed":1,"model":"m","concurrency":1,"notes":"[FIXM]"}',
-                encoding="utf-8",
-                newline="",
-            )
-            self.assertEqual(main([str(root)]), 1)
-
-    def test_markdown_link_is_not_a_placeholder(self) -> None:
-        from scripts.verify_soak_format import main
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "soak"
-            root.mkdir()
-            arm_dir = _write_minimal_arm(root)
             (arm_dir / "report.md").write_text(
-                "---\n"
-                "arm: control\n"
-                "date: 2026-06-13\n"
-                "run_id: r1\n"
-                "git_sha: abc1234\n"
-                "started_at: 2026-06-13T00:00:00Z\n"
-                "ended_at: 2026-06-13T01:00:00Z\n"
-                "---\n"
-                "See [link](https://example.com) and [1234] for details.\n",
-                encoding="utf-8",
-                newline="",
+                edited_report, encoding="utf-8", newline=""
             )
-            self.assertEqual(main([str(root)]), 0)
+            edited_telemetry = (
+                '{"event_type":"StoryStarted","ts":"2026-06-13T00:00:00Z"}\n'
+            )
+            (arm_dir / "telemetry.jsonl").write_text(
+                edited_telemetry, encoding="utf-8", newline=""
+            )
+            self.assertEqual(seed_main(args), 0)
+            self.assertEqual(
+                (arm_dir / "report.md").read_text(encoding="utf-8"),
+                edited_report,
+            )
+            self.assertEqual(
+                (arm_dir / "telemetry.jsonl").read_text(encoding="utf-8"),
+                edited_telemetry,
+            )
+
+    def test_seed_rejects_invalid_date(self) -> None:
+        from scripts.seed_soak_dir import main as seed_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = seed_main(["--date", "2026/06/13", "--arm", "control", "--root", tmp])
+            self.assertEqual(rc, 2)
+
+    def test_seed_rejects_invalid_arm_slug(self) -> None:
+        from scripts.seed_soak_dir import main as seed_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = seed_main(["--date", "2026-06-13", "--arm", "BAD ARM!", "--root", tmp])
+            self.assertEqual(rc, 2)
