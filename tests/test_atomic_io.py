@@ -815,3 +815,37 @@ class ImportAllowlistTests(unittest.TestCase):
         # so a missing psutil at install time would surface as ImportError
         # at import. Pin the dependency presence here for clarity.
         import psutil  # noqa: F401
+
+
+class IsStaleTrueBranchTests(unittest.TestCase):
+    """REQ-09 / REQ-13: dead PID + heartbeat older than 600s ⇒ True."""
+
+    def _identity(self, *, pid: int, heartbeat_iso: str):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        return RunLockIdentity(
+            pid=pid,
+            start_time=0.0,
+            hostname="h",
+            heartbeat_iso=heartbeat_iso,
+            run_id="r",
+        )
+
+    def test_dead_pid_and_aged_heartbeat_is_stale(self) -> None:
+        from story_automator.core.atomic_io import is_stale
+
+        # Use the Unix epoch as the heartbeat so all arithmetic below is
+        # exact and inspectable. parse_iso_seconds("1970-01-01T00:00:00Z")
+        # is 0.0 (pinned by ParseIsoSecondsTests.test_epoch_zero), so
+        # `age == now`.
+        identity = self._identity(
+            pid=99999,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+        )
+        # now is 3600s past the heartbeat — well beyond the 600s window.
+        now = 3600.0
+        with patch(
+            "story_automator.core.atomic_io.psutil.pid_exists",
+            return_value=False,
+        ):
+            self.assertTrue(is_stale(identity, now=now))

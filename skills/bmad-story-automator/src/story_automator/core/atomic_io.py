@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from filelock import FileLock, Timeout
+import psutil
 
 from story_automator.core.common import compact_json, iso_now
 
@@ -19,6 +20,7 @@ __all__ = [
     "RunLockHandle",
     "RunLockIdentity",
     "acquire_run_lock",
+    "is_stale",
     "parse_iso_seconds",
     "write_atomic_text",
 ]
@@ -300,3 +302,30 @@ def write_atomic_text(path: Path, data: str, *, encoding: str = "utf-8") -> None
     """
     with _lock_for_path(path):
         _write_once(path, data, encoding)
+
+
+_STALE_HEARTBEAT_WINDOW_S: float = 600.0
+
+
+def is_stale(
+    identity: RunLockIdentity,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Return ``True`` only when ``identity`` is reclaimable.
+
+    REQ-09: stale iff the heartbeat is older than 600 seconds AND the
+    recorded PID is no longer alive. Either condition alone keeps the lock
+    live — a slow but still-running process must not be reclaimed, and a
+    crashed process whose lock is less than 600 seconds old is presumed to
+    be a fresh acquisition that hasn't ticked yet.
+
+    The check is intentionally ordered cheap-first (timestamp arithmetic
+    before the syscall in ``psutil.pid_exists``).
+    """
+    age = (now if now is not None else time.time()) - parse_iso_seconds(
+        identity.heartbeat_iso
+    )
+    if age <= _STALE_HEARTBEAT_WINDOW_S:
+        return False
+    return not psutil.pid_exists(identity.pid)
