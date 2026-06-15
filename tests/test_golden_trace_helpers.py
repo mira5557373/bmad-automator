@@ -655,5 +655,42 @@ class EmitHookTests(unittest.TestCase):
         self.assertEqual(len(rec.entries), 1)
 
 
+class EventTimestampRedactionTests(unittest.TestCase):
+    def test_timestamp_replaced_with_ts_sentinel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            emitter = TelemetryEmitter(Path(tmp) / "events.jsonl")
+            event = StoryStarted(
+                timestamp="2026-06-15T12:34:56Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                emitter.emit(event)
+        self.assertEqual(rec.entries[0].payload["timestamp"], "<ts>")
+
+    def test_emit_pass_through_keeps_original_timestamp_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(log)
+            event = StoryStarted(
+                timestamp="2026-06-15T12:34:56Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            with GoldenTraceRecorder(repo_root=Path(tmp)):
+                emitter.emit(event)
+            disk = log.read_text(encoding="utf-8")
+        self.assertIn("2026-06-15T12:34:56Z", disk)
+        self.assertNotIn("<ts>", disk)
+
+
 if __name__ == "__main__":
     unittest.main()

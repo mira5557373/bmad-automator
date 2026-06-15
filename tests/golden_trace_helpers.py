@@ -21,6 +21,7 @@ MismatchField = Literal["channel", "kind", "payload", "length"]
 
 _VALID_CHANNELS: frozenset[str] = frozenset({"event", "state", "claude_p"})
 _REQUIRED_KEYS: tuple[str, ...] = ("seq", "channel", "kind", "payload")
+_TS_SENTINEL = "<ts>"
 
 __all__ = [
     "Channel",
@@ -333,6 +334,8 @@ class GoldenTraceRecorder:
         def wrapper(emitter_self: TelemetryEmitter, event: object) -> None:
             result = orig(emitter_self, event)
             payload: dict[str, object] = dict(event.to_dict())  # type: ignore[attr-defined]
+            if "timestamp" in payload:
+                payload["timestamp"] = _TS_SENTINEL
             recorder._record("event", type(event).__name__, payload)
             return result
 
