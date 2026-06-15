@@ -224,3 +224,83 @@ class FrontmatterTests(unittest.TestCase):
                 newline="",
             )
             self.assertEqual(main([str(root)]), 1)
+
+
+class ConfigJsonTests(unittest.TestCase):
+    def test_non_object_root_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text("[]", encoding="utf-8", newline="")
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_missing_key_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                '{"arm":"control","seed":1,"model":"m","concurrency":1}',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_wrong_type_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                '{"arm":"control","seed":"one","model":"m","concurrency":1,"notes":"n"}',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_bool_does_not_satisfy_int(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                '{"arm":"control","seed":true,"model":"m","concurrency":1,"notes":"n"}',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_arm_mismatch_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)  # arm dir named "control"
+            (arm_dir / "config.json").write_text(
+                '{"arm":"treatment","seed":1,"model":"m","concurrency":1,"notes":"n"}',
+                encoding="utf-8",
+                newline="",
+            )
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_invalid_json_fails(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            arm_dir = _write_minimal_arm(root)
+            (arm_dir / "config.json").write_text(
+                "{not json", encoding="utf-8", newline=""
+            )
+            self.assertEqual(main([str(root)]), 1)

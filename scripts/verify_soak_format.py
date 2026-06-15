@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-import json  # noqa: F401  # used by later tasks
+import json
 import re
 import sys
 from datetime import date, datetime
@@ -97,6 +97,49 @@ def _validate_arm_slug(name: str) -> str | None:
     return None
 
 
+CONFIG_SCHEMA: tuple[tuple[str, type], ...] = (
+    ("arm", str),
+    ("seed", int),
+    ("model", str),
+    ("concurrency", int),
+    ("notes", str),
+)
+
+
+def _validate_config_json(arm_dir: Path) -> list[str]:
+    path = arm_dir / "config.json"
+    findings: list[str] = []
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"{path}: cannot read: {exc}"]
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return [f"{path}: invalid JSON: {exc.msg}"]
+    if not isinstance(data, dict):
+        return [f"{path}: top-level value must be a JSON object"]
+    for key, expected_type in CONFIG_SCHEMA:
+        if key not in data:
+            findings.append(f"{path}: missing required key {key!r}")
+            continue
+        value = data[key]
+        # Reject bool for int (bool is subclass of int in Python).
+        if expected_type is int and isinstance(value, bool):
+            findings.append(f"{path}: key {key!r} must be int, got bool")
+        elif not isinstance(value, expected_type):
+            findings.append(
+                f"{path}: key {key!r} must be {expected_type.__name__}, "
+                f"got {type(value).__name__}"
+            )
+    arm_value = data.get("arm")
+    if isinstance(arm_value, str) and arm_value != arm_dir.name:
+        findings.append(
+            f"{path}: config 'arm' = {arm_value!r} does not match directory name {arm_dir.name!r}"
+        )
+    return findings
+
+
 def _validate_arm_dir(arm_dir: Path) -> list[str]:
     findings: list[str] = []
     for name in REQUIRED_FILES:
@@ -104,6 +147,8 @@ def _validate_arm_dir(arm_dir: Path) -> list[str]:
             findings.append(f"{arm_dir / name}: required file missing")
     if (arm_dir / "report.md").is_file():
         findings.extend(_validate_report_md(arm_dir))
+    if (arm_dir / "config.json").is_file():
+        findings.extend(_validate_config_json(arm_dir))
     return findings
 
 
