@@ -694,6 +694,62 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
+class SpecReq01PreludeTests(unittest.TestCase):
+    """REQ-01: both new files must declare
+    ``from __future__ import annotations``. The existing project
+    convention (see core/telemetry_events.py) places the module
+    docstring before the future import; this test tolerates a
+    docstring prelude but rejects any executable code between the
+    docstring and the future import."""
+
+    def _has_future_import_after_optional_docstring(self, src: str) -> bool:
+        import ast
+
+        tree = ast.parse(src)
+        body = tree.body
+        first = body[0] if body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            body = body[1:]
+        if not body:
+            return False
+        head = body[0]
+        if not isinstance(head, ast.ImportFrom):
+            return False
+        return head.module == "__future__" and any(
+            alias.name == "annotations" for alias in head.names
+        )
+
+    def test_source_file_has_future_annotations(self) -> None:
+        src_path = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "budget_ceilings.py"
+        )
+        self.assertTrue(
+            self._has_future_import_after_optional_docstring(
+                src_path.read_text(encoding="utf-8")
+            ),
+            f"REQ-01 violated for {src_path}",
+        )
+
+    def test_test_file_has_future_annotations(self) -> None:
+        test_path = Path(__file__).resolve()
+        self.assertTrue(
+            self._has_future_import_after_optional_docstring(
+                test_path.read_text(encoding="utf-8")
+            ),
+            f"REQ-01 violated for {test_path}",
+        )
+
+
 class LedgerFixturePatternTests(unittest.TestCase):
     """REQ-15: fixtures must be built by serializing M01 event instances
     through ``compact_json``. This sub-milestone has no evaluator yet,

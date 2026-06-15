@@ -1,9 +1,20 @@
 """Budget ceiling data types and config reader (M03 sub-milestone M1).
 
-This module ships the data substrate for M03 budget enforcement: the
-``CeilingDecision`` enum, the ``BudgetCeiling`` dataclass, and the
-tolerant ``parse_ceilings_config`` reader. The evaluator, bypass
-helper, and BMAD step wiring are scheduled for M03-M2 / M03-M3.
+Ships the data substrate of M03 budget enforcement: the
+``CeilingDecision`` enum (REQ-02), the ``BudgetCeiling`` dataclass
+(REQ-03), and the tolerant ``parse_ceilings_config`` reader
+(REQ-04 / REQ-05). The reader is intentionally forgiving — every
+malformed shape (missing file, missing keys, malformed entry) returns
+an empty list or skips the entry while appending a structured warning
+to the module-private ``_PARSE_WARNINGS`` list (cleared on every
+call). The list is not in ``__all__`` and is not part of the stable
+public surface — it exists so test code and downstream callers can
+inspect why ceilings were dropped.
+
+Out of scope for this sub-milestone: ``evaluate_ceilings``,
+``bypass_allowed``, the wire-up to ``sw cli ceiling-check``, the
+ten-line BMAD step insertions, and the ledger-streaming summation.
+Those land in M03-M2 (evaluator) and M03-M3 (BMAD wiring).
 """
 
 from __future__ import annotations
