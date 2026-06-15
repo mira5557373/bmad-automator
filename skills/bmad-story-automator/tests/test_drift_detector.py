@@ -398,6 +398,14 @@ _FORBIDDEN_WRITE_PATTERNS = (
     "Path.mkdir",
     "write_atomic",
 )
+_FORBIDDEN_TYPING_TOKENS = (
+    "typing.Optional",
+    "typing.Union",
+    "from typing import Optional",
+    "from typing import Union",
+    "Optional[",
+    "Union[",
+)
 
 
 def _module_source() -> str:
@@ -461,6 +469,11 @@ class ModuleSurfaceTests(unittest.TestCase):
         source = _module_source()
         for token in _FORBIDDEN_TOKENS:
             self.assertNotIn(token, source, f"forbidden import token: {token}")
+
+    def test_no_typing_optional_or_union(self) -> None:
+        source = _module_source()
+        for token in _FORBIDDEN_TYPING_TOKENS:
+            self.assertNotIn(token, source, f"NFR forbids PEP 484 union form: {token}")
 
     def test_no_filesystem_mutators(self) -> None:
         source = _module_source()
