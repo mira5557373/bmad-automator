@@ -233,3 +233,149 @@ class PromptRenderingTests(unittest.TestCase):
 
         out = _render_prompt(spec_text="s", diff_text="d")
         self.assertRegex(out, r"no markdown fences")
+
+
+class EnvelopeParserHappyPathTests(unittest.TestCase):
+    """REQ-09: parse the model's JSON envelope into ReqVerdict list."""
+
+    def test_parses_single_verdict(self) -> None:
+        from story_automator.core.spec_compliance import _parse_envelope
+
+        payload = (
+            '{"verdicts": ['
+            '{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": "seen at core/a.py:1", "confidence": 0.9}'
+            '], "model_invocation_ms": 4231}'
+        )
+        verdicts, ms = _parse_envelope(payload)
+        self.assertEqual(len(verdicts), 1)
+        self.assertEqual(verdicts[0].req_id, "REQ-01")
+        self.assertEqual(verdicts[0].status, "implemented")
+        self.assertEqual(verdicts[0].evidence, "seen at core/a.py:1")
+        self.assertAlmostEqual(verdicts[0].confidence, 0.9)
+        self.assertEqual(ms, 4231)
+
+    def test_coerces_integer_confidence_to_float(self) -> None:
+        from story_automator.core.spec_compliance import _parse_envelope
+
+        payload = (
+            '{"verdicts": ['
+            '{"req_id": "REQ-02", "status": "partial", '
+            '"evidence": "", "confidence": 1}'
+            '], "model_invocation_ms": 0}'
+        )
+        verdicts, ms = _parse_envelope(payload)
+        self.assertIsInstance(verdicts[0].confidence, float)
+        self.assertEqual(verdicts[0].confidence, 1.0)
+        self.assertEqual(ms, 0)
+
+
+class EnvelopeParserErrorTests(unittest.TestCase):
+    """REQ-10: parse failure raises ComplianceError, never downgrades."""
+
+    def test_malformed_json_raises_compliance_error(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "not valid JSON"):
+            _parse_envelope("{not json")
+
+    def test_non_object_top_level_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "top-level JSON object"):
+            _parse_envelope("[]")
+
+    def test_missing_verdicts_key_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "'verdicts'"):
+            _parse_envelope('{"model_invocation_ms": 0}')
+
+    def test_missing_model_invocation_ms_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "model_invocation_ms"):
+            _parse_envelope('{"verdicts": []}')
+
+    def test_non_list_verdicts_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "'verdicts' must be a"):
+            _parse_envelope('{"verdicts": {}, "model_invocation_ms": 0}')
+
+    def test_missing_verdict_field_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "implemented", '
+            '"evidence": "x"}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, "'confidence'"):
+            _parse_envelope(payload)
+
+    def test_unknown_status_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        payload = (
+            '{"verdicts": [{"req_id": "REQ-01", "status": "maybe", '
+            '"evidence": "", "confidence": 0.5}], "model_invocation_ms": 0}'
+        )
+        with self.assertRaisesRegex(ComplianceError, "status must be one of"):
+            _parse_envelope(payload)
+
+    def test_negative_model_invocation_ms_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "non-negative"):
+            _parse_envelope('{"verdicts": [], "model_invocation_ms": -1}')
+
+    def test_non_integer_model_invocation_ms_raises(self) -> None:
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        with self.assertRaisesRegex(ComplianceError, "model_invocation_ms"):
+            _parse_envelope('{"verdicts": [], "model_invocation_ms": "fast"}')
+
+    def test_parser_never_silently_downgrades_to_missing(self) -> None:
+        # REQ-10 explicit guarantee: a malformed envelope must NOT be
+        # converted into a "missing" verdict. Assert by checking that
+        # the parser raises rather than returning a list.
+        from story_automator.core.spec_compliance import (
+            ComplianceError,
+            _parse_envelope,
+        )
+
+        try:
+            _parse_envelope("not json at all")
+        except ComplianceError:
+            return
+        self.fail(
+            "parser silently produced a verdict instead of raising "
+            "ComplianceError on unparseable input — REQ-10 forbids that"
+        )

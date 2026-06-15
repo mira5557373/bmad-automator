@@ -18,6 +18,7 @@ overlay that pins `LANG=C.UTF-8` for deterministic locale.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -131,3 +132,84 @@ def _render_prompt(*, spec_text: str, diff_text: str) -> str:
         f"## Spec\n\n```text\n{safe_spec}\n```\n\n"
         f"## Diff\n\n```text\n{diff_text}\n```\n"
     )
+
+
+_ALLOWED_STATUSES: frozenset[str] = frozenset(
+    {"implemented", "missing", "partial"},
+)
+_REQUIRED_VERDICT_KEYS: tuple[str, ...] = (
+    "req_id",
+    "status",
+    "evidence",
+    "confidence",
+)
+
+
+def _parse_envelope(payload: str) -> tuple[list[ReqVerdict], int]:
+    """Parse the subprocess stdout into `(verdicts, model_invocation_ms)`.
+
+    Preconditions: `payload` is the raw stdout from the subprocess.
+    Postconditions: returns a tuple of `(list[ReqVerdict], int)` whose
+        verdicts preserve the input order and whose integer is the
+        non-negative `model_invocation_ms` field.
+    Raises: `ComplianceError` (REQ-10) when the payload is not valid
+        JSON, when the top-level value is not an object, when a required
+        key is missing or wrongly typed, when `status` is outside the
+        allowed set, or when `model_invocation_ms` is negative or
+        non-integer. The function NEVER silently substitutes a
+        "missing" verdict on a parse failure.
+    """
+    try:
+        data = json.loads(payload)
+    except ValueError as exc:
+        raise ComplianceError(f"subprocess output is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ComplianceError("subprocess output must be a top-level JSON object")
+    if "verdicts" not in data:
+        raise ComplianceError("envelope missing required key 'verdicts'")
+    if "model_invocation_ms" not in data:
+        raise ComplianceError("envelope missing required key 'model_invocation_ms'")
+    raw_verdicts = data["verdicts"]
+    if not isinstance(raw_verdicts, list):
+        raise ComplianceError("'verdicts' must be a JSON array")
+    ms = data["model_invocation_ms"]
+    # `bool` is a subclass of `int`; reject explicitly so `true` does
+    # not silently parse as `1`.
+    if isinstance(ms, bool) or not isinstance(ms, int):
+        raise ComplianceError(
+            f"model_invocation_ms must be an integer, got {type(ms).__name__}"
+        )
+    if ms < 0:
+        raise ComplianceError(f"model_invocation_ms must be non-negative, got {ms}")
+
+    verdicts: list[ReqVerdict] = []
+    for index, raw in enumerate(raw_verdicts):
+        if not isinstance(raw, dict):
+            raise ComplianceError(f"verdicts[{index}] must be a JSON object")
+        for key in _REQUIRED_VERDICT_KEYS:
+            if key not in raw:
+                raise ComplianceError(f"verdicts[{index}] missing required key {key!r}")
+        status = raw["status"]
+        if status not in _ALLOWED_STATUSES:
+            raise ComplianceError(
+                f"verdicts[{index}].status must be one of "
+                f"{sorted(_ALLOWED_STATUSES)!r}, got {status!r}"
+            )
+        confidence_raw = raw["confidence"]
+        if isinstance(confidence_raw, bool) or not isinstance(
+            confidence_raw,
+            (int, float),
+        ):
+            raise ComplianceError(
+                f"verdicts[{index}].confidence must be a number, got "
+                f"{type(confidence_raw).__name__}"
+            )
+        verdicts.append(
+            ReqVerdict(
+                req_id=str(raw["req_id"]),
+                status=status,
+                evidence=str(raw["evidence"]),
+                confidence=float(confidence_raw),
+            )
+        )
+    return verdicts, ms
