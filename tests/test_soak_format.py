@@ -31,3 +31,39 @@ class VerifyExitCodesTests(unittest.TestCase):
         from scripts.verify_soak_format import main
 
         self.assertEqual(main(["/definitely/does/not/exist/soak-root"]), 1)
+
+
+class DateAndArmValidationTests(unittest.TestCase):
+    def _make_root(self, tmp: str) -> Path:
+        root = Path(tmp) / "soak"
+        root.mkdir()
+        return root
+
+    def test_invalid_date_directory_is_reported(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp)
+            (root / "not-a-date").mkdir()
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_invalid_arm_slug_is_reported(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp)
+            arm = root / "2026-06-13" / "BAD ARM!"
+            arm.mkdir(parents=True)
+            # Even with required files present, the slug is invalid.
+            (arm / "telemetry.jsonl").write_text("", encoding="utf-8")
+            (arm / "report.md").write_text("", encoding="utf-8")
+            (arm / "config.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(main([str(root)]), 1)
+
+    def test_empty_date_dir_is_accepted(self) -> None:
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp)
+            (root / "2026-06-13").mkdir()
+            self.assertEqual(main([str(root)]), 0)
