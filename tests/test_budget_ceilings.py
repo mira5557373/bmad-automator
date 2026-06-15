@@ -35,5 +35,43 @@ class CeilingDecisionTests(unittest.TestCase):
         self.assertTrue(issubclass(CeilingDecision, enum.Enum))
 
 
+class BudgetCeilingShapeTests(unittest.TestCase):
+    def test_is_kw_only_dataclass(self) -> None:
+        import dataclasses
+
+        from story_automator.core.budget_ceilings import BudgetCeiling
+
+        self.assertTrue(dataclasses.is_dataclass(BudgetCeiling))
+        with self.assertRaises(TypeError):
+            BudgetCeiling("c1", "per_run", 10.0, 0.8, ("init",))  # type: ignore[misc]
+
+    def test_field_names_exact(self) -> None:
+        import dataclasses
+
+        from story_automator.core.budget_ceilings import BudgetCeiling
+
+        names = [f.name for f in dataclasses.fields(BudgetCeiling)]
+        self.assertEqual(
+            names,
+            ["name", "window", "limit_usd", "warn_at", "gate_names"],
+        )
+
+    def test_can_construct_with_keywords(self) -> None:
+        from story_automator.core.budget_ceilings import BudgetCeiling
+
+        ceiling = BudgetCeiling(
+            name="per_run_cap",
+            window="per_run",
+            limit_usd=25.0,
+            warn_at=0.8,
+            gate_names=("init", "story_start"),
+        )
+        self.assertEqual(ceiling.name, "per_run_cap")
+        self.assertEqual(ceiling.window, "per_run")
+        self.assertEqual(ceiling.limit_usd, 25.0)
+        self.assertEqual(ceiling.warn_at, 0.8)
+        self.assertEqual(ceiling.gate_names, ("init", "story_start"))
+
+
 if __name__ == "__main__":
     unittest.main()

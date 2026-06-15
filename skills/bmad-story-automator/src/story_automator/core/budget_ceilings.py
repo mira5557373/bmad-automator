@@ -9,8 +9,9 @@ helper, and BMAD step wiring are scheduled for M03-M2 / M03-M3.
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 
-__all__ = ["CeilingDecision"]
+__all__ = ["BudgetCeiling", "CeilingDecision"]
 
 
 class CeilingDecision(enum.Enum):
@@ -24,3 +25,23 @@ class CeilingDecision(enum.Enum):
     ALLOW = "ALLOW"
     WARN = "WARN"
     BLOCK = "BLOCK"
+
+
+@dataclass(kw_only=True)
+class BudgetCeiling:
+    """Single configured spending ceiling read from ``workflow.json``.
+
+    ``window`` is one of ``"per_run"``, ``"24h"``, ``"7d"``, ``"30d"``
+    (REQ-03). ``warn_at`` is a fraction in ``(0.0, 1.0]`` multiplied
+    against ``limit_usd`` to produce the WARN threshold. ``gate_names``
+    enumerates which preflight gate names this ceiling applies to:
+    elements are drawn from ``{"init", "story_start", "retry_start"}``
+    per REQ-07, but this dataclass does not enforce that set — the
+    evaluator (M03-M2) is the only consumer that filters on it.
+    """
+
+    name: str
+    window: str
+    limit_usd: float
+    warn_at: float
+    gate_names: tuple[str, ...]
