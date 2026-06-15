@@ -502,3 +502,79 @@ class RunLockIdentityTests(unittest.TestCase):
         ) as spy:
             self.assertEqual(identity.to_json(), '{"sentinel":true}')
             spy.assert_called_once()
+
+
+class AcquireRunLockHappyPathTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_acquire_writes_payload_and_returns_handle(self) -> None:
+        from story_automator.core.atomic_io import (
+            RunLockHandle,
+            RunLockIdentity,
+            acquire_run_lock,
+        )
+
+        lock_path = self.dir / "run.lock-payload"
+        handle = acquire_run_lock(lock_path, run_id="run-xyz")
+        try:
+            self.assertIsInstance(handle, RunLockHandle)
+            self.assertTrue(lock_path.exists())
+            parsed = json.loads(lock_path.read_text(encoding="utf-8"))
+            self.assertEqual(parsed["run_id"], "run-xyz")
+            self.assertEqual(parsed["pid"], os.getpid())
+            self.assertIsInstance(parsed["start_time"], float)
+            self.assertIsInstance(parsed["hostname"], str)
+            self.assertRegex(
+                parsed["heartbeat_iso"],
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+            )
+            self.assertIsInstance(handle.identity, RunLockIdentity)
+            self.assertEqual(handle.identity.run_id, "run-xyz")
+        finally:
+            handle.release()
+
+    def test_handle_is_a_context_manager_that_cleans_up(self) -> None:
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        lock_path = self.dir / "run.lock-payload"
+        with acquire_run_lock(lock_path, run_id="run-ctx") as handle:
+            self.assertTrue(lock_path.exists())
+            inside = handle.identity.run_id
+        self.assertEqual(inside, "run-ctx")
+        self.assertFalse(lock_path.exists())
+
+    def test_lock_sidecar_path_is_payload_path_plus_dot_lock(self) -> None:
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        lock_path = self.dir / "subdir" / "run.payload"
+        lock_path.parent.mkdir(parents=True)
+
+        captured_args: list[str] = []
+
+        class FakeFileLock:
+            def __init__(self, p: str, *args: object, **kwargs: object) -> None:
+                captured_args.append(p)
+                self._p = p
+
+            def acquire(self, timeout: float = -1) -> None:
+                return None
+
+            def release(self, force: bool = False) -> None:
+                return None
+
+        with patch("story_automator.core.atomic_io.FileLock", FakeFileLock):
+            handle = acquire_run_lock(lock_path, run_id="run-path")
+            handle.release()
+
+        self.assertEqual(captured_args, [str(lock_path) + ".lock"])
+
+    def test_release_is_idempotent(self) -> None:
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        lock_path = self.dir / "run.lock-payload"
+        handle = acquire_run_lock(lock_path, run_id="run-idem")
+        handle.release()
+        handle.release()

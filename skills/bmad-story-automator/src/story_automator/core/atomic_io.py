@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from dataclasses import dataclass
+from filelock import FileLock, Timeout
 
-from story_automator.core.common import compact_json
+from story_automator.core.common import compact_json, iso_now
 
 __all__ = [
     "AtomicWriteRetryExhausted",
     "RunLockBusy",
+    "RunLockHandle",
     "RunLockIdentity",
+    "acquire_run_lock",
     "write_atomic_text",
 ]
 
@@ -103,6 +107,97 @@ class RunLockIdentity:
                 "run_id": self.run_id,
             }
         )
+
+
+class RunLockHandle:
+    """Context-manager handle returned by ``acquire_run_lock``.
+
+    Holds the live ``filelock.FileLock``, the resolved payload ``Path``,
+    and the ``RunLockIdentity`` written to disk. ``release`` (also invoked
+    from ``__exit__``) is idempotent: it deletes the payload file
+    best-effort and releases the FileLock exactly once.
+    """
+
+    def __init__(
+        self,
+        *,
+        file_lock: FileLock,
+        payload_path: Path,
+        identity: RunLockIdentity,
+    ) -> None:
+        self._file_lock = file_lock
+        self._payload_path = payload_path
+        self._released = False
+        self.identity = identity
+
+    def __enter__(self) -> RunLockHandle:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.release()
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        _silent_unlink(self._payload_path)
+        try:
+            self._file_lock.release()
+        except Exception:  # pragma: no cover - filelock defensive guard
+            pass
+
+
+def acquire_run_lock(
+    lock_path: Path,
+    *,
+    run_id: str,
+    timeout: float = 0.0,
+) -> RunLockHandle:
+    """Acquire a cross-process run lock at ``lock_path``.
+
+    REQ-06: wraps ``filelock.FileLock(str(lock_path) + ".lock")``,
+    acquires with the given ``timeout`` (seconds; 0.0 means no waiting),
+    then writes a ``RunLockIdentity`` JSON payload to ``lock_path``
+    via ``write_atomic_text``. Returns a ``RunLockHandle`` whose
+    ``__exit__`` / ``release`` deletes the payload and releases the lock.
+
+    Raises ``RunLockBusy`` if the underlying filelock raises ``Timeout``.
+
+    The caller is responsible for ensuring ``lock_path.parent`` exists;
+    this function does not auto-create directories so that a typo'd path
+    fails fast rather than scattering empty lock files.
+    """
+
+    sidecar = str(lock_path) + ".lock"
+    file_lock = FileLock(sidecar)
+    try:
+        file_lock.acquire(timeout=timeout)
+    except Timeout as err:
+        raise RunLockBusy(
+            f"run lock at {lock_path} is busy (timeout={timeout}s)"
+        ) from err
+
+    try:
+        identity = RunLockIdentity(
+            pid=os.getpid(),
+            start_time=time.time(),
+            hostname=socket.gethostname(),
+            heartbeat_iso=iso_now(),
+            run_id=run_id,
+        )
+        write_atomic_text(Path(lock_path), identity.to_json())
+    except BaseException:
+        try:  # pragma: no cover - defensive guard against double-release
+            file_lock.release()
+        except Exception:
+            pass
+        raise
+
+    return RunLockHandle(
+        file_lock=file_lock,
+        payload_path=Path(lock_path),
+        identity=identity,
+    )
 
 
 def _replace_with_retry(tmp_path: Path, target: Path) -> None:
