@@ -1012,5 +1012,46 @@ class BypassAllowedTests(unittest.TestCase):
                 self.assertFalse(self._run(value, True))
 
 
+class EvaluateCeilingsDeterminismTests(unittest.TestCase):
+    def _event(self, cost):
+        return StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def test_one_hundred_calls_byte_identical(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        ceilings = [
+            BudgetCeiling(
+                name=f"c{i}",
+                window="per_run",
+                limit_usd=10.0,
+                warn_at=0.5,
+                gate_names=("init",),
+            )
+            for i in range(4)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(6.0), self._event(2.5)])
+            outputs = {
+                evaluate_ceilings(
+                    path, "init", "2026-06-15T00:00:00Z", ceilings=ceilings
+                )
+                for _ in range(100)
+            }
+        self.assertEqual(len(outputs), 1)
+        verdict, reason = outputs.pop()
+        self.assertEqual(verdict, CeilingDecision.WARN)
+        self.assertTrue(reason.startswith("c0:"))
+
+
 if __name__ == "__main__":
     unittest.main()
