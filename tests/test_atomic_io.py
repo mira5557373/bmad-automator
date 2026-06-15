@@ -763,3 +763,55 @@ class ParseIsoSecondsTests(unittest.TestCase):
         result = parse_iso_seconds(sample)
         self.assertIsInstance(result, float)
         self.assertGreater(result, 0.0)
+
+
+class ImportAllowlistTests(unittest.TestCase):
+    """REQ-12: only stdlib plus filelock and psutil. The audit is a grep in
+    the spec's quality gates; this test is the CI-side counterpart so the
+    constraint cannot be silently broken between releases."""
+
+    def test_only_allowlisted_third_party_imports(self) -> None:
+        import re
+        from pathlib import Path as _Path
+
+        module_path = (
+            _Path(__file__).resolve().parent.parent
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "atomic_io.py"
+        )
+        source = module_path.read_text(encoding="utf-8")
+
+        # Stdlib roots we expect to see in this module today. Anything outside
+        # this set that is NOT filelock or psutil is a guardrail violation.
+        stdlib_roots = {
+            "__future__",
+            "dataclasses",
+            "datetime",
+            "os",
+            "socket",
+            "sys",
+            "threading",
+            "time",
+            "pathlib",
+        }
+        allowed_third_party = {"filelock", "psutil"}
+        local_roots = {"story_automator"}
+
+        import_line = re.compile(r"^(?:from|import)\s+([\w\.]+)", re.MULTILINE)
+        for match in import_line.finditer(source):
+            root = match.group(1).split(".", 1)[0]
+            self.assertIn(
+                root,
+                stdlib_roots | allowed_third_party | local_roots,
+                f"unexpected import root: {root!r} — REQ-12 allowlist violated",
+            )
+
+    def test_psutil_is_importable(self) -> None:
+        # The module imports psutil at top level (REQ-09 uses pid_exists),
+        # so a missing psutil at install time would surface as ImportError
+        # at import. Pin the dependency presence here for clarity.
+        import psutil  # noqa: F401
