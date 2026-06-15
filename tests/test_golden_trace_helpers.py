@@ -840,5 +840,40 @@ class ClaudePHookTests(unittest.TestCase):
         self.assertEqual(len(rec.entries), 1)
 
 
+class ClaudePArgvNormalizationTests(unittest.TestCase):
+    def test_absolute_repo_path_normalized_to_relative_posix(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "stories").mkdir()
+            story = root / "stories" / "s1.md"
+            story.write_text("body", encoding="utf-8")
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                gh.notify_claude_p(["claude", "-p", str(story)])
+        self.assertEqual(rec.entries[0].payload["argv"], ["claude", "-p", "stories/s1.md"])
+
+    def test_four_letter_placeholder_token_preserved(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                gh.notify_claude_p(["claude", "-p", "Run EPIC STRY now"])
+        self.assertEqual(
+            rec.entries[0].payload["argv"],
+            ["claude", "-p", "Run EPIC STRY now"],
+        )
+
+    def test_non_path_token_passes_through_unchanged(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                gh.notify_claude_p(["claude", "-p", "--model=opus", "key=value"])
+        self.assertEqual(
+            rec.entries[0].payload["argv"],
+            ["claude", "-p", "--model=opus", "key=value"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

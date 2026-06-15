@@ -307,6 +307,34 @@ def _to_repo_relative_posix(path: Path, *, repo_root: Path) -> str:
     return rel.as_posix()
 
 
+def _normalize_argv(argv: list[str], *, repo_root: Path) -> list[str]:
+    """Normalize absolute paths in ``argv`` to repo-relative POSIX (REQ-05).
+
+    Tokens that don't represent absolute filesystem paths under the repo
+    are returned unchanged. Four-letter placeholder tokens are
+    intentionally not detected here — they're just non-path strings,
+    so the early ``is_absolute`` guard already lets them flow through.
+
+    Known limitation: tokens of the form ``--key=/abs/path`` are not
+    split on ``=`` before path detection — ``is_absolute`` is False
+    for the whole string, so the embedded absolute path stays
+    absolute. Callers (M10c fixture authors) should prefer the
+    ``--key /abs/path`` two-arg form for portable fixtures.
+    """
+    out: list[str] = []
+    for token in argv:
+        try:
+            candidate = Path(token)
+        except (TypeError, ValueError):
+            out.append(token)
+            continue
+        if candidate.is_absolute():
+            out.append(_to_repo_relative_posix(candidate, repo_root=repo_root))
+        else:
+            out.append(token)
+    return out
+
+
 def _find_repo_root(start: Path | None = None) -> Path:
     """Walk up from ``start`` (or CWD) until we find a project marker.
 
@@ -448,8 +476,8 @@ class GoldenTraceRecorder:
         recorder = self
 
         def hook(argv: list[str]) -> None:
-            # Argv path normalization lands in Task 11.
-            recorder._record("claude_p", "invoke", {"argv": list(argv)})
+            normalized = _normalize_argv(list(argv), repo_root=recorder._repo_root)
+            recorder._record("claude_p", "invoke", {"argv": normalized})
 
         _CLAUDE_P_HOOK = hook
 
