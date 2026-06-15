@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -272,11 +273,28 @@ class PerPathLockSerializationTests(unittest.TestCase):
                 ta.join()
                 tb.join()
                 self.fail("reader observed FileNotFoundError mid-write")
+            except PermissionError:
+                # Windows-only: during os.replace, the target is briefly
+                # inaccessible to concurrent readers (ERROR_SHARING_VIOLATION).
+                # The writer-side per-path lock cannot prevent this OS-level
+                # transient — it serializes writers, not OS replace windows.
+                # Atomicity is still preserved (no absence, no partial
+                # content); we just retry on the next iteration. On POSIX
+                # rename(2) is genuinely atomic to readers, so a
+                # PermissionError there indicates a real bug — re-raise.
+                if sys.platform != "win32":
+                    raise
 
         ta.join()
         tb.join()
 
         self.assertEqual(errors, [])
+        # Guard against vacuous pass: if every read hit PermissionError we'd
+        # silently report green. At least one successful read is required to
+        # exercise the atomicity assertion below.
+        self.assertGreater(
+            len(observed), 0, "no reads succeeded — test would be vacuous"
+        )
         self.assertTrue(
             observed.issubset(valid),
             f"observed non-atomic content: {observed - valid!r}",
