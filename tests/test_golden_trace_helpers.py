@@ -9,6 +9,7 @@ from tests.golden_trace_helpers import (
     TraceDiff,
     TraceEntry,
     TraceMismatch,
+    serialize_trace,
 )
 
 
@@ -133,6 +134,56 @@ class TraceDiffTests(unittest.TestCase):
         text = d.summary()
         self.assertIn("ok", text.lower())
         self.assertIn("5", text)
+
+
+class SerializeTraceTests(unittest.TestCase):
+    def _entry(self, seq: int) -> "TraceEntry":
+        return TraceEntry(
+            seq=seq,
+            channel="event",
+            kind="StoryStarted",
+            payload={"z": 2, "a": 1, "m": [3, 2, 1]},
+        )
+
+    def test_returns_str_with_trailing_newline(self) -> None:
+        out = serialize_trace([self._entry(0)])
+        self.assertIsInstance(out, str)
+        self.assertTrue(out.endswith("\n"))
+
+    def test_compact_separators(self) -> None:
+        out = serialize_trace([self._entry(0)])
+        # REQ-07 separators=(",", ":") => no whitespace between tokens.
+        self.assertNotIn(", ", out)
+        self.assertNotIn(": ", out)
+
+    def test_keys_are_sorted(self) -> None:
+        out = serialize_trace([self._entry(0)]).rstrip("\n")
+        # Both the entry-level keys and nested payload keys must be sorted.
+        # Entry-level: channel < kind < payload < seq.
+        self.assertLess(out.index('"channel"'), out.index('"kind"'))
+        self.assertLess(out.index('"kind"'), out.index('"payload"'))
+        self.assertLess(out.index('"payload"'), out.index('"seq"'))
+        # Nested payload: a < m < z.
+        self.assertLess(out.index('"a"'), out.index('"m"'))
+        self.assertLess(out.index('"m"'), out.index('"z"'))
+
+    def test_empty_list_serializes_to_bracket_newline(self) -> None:
+        self.assertEqual(serialize_trace([]), "[]\n")
+
+    def test_determinism_byte_identical_across_calls(self) -> None:
+        entries = [self._entry(i) for i in range(5)]
+        first = serialize_trace(entries)
+        second = serialize_trace(entries)
+        self.assertEqual(first, second)
+        self.assertEqual(first.encode("utf-8"), second.encode("utf-8"))
+
+    def test_determinism_independent_of_payload_key_insertion_order(self) -> None:
+        # Same logical payload constructed in two different insertion orders
+        # must serialize byte-identically — this is what enables byte-equal
+        # comparison across runs (NFR: Determinism).
+        a = TraceEntry(seq=0, channel="event", kind="X", payload={"a": 1, "b": 2})
+        b = TraceEntry(seq=0, channel="event", kind="X", payload={"b": 2, "a": 1})
+        self.assertEqual(serialize_trace([a]), serialize_trace([b]))
 
 
 if __name__ == "__main__":

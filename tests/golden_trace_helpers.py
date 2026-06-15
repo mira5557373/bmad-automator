@@ -7,7 +7,8 @@ events, no state mutations, and no claude_p invocations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 Channel = Literal["event", "state", "claude_p"]
@@ -87,8 +88,16 @@ class TraceDiff:
         return "\n".join(lines)
 
 
-def serialize_trace(entries: list[TraceEntry]) -> str:  # pragma: no cover - replaced
-    raise NotImplementedError
+def serialize_trace(entries: list[TraceEntry]) -> str:
+    """Serialize entries to canonical JSON with a trailing newline (REQ-07).
+
+    Uses ``sort_keys=True`` so payload-dict insertion order is irrelevant
+    and ``separators=(",", ":")`` to produce the compact form. The trailing
+    newline matches the project's JSONL/JSON conventions and keeps git
+    diffs clean.
+    """
+    payload = [asdict(entry) for entry in entries]
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 def load_golden(path: object) -> list[TraceEntry]:  # pragma: no cover - replaced
