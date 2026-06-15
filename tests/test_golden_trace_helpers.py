@@ -1313,5 +1313,43 @@ class RecorderSelfComparisonTests(unittest.TestCase):
         self.assertTrue(diff.ok)
 
 
+def _build_m01_recording(root: Path) -> list[TraceEntry]:
+    """M01 fixture: one StoryStarted event captured by the recorder.
+
+    All event fields are literal strings — no real timestamps, no PIDs,
+    no float fields — so the serialized trace is byte-identical across
+    runs once the recorder's timestamp redaction collapses the literal
+    ``timestamp`` field to ``"<ts>"``.
+    """
+    emitter = TelemetryEmitter(root / "events.jsonl")
+    event = StoryStarted(
+        timestamp="2026-06-15T00:00:00Z",
+        run_id="m01-fixture-run",
+        epic="e1",
+        story_key="s1",
+        agent="dev",
+        model="opus",
+        complexity="M",
+    )
+    with GoldenTraceRecorder(repo_root=root) as rec:
+        emitter.emit(event)
+    return rec.entries
+
+
+class M01FixtureTests(unittest.TestCase):
+    """REQ-11 + REQ-12(e): m01_event_basics.json round-trip."""
+
+    def test_m01_fixture_matches_fresh_recording(self) -> None:
+        _validate_or_regen("m01_event_basics.json", _build_m01_recording)
+
+    def test_m01_fixture_records_exactly_one_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = _build_m01_recording(Path(tmp).resolve())
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].channel, "event")
+        self.assertEqual(entries[0].kind, "StoryStarted")
+        self.assertEqual(entries[0].payload["timestamp"], "<ts>")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1 @@
+[{"channel":"event","kind":"StoryStarted","payload":{"agent":"dev","complexity":"M","epic":"e1","event_type":"story_started","model":"opus","run_id":"m01-fixture-run","story_key":"s1","timestamp":"<ts>"},"seq":0}]
