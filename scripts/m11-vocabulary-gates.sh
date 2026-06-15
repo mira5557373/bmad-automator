@@ -51,7 +51,7 @@ pass "REQ-13 contributor-guide (all four tags present as inline code)"
 EXPECTED="\
 docs/changelog/260401.md:3,26,61,85
 docs/changelog/260412.md:3,34
-docs/changelog/260413.md:3,27,51,77,104,129,148,168,195,215,250,277,302,330
+docs/changelog/260413.md:3,30,54,80,110,135,154,174,201,221,256,283,308,336
 docs/changelog/260414.md:3
 docs/changelog/260415.md:3,33,51
 docs/changelog/260506.md:3
