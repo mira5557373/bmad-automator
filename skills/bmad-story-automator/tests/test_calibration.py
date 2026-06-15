@@ -379,6 +379,49 @@ class BuildCalibrationParsingTolerationTests(unittest.TestCase):
         self.assertEqual(table.entries[("claude-opus-4", "code")].sample_count, 1)
 
 
+class BuildCalibrationMalformedLineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        _ExtendedEventShim.install()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _ExtendedEventShim.uninstall()
+
+    def test_malformed_json_line_is_skipped_without_counting(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            good = _completed_line(
+                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
+            )
+            ledger.write_text(
+                "\n".join(["{not json", good, "[1, 2, 3]"]) + "\n",
+                encoding="utf-8",
+            )
+            table = build_calibration(ledger)
+
+        self.assertEqual(set(table.entries.keys()), {("claude-opus-4", "code")})
+        self.assertEqual(table.entries[("claude-opus-4", "code")].sample_count, 1)
+        self.assertEqual(table.total_events_scanned, 1)
+
+    def test_json_object_missing_event_type_is_skipped(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            good = _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t")
+            from story_automator.core.common import compact_json as _cj
+
+            no_type = _cj({"timestamp": "2026-06-14T11:00:00Z", "run_id": "r2"})
+            _write_jsonl(ledger, [no_type, good])
+            table = build_calibration(ledger)
+
+        self.assertEqual(set(table.entries.keys()), {("m", "t")})
+        self.assertEqual(table.total_events_scanned, 1)
+
+
 class LookupSuccessRateTests(unittest.TestCase):
     def _make_table(self):
         from story_automator.core.calibration import CalibrationEntry, CalibrationTable
