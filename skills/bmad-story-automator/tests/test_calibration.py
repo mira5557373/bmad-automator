@@ -11,12 +11,7 @@ from story_automator.core.calibration import (
     lookup_success_rate,
 )
 from story_automator.core.common import compact_json
-from story_automator.core.telemetry_events import (
-    BudgetAlert,
-    CostCharged,
-    StoryCompleted,
-    StoryStarted,
-)
+from story_automator.core.telemetry_events import StoryCompleted
 from tests._calibration_fixtures import (
     _ExtendedEventShim,
     _completed_line,
@@ -24,6 +19,7 @@ from tests._calibration_fixtures import (
     _fixture_dir,
     _make_entry,
     _make_table,
+    _unrelated_event_lines,
     _write_jsonl,
 )
 
@@ -141,37 +137,7 @@ class BuildCalibrationEmptyAndIgnoredTests(unittest.TestCase):
     def test_unrelated_event_types_are_counted_but_not_aggregated(self) -> None:
         with _fixture_dir() as tmpdir:
             ledger = Path(tmpdir) / "telemetry.jsonl"
-            started = StoryStarted(
-                timestamp="2026-06-14T10:00:00Z",
-                run_id="r1",
-                epic="EP-1",
-                story_key="S-1",
-                agent="ag",
-                model="claude-opus-4",
-                complexity="M",
-            )
-            cost = CostCharged(
-                timestamp="2026-06-14T10:01:00Z",
-                run_id="r1",
-                epic="EP-1",
-                story_key="S-1",
-                phase="impl",
-                cost_usd=0.12,
-                tokens_in=1000,
-                tokens_out=200,
-                model="claude-opus-4",
-            )
-            budget = BudgetAlert(
-                timestamp="2026-06-14T10:02:00Z",
-                run_id="r1",
-                threshold_pct=50,
-                total_cost_usd=5.0,
-                max_budget_usd=10.0,
-                epic="EP-1",
-                story_key="S-1",
-            )
-            lines = [compact_json(e.to_dict()) for e in (started, cost, budget)]
-            _write_jsonl(ledger, lines)
+            _write_jsonl(ledger, _unrelated_event_lines())
             table = build_calibration(ledger)
 
         self.assertEqual(table.entries, {})

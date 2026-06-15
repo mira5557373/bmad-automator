@@ -7,7 +7,13 @@ from pathlib import Path
 
 from story_automator.core import telemetry_events as _events_mod
 from story_automator.core.common import compact_json, ensure_dir
-from story_automator.core.telemetry_events import StoryCompleted, StoryFailed
+from story_automator.core.telemetry_events import (
+    BudgetAlert,
+    CostCharged,
+    StoryCompleted,
+    StoryFailed,
+    StoryStarted,
+)
 from story_automator.core.calibration import CalibrationEntry, CalibrationTable
 
 
@@ -86,6 +92,45 @@ def _failed_line(
     payload["model_id"] = model_id
     payload["task_kind"] = task_kind
     return compact_json(payload)
+
+
+def _unrelated_event_lines() -> list[str]:
+    """Return JSONL lines for three non-story events (Started, Cost, Budget).
+
+    Used to assert that unrelated event types are counted in
+    `total_events_scanned` but never aggregated into `entries`.
+    """
+
+    started = StoryStarted(
+        timestamp="2026-06-14T10:00:00Z",
+        run_id="r1",
+        epic="EP-1",
+        story_key="S-1",
+        agent="ag",
+        model="claude-opus-4",
+        complexity="M",
+    )
+    cost = CostCharged(
+        timestamp="2026-06-14T10:01:00Z",
+        run_id="r1",
+        epic="EP-1",
+        story_key="S-1",
+        phase="impl",
+        cost_usd=0.12,
+        tokens_in=1000,
+        tokens_out=200,
+        model="claude-opus-4",
+    )
+    budget = BudgetAlert(
+        timestamp="2026-06-14T10:02:00Z",
+        run_id="r1",
+        threshold_pct=50,
+        total_cost_usd=5.0,
+        max_budget_usd=10.0,
+        epic="EP-1",
+        story_key="S-1",
+    )
+    return [compact_json(e.to_dict()) for e in (started, cost, budget)]
 
 
 class _ExtendedEventShim:
