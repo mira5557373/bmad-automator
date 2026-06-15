@@ -320,5 +320,41 @@ class FindExistingTestTests(unittest.TestCase):
             self.assertIsNone(_find_existing_test(Path(tmp), "REQ-07"))
 
 
+class ReqVerdictLikeProtocolTests(unittest.TestCase):
+    """Quality gate: runtime independence from spec_compliance preserved by
+    structural Protocol matching."""
+
+    def test_protocol_is_runtime_checkable(self) -> None:
+        from story_automator.core.feature_tester import ReqVerdictLike
+
+        # runtime_checkable is required so isinstance() checks work in tests
+        # without importing the concrete ReqVerdict.
+        self.assertTrue(hasattr(ReqVerdictLike, "_is_runtime_protocol"))
+
+    def test_protocol_accepts_a_duck_typed_object(self) -> None:
+        from story_automator.core.feature_tester import ReqVerdictLike
+
+        class FakeVerdict:
+            req_id = "REQ-07"
+            status = "implemented"
+            evidence = "anything"
+            confidence = 0.9
+
+        self.assertIsInstance(FakeVerdict(), ReqVerdictLike)
+
+    def test_protocol_accepts_real_req_verdict_from_layer_2(self) -> None:
+        """Bridge sanity: the concrete ReqVerdict is shape-compatible."""
+        from story_automator.core.feature_tester import ReqVerdictLike
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        verdict = ReqVerdict(
+            req_id="REQ-07",
+            status="implemented",
+            evidence="x",
+            confidence=0.9,
+        )
+        self.assertIsInstance(verdict, ReqVerdictLike)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

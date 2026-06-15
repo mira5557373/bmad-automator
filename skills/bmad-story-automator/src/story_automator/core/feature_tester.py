@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from story_automator.core.spec_compliance import ReqVerdict  # noqa: F401
@@ -32,6 +32,29 @@ __all__ = [  # noqa: F822 — plan_feature_tests added in a subsequent task
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ReqVerdictLike(Protocol):
+    """Structural shape of a single REQ verdict.
+
+    Preconditions: implementing object exposes `req_id` (str), `status`
+        (str — typically Literal["implemented", "missing", "partial"]),
+        `evidence` (str), and `confidence` (float) as readable attributes.
+    Postconditions: this is a `runtime_checkable` Protocol so
+        ``isinstance(obj, ReqVerdictLike)`` returns True for any object
+        carrying those four attributes.
+    Raises: nothing — Protocols are passive.
+
+    This Protocol exists to keep `feature_tester` runtime-independent
+    of `spec_compliance`: Layer 3 never imports `ReqVerdict` at runtime
+    (only inside ``if TYPE_CHECKING:`` for type-checker assistance).
+    """
+
+    req_id: str
+    status: str
+    evidence: str
+    confidence: float
 
 
 @dataclass(frozen=True, kw_only=True)
