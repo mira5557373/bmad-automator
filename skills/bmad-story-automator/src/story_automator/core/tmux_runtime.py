@@ -84,12 +84,16 @@ def resolve_command_shell() -> str:
     return "/bin/sh"
 
 
-_STORY_KEY_RE = re.compile(r"-e(\d+)-s(\d+)-(\d+)-")
+_STORY_KEY_RE = re.compile(r"-e(\d+)-s(\d+)-(\d+)-[A-Za-z][A-Za-z0-9]*(?:-r\d+)?$")
 
 
 def _story_key_from_session_name(session: str) -> str:
     """Extract dotted story_key (e.g. "2.7") from a session name produced by
-    generate_session_name(): `sa-{slug}-{stamp}-e{epic}-s{epic}-{story}-{step}`.
+    generate_session_name(): `sa-{slug}-{stamp}-e{epic}-s{suffix}-{step}[-r{cycle}]`
+    where `suffix` is `story_id.replace(".", "-")`.
+
+    Anchored to end-of-string so a project slug that happens to contain a
+    similar `-eN-sM-K-` fragment cannot win the match.
 
     Returns "" when the pattern does not match — for legacy / hand-crafted
     session names — so the emit path stays warning-free.

@@ -53,6 +53,16 @@ class StoryKeyFromSessionNameTests(unittest.TestCase):
     def test_returns_empty_for_empty_string(self) -> None:
         self.assertEqual(tmux_runtime._story_key_from_session_name(""), "")
 
+    def test_slug_containing_similar_fragment_does_not_win(self) -> None:
+        # Project slug "my-e2-s1-1-tool" would tempt a greedy re.search; the
+        # anchored regex must skip it and pick the real suffix at end-of-string.
+        self.assertEqual(
+            tmux_runtime._story_key_from_session_name(
+                "sa-my-e2-s1-1-tool-251215-104500-e9-s9-4-dev"
+            ),
+            "9.4",
+        )
+
 
 class EmitTmuxSpawnedWiringTests(unittest.TestCase):
     def test_emit_spawned_populates_story_key_from_session_name(self) -> None:

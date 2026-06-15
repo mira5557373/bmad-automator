@@ -738,12 +738,12 @@ def _verify_step(args: list[str]) -> int:
 
 
 def _parse_context_int(context: str, key: str) -> int:
-    match = re.search(rf"{re.escape(key)}=(\d+)", context)
+    match = re.search(rf"(?:^|\s){re.escape(key)}=(\d+)", context)
     return int(match.group(1)) if match else 0
 
 
 def _parse_context_str(context: str, key: str) -> str:
-    match = re.search(rf"{re.escape(key)}=(\S+)", context)
+    match = re.search(rf"(?:^|\s){re.escape(key)}=(\S+)", context)
     return match.group(1) if match else ""
 
 

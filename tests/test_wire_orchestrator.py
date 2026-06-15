@@ -123,6 +123,16 @@ class EscalateSessionCrashWiringTests(unittest.TestCase):
             self.assertEqual(ev["error_class"], "session_crash")
 
 
+class ParseContextStrAnchoringTests(unittest.TestCase):
+    def test_key_not_matched_as_suffix_of_longer_identifier(self) -> None:
+        # Anchored on whitespace/start so `story=` does not match the tail of
+        # `latest_story=...`.
+        ctx = "retries=4 latest_story=9.9 story=3.7 session=sess-abc"
+        self.assertEqual(orchestrator._parse_context_str(ctx, "story"), "3.7")
+        self.assertEqual(orchestrator._parse_context_str(ctx, "session"), "sess-abc")
+        self.assertEqual(orchestrator._parse_context_int(ctx, "retries"), 4)
+
+
 class MarkerCreateWiringTests(unittest.TestCase):
     def test_marker_create_emits_story_started_with_epic_and_story(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_str:
