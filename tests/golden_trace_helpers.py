@@ -34,6 +34,22 @@ _REDACTED_EVENT_FIELDS: frozenset[str] = frozenset(
         "heartbeat_counter",
     }
 )
+_HEARTBEAT_LOCK_BASENAMES: frozenset[str] = frozenset({
+    ".run.lock",
+    ".state-build.lock",
+})
+
+
+def _is_heartbeat_lock_path(rel_posix_path: str) -> bool:
+    """Return True if the path is a known heartbeat-driven lock file.
+
+    The heartbeat thread (M05) refreshes these continuously, so the
+    *count* of recorded mutations would be non-deterministic. We skip
+    them entirely. User-named files that happen to end in `.lock` are
+    NOT skipped — only the enumerated heartbeat paths are.
+    """
+    basename = rel_posix_path.rsplit("/", 1)[-1]
+    return basename in _HEARTBEAT_LOCK_BASENAMES
 
 __all__ = [
     "Channel",
@@ -393,6 +409,8 @@ class GoldenTraceRecorder:
             result = orig(path, data, encoding=encoding)
             try:
                 rel = _to_repo_relative_posix(Path(path), repo_root=recorder._repo_root)
+                if _is_heartbeat_lock_path(rel):
+                    return result
                 sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
                 recorder._record("state", "mutation", {"path": rel, "sha256": sha})
             except Exception as exc:

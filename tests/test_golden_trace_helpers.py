@@ -777,5 +777,40 @@ class StateWriteHookTests(unittest.TestCase):
         self.assertEqual(len(rec.entries), 1)
 
 
+class StateLockExclusionTests(unittest.TestCase):
+    def test_run_lock_write_not_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(root / ".run.lock", '{"pid":1}')
+        self.assertEqual(rec.entries, [])
+
+    def test_state_build_lock_write_not_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "output").mkdir()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(
+                    root / "output" / ".state-build.lock", "ignored"
+                )
+        self.assertEqual(rec.entries, [])
+
+    def test_non_lock_path_still_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            body = '{"k": 1}'
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(root / "config.json", body)
+        self.assertEqual(len(rec.entries), 1)
+
+    def test_user_named_dot_lock_file_still_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                _state_module.write_atomic_text(root / "mystory.lock", "user data")
+        self.assertEqual(len(rec.entries), 1)
+        self.assertEqual(rec.entries[0].payload["path"], "mystory.lock")
+
+
 if __name__ == "__main__":
     unittest.main()
