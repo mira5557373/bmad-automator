@@ -713,3 +713,55 @@ class ClassifyStoryDeferredTests(unittest.TestCase):
         result = classify(event)
         # Spec REQ-10 says "exceeds 3" — 3 itself stays in the default branch.
         self.assertEqual(result.primary, FailureClass.GATE_DEFER)
+
+
+class ClassifyEscalationTests(unittest.TestCase):
+    def _make_event(self) -> object:
+        from story_automator.core.telemetry_events import EscalationTriggered
+
+        return EscalationTriggered(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            trigger_id=1,
+            severity="warn",
+            message="manual review requested",
+        )
+
+    def test_default_returns_review_rejected_medium(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event())
+        self.assertEqual(result.primary, FailureClass.REVIEW_REJECTED)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.MEDIUM)
+
+    def test_policy_trigger_prefix_upgrades_to_policy_violation_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        event = self._make_event()
+        # Spec REQ-11 names a ``trigger`` field; M01 has ``trigger_id``
+        # (int) and ``severity``/``message`` (strings) only. Inject the
+        # spec field on the otherwise-mutable dataclass instance.
+        event.trigger = "policy:pii_leak"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
+        self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_non_policy_trigger_stays_review_rejected(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        event = self._make_event()
+        event.trigger = "review:manual"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.REVIEW_REJECTED)
