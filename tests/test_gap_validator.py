@@ -4,7 +4,9 @@ import dataclasses
 import io
 import logging
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 
 class ModuleImportContractTests(unittest.TestCase):
@@ -305,3 +307,50 @@ class ParseGapListErrorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             parse_gap_list("{not json")
+
+
+class ValidateGapsAggregationTests(unittest.TestCase):
+    """REQ-03 + REQ-04: aggregate fields and base-confidence formula."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+
+    def test_empty_gap_list_returns_overall_confidence_one(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([], repo_root=self.root)
+        self.assertEqual(report.statuses, [])
+        self.assertEqual(report.overall_confidence, 1.0)
+        self.assertRegex(report.validated_at, r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_overall_confidence_is_mean_of_per_gap_confidence(self) -> None:
+        from story_automator.core.gap_validator import Gap, validate_gaps
+
+        # Two gaps that both fail all three checks (no file exists in an
+        # empty repo) → each gets base 0.8 → mean = 0.8.
+        gaps = [
+            Gap(
+                file_path="missing_a.py",
+                line=1,
+                symbol="x",
+                description="d",
+                severity="minor",
+            ),
+            Gap(
+                file_path="missing_b.py",
+                line=1,
+                symbol="y",
+                description="d",
+                severity="minor",
+            ),
+        ]
+        report = validate_gaps(gaps, repo_root=self.root)
+        self.assertEqual(len(report.statuses), 2)
+        for status in report.statuses:
+            self.assertFalse(status.path_exists)
+            self.assertFalse(status.line_in_range)
+            self.assertFalse(status.symbol_present)
+            self.assertAlmostEqual(status.confidence, 0.8)
+        self.assertAlmostEqual(report.overall_confidence, 0.8)

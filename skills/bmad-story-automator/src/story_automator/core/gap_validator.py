@@ -21,8 +21,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
-__all__ = [  # noqa: F822 — symbols are added incrementally in later M06a-M1 tasks
+from .common import iso_now
+
+__all__ = [
     "Gap",
     "GapStatus",
     "ValidationReport",
@@ -146,3 +149,83 @@ def parse_gap_list(payload: str) -> list[Gap]:
             )
         )
     return out
+
+
+_BASE_CONFIDENCE: float = 0.8
+_PASS_BONUS: float = 0.05
+_CONFIDENCE_CEILING: float = 1.0
+
+
+def _empty_overall_confidence() -> float:
+    """Overall confidence when no gaps were submitted.
+
+    Returning 1.0 expresses "no gaps to validate = trivially valid".
+    Centralised here so the value is easy to change if the operator
+    later prefers 0.0 ("no evidence either way").
+    """
+    return 1.0
+
+
+def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
+    """Validate each gap's file/line/symbol citation against `repo_root`.
+
+    Preconditions: `repo_root` is an existing directory; each gap's
+        `file_path` is interpreted relative to `repo_root`. Absolute
+        paths, `..` traversal escaping the root, and outward-pointing
+        symlinks are rejected with `path_exists=False`.
+    Postconditions: returns a `ValidationReport` whose `statuses` list
+        is one-for-one with the input `gaps`, in the same order. Per-gap
+        confidence lies in `[0.8, 0.95]` (cap 1.0); failed checks
+        contribute one note each. Aggregate `overall_confidence` is the
+        arithmetic mean of per-gap confidence rounded to 6 dp, or 1.0
+        when `gaps` is empty.
+    Raises: nothing under normal operation — IO errors during the
+        line-range or symbol checks are converted into `False` results
+        with an explanatory note, so a torn source tree degrades
+        gracefully rather than aborting the report.
+    """
+    statuses: list[GapStatus] = []
+    root_resolved = Path(repo_root).resolve()
+    for gap in gaps:
+        notes: list[str] = []
+        path_exists = False  # Placeholder — Task 8 implements path resolution.
+        line_in_range = False  # Placeholder — Task 9 implements line check.
+        symbol_present = False  # Placeholder — Task 10 implements symbol check.
+        if not path_exists:
+            notes.append(f"path does not exist or escapes repo_root: {gap.file_path}")
+        if not line_in_range:
+            notes.append(
+                f"line {gap.line} could not be verified in range for {gap.file_path}"
+            )
+        if not symbol_present:
+            notes.append(f"symbol {gap.symbol!r} not found in {gap.file_path}")
+        confidence = _BASE_CONFIDENCE + _PASS_BONUS * sum(
+            [path_exists, line_in_range, symbol_present]
+        )
+        confidence = min(confidence, _CONFIDENCE_CEILING)
+        statuses.append(
+            GapStatus(
+                gap=gap,
+                path_exists=path_exists,
+                line_in_range=line_in_range,
+                symbol_present=symbol_present,
+                confidence=confidence,
+                notes=notes,
+            )
+        )
+    if statuses:
+        overall = round(
+            sum(s.confidence for s in statuses) / len(statuses),
+            6,
+        )
+    else:
+        overall = _empty_overall_confidence()
+    # `root_resolved` is computed up front so Tasks 8–11 can pass it
+    # through to the per-gap path resolver; reference it here so ruff's
+    # F841 does not flag it as unused on this intermediate revision.
+    del root_resolved
+    return ValidationReport(
+        statuses=statuses,
+        overall_confidence=overall,
+        validated_at=iso_now(),
+    )
