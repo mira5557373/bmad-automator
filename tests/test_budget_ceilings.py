@@ -172,6 +172,417 @@ class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
             self.assertEqual(parse_ceilings_config(path), [])
 
 
+class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
+    def _write(self, tmp: str, ceilings: list[object]) -> Path:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(
+            compact_json({"policy": {"cost_ceilings": ceilings}}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_missing_required_key_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "gate_names": ["init"],
+                    },
+                    {
+                        "name": "good",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    },
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual([c.name for c in result], ["good"])
+        self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "missing_keys")
+        self.assertIn("warn_at", budget_ceilings._PARSE_WARNINGS[0]["detail"])
+
+    def test_invalid_window_string_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "1h",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_window")
+
+    def test_negative_limit_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": -1.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(
+            budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_value"
+        )
+
+    def test_zero_limit_is_skipped(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": 0.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+
+    def test_warn_at_out_of_range_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        cases = [0.0, -0.1, 1.5]
+        for warn_at in cases:
+            with self.subTest(warn_at=warn_at):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = self._write(
+                        tmp,
+                        [
+                            {
+                                "name": "bad",
+                                "window": "per_run",
+                                "limit_usd": 10.0,
+                                "warn_at": warn_at,
+                                "gate_names": ["init"],
+                            }
+                        ],
+                    )
+                    result = parse_ceilings_config(path)
+                self.assertEqual(result, [])
+                self.assertTrue(
+                    budget_ceilings._PARSE_WARNINGS[0]["reason"].startswith(
+                        "bad_warn_at"
+                    )
+                )
+
+    def test_boundary_warn_at_one_is_allowed(self) -> None:
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "ok",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 1.0,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].warn_at, 1.0)
+
+    def test_non_object_entry_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, ["not an object", 42, None])
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 3)
+        for warning in budget_ceilings._PARSE_WARNINGS:
+            self.assertEqual(warning["reason"], "not_object")
+
+    def test_gate_names_must_be_list_of_strings(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": "init",
+                    },
+                    {
+                        "name": "bad2",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": [1, 2],
+                    },
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        reasons = [w["reason"] for w in budget_ceilings._PARSE_WARNINGS]
+        self.assertEqual(reasons, ["bad_gate_names", "bad_gate_names"])
+
+    def test_warnings_cleared_on_each_call(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "nope",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            parse_ceilings_config(bad_path)
+            self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
+
+            good_path = Path(tmp) / "workflow2.json"
+            good_path.write_text(
+                compact_json(
+                    {
+                        "policy": {
+                            "cost_ceilings": [
+                                {
+                                    "name": "ok",
+                                    "window": "per_run",
+                                    "limit_usd": 10.0,
+                                    "warn_at": 0.5,
+                                    "gate_names": ["init"],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            parse_ceilings_config(good_path)
+            self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
+
+    def test_bool_is_not_accepted_as_limit_usd(self) -> None:
+        """``True`` is an ``int`` in Python; the validator explicitly
+        rejects bool to avoid silently coercing ``True`` to 1.0."""
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": True,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(
+            budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_type"
+        )
+
+    def test_string_limit_usd_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": "10.0",
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(
+            budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_type"
+        )
+
+    def test_bool_is_not_accepted_as_warn_at(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": True,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(
+            budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_warn_at_type"
+        )
+
+    def test_string_warn_at_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": "0.5",
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(
+            budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_warn_at_type"
+        )
+
+    def test_non_string_name_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": 42,
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_name")
+
+    def test_empty_string_name_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_name")
+
+    def test_non_string_window_is_skipped(self) -> None:
+        from story_automator.core import budget_ceilings
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "bad",
+                        "window": 42,
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(result, [])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_window")
+
+    def test_utf8_non_ascii_name_round_trips(self) -> None:
+        """REQ-04 says UTF-8 reading; confirm non-ASCII names survive."""
+        from story_automator.core.budget_ceilings import parse_ceilings_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                [
+                    {
+                        "name": "ceiling-ünïcödé",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            result = parse_ceilings_config(path)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].name, "ceiling-ünïcödé")
+
+
 class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
     def _write(self, tmp: str, ceilings: list[dict[str, object]]) -> Path:
         ensure_dir(tmp)
