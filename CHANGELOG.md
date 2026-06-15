@@ -1,5 +1,11 @@
 ### Features
 
+- feat(failure-triage): add classify_stream generator + export (REQ-12) (e6f86f8)
+- feat(failure-triage): implement _classify_escalation + export classify (REQ-11) (ae386d1)
+- feat(failure-triage): implement _classify_story_deferred plateau branch (REQ-10) (5a3dbe0)
+- feat(failure-triage): implement _classify_tmux_crash with conditional NETWORK_ERROR (REQ-09) (ac74d67)
+- feat(failure-triage): implement _classify_story_failed substring rules (REQ-08) (be81870)
+- feat(failure-triage): add classify dispatch skeleton + helper stubs (REQ-06) (2f7a135)
 - feat(failure-triage): add IMPLIES_GRAPH static edges + module __all__ (REQ-05) (8bb0810)
 - feat(failure-triage): add frozen Classification dataclass (REQ-04) (6e815a2)
 - feat(failure-triage): add Confidence enum (REQ-03) (c62ef0f)
@@ -99,6 +105,8 @@
 
 ### Documentation
 
+- docs(failure-triage): add m07b classifier-dispatch plan + gap report (93e9e12)
+- docs: update generated documentation (089a7e5)
 - docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
@@ -124,6 +132,13 @@
 
 ### Tests
 
+- test(failure-triage): add 13-class behavioural matrix + determinism gate (REQ-14/15) (c090b1e)
+- test(failure-triage): add failing classify_stream generator tests (REQ-12) (6cbefbf)
+- test(failure-triage): add failing _classify_escalation cases (REQ-11) (ba9ba8a)
+- test(failure-triage): add failing _classify_story_deferred cases (REQ-10) (869c94c)
+- test(failure-triage): add failing _classify_tmux_crash cases (REQ-09) (9fe1d75)
+- test(failure-triage): add failing _classify_story_failed cases (REQ-08) (309a69f)
+- test(failure-triage): add failing classify dispatch skeleton tests (REQ-06) (99e42bc)
 - test(failure-triage): add import-allowlist + line-count discipline gates (f55435d)
 - test(failure-triage): add taxonomy-completeness + placeholder-token gates (8c05864)
 - test(failure-triage): add failing IMPLIES_GRAPH tests for REQ-05 (d4ca3be)
@@ -159,6 +174,7 @@
 
 ### Chores
 
+- chore(failure-triage): write phase-C gap report (m07b classifier dispatch) (b220acd)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
 - chore: keep versioning plan docs off preview branch (4bba55b)
