@@ -14,6 +14,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from story_automator.commands import state as _state_module
+from story_automator.core.atomic_io import (
+    HeartbeatThread,
+    RunLockIdentity,
+    acquire_run_lock,
+)
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 from story_automator.core.telemetry_events import StoryStarted, TmuxSessionSpawned
 
@@ -1396,6 +1401,81 @@ class M02FixtureTests(unittest.TestCase):
         self.assertEqual(
             [e.payload["story_key"] for e in entries],
             ["s0", "s1", "s2", "s3", "s4"],
+        )
+
+
+def _build_m05_recording(root: Path) -> list[TraceEntry]:
+    """M05 fixture: three concurrent state writes under composite-identity
+    lock + heartbeat thread, sequenced via threading.Event for a fixed
+    completion order.
+
+    The lock-file writes (``<root>/.run.lock``) are filtered by the
+    recorder's ``_is_heartbeat_lock_path`` helper, and heartbeat writes go
+    through ``atomic_io.write_atomic_text`` directly (not state.py), so
+    neither pollutes the trace. The only recorded entries are the three
+    ``state.mutation`` events from the worker threads, in seq 0/1/2 order.
+    """
+    lock_path = root / ".run.lock"
+    gates = [_threading.Event() for _ in range(4)]
+    gates[0].set()
+    write_results: list[Exception | None] = [None, None, None]
+
+    def worker(i: int) -> None:
+        try:
+            gates[i].wait()
+            _state_module.write_atomic_text(root / f"out{i}.json", f'{{"i":{i}}}')
+        except Exception as exc:
+            write_results[i] = exc
+        finally:
+            gates[i + 1].set()
+
+    with GoldenTraceRecorder(repo_root=root) as rec:
+        with acquire_run_lock(lock_path, run_id="m05-fixture-run"):
+            heartbeat = HeartbeatThread(
+                lock_path=lock_path,
+                identity=RunLockIdentity(
+                    pid=0,
+                    start_time=0.0,
+                    hostname="fixture",
+                    heartbeat_iso="2026-06-15T00:00:00Z",
+                    run_id="m05-fixture-run",
+                ),
+                interval=3600.0,
+            )
+            heartbeat.start()
+            try:
+                threads = [
+                    _threading.Thread(target=worker, args=(i,)) for i in range(3)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            finally:
+                heartbeat.stop()
+                heartbeat.join(timeout=5.0)
+    for i, err in enumerate(write_results):
+        if err is not None:
+            raise AssertionError(f"worker {i} raised: {err!r}") from err
+    return rec.entries
+
+
+class M05FixtureTests(unittest.TestCase):
+    """REQ-11 + REQ-12(e): m05_atomic_write_smoke.json round-trip."""
+
+    def test_m05_fixture_matches_fresh_recording(self) -> None:
+        _validate_or_regen("m05_atomic_write_smoke.json", _build_m05_recording)
+
+    def test_m05_fixture_records_three_state_mutations_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = _build_m05_recording(Path(tmp).resolve())
+        self.assertEqual(len(entries), 3)
+        self.assertEqual([e.seq for e in entries], [0, 1, 2])
+        self.assertEqual([e.channel for e in entries], ["state"] * 3)
+        self.assertEqual([e.kind for e in entries], ["mutation"] * 3)
+        self.assertEqual(
+            [e.payload["path"] for e in entries],
+            ["out0.json", "out1.json", "out2.json"],
         )
 
 
