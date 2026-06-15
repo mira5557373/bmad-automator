@@ -298,5 +298,45 @@ class SkillMdReq04Tests(unittest.TestCase):
             )
 
 
+class SkillMdReq05Tests(unittest.TestCase):
+    """REQ-05: ## Output contract section names the five top-level keys
+    and the three allowed decision literals."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, SKILL_MD)
+
+    def test_output_contract_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## Output contract\s*$",
+            msg="SKILL.md must include a level-2 '## Output contract' heading",
+        )
+
+    def test_output_path_named(self) -> None:
+        self.assertIn(
+            ".claude/trust-verify-output/result.json",
+            self.text,
+            msg="SKILL.md ## Output contract must name the result.json path",
+        )
+
+    def test_all_five_top_level_keys_named(self) -> None:
+        for key in ("layer1", "layer2", "layer3", "decision", "verified_at"):
+            self.assertIn(
+                key,
+                self.text,
+                msg=f"SKILL.md ## Output contract missing key {key!r}",
+            )
+
+    def test_all_three_decision_literals_named(self) -> None:
+        for literal in ("pass", "warn", "block"):
+            # Match the literal bounded by non-word characters so 'pass'
+            # does not match inside 'password'.
+            self.assertRegex(
+                self.text,
+                rf"(?<!\w){re.escape(literal)}(?!\w)",
+                msg=f"SKILL.md ## Output contract missing decision literal {literal!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
