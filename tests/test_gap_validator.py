@@ -230,3 +230,78 @@ class ParseGapListHappyPathTests(unittest.TestCase):
         gaps = parse_gap_list(payload)
         self.assertEqual([g.file_path for g in gaps], ["a.py", "b.py"])
         self.assertEqual([g.severity for g in gaps], ["blocker", "minor"])
+
+
+class ParseGapListErrorTests(unittest.TestCase):
+    """REQ-06: precise field-locating ValueError on each malformed shape."""
+
+    def test_rejects_non_object_top_level(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        with self.assertRaisesRegex(ValueError, "top-level 'gaps' key"):
+            parse_gap_list("[]")
+
+    def test_rejects_missing_gaps_key(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        with self.assertRaisesRegex(ValueError, "top-level 'gaps' key"):
+            parse_gap_list('{"other": []}')
+
+    def test_rejects_non_list_gaps_value(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        with self.assertRaisesRegex(ValueError, "'gaps' must be a JSON array"):
+            parse_gap_list('{"gaps": {}}')
+
+    def test_rejects_non_object_gap_entry(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        with self.assertRaisesRegex(ValueError, r"gaps\[0\] must be a JSON object"):
+            parse_gap_list('{"gaps": ["a string"]}')
+
+    def test_rejects_missing_required_key_with_field_locator(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        payload = '{"gaps": [{"file_path": "a", "line": 1, "symbol": "s", "description": "d"}]}'
+        with self.assertRaisesRegex(
+            ValueError, r"gaps\[0\] missing required key 'severity'"
+        ):
+            parse_gap_list(payload)
+
+    def test_rejects_non_integer_line(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        payload = (
+            '{"gaps": [{"file_path": "a", "line": "42", "symbol": "s",'
+            ' "description": "d", "severity": "minor"}]}'
+        )
+        with self.assertRaisesRegex(ValueError, r"gaps\[0\].line must be an integer"):
+            parse_gap_list(payload)
+
+    def test_rejects_boolean_line_even_though_bool_is_subclass_of_int(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        payload = (
+            '{"gaps": [{"file_path": "a", "line": true, "symbol": "s",'
+            ' "description": "d", "severity": "minor"}]}'
+        )
+        with self.assertRaisesRegex(ValueError, r"gaps\[0\].line must be an integer"):
+            parse_gap_list(payload)
+
+    def test_rejects_unknown_severity(self) -> None:
+        from story_automator.core.gap_validator import parse_gap_list
+
+        payload = (
+            '{"gaps": [{"file_path": "a", "line": 1, "symbol": "s",'
+            ' "description": "d", "severity": "catastrophic"}]}'
+        )
+        with self.assertRaisesRegex(ValueError, r"gaps\[0\].severity must be one of"):
+            parse_gap_list(payload)
+
+    def test_malformed_json_raises_value_error(self) -> None:
+        # json.JSONDecodeError is a ValueError, so callers catching
+        # ValueError catch malformed JSON uniformly.
+        from story_automator.core.gap_validator import parse_gap_list
+
+        with self.assertRaises(ValueError):
+            parse_gap_list("{not json")
