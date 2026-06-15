@@ -2,7 +2,7 @@
 
 Walks the M02 JSONL telemetry ledger and aggregates StoryCompleted /
 StoryFailed events into a (model_id, task_kind) -> success_rate table.
-Passive and side-effect free: no writes, no network, no subprocess.
+Passive and side-effect free: no writes, no network, no shell-outs.
 """
 
 from __future__ import annotations
