@@ -10,7 +10,8 @@ does not call audit-log routines, and does not prompt for input
 
 from __future__ import annotations
 
-from ..core.common import print_json
+from ..core.budget_ceilings import bypass_allowed, evaluate_ceilings
+from ..core.common import iso_now, print_json
 
 
 _VALID_GATES = ("init", "story_start", "retry_start")
@@ -48,5 +49,20 @@ def cmd_ceiling_check(args: list[str]) -> int:
     if not events_path:
         print_json({"ok": False, "error": "missing_events"})
         return 1
-    print_json({"ok": False, "error": "not_implemented"})
-    return 1
+    workflow_path: str | None = params.get("workflow") or None
+    now_iso = params.get("now") or iso_now()
+    verdict, reason = evaluate_ceilings(
+        events_path,
+        gate,
+        now_iso,
+        workflow_json_path=workflow_path,
+    )
+    print_json(
+        {
+            "ok": True,
+            "verdict": verdict.value,
+            "reason": reason,
+            "bypass_allowed": bypass_allowed(),
+        }
+    )
+    return 0

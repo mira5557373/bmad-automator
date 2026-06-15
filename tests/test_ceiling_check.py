@@ -63,5 +63,21 @@ class CmdCeilingCheckFlagParseTests(unittest.TestCase):
         self.assertEqual(payload.get("error"), "missing_events")
 
 
+class CmdCeilingCheckNoConfigTests(unittest.TestCase):
+    def test_no_workflow_returns_allow_no_ceilings_sentinel(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        code, payload = _capture(
+            cmd_ceiling_check,
+            ["--gate", "init", "--events", "events.jsonl"],
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual(payload.get("verdict"), "ALLOW")
+        self.assertEqual(payload.get("reason"), "no_ceilings_configured")
+        self.assertIn("bypass_allowed", payload)
+        self.assertIsInstance(payload["bypass_allowed"], bool)
+
+
 if __name__ == "__main__":
     unittest.main()
