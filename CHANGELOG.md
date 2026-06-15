@@ -1,5 +1,12 @@
 ### Features
 
+- feat(spec_compliance): implement check_compliance happy path with stubbed subprocess (REQ-09) (251dc85)
+- feat(spec_compliance): implement strict JSON envelope parser (REQ-09, REQ-10) (74f64a4)
+- feat(spec_compliance): render prompt with fenced blocks and placeholder escape (REQ-11) (4283d9e)
+- feat(spec_compliance): add frozen kw_only ComplianceReport dataclass (REQ-08) (dfc2a91)
+- feat(spec_compliance): add frozen kw_only ReqVerdict dataclass (REQ-07) (1dd1eb1)
+- feat(spec_compliance): add ComplianceError exception (REQ-10) (ce92ca7)
+- feat(spec_compliance): add module skeleton, __all__, and import-contract tests (9f457dd)
 - feat(gap_validator): implement symbol_present substring check (REQ-04) (6672eaf)
 - feat(gap_validator): implement line_in_range check (REQ-04) (7dc6bdd)
 - feat(gap_validator): resolve file_path inside repo_root, reject escapes (REQ-05) (4af5cdf)
@@ -66,6 +73,7 @@
 
 ### Bug Fixes
 
+- fix(spec_compliance): enforce documented parser preconditions (REQ-10) (e0150e3)
 - fix(gap_validator): post-impl and production review fixes (597c845)
 - fix: post-impl review fixes for m05-m4-state-integration (4679457)
 - fix(test-state): make cross-thread smoke test deterministic (a9332e8)
@@ -122,6 +130,8 @@
 
 ### Documentation
 
+- docs(plan): add M06a-M2 spec compliance TDD implementation plan (03290e9)
+- docs: update generated documentation (eb5df5a)
 - docs(plan): m06a-m1-gap-validator implementation plan + gap report (142a001)
 - docs: update generated documentation (ecf0658)
 - docs(plan): add m05-m4 state integration TDD plan (40adec4)
@@ -156,6 +166,11 @@
 
 ### Tests
 
+- test(spec_compliance): assert __all__ resolves and forbidden imports absent (REQ-16, NFR) (3f78dff)
+- test(spec_compliance): pin FileNotFoundError contract for missing spec_path (ae6219b)
+- test(spec_compliance): document real-model boundary as skipped test (quality gate) (38d19d3)
+- test(spec_compliance): assert subprocess argument shape, cwd, and LANG=C.UTF-8 (NFR) (8f4e076)
+- test(spec_compliance): cover error matrix for non-zero exit, timeout, parse failure (REQ-10) (fa07ec4)
 - test(gap_validator): assert __all__ resolves and forbidden layer imports absent (REQ-16) (3786ccc)
 - test(gap_validator): cover parse_gap_list error matrix (REQ-06) (7de455e)
 - test(state): cross-thread cmd_build_state_doc never deadlocks (c8f2797)
