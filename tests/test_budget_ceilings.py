@@ -420,5 +420,37 @@ class EvaluatorSurfaceTests(unittest.TestCase):
         self.assertIn("bypass_allowed", budget_ceilings.__all__)
 
 
+class EvaluateCeilingsNoConfigTests(unittest.TestCase):
+    def test_both_none_returns_allow_no_ceilings_sentinel(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        verdict, reason = evaluate_ceilings(
+            "events.jsonl", "init", "2026-06-15T00:00:00Z"
+        )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "no_ceilings_configured")
+
+    def test_empty_ceilings_list_returns_allow_no_ceilings_sentinel(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        verdict, reason = evaluate_ceilings(
+            "events.jsonl", "init", "2026-06-15T00:00:00Z", ceilings=[]
+        )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "no_ceilings_configured")
+
+    def test_no_config_path_does_not_touch_ledger(self) -> None:
+        """Sentinel must short-circuit before any file I/O."""
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        verdict, reason = evaluate_ceilings(
+            "/nonexistent/path/to/events.jsonl",
+            "init",
+            "2026-06-15T00:00:00Z",
+        )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "no_ceilings_configured")
+
+
 if __name__ == "__main__":
     unittest.main()
