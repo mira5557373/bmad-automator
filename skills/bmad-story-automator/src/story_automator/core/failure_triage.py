@@ -47,3 +47,17 @@ class FailureClass(enum.Enum):
     PLATEAU = "PLATEAU"
     REPEATED_RETRY = "REPEATED_RETRY"
     UNKNOWN = "UNKNOWN"
+
+
+class Confidence(enum.Enum):
+    """Three-level confidence ordinal for a classification.
+
+    Case-sensitive member names mirror the value strings; serialisations
+    in M07b emit the bare member name so downstream policy engines (M08
+    adaptive retry, M09 gate) can match on string equality without
+    needing to import this enum.
+    """
+
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
