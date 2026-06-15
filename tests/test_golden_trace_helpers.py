@@ -10,6 +10,7 @@ import threading as _threading
 import time
 import unittest
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 from story_automator.commands import state as _state_module
@@ -28,6 +29,45 @@ from tests.golden_trace_helpers import (
     notify_claude_p,
     serialize_trace,
 )
+
+_GOLDEN_DIR = Path(__file__).parent / "golden"
+_REGEN_ENV = "BMA_GOLDEN_REGEN"
+
+
+def _validate_or_regen(
+    fixture_name: str,
+    builder: Callable[[Path], list[TraceEntry]],
+) -> None:
+    """Validate a shipped fixture against a fresh recording.
+
+    Normal mode: ``load_golden(<fixture>)`` and ``compare_traces(fresh, golden)``;
+    fail with a diagnostic summary if not ok.
+
+    Regen mode (``BMA_GOLDEN_REGEN=1``): build the recording in a tempdir,
+    serialize it, and write to ``<fixture>``. The caller's tempdir is used as
+    ``repo_root`` inside the builder so absolute paths normalize to repo-
+    relative POSIX in the recorded entries.
+    """
+    fixture_path = _GOLDEN_DIR / fixture_name
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp).resolve()
+        entries = builder(root)
+        serialized = serialize_trace(entries)
+    if os.environ.get(_REGEN_ENV) == "1":
+        _GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
+        fixture_path.write_text(serialized, encoding="utf-8")
+        return
+    if not fixture_path.exists():
+        raise AssertionError(
+            f"fixture {fixture_path} does not exist; run with "
+            f"{_REGEN_ENV}=1 to generate it"
+        )
+    golden = load_golden(fixture_path)
+    diff = compare_traces(entries, golden)
+    if not diff.ok:
+        raise AssertionError(
+            f"{fixture_name} diverged from fresh recording:\n{diff.summary()}"
+        )
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -1180,6 +1220,23 @@ class RecorderPerformanceTests(unittest.TestCase):
             f"per-op overhead {overhead_us:.0f}us exceeds 500us guard "
             f"(spec target is ~50us)",
         )
+
+
+class FixtureHelperContractTests(unittest.TestCase):
+    def test_golden_dir_constant_points_to_tests_golden(self) -> None:
+        from tests.test_golden_trace_helpers import _GOLDEN_DIR  # type: ignore[attr-defined]
+
+        self.assertEqual(_GOLDEN_DIR, Path(__file__).parent / "golden")
+
+    def test_regen_env_var_constant(self) -> None:
+        from tests.test_golden_trace_helpers import _REGEN_ENV  # type: ignore[attr-defined]
+
+        self.assertEqual(_REGEN_ENV, "BMA_GOLDEN_REGEN")
+
+    def test_validate_or_regen_callable_present(self) -> None:
+        from tests.test_golden_trace_helpers import _validate_or_regen  # type: ignore[attr-defined]
+
+        self.assertTrue(callable(_validate_or_regen))
 
 
 class GoldenDirectoryStructureTests(unittest.TestCase):
