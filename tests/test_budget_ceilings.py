@@ -503,5 +503,85 @@ class EvaluateCeilingsEmptyLedgerTests(unittest.TestCase):
         self.assertEqual(reason, "c1:per_run:spent=0.0000:limit=10.0000")
 
 
+class EvaluateCeilingsDecisionRuleTests(unittest.TestCase):
+    def _ceiling(self):
+        return BudgetCeiling(
+            name="c1",
+            window="per_run",
+            limit_usd=10.0,
+            warn_at=0.8,
+            gate_names=("init",),
+        )
+
+    def _event(self, cost):
+        return StoryCompleted(
+            timestamp="2026-06-15T00:00:00Z",
+            run_id="r1",
+            epic="E1",
+            story_key="S1",
+            duration_s=1.0,
+            cost_usd=cost,
+            tokens_in=0,
+            tokens_out=0,
+            attempts=1,
+        )
+
+    def test_below_warn_threshold_returns_allow(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(1.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.ALLOW)
+        self.assertEqual(reason, "c1:per_run:spent=1.0000:limit=10.0000")
+
+    def test_at_warn_threshold_returns_warn(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 10.0 * 0.8 = 8.0 exactly
+            path = _write_ledger(tmp, [self._event(8.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.WARN)
+        self.assertEqual(reason, "c1:per_run:spent=8.0000:limit=10.0000")
+
+    def test_between_warn_and_limit_returns_warn(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(5.0), self._event(4.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.WARN)
+        self.assertEqual(reason, "c1:per_run:spent=9.0000:limit=10.0000")
+
+    def test_at_limit_returns_block(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(10.0)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.BLOCK)
+        self.assertEqual(reason, "c1:per_run:spent=10.0000:limit=10.0000")
+
+    def test_above_limit_returns_block(self) -> None:
+        from story_automator.core.budget_ceilings import evaluate_ceilings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_ledger(tmp, [self._event(12.5)])
+            verdict, reason = evaluate_ceilings(
+                path, "init", "2026-06-15T00:00:00Z", ceilings=[self._ceiling()]
+            )
+        self.assertEqual(verdict, CeilingDecision.BLOCK)
+        self.assertEqual(reason, "c1:per_run:spent=12.5000:limit=10.0000")
+
+
 if __name__ == "__main__":
     unittest.main()
