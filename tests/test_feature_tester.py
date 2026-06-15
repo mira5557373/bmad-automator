@@ -123,5 +123,48 @@ class TestPlanEntryDataclassTests(unittest.TestCase):
             entry.action = "skipped"  # type: ignore[misc]
 
 
+class NormalizeReqIdTests(unittest.TestCase):
+    """Internal helper: normalizes REQ-NN into its three rendered forms."""
+
+    def test_normalizes_well_formed_id(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        underscored_lower, class_suffix = _normalize_req_id("REQ-07")
+        self.assertEqual(underscored_lower, "req_07")
+        self.assertEqual(class_suffix, "REQ_07")
+
+    def test_normalizes_multi_digit_id(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        underscored_lower, class_suffix = _normalize_req_id("REQ-123")
+        self.assertEqual(underscored_lower, "req_123")
+        self.assertEqual(class_suffix, "REQ_123")
+
+    def test_rejects_lowercase_prefix(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        with self.assertRaises(ValueError) as ctx:
+            _normalize_req_id("req-07")
+        self.assertIn("REQ-", str(ctx.exception))
+
+    def test_rejects_missing_dash(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        with self.assertRaises(ValueError):
+            _normalize_req_id("REQ07")
+
+    def test_rejects_empty_string(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        with self.assertRaises(ValueError):
+            _normalize_req_id("")
+
+    def test_rejects_trailing_whitespace(self) -> None:
+        from story_automator.core.feature_tester import _normalize_req_id
+
+        with self.assertRaises(ValueError):
+            _normalize_req_id("REQ-07 ")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

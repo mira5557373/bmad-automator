@@ -18,6 +18,7 @@ loads `spec_compliance.py`.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -55,3 +56,25 @@ class TestPlanEntry:
     existing_test_path: str | None
     created_test_path: str | None
     action: Literal["found", "created", "skipped"]
+
+
+_REQ_ID_RE: re.Pattern[str] = re.compile(r"REQ-\d+")
+
+
+def _normalize_req_id(req_id: str) -> tuple[str, str]:
+    """Return ``(req_id_lower_underscored, class_suffix)`` for a REQ id.
+
+    Preconditions: `req_id` matches ``re.fullmatch(r"REQ-\\d+", req_id)``
+        exactly — leading/trailing whitespace, lowercase prefixes, and
+        missing dashes are all rejected.
+    Postconditions: returns a 2-tuple of strings; the first replaces the
+        dash with an underscore and lowercases the whole string (for
+        method names and file names), the second only replaces the dash
+        with an underscore (for class name suffixes).
+    Raises: ValueError if the input does not match the required pattern.
+    """
+    if not _REQ_ID_RE.fullmatch(req_id):
+        raise ValueError(
+            f"req_id must match 'REQ-<digits>'; got {req_id!r}"
+        )
+    return req_id.lower().replace("-", "_"), req_id.replace("-", "_")
