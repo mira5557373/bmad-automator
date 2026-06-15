@@ -73,5 +73,20 @@ class BudgetCeilingShapeTests(unittest.TestCase):
         self.assertEqual(ceiling.gate_names, ("init", "story_start"))
 
 
+class ParseWarningsModuleStateTests(unittest.TestCase):
+    def test_module_exposes_parse_warnings_list(self) -> None:
+        from story_automator.core import budget_ceilings
+
+        self.assertTrue(hasattr(budget_ceilings, "_PARSE_WARNINGS"))
+        self.assertIsInstance(budget_ceilings._PARSE_WARNINGS, list)
+
+    def test_parse_warnings_starts_empty(self) -> None:
+        from story_automator.core import budget_ceilings
+
+        first = budget_ceilings._PARSE_WARNINGS
+        second = budget_ceilings._PARSE_WARNINGS
+        self.assertIs(first, second)
+
+
 if __name__ == "__main__":
     unittest.main()

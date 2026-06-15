@@ -45,3 +45,13 @@ class BudgetCeiling:
     limit_usd: float
     warn_at: float
     gate_names: tuple[str, ...]
+
+
+_PARSE_WARNINGS: list[dict[str, str]] = []
+"""Structured parse warnings, cleared at the start of each
+``parse_ceilings_config`` call (REQ-05). Each entry is a dict with
+``index`` (str repr of the position in the array), ``reason``
+(short slug), and ``detail`` (free-form message). Intentionally
+module-level, not part of the function return, so callers that care
+about warnings can opt in without complicating the happy-path
+signature."""
