@@ -341,5 +341,41 @@ class CmdCeilingCheckGateFilterTests(unittest.TestCase):
                 self.assertIn("any_gate", payload["reason"])
 
 
+class CmdCeilingCheckNowDefaultTests(unittest.TestCase):
+    def test_now_omitted_uses_iso_now(self) -> None:
+        """For per_run ceilings the anchor is unused, so the test
+        verifies the call succeeds without ``--now``. (24h/7d/30d
+        windows still resolve against the runtime ``iso_now()``.)"""
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = _write_workflow(
+                tmp,
+                [
+                    {
+                        "name": "cap",
+                        "window": "per_run",
+                        "limit_usd": 10.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["init"],
+                    }
+                ],
+            )
+            ledger = _write_ledger(tmp, [_completed(1.0)])
+            code, payload = _capture(
+                cmd_ceiling_check,
+                [
+                    "--gate",
+                    "init",
+                    "--events",
+                    str(ledger),
+                    "--workflow",
+                    str(wf),
+                ],
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["verdict"], "ALLOW")
+
+
 if __name__ == "__main__":
     unittest.main()
