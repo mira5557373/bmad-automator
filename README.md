@@ -1,1 +1,1 @@
-Updated `README.md` with overview (project goal + milestone status table), quickstart (test/lint/coverage/build commands + platform support), architecture (module map + dependency allowlist + shared helpers), and contributing (Python style, test rules, Conventional Commits with recent M03 commits, milestone discipline, hard guardrails).
+Updated `README.md` with overview, quickstart, architecture, and contributing sections — stats reflect M03 active milestone, version 1.15.0, and current dependency allowlist.

@@ -1,5 +1,11 @@
 ### Features
 
+- feat(budget-ceilings): wire retry_start gate ceiling-check into step-03a-execute-review (M03 REQ-13) (82b7d8b)
+- feat(budget-ceilings): wire story_start gate ceiling-check into step-03-execute (M03 REQ-13) (6ef4ab1)
+- feat(budget-ceilings): wire init gate ceiling-check into step-01-init (M03 REQ-13) (3082fcb)
+- feat(budget-ceilings): ceiling-check emits no-config sentinel JSON (M03 REQ-06/REQ-13) (b348337)
+- feat(budget-ceilings): ceiling-check flag parser with gate/events validation (M03-M3) (1e3c1a1)
+- feat(budget-ceilings): scaffold ceiling-check CLI subcommand (M03-M3) (d2c9044)
 - feat(budget-ceilings): bypass_allowed env + isatty truth table (M03 REQ-11) (0c1575e)
 - feat(budget-ceilings): merge multi-ceiling verdicts by severity (M03 REQ-10) (9af152c)
 - feat(budget-ceilings): filter ceilings by gate_name (M03 REQ-07) (327b723)
@@ -56,6 +62,7 @@
 
 ### Bug Fixes
 
+- fix(budget-ceilings): post-impl and production review fixes (5b33d7a)
 - fix(budget-ceilings): skip non-finite cost values in ledger summation (45a4421)
 - fix(budget-ceilings): post-impl review fixes for M03-M1 (b7a22dc)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
@@ -113,6 +120,8 @@
 
 ### Documentation
 
+- docs(budget-ceilings): add M03-M3 bypass/CLI/skill-wiring plan (12372de)
+- docs: update generated documentation (f34d40a)
 - docs(budget-ceilings): TDD plan for M03-M2 evaluator core (e056f4a)
 - docs: update generated documentation (0a0c369)
 - docs(budget-ceilings): finalize module docstring and add REQ-01 prelude tests (d1fb1d5)
@@ -141,6 +150,11 @@
 
 ### Tests
 
+- test(budget-ceilings): ceiling-check defaults --now to iso_now() (M03 REQ-13) (f4a1fc5)
+- test(budget-ceilings): ceiling-check honors gate filter and workflow source (M03 REQ-06/REQ-07) (c0dc873)
+- test(budget-ceilings): ceiling-check reflects bypass_allowed truth table (M03 REQ-11/REQ-14) (07f758e)
+- test(budget-ceilings): ceiling-check WARN/BLOCK paths emit verdict JSON (M03 REQ-09/REQ-13) (4495bae)
+- test(budget-ceilings): ceiling-check ALLOW path emits structured reason (M03 REQ-09/REQ-13) (8d88f77)
 - test(budget-ceilings): workflow_json_path source path round-trip (M03 REQ-06) (b2edf9e)
 - test(budget-ceilings): determinism gate — 100 calls byte-identical (M03 NFR) (cfd5674)
 - test(budget-ceilings): tolerate CRLF and malformed ledger lines (M03 NFR) (c8b847c)
@@ -188,6 +202,10 @@
 - chore: update changelog (7c9c3c1)
 - chore: release 1.12.1 (334337e)
 - chore: prepare repository for open source release (de29b37)
+
+### Style
+
+- style(budget-ceilings): apply ruff format to ceiling-check CLI (0afda25)
 
 ### Other
 
