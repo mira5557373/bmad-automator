@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Literal
+from pathlib import Path
+from typing import Literal, cast
 
 Channel = Literal["event", "state", "claude_p"]
 MismatchField = Literal["channel", "kind", "payload", "length"]
+
+_VALID_CHANNELS: frozenset[str] = frozenset({"event", "state", "claude_p"})
+_REQUIRED_KEYS: tuple[str, ...] = ("seq", "channel", "kind", "payload")
 
 __all__ = [
     "Channel",
@@ -100,8 +104,52 @@ def serialize_trace(entries: list[TraceEntry]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
 
 
-def load_golden(path: object) -> list[TraceEntry]:  # pragma: no cover - replaced
-    raise NotImplementedError
+def load_golden(path: Path) -> list[TraceEntry]:
+    """Parse a stored golden fixture into a list of TraceEntry (REQ-08).
+
+    Raises GoldenTraceError on malformed JSON, non-list top-level value,
+    non-dict entry, missing required keys, or unknown channel.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GoldenTraceError(f"{path}: malformed JSON: {exc}") from exc
+    if not isinstance(raw, list):
+        raise GoldenTraceError(
+            f"{path}: top-level value must be a JSON array, got {type(raw).__name__}"
+        )
+    entries: list[TraceEntry] = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} must be a JSON object, got {type(item).__name__}"
+            )
+        missing = [k for k in _REQUIRED_KEYS if k not in item]
+        if missing:
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} missing required keys: {missing}"
+            )
+        channel = item["channel"]
+        if channel not in _VALID_CHANNELS:
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} unknown channel {channel!r}; "
+                f"expected one of {sorted(_VALID_CHANNELS)}"
+            )
+        payload = item["payload"]
+        if not isinstance(payload, dict):
+            raise GoldenTraceError(
+                f"{path}: entry #{idx} payload must be an object, "
+                f"got {type(payload).__name__}"
+            )
+        entries.append(
+            TraceEntry(
+                seq=int(item["seq"]),
+                channel=cast(Channel, channel),
+                kind=str(item["kind"]),
+                payload=cast("dict[str, object]", dict(payload)),
+            )
+        )
+    return entries
 
 
 def compare_traces(  # pragma: no cover - replaced

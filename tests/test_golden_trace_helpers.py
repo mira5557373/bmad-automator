@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import tempfile
 import unittest
+from pathlib import Path
 
 from tests.golden_trace_helpers import (
     GoldenTraceError,
     TraceDiff,
     TraceEntry,
     TraceMismatch,
+    load_golden,
     serialize_trace,
 )
 
@@ -184,6 +187,39 @@ class SerializeTraceTests(unittest.TestCase):
         a = TraceEntry(seq=0, channel="event", kind="X", payload={"a": 1, "b": 2})
         b = TraceEntry(seq=0, channel="event", kind="X", payload={"b": 2, "a": 1})
         self.assertEqual(serialize_trace([a]), serialize_trace([b]))
+
+
+class LoadGoldenHappyPathTests(unittest.TestCase):
+    def test_round_trip_serialize_then_load(self) -> None:
+        entries = [
+            TraceEntry(
+                seq=0, channel="event", kind="StoryStarted", payload={"epic": "1"}
+            ),
+            TraceEntry(
+                seq=1,
+                channel="state",
+                kind="mutation",
+                payload={"path": "state.json", "sha256": "abc"},
+            ),
+            TraceEntry(
+                seq=2,
+                channel="claude_p",
+                kind="invoke",
+                payload={"argv": ["claude", "-p"]},
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "golden.json"
+            path.write_text(serialize_trace(entries), encoding="utf-8")
+            loaded = load_golden(path)
+        self.assertEqual(loaded, entries)
+
+    def test_load_empty_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty.json"
+            path.write_text("[]\n", encoding="utf-8")
+            loaded = load_golden(path)
+        self.assertEqual(loaded, [])
 
 
 if __name__ == "__main__":
