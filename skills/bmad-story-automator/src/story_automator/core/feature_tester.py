@@ -148,7 +148,8 @@ def _find_existing_test(tests_dir: Path, req_id: str) -> str | None:
         lexicographic order; returns the first whose UTF-8 contents
         contain `req_id` bounded by non-word characters (so ``REQ-07``
         does NOT match a file mentioning ``REQ-070``).
-    Raises: nothing — file-read errors propagate naturally as ``OSError``.
+    Raises: nothing of its own; ``OSError`` from filesystem failures and
+        ``UnicodeDecodeError`` from non-UTF-8 files propagate naturally.
     """
     if not tests_dir.exists():
         return None
@@ -172,6 +173,7 @@ def _plan_for_verdict(
 
     existing = _find_existing_test(tests_dir, req_id)
     if existing is not None:
+        logger.info("feature_tester.found req_id=%s path=%s", req_id, existing)
         return TestPlanEntry(
             req_id=req_id,
             existing_test_path=existing,
@@ -180,21 +182,26 @@ def _plan_for_verdict(
         )
 
     target = tests_dir / f"test_compliance_{req_id_lower_underscored}.py"
+    target_str = str(target.resolve())
 
     if dry_run:
+        logger.info(
+            "feature_tester.skipped req_id=%s would_write=%s", req_id, target_str
+        )
         return TestPlanEntry(
             req_id=req_id,
             existing_test_path=None,
-            created_test_path=str(target.resolve()),
+            created_test_path=target_str,
             action="skipped",
         )
 
     tests_dir.mkdir(parents=True, exist_ok=True)
     write_atomic_text(target, _render_skeleton(req_id))
+    logger.info("feature_tester.created req_id=%s path=%s", req_id, target_str)
     return TestPlanEntry(
         req_id=req_id,
         existing_test_path=None,
-        created_test_path=str(target.resolve()),
+        created_test_path=target_str,
         action="created",
     )
 

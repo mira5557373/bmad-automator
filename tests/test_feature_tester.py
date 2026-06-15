@@ -521,6 +521,7 @@ class PlanFeatureTestsDryRunTests(unittest.TestCase):
             entry = plan[0]
             self.assertEqual(entry.action, "skipped")
             self.assertIsNone(entry.existing_test_path)
+            self.assertIsNotNone(entry.created_test_path)
             would_be = Path(entry.created_test_path)
             self.assertEqual(would_be.name, "test_compliance_req_07.py")
             self.assertFalse(would_be.exists())
