@@ -27,6 +27,14 @@ def _validate_arm_slug(name: str) -> str | None:
     return None
 
 
+def _validate_arm_dir(arm_dir: Path) -> list[str]:
+    findings: list[str] = []
+    for name in REQUIRED_FILES:
+        if not (arm_dir / name).is_file():
+            findings.append(f"{arm_dir / name}: required file missing")
+    return findings
+
+
 def _validate_root(root: Path) -> list[str]:
     findings: list[str] = []
     for date_dir in sorted(p for p in root.iterdir() if p.is_dir()):
@@ -39,6 +47,7 @@ def _validate_root(root: Path) -> list[str]:
             if arm_err is not None:
                 findings.append(f"{arm_dir}: {arm_err}")
                 continue
+            findings.extend(_validate_arm_dir(arm_dir))
     return findings
 
 

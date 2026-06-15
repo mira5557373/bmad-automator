@@ -67,3 +67,58 @@ class DateAndArmValidationTests(unittest.TestCase):
             root = self._make_root(tmp)
             (root / "2026-06-13").mkdir()
             self.assertEqual(main([str(root)]), 0)
+
+
+def _write_minimal_arm(
+    root: Path, date_str: str = "2026-06-13", arm: str = "control"
+) -> Path:
+    arm_dir = root / date_str / arm
+    arm_dir.mkdir(parents=True)
+    (arm_dir / "telemetry.jsonl").write_text(
+        '{"event_type":"StoryStarted","ts":"2026-06-13T00:00:00Z"}\n',
+        encoding="utf-8",
+        newline="",
+    )
+    (arm_dir / "report.md").write_text(
+        "---\n"
+        "arm: control\n"
+        "date: 2026-06-13\n"
+        "run_id: r1\n"
+        "git_sha: abc1234\n"
+        "started_at: 2026-06-13T00:00:00Z\n"
+        "ended_at: 2026-06-13T01:00:00Z\n"
+        "---\n"
+        "Body.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    (arm_dir / "config.json").write_text(
+        '{"arm":"control","seed":1,"model":"m","concurrency":1,"notes":"n"}',
+        encoding="utf-8",
+        newline="",
+    )
+    return arm_dir
+
+
+class RequiredFilesTests(unittest.TestCase):
+    def test_valid_arm_passes(self) -> None:
+        # REQ-13(a)
+        from scripts.verify_soak_format import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "soak"
+            root.mkdir()
+            _write_minimal_arm(root)
+            self.assertEqual(main([str(root)]), 0)
+
+    def test_each_missing_required_file_fails(self) -> None:
+        # REQ-13(b) — covers each of the three required files individually.
+        from scripts.verify_soak_format import main
+
+        for missing in ("telemetry.jsonl", "report.md", "config.json"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "soak"
+                root.mkdir()
+                arm_dir = _write_minimal_arm(root)
+                (arm_dir / missing).unlink()
+                self.assertEqual(main([str(root)]), 1, missing)
