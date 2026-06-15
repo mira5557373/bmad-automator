@@ -7,6 +7,7 @@ events, no state mutations, and no claude_p invocations.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 Channel = Literal["event", "state", "claude_p"]
@@ -30,8 +31,19 @@ class GoldenTraceError(ValueError):
 
 
 # Stubs — concrete implementations land in later tasks.
-class TraceEntry:  # pragma: no cover - replaced in Task 3
-    pass
+@dataclass(kw_only=True, frozen=True)
+class TraceEntry:
+    """One arrival-ordered observation recorded by the golden-trace recorder.
+
+    `payload` is a JSON-object dict whose key ordering is canonicalized at
+    serialize time (REQ-07 uses sort_keys=True), so callers do not need to
+    pre-sort payloads to get byte-identical traces.
+    """
+
+    seq: int
+    channel: Channel
+    kind: str
+    payload: dict[str, object]
 
 
 class TraceMismatch:  # pragma: no cover - replaced in Task 4
