@@ -1032,3 +1032,154 @@ class HeartbeatThreadConstructorTests(unittest.TestCase):
         )
         self.assertEqual(thread.interval, 0.05)
         self.assertEqual(HeartbeatThread.interval, 60.0)
+
+
+class HeartbeatThreadRefreshTests(unittest.TestCase):
+    """REQ-13: HeartbeatThread refresh observed by reading the payload twice."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def _make(self, *, lock_path: Path, interval: float):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import (
+            HeartbeatThread,
+            RunLockIdentity,
+            write_atomic_text,
+        )
+
+        identity = RunLockIdentity(
+            pid=os.getpid(),
+            start_time=0.0,
+            hostname="h",
+            heartbeat_iso="2026-06-15T00:00:00Z",
+            run_id="r",
+        )
+        # Seed the payload so readers never see absence.
+        write_atomic_text(lock_path, identity.to_json())
+        return HeartbeatThread(
+            lock_path=lock_path,
+            identity=identity,
+            interval=interval,
+        )
+
+    def test_run_refreshes_heartbeat_iso_observed_by_two_reads(self) -> None:
+        lock_path = self.dir / "run.payload"
+
+        counter = {"n": 0}
+
+        def fake_iso_now() -> str:
+            counter["n"] += 1
+            n = counter["n"]
+            return (
+                f"2026-06-15T{(n // 3600) % 24:02d}:{(n // 60) % 60:02d}:{n % 60:02d}Z"
+            )
+
+        def read_payload():  # type: ignore[no-untyped-def]
+            try:
+                return json.loads(lock_path.read_text(encoding="utf-8"))
+            except PermissionError:
+                if sys.platform != "win32":
+                    raise
+                return None
+
+        thread = self._make(lock_path=lock_path, interval=0.01)
+        with patch(
+            "story_automator.core.atomic_io.iso_now",
+            side_effect=fake_iso_now,
+        ):
+            thread.start()
+            try:
+                deadline = time.monotonic() + 2.0
+                first = None
+                while time.monotonic() < deadline:
+                    parsed = read_payload()
+                    if parsed and parsed["heartbeat_iso"] != "2026-06-15T00:00:00Z":
+                        first = parsed["heartbeat_iso"]
+                        break
+                    time.sleep(0.005)
+                self.assertIsNotNone(first, "first refresh never landed")
+
+                deadline = time.monotonic() + 2.0
+                second = first
+                while time.monotonic() < deadline:
+                    parsed = read_payload()
+                    if parsed and parsed["heartbeat_iso"] != first:
+                        second = parsed["heartbeat_iso"]
+                        break
+                    time.sleep(0.005)
+                self.assertNotEqual(second, first, "second refresh never landed")
+            finally:
+                thread.stop()
+                thread.join(timeout=2.0)
+                self.assertFalse(thread.is_alive(), "thread did not stop")
+
+    def test_stop_observed_within_one_interval(self) -> None:
+        # The loop must poll the stop event via Event.wait(interval) rather
+        # than sleep(interval) — otherwise stop() is delayed by up to one
+        # full interval. With interval=0.5s the join must complete promptly.
+        lock_path = self.dir / "run.payload"
+        thread = self._make(lock_path=lock_path, interval=0.5)
+        thread.start()
+        time.sleep(0.05)
+        t0 = time.monotonic()
+        thread.stop()
+        thread.join(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        self.assertFalse(thread.is_alive(), "thread did not stop")
+        self.assertLess(elapsed, 0.4, f"stop took {elapsed:.3f}s — uses sleep?")
+
+    def test_run_does_not_refresh_after_stop(self) -> None:
+        lock_path = self.dir / "run.payload"
+        thread = self._make(lock_path=lock_path, interval=0.01)
+
+        from story_automator.core import atomic_io as mod
+
+        real_write = mod.write_atomic_text
+        call_count = {"n": 0}
+
+        def spy(path, data, *, encoding="utf-8"):  # type: ignore[no-untyped-def]
+            call_count["n"] += 1
+            real_write(path, data, encoding=encoding)
+
+        with patch.object(mod, "write_atomic_text", side_effect=spy):
+            thread.start()
+            time.sleep(0.05)
+            thread.stop()
+            thread.join(timeout=2.0)
+            n_after_stop = call_count["n"]
+            time.sleep(0.1)
+            self.assertEqual(
+                call_count["n"],
+                n_after_stop,
+                "writes continued after stop()",
+            )
+
+    def test_run_survives_transient_write_errors(self) -> None:
+        lock_path = self.dir / "run.payload"
+        thread = self._make(lock_path=lock_path, interval=0.01)
+
+        from story_automator.core import atomic_io as mod
+
+        real_write = mod.write_atomic_text
+        calls = {"n": 0}
+
+        def flaky(path, data, *, encoding="utf-8"):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("simulated transient disk error")
+            real_write(path, data, encoding=encoding)
+
+        with patch.object(mod, "write_atomic_text", side_effect=flaky):
+            thread.start()
+            try:
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline and calls["n"] < 2:
+                    time.sleep(0.005)
+                self.assertGreaterEqual(calls["n"], 2)
+                self.assertTrue(thread.is_alive())
+                self.assertEqual(thread.write_errors, 1)
+            finally:
+                thread.stop()
+                thread.join(timeout=2.0)

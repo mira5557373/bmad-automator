@@ -370,5 +370,23 @@ class HeartbeatThread(threading.Thread):
         """Signal the loop to exit at its next wake-up."""
         self._stop_event.set()
 
-    def run(self) -> None:  # pragma: no cover - filled in Task 6
-        return None
+    def run(self) -> None:
+        """Refresh the on-disk heartbeat until ``stop()`` is signalled.
+
+        REQ-08: rewrites the payload via ``write_atomic_text`` with a
+        refreshed ``heartbeat_iso`` each tick. The loop uses
+        ``Event.wait(self.interval)`` so ``stop()`` is observed within
+        one wake-up rather than waiting up to a full interval. Transient
+        write failures (e.g. an ENOSPC blip) are counted on
+        ``self.write_errors`` and swallowed so a single bad refresh does
+        not terminate the daemon; surfacing those counts is M02's job.
+        """
+        while not self._stop_event.is_set():
+            try:
+                self._identity.heartbeat_iso = iso_now()
+                write_atomic_text(self._lock_path, self._identity.to_json())
+            except Exception:
+                self.write_errors += 1
+            # wait() returns True if the event was set, False on timeout.
+            if self._stop_event.wait(self.interval):
+                return
