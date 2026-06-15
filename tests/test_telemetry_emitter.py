@@ -10,7 +10,23 @@ from pathlib import Path
 from unittest import mock
 
 from story_automator.core.telemetry_emitter import TelemetryEmitter
-from story_automator.core.telemetry_events import StoryStarted
+from story_automator.core.telemetry_events import (
+    BudgetAlert,
+    CostCharged,
+    EscalationTriggered,
+    Event,
+    RetroFired,
+    RetryAttempt,
+    ReviewCycle,
+    StoryCompleted,
+    StoryDeferred,
+    StoryFailed,
+    StoryStarted,
+    TmuxSessionCompleted,
+    TmuxSessionCrashed,
+    TmuxSessionSpawned,
+    parse_event,
+)
 
 
 class TelemetryEmitterScaffoldTests(unittest.TestCase):
@@ -266,3 +282,172 @@ class TelemetryEmitterRunIdTests(unittest.TestCase):
             )
             emitter.emit(event)
             self.assertEqual(event.run_id, "")
+
+
+class TelemetryEmitterRoundTripTests(unittest.TestCase):
+    """REQ-12: every M01 event type round-trips through emit → parse_event."""
+
+    def _emit_and_reparse(self, event: Event) -> Event:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            emitter = TelemetryEmitter(path)
+            emitter.emit(event)
+            line = path.read_text(encoding="utf-8").rstrip("\n")
+            return parse_event(line)
+
+    def test_story_started_round_trip(self) -> None:
+        original = StoryStarted(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            agent="claude",
+            model="sonnet",
+            complexity="medium",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_story_completed_round_trip(self) -> None:
+        original = StoryCompleted(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            duration_s=1.5,
+            cost_usd=0.25,
+            tokens_in=100,
+            tokens_out=200,
+            attempts=1,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_story_failed_round_trip(self) -> None:
+        original = StoryFailed(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            error_class="lint",
+            reason="ruff E501",
+            attempts=5,
+            final_session="sess-1",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_story_deferred_round_trip(self) -> None:
+        original = StoryDeferred(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            reason="plateau",
+            tasks_completed=3,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_retry_attempt_round_trip(self) -> None:
+        original = RetryAttempt(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            attempt_num=2,
+            agent="claude",
+            model="opus",
+            prev_error_class="test_fail",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_escalation_triggered_round_trip(self) -> None:
+        original = EscalationTriggered(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            trigger_id=3,
+            severity="critical",
+            message="review loop",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_review_cycle_round_trip(self) -> None:
+        original = ReviewCycle(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            cycle_num=2,
+            issues_found=4,
+            blocking=True,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_retro_fired_round_trip(self) -> None:
+        original = RetroFired(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            stories_completed=4,
+            total_cost_usd=1.50,
+            duration_s=120.0,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_tmux_session_spawned_round_trip(self) -> None:
+        original = TmuxSessionSpawned(
+            timestamp="t",
+            run_id="r",
+            session_name="sess-1",
+            story_key="S",
+            pid=12345,
+            pane_geometry="80x24",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_tmux_session_completed_round_trip(self) -> None:
+        original = TmuxSessionCompleted(
+            timestamp="t",
+            run_id="r",
+            session_name="sess-1",
+            story_key="S",
+            exit_code=0,
+            duration_s=60.0,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_tmux_session_crashed_round_trip(self) -> None:
+        original = TmuxSessionCrashed(
+            timestamp="t",
+            run_id="r",
+            session_name="sess-1",
+            story_key="S",
+            exit_code=137,
+            last_capture_chars=500,
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_cost_charged_round_trip(self) -> None:
+        original = CostCharged(
+            timestamp="t",
+            run_id="r",
+            epic="E",
+            story_key="S",
+            phase="dev",
+            cost_usd=0.12,
+            tokens_in=50,
+            tokens_out=100,
+            model="sonnet",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
+
+    def test_budget_alert_round_trip(self) -> None:
+        original = BudgetAlert(
+            timestamp="t",
+            run_id="r",
+            threshold_pct=75,
+            total_cost_usd=7.5,
+            max_budget_usd=10.0,
+            epic="E",
+            story_key="S",
+        )
+        self.assertEqual(self._emit_and_reparse(original), original)
