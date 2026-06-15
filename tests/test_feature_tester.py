@@ -467,5 +467,63 @@ class PlanFeatureTestsHappyPathTests(unittest.TestCase):
                 )
 
 
+class PlanFeatureTestsStatusFilterTests(unittest.TestCase):
+    """REQ-13: processes only verdicts with status == 'implemented'."""
+
+    def test_missing_verdicts_dropped(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07", status="missing")],
+                tests_dir=tests_dir,
+            )
+            self.assertEqual(plan, [])
+            self.assertEqual(
+                list(tests_dir.glob("test_compliance_*.py")), []
+            )
+
+    def test_partial_verdicts_dropped(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07", status="partial")],
+                tests_dir=tests_dir,
+            )
+            self.assertEqual(plan, [])
+
+    def test_mixed_input_keeps_only_implemented(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [
+                    _make_verdict("REQ-07", status="implemented"),
+                    _make_verdict("REQ-08", status="missing"),
+                    _make_verdict("REQ-09", status="partial"),
+                    _make_verdict("REQ-10", status="implemented"),
+                ],
+                tests_dir=tests_dir,
+            )
+            self.assertEqual(
+                sorted(e.req_id for e in plan), ["REQ-07", "REQ-10"]
+            )
+
+    def test_dropped_verdicts_do_not_validate_req_id(self) -> None:
+        """Dropped early — a malformed missing/partial id must NOT raise."""
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = plan_feature_tests(
+                [_make_verdict("not-a-req", status="missing")],
+                tests_dir=Path(tmp),
+            )
+            self.assertEqual(plan, [])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
