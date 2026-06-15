@@ -12,6 +12,7 @@ from story_automator.core.drift_detector import (
     DriftReport,
     _classify,
     compute_drift,
+    format_drift_report,
 )
 
 
@@ -314,6 +315,67 @@ class ComputeDriftSortOrderTests(unittest.TestCase):
         self.assertEqual(first.entries, second.entries)
         self.assertEqual(first.baseline_source, second.baseline_source)
         self.assertEqual(first.current_source, second.current_source)
+
+
+class FormatDriftReportTests(unittest.TestCase):
+    def test_snapshot_for_known_fixture(self) -> None:
+        baseline = _table(
+            _entry("alpha", "story", 0.80),
+            _entry("beta", "review", 0.90),
+            source_path="/fixtures/base.jsonl",
+        )
+        current = _table(
+            _entry("alpha", "story", 0.60),  # delta = -0.20 -> severe
+            _entry("beta", "review", 0.93),  # delta = +0.03 -> stable
+            source_path="/fixtures/now.jsonl",
+        )
+        report = compute_drift(baseline=baseline, current=current)
+        rendered = format_drift_report(report)
+        expected = (
+            "baseline: /fixtures/base.jsonl\tcurrent: /fixtures/now.jsonl\n"
+            "model_id\ttask_kind\tbaseline\tcurrent\tdelta\tclassification\n"
+            "alpha\tstory\t0.8000\t0.6000\t-0.2000\tsevere_drift\n"
+            "beta\treview\t0.9000\t0.9300\t+0.0300\tstable\n"
+        )
+        self.assertEqual(rendered, expected)
+
+    def test_ends_with_single_trailing_newline(self) -> None:
+        rendered = format_drift_report(
+            compute_drift(baseline=_table(), current=_table())
+        )
+        self.assertTrue(rendered.endswith("\n"))
+        self.assertFalse(rendered.endswith("\n\n"))
+
+    def test_empty_report_still_has_header(self) -> None:
+        rendered = format_drift_report(
+            DriftReport(
+                entries=[],
+                generated_at="2026-06-15T00:00:00Z",
+                baseline_source="b",
+                current_source="c",
+            )
+        )
+        expected = (
+            "baseline: b\tcurrent: c\n"
+            "model_id\ttask_kind\tbaseline\tcurrent\tdelta\tclassification\n"
+        )
+        self.assertEqual(rendered, expected)
+
+    def test_signed_delta_formatting(self) -> None:
+        baseline = _table(_entry("m", "t", 0.50))
+        current = _table(_entry("m", "t", 0.60))
+        rendered = format_drift_report(
+            compute_drift(baseline=baseline, current=current)
+        )
+        self.assertIn("\t+0.1000\t", rendered)
+
+    def test_is_ascii_only(self) -> None:
+        baseline = _table(_entry("m", "t", 0.50))
+        current = _table(_entry("m", "t", 0.55))
+        rendered = format_drift_report(
+            compute_drift(baseline=baseline, current=current)
+        )
+        rendered.encode("ascii")  # raises if non-ASCII slipped in
 
 
 if __name__ == "__main__":

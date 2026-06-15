@@ -9,7 +9,7 @@ no alarms.
 
 from __future__ import annotations
 
-__all__ = [  # noqa: F822
+__all__ = [
     "DriftClassification",
     "DriftEntry",
     "DriftReport",
@@ -135,3 +135,28 @@ def compute_drift(
         baseline_source=baseline.source_path,
         current_source=current.source_path,
     )
+
+
+def format_drift_report(report: DriftReport) -> str:
+    """Render a DriftReport as deterministic plain-ASCII text.
+
+    Line 1 names both sources. Line 2 is the tab-separated header row.
+    Body rows render `baseline_success_rate` and `current_success_rate`
+    with four decimal places, and `delta` with an explicit sign and
+    four decimal places. The final character is a single trailing
+    newline.
+    """
+
+    lines: list[str] = [
+        f"baseline: {report.baseline_source}\tcurrent: {report.current_source}",
+        "model_id\ttask_kind\tbaseline\tcurrent\tdelta\tclassification",
+    ]
+    for entry in report.entries:
+        lines.append(
+            f"{entry.model_id}\t{entry.task_kind}\t"
+            f"{entry.baseline_success_rate:.4f}\t"
+            f"{entry.current_success_rate:.4f}\t"
+            f"{entry.delta:+.4f}\t"
+            f"{entry.classification.value}"
+        )
+    return "\n".join(lines) + "\n"
