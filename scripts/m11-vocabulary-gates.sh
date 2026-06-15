@@ -57,7 +57,8 @@ docs/changelog/260415.md:3,33,51
 docs/changelog/260506.md:3
 docs/changelog/260508.md:3,25,43
 docs/changelog/260517.md:3
-docs/changelog/260519.md:3"
+docs/changelog/260519.md:3
+docs/changelog/260615.md:3"
 
 ACTUAL=$(for F in docs/changelog/*.md; do
   LINES=$(grep -nE '^##+ [0-9]{6}' "$F" | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
