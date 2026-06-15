@@ -325,3 +325,47 @@ class PerPathLockSerializationTests(unittest.TestCase):
 
         self.assertEqual(len(results), 8)
         self.assertTrue(all(r is results[0] for r in results))
+
+
+class CrashSafetyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_failure_during_replace_preserves_original_target(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+        target.write_text("ORIGINAL", encoding="utf-8")
+
+        def boom(src: str, dst: str) -> None:
+            raise OSError("simulated crash between fsync and replace")
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=False),
+            patch("story_automator.core.atomic_io.os.replace", side_effect=boom),
+        ):
+            with self.assertRaises(OSError):
+                write_atomic_text(target, "NEW")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "ORIGINAL")
+        # No orphan tmp file left behind.
+        siblings = sorted(p.name for p in self.dir.iterdir())
+        self.assertEqual(siblings, ["out.txt"])
+
+    def test_failure_during_write_preserves_missing_target(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+        # Inject failure into fsync (after the fd is open and writable).
+        with patch(
+            "story_automator.core.atomic_io.os.fsync",
+            side_effect=OSError("fsync failed"),
+        ):
+            with self.assertRaises(OSError):
+                write_atomic_text(target, "NEW")
+
+        self.assertFalse(target.exists())
+        siblings = list(self.dir.iterdir())
+        self.assertEqual(siblings, [])
