@@ -326,5 +326,25 @@ class ActiveTaskCsvTests(unittest.TestCase):
         self.assertIn("a.py", result)
 
 
+class SpawnCollisionTests(unittest.TestCase):
+    """R05: a name collision with a live session must not clobber its state."""
+
+    def test_spawn_refuses_when_session_already_live(self) -> None:
+        from story_automator.core import tmux_runtime as tr
+
+        with mock.patch.object(tr, "command_exists", return_value=True), \
+            mock.patch.object(tr.shutil, "which", return_value="/bin/bash"), \
+            mock.patch.object(tr, "resolve_command_shell", return_value="/bin/bash"), \
+            mock.patch.object(tr, "tmux_has_session", return_value=True), \
+            mock.patch.object(tr, "cleanup_runtime_artifacts") as cleanup, \
+            mock.patch.object(tr, "run_cmd") as run_cmd:
+            out, code = tr._spawn_runner("sa-proj-260101-000000-e1-s1-1-dev", "echo hi", "claude", "/tmp/x")
+        self.assertEqual(code, 1)
+        self.assertIn("session already exists", out)
+        # The destructive cleanup and tmux new-session must NOT have run.
+        cleanup.assert_not_called()
+        run_cmd.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
