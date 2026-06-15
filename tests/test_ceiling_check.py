@@ -271,5 +271,75 @@ class CmdCeilingCheckBypassReflectionTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "no_ceilings_configured")
 
 
+class CmdCeilingCheckGateFilterTests(unittest.TestCase):
+    def test_ceiling_only_for_other_gate_returns_no_ceilings(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = _write_workflow(
+                tmp,
+                [
+                    {
+                        "name": "story_only",
+                        "window": "per_run",
+                        "limit_usd": 1.0,
+                        "warn_at": 0.5,
+                        "gate_names": ["story_start"],
+                    }
+                ],
+            )
+            ledger = _write_ledger(tmp, [_completed(99.0)])
+            _, payload = _capture(
+                cmd_ceiling_check,
+                [
+                    "--gate",
+                    "init",
+                    "--events",
+                    str(ledger),
+                    "--workflow",
+                    str(wf),
+                    "--now",
+                    "2026-06-15T00:00:00Z",
+                ],
+            )
+        self.assertEqual(payload["verdict"], "ALLOW")
+        self.assertEqual(payload["reason"], "no_ceilings_configured")
+
+    def test_each_gate_name_routes_through_cli(self) -> None:
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        for gate in ("init", "story_start", "retry_start"):
+            with self.subTest(gate=gate):
+                with tempfile.TemporaryDirectory() as tmp:
+                    wf = _write_workflow(
+                        tmp,
+                        [
+                            {
+                                "name": "any_gate",
+                                "window": "per_run",
+                                "limit_usd": 5.0,
+                                "warn_at": 0.5,
+                                "gate_names": ["init", "story_start", "retry_start"],
+                            }
+                        ],
+                    )
+                    ledger = _write_ledger(tmp, [_completed(6.0)])
+                    _, payload = _capture(
+                        cmd_ceiling_check,
+                        [
+                            "--gate",
+                            gate,
+                            "--events",
+                            str(ledger),
+                            "--workflow",
+                            str(wf),
+                            "--now",
+                            "2026-06-15T00:00:00Z",
+                        ],
+                    )
+                self.assertEqual(payload["verdict"], "BLOCK")
+                self.assertIn("any_gate", payload["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
