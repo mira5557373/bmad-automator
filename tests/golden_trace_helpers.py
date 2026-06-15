@@ -46,8 +46,19 @@ class TraceEntry:
     payload: dict[str, object]
 
 
-class TraceMismatch:  # pragma: no cover - replaced in Task 4
-    pass
+@dataclass(kw_only=True)
+class TraceMismatch:
+    """One arrival-position divergence between an actual and a golden trace.
+
+    `field` identifies which slot diverged (per REQ-10). `actual` and
+    `expected` use PEP 604 `object | None` because a "length" mismatch may
+    have no entry on one side at that arrival index.
+    """
+
+    seq: int
+    field: MismatchField
+    actual: object | None
+    expected: object | None
 
 
 class TraceDiff:  # pragma: no cover - replaced in Task 5

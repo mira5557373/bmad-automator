@@ -4,7 +4,7 @@ import dataclasses
 import importlib
 import unittest
 
-from tests.golden_trace_helpers import GoldenTraceError, TraceEntry
+from tests.golden_trace_helpers import GoldenTraceError, TraceEntry, TraceMismatch
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -68,6 +68,33 @@ class TraceEntryTests(unittest.TestCase):
         # kw_only=True must forbid positional args.
         with self.assertRaises(TypeError):
             TraceEntry(0, "event", "StoryStarted", {})  # type: ignore[misc]
+
+
+class TraceMismatchTests(unittest.TestCase):
+    def test_is_kw_only_dataclass(self) -> None:
+        self.assertTrue(dataclasses.is_dataclass(TraceMismatch))
+        params = TraceMismatch.__dataclass_params__  # type: ignore[attr-defined]
+        self.assertTrue(params.kw_only)
+        # Not frozen — caller may want to attach diagnostics later.
+        self.assertFalse(params.frozen)
+
+    def test_required_fields(self) -> None:
+        names = {f.name for f in dataclasses.fields(TraceMismatch)}
+        self.assertEqual(names, {"seq", "field", "actual", "expected"})
+
+    def test_construct_with_payload_diff(self) -> None:
+        m = TraceMismatch(seq=3, field="payload", actual={"a": 1}, expected={"a": 2})
+        self.assertEqual(m.seq, 3)
+        self.assertEqual(m.field, "payload")
+        self.assertEqual(m.actual, {"a": 1})
+        self.assertEqual(m.expected, {"a": 2})
+
+    def test_actual_and_expected_allow_none(self) -> None:
+        # PEP 604 object | None per REQ-10 — used for "length" mismatches
+        # where one side has no entry at that seq.
+        m = TraceMismatch(seq=5, field="length", actual=None, expected={"x": 1})
+        self.assertIsNone(m.actual)
+        self.assertEqual(m.expected, {"x": 1})
 
 
 if __name__ == "__main__":
