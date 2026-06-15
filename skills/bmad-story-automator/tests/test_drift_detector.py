@@ -380,10 +380,12 @@ class FormatDriftReportTests(unittest.TestCase):
         rendered.encode("ascii")  # raises if non-ASCII slipped in
 
 
-_FORBIDDEN_TOKENS = (
+_FORBIDDEN_TOKENS = tuple(
     "requests httpx aiohttp subprocess os.system psutil filelock".split()
 )
-_FORBIDDEN_WRITE_PATTERNS = "open( write_text read_text Path.mkdir write_atomic".split()
+_FORBIDDEN_WRITE_PATTERNS = tuple(
+    "open( write_text read_text Path.mkdir write_atomic".split()
+)
 _FORBIDDEN_TYPING_TOKENS = (
     "typing.Optional",
     "typing.Union",
