@@ -51,12 +51,20 @@ def cmd_ceiling_check(args: list[str]) -> int:
         return 1
     workflow_path: str | None = params.get("workflow") or None
     now_iso = params.get("now") or iso_now()
-    verdict, reason = evaluate_ceilings(
-        events_path,
-        gate,
-        now_iso,
-        workflow_json_path=workflow_path,
-    )
+    try:
+        verdict, reason = evaluate_ceilings(
+            events_path,
+            gate,
+            now_iso,
+            workflow_json_path=workflow_path,
+        )
+    except OSError as exc:
+        # A real I/O error (e.g., PermissionError on an existing ledger)
+        # would emit a stack trace to stderr — the skill markdown parses
+        # stdout JSON via jq and would silently treat non-JSON as ALLOW.
+        # Surface it as a structured failure with ok=false instead.
+        print_json({"ok": False, "error": "io_error", "detail": str(exc)})
+        return 1
     print_json(
         {
             "ok": True,

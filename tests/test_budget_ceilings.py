@@ -62,16 +62,13 @@ def _write_ledger(tmp, events, *, eol="\n", trailing_blanks=0):
 
 
 _DEFAULT_TS = "2026-06-15T00:00:00Z"
+
+
 # fmt: off
-_COMPLETED_BASE = StoryCompleted(
-    timestamp=_DEFAULT_TS, run_id="r1", epic="E1", story_key="S1",
-    duration_s=1.0, cost_usd=0.0, tokens_in=0, tokens_out=0, attempts=1,
-)
-# fmt: on
-
-
 def _completed(cost, ts=_DEFAULT_TS):
-    return dataclasses.replace(_COMPLETED_BASE, cost_usd=cost, timestamp=ts)
+    return StoryCompleted(timestamp=ts, run_id="r1", epic="E1", story_key="S1",
+                          duration_s=1.0, cost_usd=cost, tokens_in=0, tokens_out=0, attempts=1)
+# fmt: on
 
 
 # fmt: off
@@ -103,10 +100,8 @@ class ModuleAndSurfaceTests(unittest.TestCase):
 
     def test_ceiling_decision_enum_shape(self) -> None:
         self.assertTrue(issubclass(CeilingDecision, enum.Enum))
-        names = [m.name for m in CeilingDecision]
-        self.assertEqual(names, ["ALLOW", "WARN", "BLOCK"])
-        for n in names:
-            self.assertEqual(CeilingDecision[n].value, n)
+        self.assertEqual([m.name for m in CeilingDecision], ["ALLOW", "WARN", "BLOCK"])
+        self.assertEqual([m.value for m in CeilingDecision], ["ALLOW", "WARN", "BLOCK"])
 
 
 class BudgetCeilingShapeTests(unittest.TestCase):
@@ -257,19 +252,19 @@ class SpecReq01PreludeTests(unittest.TestCase):
     """REQ-01: future annotations required at top of source and test files."""
 
     def test_files_have_future_annotations(self) -> None:
-        # fmt: off
-        def has_future_import(src: str) -> bool:
-            body = ast.parse(src).body
-            if body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0].value, "value", None), str):
-                body = body[1:]
-            head = body[0] if body else None
-            return (isinstance(head, ast.ImportFrom) and head.module == "__future__"
-                    and any(a.name == "annotations" for a in head.names))
-        src_path = Path(__file__).resolve().parents[1] / "skills/bmad-story-automator/src/story_automator/core/budget_ceilings.py"
-        # fmt: on
+        src_path = (
+            Path(__file__).resolve().parents[1]
+            / "skills/bmad-story-automator/src/story_automator/core/budget_ceilings.py"
+        )
         for p in [src_path, Path(__file__).resolve()]:
             with self.subTest(path=p.name):
-                self.assertTrue(has_future_import(p.read_text(encoding="utf-8")))
+                body = ast.parse(p.read_text(encoding="utf-8")).body
+                if body and isinstance(body[0], ast.Expr):
+                    body = body[1:]
+                head = body[0] if body else None
+                self.assertIsInstance(head, ast.ImportFrom)
+                self.assertEqual(head.module, "__future__")
+                self.assertIn("annotations", [a.name for a in head.names])
 
 
 class LedgerFixturePatternTests(unittest.TestCase):
@@ -478,29 +473,27 @@ class EvaluateCeilingsDeterminismTests(unittest.TestCase):
         self.assertTrue(reason.startswith("c0:"))
 
 
+# fmt: off
 class EvaluateCeilingsConfigSourceTests(unittest.TestCase):
-    def _write_workflow(self, tmp, ceilings_list):
+    def _write_workflow(self, tmp, ceilings):
         path = Path(tmp) / "workflow.json"
-        body = compact_json({"policy": {"cost_ceilings": ceilings_list}})
-        path.write_text(body, encoding="utf-8")
+        path.write_text(compact_json({"policy": {"cost_ceilings": ceilings}}), encoding="utf-8")
         return path
 
     def test_workflow_json_path_round_trip(self) -> None:
-        # fmt: off
-        # Loaded ceiling triggers BLOCK on the ledger.
+        # Loaded ceiling triggers BLOCK; empty list yields no-config sentinel.
         with tempfile.TemporaryDirectory() as tmp:
-            workflow = self._write_workflow(tmp, [_c(name="from_disk", limit_usd=5.0)])
+            wf = self._write_workflow(tmp, [_c(name="from_disk", limit_usd=5.0)])
             ledger = _write_ledger(tmp, [_completed(6.0)])
-            verdict, reason = evaluate_ceilings(ledger, "init", _DEFAULT_TS, workflow_json_path=workflow)
+            verdict, reason = evaluate_ceilings(ledger, "init", _DEFAULT_TS, workflow_json_path=wf)
         self.assertEqual(verdict, CeilingDecision.BLOCK)
         self.assertTrue(reason.startswith("from_disk:"))
-        # Empty ceilings list on disk yields the no-config sentinel.
         with tempfile.TemporaryDirectory() as tmp:
-            workflow = self._write_workflow(tmp, [])
-            verdict, reason = evaluate_ceilings("irrelevant.jsonl", "init", _DEFAULT_TS, workflow_json_path=workflow)
-        # fmt: on
+            wf = self._write_workflow(tmp, [])
+            verdict, reason = evaluate_ceilings("irrelevant.jsonl", "init", _DEFAULT_TS, workflow_json_path=wf)
         self.assertEqual(verdict, CeilingDecision.ALLOW)
         self.assertEqual(reason, "no_ceilings_configured")
+# fmt: on
 
 
 if __name__ == "__main__":

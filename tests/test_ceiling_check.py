@@ -341,6 +341,58 @@ class CmdCeilingCheckGateFilterTests(unittest.TestCase):
                 self.assertIn("any_gate", payload["reason"])
 
 
+class CmdCeilingCheckIOErrorTests(unittest.TestCase):
+    """Production hardening: a real OSError from the ledger reader must
+    not leak a stack trace to stderr — the skill markdown parses stdout
+    JSON via ``jq`` and a non-JSON stdout would be silently treated as
+    ALLOW. The CLI surfaces it as a structured error with ``ok=false``
+    and exit code 1 instead."""
+
+    def test_oserror_surfaces_structured_error_json(self) -> None:
+        from story_automator.commands import ceiling_check
+
+        with mock.patch.object(
+            ceiling_check,
+            "evaluate_ceilings",
+            side_effect=PermissionError("denied"),
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                wf = Path(tmp) / "workflow.json"
+                wf.write_text(
+                    compact_json(
+                        {
+                            "policy": {
+                                "cost_ceilings": [
+                                    {
+                                        "name": "x",
+                                        "window": "per_run",
+                                        "limit_usd": 1.0,
+                                        "warn_at": 0.5,
+                                        "gate_names": ["init"],
+                                    }
+                                ]
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                code, payload = _capture(
+                    ceiling_check.cmd_ceiling_check,
+                    [
+                        "--gate",
+                        "init",
+                        "--events",
+                        str(Path(tmp) / "events.jsonl"),
+                        "--workflow",
+                        str(wf),
+                    ],
+                )
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "io_error")
+        self.assertIn("denied", payload["detail"])
+
+
 class CmdCeilingCheckNowDefaultTests(unittest.TestCase):
     def test_now_omitted_uses_iso_now(self) -> None:
         """For per_run ceilings the anchor is unused, so the test
