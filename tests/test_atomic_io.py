@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -414,3 +415,90 @@ class RunLockBusyExceptionTests(unittest.TestCase):
 
         err = RunLockBusy("lock /tmp/x.lock held by pid 42")
         self.assertIn("pid 42", str(err))
+
+
+class RunLockIdentityTests(unittest.TestCase):
+    def _sample(self):  # type: ignore[no-untyped-def]
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        return RunLockIdentity(
+            pid=4242,
+            start_time=1717000000.5,
+            hostname="builder-01",
+            heartbeat_iso="2026-06-14T12:34:56Z",
+            run_id="run-abc-123",
+        )
+
+    def test_dataclass_requires_keyword_only_construction(self) -> None:
+        # REQ-05 specifies @dataclass(kw_only=True). Positional construction
+        # must raise TypeError so a future field reordering cannot silently
+        # rebind callers passing positional args.
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        with self.assertRaises(TypeError):
+            RunLockIdentity(  # type: ignore[misc]
+                4242,
+                1717000000.5,
+                "builder-01",
+                "2026-06-14T12:34:56Z",
+                "run-abc-123",
+            )
+
+    def test_to_json_is_compact(self) -> None:
+        identity = self._sample()
+        payload = identity.to_json()
+        # compact_json uses (",", ":") separators — no whitespace between
+        # tokens. Our sample values contain no spaces, so the WHOLE payload
+        # must be whitespace-free.
+        self.assertNotIn(" ", payload)
+        self.assertNotIn("\n", payload)
+        self.assertNotIn("\t", payload)
+
+    def test_to_json_round_trips_via_json_loads(self) -> None:
+        identity = self._sample()
+        parsed = json.loads(identity.to_json())
+        self.assertEqual(
+            parsed,
+            {
+                "pid": 4242,
+                "start_time": 1717000000.5,
+                "hostname": "builder-01",
+                "heartbeat_iso": "2026-06-14T12:34:56Z",
+                "run_id": "run-abc-123",
+            },
+        )
+
+    def test_to_json_key_order_is_stable(self) -> None:
+        # Two constructions in different field orders must yield byte-equal
+        # JSON. This protects future readers parsing the file mid-write from
+        # observing reordered keys across heartbeat refreshes.
+        from story_automator.core.atomic_io import RunLockIdentity
+
+        a = RunLockIdentity(
+            pid=1,
+            start_time=2.0,
+            hostname="h",
+            heartbeat_iso="2026-06-14T00:00:00Z",
+            run_id="r",
+        )
+        b = RunLockIdentity(
+            run_id="r",
+            heartbeat_iso="2026-06-14T00:00:00Z",
+            hostname="h",
+            start_time=2.0,
+            pid=1,
+        )
+        self.assertEqual(a.to_json(), b.to_json())
+
+    def test_to_json_uses_compact_json_helper(self) -> None:
+        # REQ-05 explicitly requires the compact_json helper from common.py;
+        # patching it must be observable so we know the wiring is right.
+        from unittest.mock import patch
+
+        identity = self._sample()
+        with patch(
+            "story_automator.core.atomic_io.compact_json",
+            return_value='{"sentinel":true}',
+        ) as spy:
+            self.assertEqual(identity.to_json(), '{"sentinel":true}')
+            spy.assert_called_once()

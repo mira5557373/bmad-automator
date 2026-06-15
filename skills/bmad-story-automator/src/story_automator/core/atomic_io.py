@@ -6,9 +6,14 @@ import threading
 import time
 from pathlib import Path
 
+from dataclasses import dataclass
+
+from story_automator.core.common import compact_json
+
 __all__ = [
     "AtomicWriteRetryExhausted",
     "RunLockBusy",
+    "RunLockIdentity",
     "write_atomic_text",
 ]
 
@@ -69,6 +74,35 @@ class RunLockBusy(Exception):
     telemetry consumers classify it by type, so it must remain distinct
     from the atomic-write retry-exhaustion failure mode.
     """
+
+
+@dataclass(kw_only=True)
+class RunLockIdentity:
+    """Identity payload written into a run lock file.
+
+    Field order is fixed by REQ-05; ``to_json`` always emits keys in this
+    same order so two constructions with permuted kwargs produce byte-equal
+    output. That stability matters because a future ``HeartbeatThread``
+    (M05-M3) will rewrite this payload roughly every 60 seconds and stale
+    detectors may diff the bytes.
+    """
+
+    pid: int
+    start_time: float
+    hostname: str
+    heartbeat_iso: str
+    run_id: str
+
+    def to_json(self) -> str:
+        return compact_json(
+            {
+                "pid": self.pid,
+                "start_time": self.start_time,
+                "hostname": self.hostname,
+                "heartbeat_iso": self.heartbeat_iso,
+                "run_id": self.run_id,
+            }
+        )
 
 
 def _replace_with_retry(tmp_path: Path, target: Path) -> None:
