@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -71,7 +73,6 @@ class HappyPathTests(unittest.TestCase):
         # across filesystems. We assert the implementation hasn't drifted
         # to tempfile.gettempdir() by inspecting an interrupted write.
         from story_automator.core.atomic_io import write_atomic_text
-        from unittest.mock import patch
 
         target = self.dir / "out.txt"
         observed_dirs: list[Path] = []
@@ -85,3 +86,139 @@ class HappyPathTests(unittest.TestCase):
             write_atomic_text(target, "payload")
 
         self.assertEqual(observed_dirs, [self.dir.resolve()])
+
+
+class WindowsRetryTests(unittest.TestCase):
+    """Simulated retry logic — must pass on POSIX too via mocking."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_retries_replace_on_permission_error_until_success(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+        real_replace = os.replace
+        call_log: list[float] = []
+        attempts = {"n": 0}
+
+        def flaky(src: str, dst: str) -> None:
+            attempts["n"] += 1
+            call_log.append(time.monotonic())
+            if attempts["n"] < 3:
+                raise PermissionError("simulated sharing violation")
+            real_replace(src, dst)
+
+        sleep_log: list[float] = []
+
+        def fake_sleep(d: float) -> None:
+            sleep_log.append(d)
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=True),
+            patch("story_automator.core.atomic_io.os.replace", side_effect=flaky),
+            patch("story_automator.core.atomic_io.time.sleep", side_effect=fake_sleep),
+        ):
+            write_atomic_text(target, "payload")
+
+        self.assertEqual(attempts["n"], 3)
+        # Two backoff sleeps happened before the third (successful) attempt.
+        self.assertEqual(sleep_log, [0.050, 0.100])
+        self.assertEqual(target.read_text(encoding="utf-8"), "payload")
+
+    def test_raises_atomic_write_retry_exhausted_after_five_failures(self) -> None:
+        from story_automator.core.atomic_io import (
+            AtomicWriteRetryExhausted,
+            write_atomic_text,
+        )
+
+        target = self.dir / "out.txt"
+        sleep_log: list[float] = []
+
+        def always_fails(src: str, dst: str) -> None:
+            raise PermissionError("simulated sharing violation")
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=True),
+            patch(
+                "story_automator.core.atomic_io.os.replace", side_effect=always_fails
+            ),
+            patch(
+                "story_automator.core.atomic_io.time.sleep",
+                side_effect=lambda d: sleep_log.append(d),
+            ),
+        ):
+            with self.assertRaises(AtomicWriteRetryExhausted) as ctx:
+                write_atomic_text(target, "payload")
+
+        # Interpretation: 1 initial attempt + 5 retries = 6 total attempts.
+        # Each retry is preceded by the corresponding backoff sleep, so 5
+        # retries means exactly 5 sleeps (50/100/200/400/800 ms). The spec
+        # REQ-04 wording "retry up to 5 times with exponential backoff
+        # 50/100/200/400/800 ms" pairs each backoff value with one retry.
+        self.assertEqual(sleep_log, [0.050, 0.100, 0.200, 0.400, 0.800])
+        self.assertIsInstance(ctx.exception.__cause__, PermissionError)
+        # Temp file must have been cleaned up.
+        leftovers = list(self.dir.iterdir())
+        self.assertEqual(leftovers, [])
+
+    def test_posix_calls_replace_exactly_once_on_failure(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+        attempts = {"n": 0}
+
+        def fails(src: str, dst: str) -> None:
+            attempts["n"] += 1
+            raise PermissionError("posix should not retry")
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=False),
+            patch("story_automator.core.atomic_io.os.replace", side_effect=fails),
+        ):
+            with self.assertRaises(PermissionError):
+                write_atomic_text(target, "payload")
+
+        self.assertEqual(attempts["n"], 1)
+
+    def test_posix_non_permission_error_is_not_swallowed(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+
+        def fails(src: str, dst: str) -> None:
+            raise OSError("disk full")
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=False),
+            patch("story_automator.core.atomic_io.os.replace", side_effect=fails),
+        ):
+            with self.assertRaises(OSError):
+                write_atomic_text(target, "payload")
+
+    def test_windows_non_permission_oserror_does_not_retry(self) -> None:
+        from story_automator.core.atomic_io import write_atomic_text
+
+        target = self.dir / "out.txt"
+        sleep_log: list[float] = []
+        attempts = {"n": 0}
+
+        def fails(src: str, dst: str) -> None:
+            attempts["n"] += 1
+            raise OSError("not a sharing violation")
+
+        with (
+            patch("story_automator.core.atomic_io._is_windows", return_value=True),
+            patch("story_automator.core.atomic_io.os.replace", side_effect=fails),
+            patch(
+                "story_automator.core.atomic_io.time.sleep",
+                side_effect=lambda d: sleep_log.append(d),
+            ),
+        ):
+            with self.assertRaises(OSError):
+                write_atomic_text(target, "payload")
+
+        self.assertEqual(attempts["n"], 1)
+        self.assertEqual(sleep_log, [])

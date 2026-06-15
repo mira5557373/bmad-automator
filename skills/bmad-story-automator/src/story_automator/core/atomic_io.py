@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
 __all__ = ["AtomicWriteRetryExhausted", "write_atomic_text"]
+
+
+# Inter-retry backoffs: sleep _WINDOWS_REPLACE_BACKOFFS_S[i] BEFORE the
+# (i+1)-th retry. With 5 entries this gives 1 initial attempt + 5 retries =
+# 6 total attempts on Windows; on POSIX exactly 1 attempt.
+_WINDOWS_REPLACE_BACKOFFS_S: tuple[float, ...] = (0.050, 0.100, 0.200, 0.400, 0.800)
+
+
+def _is_windows() -> bool:
+    return sys.platform == "win32"
 
 
 class AtomicWriteRetryExhausted(PermissionError):
@@ -16,6 +27,34 @@ class AtomicWriteRetryExhausted(PermissionError):
     rather than string-match). PermissionError is itself a subclass of
     OSError, so callers that already handle OSError keep working.
     """
+
+
+def _replace_with_retry(tmp_path: Path, target: Path) -> None:
+    if not _is_windows():
+        os.replace(str(tmp_path), str(target))
+        return
+
+    # Initial attempt (no preceding sleep).
+    try:
+        os.replace(str(tmp_path), str(target))
+        return
+    except PermissionError as last_error:
+        pending = last_error
+    # Non-PermissionError OSError propagates naturally without retry.
+
+    for backoff in _WINDOWS_REPLACE_BACKOFFS_S:
+        time.sleep(backoff)
+        try:
+            os.replace(str(tmp_path), str(target))
+            return
+        except PermissionError as err:
+            pending = err
+        # Non-PermissionError OSError on retry also propagates naturally.
+
+    raise AtomicWriteRetryExhausted(
+        f"os.replace failed after {1 + len(_WINDOWS_REPLACE_BACKOFFS_S)} attempts: "
+        f"{target}"
+    ) from pending
 
 
 def _write_once(path: Path, data: str, encoding: str) -> None:
@@ -45,7 +84,7 @@ def _write_once(path: Path, data: str, encoding: str) -> None:
         raise
 
     try:
-        os.replace(str(tmp_path), str(path))
+        _replace_with_retry(tmp_path, path)
     except BaseException:
         _silent_unlink(tmp_path)
         raise
