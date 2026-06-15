@@ -9,11 +9,13 @@ first emit via ``ensure_dir`` from ``story_automator.core.common``.
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
 from filelock import FileLock
 
+from .common import ensure_dir
 from .telemetry_events import Event
 
 
@@ -26,7 +28,12 @@ class TelemetryEmitter:
         self._file_lock: FileLock = FileLock(str(self._lock_path))
 
     def emit(self, event: Event) -> None:
-        raise NotImplementedError
+        ensure_dir(self._path.parent)
+        line = event.to_json_line() + "\n"
+        with open(self._path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+            fh.flush()
+            os.fsync(fh.fileno())
 
 
 __all__ = ["TelemetryEmitter"]
