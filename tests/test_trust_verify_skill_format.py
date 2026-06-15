@@ -364,5 +364,34 @@ class Step03abReq07Tests(unittest.TestCase):
             )
 
 
+class Step03abReq08Tests(unittest.TestCase):
+    """REQ-08: ## What it does section explains invoke -> read -> decide."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, STEP_03AB)
+
+    def test_what_it_does_section_present(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"(?m)^## What it does\s*$",
+            msg="step-03ab must include a level-2 '## What it does' heading",
+        )
+
+    def test_what_it_does_mentions_skill_result_and_decision(self) -> None:
+        for needle in (
+            "trust-but-verify",
+            "result.json",
+            "pass",
+            "warn",
+            "block",
+            "section D",
+        ):
+            self.assertIn(
+                needle,
+                self.text,
+                msg=f"step-03ab ## What it does missing reference: {needle!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
