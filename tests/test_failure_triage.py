@@ -881,3 +881,299 @@ class ClassifyStreamTests(unittest.TestCase):
         gen = classify_stream(source())
         with self.assertRaises(Boom):
             list(gen)
+
+
+class ThirteenClassBehaviouralMatrixTests(unittest.TestCase):
+    """One test per ``FailureClass`` member — REQ-14 acceptance matrix.
+
+    Each test asserts on ``primary``, on the membership of the expected
+    entries in ``implies``, and on ``confidence`` (REQ-15). No I/O, no
+    ``compact_json`` call, no clock read.
+    """
+
+    def _story_failed(self, *, reason: str) -> object:
+        from story_automator.core.telemetry_events import StoryFailed
+
+        return StoryFailed(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            error_class="",
+            reason=reason,
+            attempts=1,
+            final_session="sess",
+        )
+
+    def _story_deferred(self, *, reason: str = "complexity cap") -> object:
+        from story_automator.core.telemetry_events import StoryDeferred
+
+        return StoryDeferred(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            reason=reason,
+            tasks_completed=1,
+        )
+
+    def _tmux_crashed(self) -> object:
+        from story_automator.core.telemetry_events import TmuxSessionCrashed
+
+        return TmuxSessionCrashed(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            session_name="sess",
+            story_key="S1",
+            exit_code=137,
+            last_capture_chars=0,
+        )
+
+    def _escalation(self) -> object:
+        from story_automator.core.telemetry_events import EscalationTriggered
+
+        return EscalationTriggered(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            trigger_id=1,
+            severity="warn",
+            message="m",
+        )
+
+    def test_crash_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._tmux_crashed())
+        self.assertEqual(result.primary, FailureClass.CRASH)
+        self.assertEqual(result.implies, ())  # REQ-15: implies membership asserted
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_timeout_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="timeout 600s"))
+        self.assertEqual(result.primary, FailureClass.TIMEOUT)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_policy_violation_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="policy refusal"))
+        self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
+        self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_review_rejected_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._escalation())
+        self.assertEqual(result.primary, FailureClass.REVIEW_REJECTED)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.MEDIUM)
+
+    def test_test_failure_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="pytest failure"))
+        self.assertEqual(result.primary, FailureClass.TEST_FAILURE)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_budget_exceeded_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="budget cap"))
+        self.assertEqual(result.primary, FailureClass.BUDGET_EXCEEDED)
+        self.assertIn(FailureClass.GATE_DEFER, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_parse_error_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="parse error"))
+        self.assertEqual(result.primary, FailureClass.PARSE_ERROR)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.MEDIUM)
+
+    def test_agent_refused_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_failed(reason="agent refused"))
+        self.assertEqual(result.primary, FailureClass.AGENT_REFUSED)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_network_error_implied_on_tmux_crash(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        event = self._tmux_crashed()
+        event.exit_signal = "SIGPIPE"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.CRASH)
+        self.assertIn(FailureClass.NETWORK_ERROR, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_gate_defer_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_deferred())
+        self.assertEqual(result.primary, FailureClass.GATE_DEFER)
+        self.assertEqual(result.implies, ())  # REQ-15
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_plateau_implied_on_story_deferred(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._story_deferred(reason="plateau"))
+        self.assertEqual(result.primary, FailureClass.REPEATED_RETRY)
+        self.assertIn(FailureClass.PLATEAU, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_repeated_retry_primary(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        event = self._story_deferred()
+        event.attempt_count = 7  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.REPEATED_RETRY)
+        self.assertIn(FailureClass.PLATEAU, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_unknown_primary_on_non_failure_event(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+        from story_automator.core.telemetry_events import StoryStarted
+
+        event = StoryStarted(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            agent="dev",
+            model="claude-opus-4-7",
+            complexity="medium",
+        )
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.UNKNOWN)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.LOW)
+
+
+class DeterminismGateTests(unittest.TestCase):
+    def test_classify_is_byte_identical_over_100_runs(self) -> None:
+        """Determinism quality gate — REQ-15-adjacent.
+
+        Classify the same synthetic event 100 times and assert every
+        result is structurally equal *and* produces a byte-identical
+        ``repr()``. Guards against accidental nondeterminism from set
+        iteration or dict ordering inside any future implies-aggregation
+        logic.
+        """
+        from story_automator.core.failure_triage import classify
+        from story_automator.core.telemetry_events import StoryFailed
+
+        event = StoryFailed(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            error_class="",
+            reason="policy guardrail tripped on PII",
+            attempts=3,
+            final_session="sess",
+        )
+        first = classify(event)
+        first_repr = repr(first)
+        for _ in range(99):
+            other = classify(event)
+            self.assertEqual(other, first)
+            self.assertEqual(repr(other), first_repr)
+
+    def test_classify_stream_is_byte_identical_over_100_runs(self) -> None:
+        """Same gate as above but for the stream path."""
+        from story_automator.core.failure_triage import classify_stream
+        from story_automator.core.telemetry_events import (
+            StoryDeferred,
+            TmuxSessionCrashed,
+        )
+
+        def make_events() -> list[object]:
+            return [
+                StoryDeferred(
+                    timestamp="2026-01-01T00:00:00Z",
+                    run_id="run-1",
+                    epic="E1",
+                    story_key="S1",
+                    reason="plateau",
+                    tasks_completed=1,
+                ),
+                TmuxSessionCrashed(
+                    timestamp="2026-01-01T00:00:00Z",
+                    run_id="run-1",
+                    session_name="sess",
+                    story_key="S1",
+                    exit_code=137,
+                    last_capture_chars=0,
+                ),
+            ]
+
+        first = list(classify_stream(make_events()))
+        first_repr = [repr(c) for c in first]
+        for _ in range(99):
+            other = list(classify_stream(make_events()))
+            self.assertEqual(other, first)
+            self.assertEqual([repr(c) for c in other], first_repr)
