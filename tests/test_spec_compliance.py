@@ -745,3 +745,46 @@ class SpecPathErrorTests(unittest.TestCase):
             missing = Path(tmp) / "nope.md"
             with self.assertRaises(FileNotFoundError):
                 check_compliance(spec_path=missing, diff_text="d")
+
+
+class AllSymbolsActuallyDefinedTests(unittest.TestCase):
+    """REQ-16: every name in `__all__` must actually be defined.
+
+    The Task 1 import-contract test only checks `__all__` membership;
+    this test closes the gap by asserting each declared name resolves
+    to a real attribute on the module.
+    """
+
+    def test_each_all_symbol_resolves(self) -> None:
+        from story_automator.core import spec_compliance
+
+        for name in spec_compliance.__all__:
+            self.assertTrue(
+                hasattr(spec_compliance, name),
+                f"__all__ advertises {name!r} but the module has no such attribute",
+            )
+
+    def test_no_unrelated_layer_imports(self) -> None:
+        """Quality gate: no import from other M06a layers or from commands/."""
+        import inspect
+
+        from story_automator.core import spec_compliance
+
+        source = inspect.getsource(spec_compliance)
+        for forbidden in (
+            "from .gap_validator",
+            "from .feature_tester",
+            "from story_automator.commands",
+            "from ..commands",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    def test_no_psutil_import(self) -> None:
+        # NFR: stdlib-only with no psutil.
+        import inspect
+
+        from story_automator.core import spec_compliance
+
+        source = inspect.getsource(spec_compliance)
+        self.assertNotIn("import psutil", source)
+        self.assertNotIn("from psutil", source)
