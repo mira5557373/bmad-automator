@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -214,6 +215,60 @@ class CmdCeilingCheckWarnBlockTests(unittest.TestCase):
         flag-parsing failure."""
         _, payload = self._run(99.0)
         self.assertTrue(payload["ok"])
+
+
+class CmdCeilingCheckBypassReflectionTests(unittest.TestCase):
+    """REQ-14 bypass subset — verify ``bypass_allowed`` is reflected in
+    the CLI output and only returns ``True`` when both the env var and
+    isatty signal agree."""
+
+    def setUp(self) -> None:
+        self._prior = os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        if self._prior is not None:
+            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = self._prior
+
+    def _invoke(self, env_value, isatty_value):
+        if env_value is None:
+            os.environ.pop("BMAD_ALLOW_CEILING_BYPASS", None)
+        else:
+            os.environ["BMAD_ALLOW_CEILING_BYPASS"] = env_value
+        from story_automator.commands.ceiling_check import cmd_ceiling_check
+
+        with mock.patch("sys.stdin.isatty", return_value=isatty_value):
+            return _capture(
+                cmd_ceiling_check,
+                ["--gate", "init", "--events", "no-such.jsonl"],
+            )
+
+    def test_bypass_false_when_env_unset(self) -> None:
+        _, payload = self._invoke(None, True)
+        self.assertFalse(payload["bypass_allowed"])
+
+    def test_bypass_false_when_no_tty(self) -> None:
+        _, payload = self._invoke("1", False)
+        self.assertFalse(payload["bypass_allowed"])
+
+    def test_bypass_false_for_other_env_values(self) -> None:
+        for value in ("0", "true", "yes", "TRUE", "01"):
+            with self.subTest(env=value):
+                _, payload = self._invoke(value, True)
+                self.assertFalse(payload["bypass_allowed"])
+
+    def test_bypass_true_when_env_and_tty_agree(self) -> None:
+        _, payload = self._invoke("1", True)
+        self.assertTrue(payload["bypass_allowed"])
+
+    def test_bypass_flag_present_even_in_no_config_path(self) -> None:
+        """The skill markdown branches on bypass_allowed regardless of
+        verdict — the field must be present in EVERY successful payload,
+        including the no-config sentinel branch."""
+        _, payload = self._invoke(None, False)
+        self.assertIn("bypass_allowed", payload)
+        self.assertEqual(payload["verdict"], "ALLOW")
+        self.assertEqual(payload["reason"], "no_ceilings_configured")
 
 
 if __name__ == "__main__":
