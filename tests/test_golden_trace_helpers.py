@@ -1182,5 +1182,22 @@ class RecorderPerformanceTests(unittest.TestCase):
         )
 
 
+class GoldenDirectoryStructureTests(unittest.TestCase):
+    def test_golden_directory_exists_under_tests(self) -> None:
+        golden_dir = Path(__file__).parent / "golden"
+        self.assertTrue(
+            golden_dir.is_dir(),
+            "tests/golden/ must exist; M10c ships fixtures here",
+        )
+
+    def test_golden_directory_is_committed(self) -> None:
+        golden_dir = Path(__file__).parent / "golden"
+        contents = list(golden_dir.iterdir())
+        self.assertTrue(
+            contents,
+            "tests/golden/ must contain at least .gitkeep or a fixture",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
