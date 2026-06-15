@@ -312,5 +312,64 @@ class CompareTracesEqualTests(unittest.TestCase):
         self.assertTrue(diff.ok)
 
 
+class CompareTracesFieldMismatchTests(unittest.TestCase):
+    def _golden(self) -> list[TraceEntry]:
+        return [
+            TraceEntry(seq=0, channel="event", kind="A", payload={"x": 1}),
+            TraceEntry(seq=1, channel="event", kind="B", payload={"y": 2}),
+            TraceEntry(seq=2, channel="state", kind="mutation", payload={"path": "p"}),
+        ]
+
+    def test_payload_regression_localized_to_specific_seq(self) -> None:
+        golden = self._golden()
+        actual = [
+            golden[0],
+            TraceEntry(seq=1, channel="event", kind="B", payload={"y": 99}),  # changed
+            golden[2],
+        ]
+        diff = compare_traces(actual, golden)
+        self.assertFalse(diff.ok)
+        self.assertEqual(diff.matched, 2)
+        self.assertEqual(len(diff.mismatches), 1)
+        m = diff.mismatches[0]
+        self.assertEqual(m.seq, 1)
+        self.assertEqual(m.field, "payload")
+        self.assertEqual(m.actual, {"y": 99})
+        self.assertEqual(m.expected, {"y": 2})
+
+    def test_channel_mismatch_takes_priority_over_kind_and_payload(self) -> None:
+        golden = [TraceEntry(seq=0, channel="event", kind="A", payload={"x": 1})]
+        actual = [TraceEntry(seq=0, channel="state", kind="Z", payload={"y": 9})]
+        diff = compare_traces(actual, golden)
+        self.assertEqual(len(diff.mismatches), 1)
+        self.assertEqual(diff.mismatches[0].field, "channel")
+
+    def test_kind_mismatch_when_channels_match(self) -> None:
+        golden = [TraceEntry(seq=0, channel="event", kind="A", payload={"x": 1})]
+        actual = [TraceEntry(seq=0, channel="event", kind="B", payload={"x": 1})]
+        diff = compare_traces(actual, golden)
+        self.assertEqual(len(diff.mismatches), 1)
+        self.assertEqual(diff.mismatches[0].field, "kind")
+        self.assertEqual(diff.mismatches[0].actual, "B")
+        self.assertEqual(diff.mismatches[0].expected, "A")
+
+    def test_multiple_mismatches_one_per_seq(self) -> None:
+        golden = self._golden()
+        actual = [
+            TraceEntry(
+                seq=0, channel="event", kind="A", payload={"x": 99}
+            ),  # payload differs
+            TraceEntry(
+                seq=1, channel="state", kind="B", payload={"y": 2}
+            ),  # channel differs
+            golden[2],
+        ]
+        diff = compare_traces(actual, golden)
+        self.assertEqual(diff.matched, 1)
+        self.assertEqual(len(diff.mismatches), 2)
+        self.assertEqual([m.seq for m in diff.mismatches], [0, 1])
+        self.assertEqual([m.field for m in diff.mismatches], ["payload", "channel"])
+
+
 if __name__ == "__main__":
     unittest.main()
