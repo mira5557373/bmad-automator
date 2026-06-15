@@ -280,5 +280,54 @@ class RunLockGuardTests(unittest.TestCase):
         )
 
 
+class RunLockContentionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name)
+        self.output_dir = self.project_root / "_bmad-output" / "story-automator"
+        _install_bundle(self.project_root)
+        _install_required_skills(self.project_root)
+        self.template = (
+            self.project_root
+            / ".claude"
+            / "skills"
+            / "bmad-story-automator"
+            / "templates"
+            / "state-document.md"
+        )
+
+    def test_returns_run_lock_busy_envelope_when_lock_is_held(self) -> None:
+        """If a sibling holder already owns the .state-build.lock, the next
+        cmd_build_state_doc invocation must surface
+        ``{"ok": False, "error": "run_lock_busy"}`` and exit 1, NOT crash.
+        """
+        from story_automator.core.atomic_io import acquire_run_lock
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        holder_lock_path = self.output_dir / ".state-build.lock"
+
+        # Hold the lock from this thread. timeout=0.0 means no waiting; the
+        # subsequent cmd_build_state_doc call must hit RunLockBusy
+        # immediately.
+        with acquire_run_lock(holder_lock_path, run_id="holder", timeout=0.0):
+            stdout = io.StringIO()
+            with _PatchEnv(self.project_root), redirect_stdout(stdout):
+                code = cmd_build_state_doc(
+                    [
+                        "--template",
+                        str(self.template),
+                        "--output-folder",
+                        str(self.output_dir),
+                        "--config-json",
+                        json.dumps(_config()),
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload, {"ok": False, "error": "run_lock_busy"})
+
+
 if __name__ == "__main__":
     unittest.main()
