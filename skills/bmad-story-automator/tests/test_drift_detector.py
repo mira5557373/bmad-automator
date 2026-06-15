@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import ast
 import unittest
+from pathlib import Path
 
+import story_automator.core.drift_detector as drift_module
 from story_automator.core.calibration import CalibrationEntry, CalibrationTable
 from story_automator.core.drift_detector import (
     MAJOR_MAX,
@@ -376,6 +379,90 @@ class FormatDriftReportTests(unittest.TestCase):
             compute_drift(baseline=baseline, current=current)
         )
         rendered.encode("ascii")  # raises if non-ASCII slipped in
+
+
+_FORBIDDEN_TOKENS = (
+    "requests",
+    "httpx",
+    "aiohttp",
+    "subprocess",
+    "os.system",
+    "psutil",
+    "filelock",
+)
+_FORBIDDEN_WRITE_PATTERNS = (
+    "open(",
+    "write_text",
+    "read_text",
+    "Path.mkdir",
+    "write_atomic",
+)
+
+
+def _module_source() -> str:
+    path = Path(drift_module.__file__)
+    return path.read_text(encoding="utf-8")
+
+
+class ModuleSurfaceTests(unittest.TestCase):
+    def test_all_lists_exact_symbols(self) -> None:
+        self.assertEqual(
+            set(drift_module.__all__),
+            {
+                "DriftClassification",
+                "DriftEntry",
+                "DriftReport",
+                "compute_drift",
+                "format_drift_report",
+            },
+        )
+
+    def test_starts_with_future_annotations(self) -> None:
+        source = _module_source()
+        tree = ast.parse(source)
+        body = tree.body
+        self.assertTrue(body, "module body is empty")
+        first = body[0]
+        is_docstring = (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        )
+        if is_docstring:
+            self.assertGreaterEqual(
+                len(body), 2, "docstring present but no __future__ import follows"
+            )
+            future_node = body[1]
+        else:
+            future_node = first
+        self.assertIsInstance(future_node, ast.ImportFrom)
+        self.assertEqual(future_node.module, "__future__")
+        self.assertEqual([alias.name for alias in future_node.names], ["annotations"])
+
+    def test_import_allowlist(self) -> None:
+        source = _module_source()
+        for token in _FORBIDDEN_TOKENS:
+            self.assertNotIn(token, source, f"forbidden import token: {token}")
+
+    def test_no_filesystem_mutators(self) -> None:
+        source = _module_source()
+        for token in _FORBIDDEN_WRITE_PATTERNS:
+            self.assertNotIn(token, source, f"forbidden write pattern: {token}")
+
+    def test_no_unresolved_four_letter_placeholder(self) -> None:
+        source = _module_source()
+        tokens = (
+            "TO" + "DO",
+            "FI" + "XME",
+            "XX" + "XX",
+            "TB" + "DX",
+        )
+        for token in tokens:
+            self.assertNotIn(token, source, f"placeholder token leaked: {token}")
+
+    def test_module_under_300_lines(self) -> None:
+        line_count = len(_module_source().splitlines())
+        self.assertLessEqual(line_count, 300, f"module is {line_count} lines (>300)")
 
 
 if __name__ == "__main__":
