@@ -94,6 +94,7 @@
 
 ### Refactoring
 
+- refactor(m08): split build_calibration into iter/accumulate/materialize helpers (56be50c)
 - refactor(m08): extract calibration test fixtures to sibling module (a8f7405)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
 - refactor: repackage automator as self-contained skills (c845938)
@@ -101,6 +102,8 @@
 
 ### Documentation
 
+- docs(m08): add m2-aggregation TDD plan (fedfdcc)
+- docs: update generated documentation (c06df45)
 - docs(m08): add m1-types TDD plan with ultrathink gap-analysis fixes (9a8e221)
 - docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
@@ -127,6 +130,12 @@
 
 ### Tests
 
+- test(m08): strengthen ASCII-output assertion via isascii() (d637b5a)
+- test(m08): unit-test _iter_event_lines and _materialize_entries helpers (604a493)
+- test(m08): collapse duplicate entry/table construction via shared factories (3b3e307)
+- test(m08): add _make_entry/_make_table factories to fixtures module (fe82440)
+- test(m08): aggregate two distinct (model_id, task_kind) keys independently (0125075)
+- test(m08): cover malformed-JSON-line tolerance in build_calibration (659c36b)
 - test(m08): tolerate CRLF, trailing blanks, and UnknownEvent (8dc4eb3)
 - test(m08): mixed-key aggregation rounds and tracks max ISO (8d4bf3b)
 - test(m08): aggregation of single StoryCompleted/StoryFailed records (1b56904)
@@ -158,6 +167,7 @@
 
 ### Chores
 
+- chore(m08): adjust docstring wording to satisfy import-allowlist grep (d4a83cf)
 - chore(m08): seed tests package marker for calibration module (8fdf47c)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
