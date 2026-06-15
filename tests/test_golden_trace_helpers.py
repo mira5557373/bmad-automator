@@ -1256,5 +1256,62 @@ class GoldenDirectoryStructureTests(unittest.TestCase):
         )
 
 
+class RecorderSelfComparisonTests(unittest.TestCase):
+    """REQ-12(a): a recording compared against itself yields ok=True.
+
+    Uses the live recorder to capture all three channels, then runs
+    compare_traces(entries, entries) — the loopback acts as the simplest
+    smoke test of the full record + diff pipeline.
+    """
+
+    def test_self_comparison_returns_ok_true(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter = TelemetryEmitter(root / "events.jsonl")
+            event = StoryStarted(
+                timestamp="2026-06-15T00:00:00Z",
+                run_id="r",
+                epic="e",
+                story_key="s",
+                agent="a",
+                model="m",
+                complexity="c",
+            )
+            import tests.golden_trace_helpers as gh
+
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                emitter.emit(event)
+                _state_module.write_atomic_text(root / "doc.txt", "hello")
+                gh.notify_claude_p(["claude", "-p", "Run story"])
+            entries = rec.entries
+        diff = compare_traces(entries, entries)
+        self.assertTrue(diff.ok)
+        self.assertEqual(diff.matched, len(entries))
+        self.assertEqual(diff.mismatches, [])
+
+    def test_self_comparison_after_serialize_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter = TelemetryEmitter(root / "events.jsonl")
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                emitter.emit(
+                    StoryStarted(
+                        timestamp="2026-06-15T00:00:00Z",
+                        run_id="r",
+                        epic="e",
+                        story_key="s",
+                        agent="a",
+                        model="m",
+                        complexity="c",
+                    )
+                )
+            entries = rec.entries
+            fixture = Path(tmp) / "round_trip.json"
+            fixture.write_text(serialize_trace(entries), encoding="utf-8")
+            reloaded = load_golden(fixture)
+        diff = compare_traces(entries, reloaded)
+        self.assertTrue(diff.ok)
+
+
 if __name__ == "__main__":
     unittest.main()
