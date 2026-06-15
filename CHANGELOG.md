@@ -1,5 +1,11 @@
 ### Features
 
+- feat(m08): deterministic plain-ASCII calibration report (4071886)
+- feat(m08): lookup_success_rate with 0.5 default (c80224b)
+- feat(m08): stream JSONL ledger and ignore non-story events (eacec2b)
+- feat(m08): build_calibration handles missing ledger path (d4f0fc6)
+- feat(m08): add CalibrationTable dataclass scaffold (981c77b)
+- feat(m08): add CalibrationEntry dataclass scaffold (3903e88)
 - feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
 - feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
 - feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
@@ -42,6 +48,7 @@
 
 ### Bug Fixes
 
+- fix(m08): post-impl review fixes for m1-types (d3cc6c8)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
 - fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
@@ -87,12 +94,15 @@
 
 ### Refactoring
 
+- refactor(m08): extract calibration test fixtures to sibling module (a8f7405)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
 - refactor: repackage automator as self-contained skills (c845938)
 - refactor: route create validation through verifier (5ea8540)
 
 ### Documentation
 
+- docs(m08): add m1-types TDD plan with ultrathink gap-analysis fixes (9a8e221)
+- docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
@@ -117,6 +127,9 @@
 
 ### Tests
 
+- test(m08): tolerate CRLF, trailing blanks, and UnknownEvent (8dc4eb3)
+- test(m08): mixed-key aggregation rounds and tracks max ISO (8d4bf3b)
+- test(m08): aggregation of single StoryCompleted/StoryFailed records (1b56904)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
 - test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
@@ -145,6 +158,7 @@
 
 ### Chores
 
+- chore(m08): seed tests package marker for calibration module (8fdf47c)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
 - chore: keep versioning plan docs off preview branch (4bba55b)
@@ -158,8 +172,14 @@
 - chore: release 1.12.1 (334337e)
 - chore: prepare repository for open source release (de29b37)
 
+### Style
+
+- style(m08): satisfy ruff + coverage quality gates (9b9f84d)
+
 ### Other
 
+- spec(m08): copy spec into worktree (876f280)
+- build: gitignore sw init outputs (78f54c6)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
