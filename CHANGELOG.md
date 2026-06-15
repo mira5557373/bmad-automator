@@ -1,5 +1,9 @@
 ### Features
 
+- feat(atomic_io): serialize writes through per-path threading.Lock registry (f504bb6)
+- feat(atomic_io): retry os.replace on Windows PermissionError with exponential backoff (ef406e4)
+- feat(atomic_io): implement happy-path tmp+fsync+os.replace write (971a593)
+- feat(atomic_io): add module skeleton and AtomicWriteRetryExhausted exception (c66bcdf)
 - feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
 - feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
 - feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
@@ -42,6 +46,7 @@
 
 ### Bug Fixes
 
+- fix(atomic_io): tolerate Windows replace-window PermissionError in concurrent reader test (0525b31)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
 - fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
@@ -93,6 +98,8 @@
 
 ### Documentation
 
+- docs(plan): add M05-M1 atomic-write foundation implementation plan (bea07cc)
+- docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
@@ -117,6 +124,7 @@
 
 ### Tests
 
+- test(atomic_io): document crash-safety behavior for replace and fsync failures (4d4152e)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
 - test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
@@ -160,6 +168,7 @@
 
 ### Other
 
+- build: gitignore sw init outputs (0c6e2e5)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
