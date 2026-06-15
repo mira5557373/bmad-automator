@@ -1,5 +1,11 @@
 ### Features
 
+- feat(feature_tester): plan_feature_tests happy path (REQ-13) (ebd2ad9)
+- feat(feature_tester): ReqVerdictLike Protocol preserves runtime independence (bb0d838)
+- feat(feature_tester): _find_existing_test with word-boundary match (REQ-13) (1971aff)
+- feat(feature_tester): skeleton template with golden-string render (REQ-14) (a7eeb0c)
+- feat(feature_tester): _normalize_req_id helper with strict validation (fbd356a)
+- feat(feature_tester): TestPlanEntry frozen kw_only dataclass (REQ-12) (89a0ae0)
 - feat(spec_compliance): implement check_compliance happy path with stubbed subprocess (REQ-09) (251dc85)
 - feat(spec_compliance): implement strict JSON envelope parser (REQ-09, REQ-10) (74f64a4)
 - feat(spec_compliance): render prompt with fenced blocks and placeholder escape (REQ-11) (4283d9e)
@@ -73,6 +79,7 @@
 
 ### Bug Fixes
 
+- fix(feature_tester): post-impl + production review fixes (3d5029d)
 - fix(spec_compliance): enforce documented parser preconditions (REQ-10) (e0150e3)
 - fix(gap_validator): post-impl and production review fixes (597c845)
 - fix: post-impl review fixes for m05-m4-state-integration (4679457)
@@ -130,6 +137,8 @@
 
 ### Documentation
 
+- docs(plan): m06a-m3 feature-tester TDD plan + Phase A gap report (3b5bfa9)
+- docs: update generated documentation (1b3af92)
 - docs(plan): add M06a-M2 spec compliance TDD implementation plan (03290e9)
 - docs: update generated documentation (eb5df5a)
 - docs(plan): m06a-m1-gap-validator implementation plan + gap report (142a001)
@@ -166,6 +175,11 @@
 
 ### Tests
 
+- test(feature_tester): forbid psutil/commands/cross-layer runtime imports (c24cf5a)
+- test(feature_tester): pin docstring contracts and atomic-write call (REQ-13, NFR) (87727f8)
+- test(feature_tester): dry_run semantics (REQ-15) (b99a8e3)
+- test(feature_tester): status filter — only implemented processed (REQ-13) (7436b6d)
+- test(feature_tester): module import contract (REQ-16) (6fa537d)
 - test(spec_compliance): assert __all__ resolves and forbidden imports absent (REQ-16, NFR) (3f78dff)
 - test(spec_compliance): pin FileNotFoundError contract for missing spec_path (ae6219b)
 - test(spec_compliance): document real-model boundary as skipped test (quality gate) (38d19d3)
@@ -228,6 +242,7 @@
 
 ### Style
 
+- style(feature_tester): ruff format (991ebb3)
 - style(state): ruff format touched files (27f8f3b)
 
 ### Other
