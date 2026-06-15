@@ -446,3 +446,76 @@ class PathExistsAndEscapeTests(unittest.TestCase):
 
         report = validate_gaps([self._gap("leak.py")], repo_root=self.root)
         self.assertFalse(report.statuses[0].path_exists)
+
+
+class LineInRangeTests(unittest.TestCase):
+    """REQ-04: `line_in_range` is True iff 1 <= line <= number-of-lines."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / "a.py").write_text(
+            "line1\nline2\nline3\n",
+            encoding="utf-8",
+        )
+
+    def _gap(self, line: int) -> Gap:
+        from story_automator.core.gap_validator import Gap
+
+        return Gap(
+            file_path="a.py",
+            line=line,
+            symbol="anything",
+            description="d",
+            severity="minor",
+        )
+
+    def test_line_inside_range_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap(2)], repo_root=self.root)
+        self.assertTrue(report.statuses[0].line_in_range)
+
+    def test_line_at_lower_bound_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap(1)], repo_root=self.root)
+        self.assertTrue(report.statuses[0].line_in_range)
+
+    def test_line_at_upper_bound_is_accepted(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap(3)], repo_root=self.root)
+        self.assertTrue(report.statuses[0].line_in_range)
+
+    def test_line_zero_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap(0)], repo_root=self.root)
+        self.assertFalse(report.statuses[0].line_in_range)
+        joined = " | ".join(report.statuses[0].notes)
+        self.assertIn("line 0", joined)
+
+    def test_line_beyond_end_of_file_is_rejected(self) -> None:
+        from story_automator.core.gap_validator import validate_gaps
+
+        report = validate_gaps([self._gap(999)], repo_root=self.root)
+        self.assertFalse(report.statuses[0].line_in_range)
+
+    def test_missing_path_implies_line_not_in_range(self) -> None:
+        from story_automator.core.gap_validator import Gap, validate_gaps
+
+        report = validate_gaps(
+            [
+                Gap(
+                    file_path="missing.py",
+                    line=1,
+                    symbol="x",
+                    description="d",
+                    severity="minor",
+                )
+            ],
+            repo_root=self.root,
+        )
+        self.assertFalse(report.statuses[0].line_in_range)

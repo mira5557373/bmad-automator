@@ -181,6 +181,33 @@ def _resolve_inside_root(
     return resolved, None
 
 
+def _check_line_in_range(
+    resolved_path: Path | None,
+    line: int,
+) -> tuple[bool, str | None]:
+    """Return `(True, None)` if `1 <= line <= file_line_count`.
+
+    Returns `(False, note)` otherwise. If `resolved_path` is None (path
+    rejection already noted by the caller), returns `(False, None)` so
+    the caller doesn't double-note the same root cause.
+    """
+    if resolved_path is None:
+        return False, None
+    try:
+        text = resolved_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"could not read {resolved_path.name} for line check: {exc}"
+    except UnicodeDecodeError as exc:
+        return False, f"could not decode {resolved_path.name} as UTF-8: {exc}"
+    if not text:
+        line_count = 0
+    else:
+        line_count = len(text.splitlines())
+    if 1 <= line <= line_count:
+        return True, None
+    return False, f"line {line} outside file range 1..{line_count}"
+
+
 def _empty_overall_confidence() -> float:
     """Overall confidence when no gaps were submitted.
 
@@ -218,13 +245,11 @@ def validate_gaps(gaps: list[Gap], *, repo_root: Path) -> ValidationReport:
         if escape_note is not None:
             notes.append(escape_note)
 
-        line_in_range = False  # Placeholder — Task 9 implements line check.
+        line_in_range, line_note = _check_line_in_range(resolved, gap.line)
+        if line_note is not None:
+            notes.append(line_note)
         symbol_present = False  # Placeholder — Task 10 implements symbol check.
 
-        if not line_in_range:
-            notes.append(
-                f"line {gap.line} could not be verified in range for {gap.file_path}"
-            )
         if not symbol_present:
             notes.append(f"symbol {gap.symbol!r} not found in {gap.file_path}")
 
