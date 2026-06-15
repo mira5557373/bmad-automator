@@ -1,0 +1,23 @@
+{
+  "pass": 1,
+  "critical_gaps": 0,
+  "architectural_gaps": 0,
+  "important_gaps": 0,
+  "minor_gaps": 3,
+  "deferred_gaps": 0,
+  "total_gaps_found": 8,
+  "gaps_fixed_this_pass": 5,
+  "tests_green": true,
+  "lint_clean": true,
+  "converged": true,
+  "gap_summaries": [
+    "[ultrathink] CRITICAL — Task 8 test `test_relative_path_existing_inside_root_is_accepted` pinned confidence=0.85 on a single-line file with line=1; after Task 9 wires `_check_line_in_range`, line_in_range flips to True and the same test starts asserting confidence=0.90 incorrectly. FIXED: removed the brittle confidence assertion, kept only path_exists check, deferred the full 0.95 confidence pin to Task 10's `test_all_three_checks_passing_yields_confidence_0_95`.",
+    "[ultrathink] IMPORTANT — `_check_line_in_range` and `_check_symbol_present` only caught OSError on `read_text(encoding=\"utf-8\")`; a binary or Latin-1 file inside repo_root would surface UnicodeDecodeError and crash `validate_gaps`, contradicting the docstring's 'degrades gracefully' contract. FIXED: added an explicit `except UnicodeDecodeError` branch to both helpers returning (False, note).",
+    "[ultrathink] IMPORTANT — The single-note-when-path-missing behavior (line/symbol helpers return (False, None) when resolved=None to avoid duplicate noise) was implicit. Spec REQ-04 says 'failed checks ... append a human-readable note' and a strict reader could expect 1-note-per-check. FIXED: added an explicit 'Note-suppression rule' paragraph to the Confidence Model section justifying the elision as the spec-permitted reading.",
+    "[ultrathink] IMPORTANT — Task 12 step 3 fallback mypy command used bash inline `VAR=val cmd` syntax which is a parser error in PowerShell (the operator's primary shell alongside git-bash). FIXED: added a PowerShell equivalent using `$env:MYPYPATH = ...` plus `Remove-Item Env:MYPYPATH` cleanup.",
+    "[ultrathink] IMPORTANT — Task 10 and Task 11 reported 'PASS (N tests on POSIX)' without naming the Windows variant, inconsistent with Task 8's careful '(33 on Windows due to the skipIf)'. FIXED: appended '(N-1 on Windows — the symlink case is skipped)' to both Task 10 step 4 and Task 11 step 2.",
+    "[ultrathink] MINOR — Notes for escape vs. missing-but-non-escaping paths share the wording 'path does not exist or escapes repo_root'; not strictly required by spec REQ-05 which says 'note referencing the rejected path' (both notes do reference the path). Not fixed — cosmetic, plan documents the choice in `_resolve_inside_root` docstring.",
+    "[ultrathink] MINOR — `_check_line_in_range`'s upper-bound test uses a file with trailing newline; no explicit case for file without trailing newline (`splitlines` handles both, but a regression test would harden it). Not fixed — coverage on the line-count branch is already exercised by the boundary tests.",
+    "[ultrathink] MINOR — `parse_gap_list` does not type-validate string fields (`file_path`, `symbol`, `description`); silently coerces with `str(raw[...])`. Spec REQ-06 only enumerates three required validations (missing key, non-integer line, out-of-set severity), so this is defensible. Not fixed — design judgment matches spec letter."
+  ]
+}
