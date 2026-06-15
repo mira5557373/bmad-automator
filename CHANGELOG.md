@@ -1,5 +1,8 @@
 ### Features
 
+- feat(state): guard cmd_build_state_doc write with acquire_run_lock (8d35f6d)
+- feat(state): route cmd_build_state_doc writes through write_atomic_text (4c0bbc8)
+- feat(state): cmd_build_state_doc removes legacy marker at startup (9c65ed4)
 - feat(atomic_io): HeartbeatThread rejects non-positive interval at construction (8935e44)
 - feat(atomic_io): HeartbeatThread.run loop refreshes payload until stopped (036c5a4)
 - feat(atomic_io): add HeartbeatThread class skeleton with daemon flag and stop() (3b048b0)
@@ -54,6 +57,8 @@
 
 ### Bug Fixes
 
+- fix: post-impl review fixes for m05-m4-state-integration (4679457)
+- fix(test-state): make cross-thread smoke test deterministic (a9332e8)
 - fix(atomic_io): drop redundant unittest.mock.patch reimport in test (95577f9)
 - fix(atomic_io): tolerate Windows replace-window PermissionError in concurrent reader test (0525b31)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
@@ -107,6 +112,8 @@
 
 ### Documentation
 
+- docs(plan): add m05-m4 state integration TDD plan (40adec4)
+- docs: update generated documentation (cca5d41)
 - docs(plan): add M05-M3 heartbeat & staleness implementation plan (0782fe2)
 - docs: update generated documentation (ade5326)
 - docs(plan): add M05-M2 run lock identity implementation plan (d592914)
@@ -137,6 +144,12 @@
 
 ### Tests
 
+- test(state): cross-thread cmd_build_state_doc never deadlocks (c8f2797)
+- test(state): regression pin legacy marker cleanup runs before lock (107f39e)
+- test(state): pin RunLockBusy envelope under contended .state-build.lock (105e489)
+- test(state): pin cmd_build_state_doc acquires run lock around write (f54eacf)
+- test(state): pin cmd_build_state_doc routes writes through write_atomic_text (863dc5c)
+- test(state): pin legacy marker cleanup at cmd_build_state_doc entry (e705fe5)
 - test(atomic_io): pin is_stale False-branch truth table and threshold (afac3d9)
 - test(atomic_io): pin import allowlist to stdlib + filelock + psutil (9fc5bd1)
 - test(atomic_io): release FileLock when payload write fails (28a94f7)
@@ -183,6 +196,10 @@
 - chore: update changelog (7c9c3c1)
 - chore: release 1.12.1 (334337e)
 - chore: prepare repository for open source release (de29b37)
+
+### Style
+
+- style(state): ruff format touched files (27f8f3b)
 
 ### Other
 
