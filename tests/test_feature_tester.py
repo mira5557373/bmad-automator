@@ -525,5 +525,64 @@ class PlanFeatureTestsStatusFilterTests(unittest.TestCase):
             self.assertEqual(plan, [])
 
 
+class PlanFeatureTestsDryRunTests(unittest.TestCase):
+    """REQ-15: dry_run=True writes no file; created_test_path is the
+    would-be path; action='skipped'."""
+
+    def test_dry_run_does_not_write_file(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")],
+                tests_dir=tests_dir,
+                dry_run=True,
+            )
+            self.assertEqual(len(plan), 1)
+            entry = plan[0]
+            self.assertEqual(entry.action, "skipped")
+            self.assertIsNone(entry.existing_test_path)
+            would_be = Path(entry.created_test_path)
+            self.assertEqual(would_be.name, "test_compliance_req_07.py")
+            self.assertFalse(would_be.exists())
+            self.assertEqual(
+                list(tests_dir.glob("test_compliance_*.py")), []
+            )
+
+    def test_dry_run_does_not_create_tests_dir(self) -> None:
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp) / "nested" / "tests"
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")],
+                tests_dir=tests_dir,
+                dry_run=True,
+            )
+            self.assertEqual(plan[0].action, "skipped")
+            self.assertFalse(tests_dir.exists())
+
+    def test_dry_run_still_returns_found_when_existing_test_present(
+        self,
+    ) -> None:
+        """If a test already exists, dry_run still reports 'found'."""
+        from story_automator.core.feature_tester import plan_feature_tests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tests_dir = Path(tmp)
+            existing = tests_dir / "test_compliance_req_07.py"
+            existing.write_text('"""REQ-07 covered."""\n', encoding="utf-8")
+            plan = plan_feature_tests(
+                [_make_verdict("REQ-07")],
+                tests_dir=tests_dir,
+                dry_run=True,
+            )
+            self.assertEqual(plan[0].action, "found")
+            self.assertEqual(
+                plan[0].existing_test_path, str(existing.resolve())
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
