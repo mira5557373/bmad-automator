@@ -1,5 +1,8 @@
 ### Features
 
+- feat(atomic_io): add acquire_run_lock returning RunLockHandle context manager (8f4d1a7)
+- feat(atomic_io): add RunLockIdentity dataclass with deterministic JSON encoding (602c815)
+- feat(atomic_io): add RunLockBusy typed exception for acquire timeout (040ce76)
 - feat(atomic_io): serialize writes through per-path threading.Lock registry (f504bb6)
 - feat(atomic_io): retry os.replace on Windows PermissionError with exponential backoff (ef406e4)
 - feat(atomic_io): implement happy-path tmp+fsync+os.replace write (971a593)
@@ -46,6 +49,7 @@
 
 ### Bug Fixes
 
+- fix(atomic_io): drop redundant unittest.mock.patch reimport in test (95577f9)
 - fix(atomic_io): tolerate Windows replace-window PermissionError in concurrent reader test (0525b31)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
@@ -98,6 +102,8 @@
 
 ### Documentation
 
+- docs(plan): add M05-M2 run lock identity implementation plan (d592914)
+- docs: update generated documentation (b4385cc)
 - docs(plan): add M05-M1 atomic-write foundation implementation plan (bea07cc)
 - docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
@@ -124,6 +130,9 @@
 
 ### Tests
 
+- test(atomic_io): release FileLock when payload write fails (28a94f7)
+- test(atomic_io): verify RunLockIdentity fields sourced from canonical helpers (528e7e0)
+- test(atomic_io): cover RunLockBusy translation and zero-timeout contention (8a24679)
 - test(atomic_io): document crash-safety behavior for replace and fsync failures (4d4152e)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
