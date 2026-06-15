@@ -374,6 +374,16 @@ class LookupSuccessRateTests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(lookup_success_rate(table, *args, **kwargs), expected)
 
+    def test_default_kwarg_is_exactly_zero_point_five(self) -> None:
+        import inspect
+
+        from story_automator.core.calibration import lookup_success_rate
+
+        sig = inspect.signature(lookup_success_rate)
+        self.assertIn("default", sig.parameters)
+        self.assertEqual(sig.parameters["default"].default, 0.5)
+        self.assertEqual(sig.parameters["default"].annotation, "float")
+
 
 class FormatCalibrationReportTests(unittest.TestCase):
     def test_empty_table_emits_header_and_trailing_newline(self) -> None:
