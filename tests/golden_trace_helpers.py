@@ -11,6 +11,7 @@ import hashlib
 import json
 import threading
 import warnings
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -38,6 +39,9 @@ _HEARTBEAT_LOCK_BASENAMES: frozenset[str] = frozenset({
     ".run.lock",
     ".state-build.lock",
 })
+
+_CLAUDE_P_HOOK: Callable[[list[str]], None] | None = None
+_ACTIVE_RECORDER: "GoldenTraceRecorder | None" = None
 
 
 def _is_heartbeat_lock_path(rel_posix_path: str) -> bool:
@@ -324,15 +328,17 @@ def _find_repo_root(start: Path | None = None) -> Path:
 
 
 def notify_claude_p(argv: list[str]) -> None:
-    """Hook surface for `claude -p` invocations.
+    """Hook surface for `claude -p` invocations (REQ-05).
 
-    No-op when no recorder is active. GoldenTraceRecorder.__enter__
-    swaps the module-level _CLAUDE_P_HOOK slot (NOT this function
-    itself) in a later task, so callers that did
-    `from tests.golden_trace_helpers import notify_claude_p` still
-    see the active recorder because the function body re-reads the
-    module-global slot on every call.
+    No-op when no recorder is active; the recorder swaps the
+    module-global ``_CLAUDE_P_HOOK`` slot on ``__enter__``. Because
+    this function body re-reads the slot on every call (not at import
+    time), callers may use either ``from ... import notify_claude_p``
+    or module-attribute access — both see the active recorder.
     """
+    hook = _CLAUDE_P_HOOK
+    if hook is not None:
+        hook(argv)
     return None
 
 
@@ -355,12 +361,21 @@ class GoldenTraceRecorder:
         return list(self._entries)
 
     def __enter__(self) -> GoldenTraceRecorder:
+        global _ACTIVE_RECORDER
         if self._installed:
             raise RuntimeError("GoldenTraceRecorder is not reentrant")
+        if _ACTIVE_RECORDER is not None:
+            raise RuntimeError(
+                "Another GoldenTraceRecorder is already active; nested "
+                "recorders are not supported"
+            )
         self._orig_emit = TelemetryEmitter.emit
         self._orig_state_write = _state_module.write_atomic_text
+        self._orig_claude_p_hook = _CLAUDE_P_HOOK
         self._install_emit_hook()
         self._install_state_hook()
+        self._install_claude_p_hook()
+        _ACTIVE_RECORDER = self
         self._installed = True
         return self
 
@@ -370,6 +385,7 @@ class GoldenTraceRecorder:
         exc: BaseException | None,
         tb: object,
     ) -> None:
+        global _CLAUDE_P_HOOK, _ACTIVE_RECORDER
         errors: list[BaseException] = []
         for restore in (
             lambda: setattr(TelemetryEmitter, "emit", self._orig_emit),
@@ -379,9 +395,13 @@ class GoldenTraceRecorder:
                 restore()
             except BaseException as restore_err:
                 errors.append(restore_err)
+        try:
+            _CLAUDE_P_HOOK = self._orig_claude_p_hook
+        except BaseException as restore_err:  # pragma: no cover - defensive
+            errors.append(restore_err)
+        _ACTIVE_RECORDER = None
         self._installed = False
         if errors:
-            # BaseExceptionGroup is a builtin on Python 3.11+ (project floor).
             raise BaseExceptionGroup(  # noqa: F821
                 "GoldenTraceRecorder failed to restore one or more hooks",
                 errors,
@@ -422,6 +442,16 @@ class GoldenTraceRecorder:
             return result
 
         _state_module.write_atomic_text = wrapper  # type: ignore[assignment]
+
+    def _install_claude_p_hook(self) -> None:
+        global _CLAUDE_P_HOOK
+        recorder = self
+
+        def hook(argv: list[str]) -> None:
+            # Argv path normalization lands in Task 11.
+            recorder._record("claude_p", "invoke", {"argv": list(argv)})
+
+        _CLAUDE_P_HOOK = hook
 
     def _record(self, channel: Channel, kind: str, payload: dict[str, object]) -> None:
         """Append one entry under the arrival lock (REQ-06).

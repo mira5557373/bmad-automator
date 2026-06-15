@@ -812,5 +812,33 @@ class StateLockExclusionTests(unittest.TestCase):
         self.assertEqual(rec.entries[0].payload["path"], "mystory.lock")
 
 
+class ClaudePHookTests(unittest.TestCase):
+    def test_notify_claude_p_records_invoke_entry(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                gh.notify_claude_p(["claude", "-p", "Run story s1"])
+        self.assertEqual(len(rec.entries), 1)
+        entry = rec.entries[0]
+        self.assertEqual(entry.channel, "claude_p")
+        self.assertEqual(entry.kind, "invoke")
+        self.assertEqual(entry.payload["argv"], ["claude", "-p", "Run story s1"])
+
+    def test_notify_claude_p_outside_recorder_is_noop(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            with GoldenTraceRecorder(repo_root=Path(tmp)):
+                pass
+        self.assertIsNone(gh.notify_claude_p(["claude", "-p", "x"]))
+
+    def test_claude_p_hook_removed_on_exit(self) -> None:
+        import tests.golden_trace_helpers as gh
+        with tempfile.TemporaryDirectory() as tmp:
+            with GoldenTraceRecorder(repo_root=Path(tmp)) as rec:
+                gh.notify_claude_p(["claude", "-p", "a"])
+            gh.notify_claude_p(["claude", "-p", "b"])  # not recorded
+        self.assertEqual(len(rec.entries), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
