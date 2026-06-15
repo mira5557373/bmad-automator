@@ -1550,5 +1550,76 @@ class RecorderRegressionLocalizationTests(unittest.TestCase):
         self.assertEqual(diff.mismatches[0].field, "length")
 
 
+class PlaceholderLeakQualityGateTests(unittest.TestCase):
+    """Quality gate: no unresolved four-letter placeholder tokens leak
+    into tests/golden_trace_helpers.py.
+
+    The recorder source must never contain bare 4-letter uppercase
+    sentinels like ``EPIC`` or ``STRY`` — those belong only in template
+    payloads, which the recorder preserves verbatim per REQ-13.
+    """
+
+    _ALLOWED_TOKENS = frozenset(
+        {
+            "JSON",
+            "HTTP",
+            "NONE",
+            "TRUE",
+            "ASCI",
+            "REQ",
+            "POSIX",
+            "PEP",
+        }
+    )
+
+    def test_no_unallowed_four_letter_placeholder_in_helper_source(self) -> None:
+        import re
+
+        helper_path = Path(__file__).parent / "golden_trace_helpers.py"
+        source = helper_path.read_text(encoding="utf-8")
+        pattern = re.compile(r"\b[A-Z]{4}\b")
+        offenders: list[tuple[int, str, str]] = []
+        for lineno, line in enumerate(source.splitlines(), start=1):
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            for match in pattern.finditer(line):
+                token = match.group(0)
+                if token in self._ALLOWED_TOKENS:
+                    continue
+                offenders.append((lineno, token, line.rstrip()))
+        self.assertEqual(
+            offenders,
+            [],
+            f"unresolved 4-letter placeholder tokens in helper source: "
+            f"{offenders}",
+        )
+
+    def test_four_letter_placeholder_in_event_payload_survives_serialization(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            emitter = TelemetryEmitter(root / "events.jsonl")
+            with GoldenTraceRecorder(repo_root=root) as rec:
+                emitter.emit(
+                    StoryStarted(
+                        timestamp="2026-06-15T00:00:00Z",
+                        run_id="r",
+                        epic="EPIC",
+                        story_key="STRY",
+                        agent="a",
+                        model="m",
+                        complexity="c",
+                    )
+                )
+            entries = rec.entries
+            fixture = Path(tmp) / "placeholder.json"
+            fixture.write_text(serialize_trace(entries), encoding="utf-8")
+            reloaded = load_golden(fixture)
+        self.assertEqual(reloaded[0].payload["epic"], "EPIC")
+        self.assertEqual(reloaded[0].payload["story_key"], "STRY")
+
+
 if __name__ == "__main__":
     unittest.main()
