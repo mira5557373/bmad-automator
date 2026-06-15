@@ -123,5 +123,45 @@ class EscalateSessionCrashWiringTests(unittest.TestCase):
             self.assertEqual(ev["error_class"], "session_crash")
 
 
+class MarkerCreateWiringTests(unittest.TestCase):
+    def test_marker_create_emits_story_started_with_epic_and_story(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+            ):
+                rc = orchestrator._marker(
+                    [
+                        "create",
+                        "--epic",
+                        "8",
+                        "--story",
+                        "8.4",
+                        "--remaining",
+                        "3",
+                        "--state-file",
+                        str(tmp / "state.md"),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            started = [e for e in events if e["event_type"] == "story_started"]
+            self.assertEqual(len(started), 1)
+            ev = started[0]
+            self.assertEqual(ev["epic"], "8")
+            self.assertEqual(ev["story_key"], "8.4")
+            # agent/model/complexity intentionally empty at marker site
+            # (spawn-time population is M03+ scope per spec lines 8-9)
+            self.assertEqual(ev["agent"], "")
+            self.assertEqual(ev["model"], "")
+            self.assertEqual(ev["complexity"], "")
+
+
 if __name__ == "__main__":
     unittest.main()
