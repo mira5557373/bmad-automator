@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import json
 import shutil
-import sys  # noqa: F401
 import tempfile
 import threading
 import unittest
@@ -388,6 +387,106 @@ class CleanupBeforeLockOrderingTests(unittest.TestCase):
             legacy.exists(),
             "cleanup must happen BEFORE lock acquisition — RunLockBusy on "
             "the first lock attempt must not skip the cleanup step",
+        )
+
+
+class ValidationErrorOrderingTests(unittest.TestCase):
+    """REQ-10 + plan invariant: early-validation errors must NOT acquire the
+    run lock. The plan deliberately orders ``acquire_run_lock`` AFTER all
+    validation (template / config / policy snapshot) so that the existing
+    failure envelopes are byte-identical to the pre-M05 behavior and so
+    failed builds never leave a ``.state-build.lock`` payload behind. A
+    future refactor that moved the lock earlier would silently flip that
+    contract; this test pins it.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name)
+        self.output_dir = self.project_root / "_bmad-output" / "story-automator"
+        _install_bundle(self.project_root)
+        _install_required_skills(self.project_root)
+        self.template = (
+            self.project_root
+            / ".claude"
+            / "skills"
+            / "bmad-story-automator"
+            / "templates"
+            / "state-document.md"
+        )
+
+    def _assert_lock_untouched(
+        self, args: list[str], expected_error: str, expected_code: int = 1
+    ) -> None:
+        from unittest.mock import patch
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        def _explode(*_a: object, **_kw: object) -> None:
+            raise AssertionError(
+                "acquire_run_lock must NOT be invoked when validation fails "
+                f"(error={expected_error!r})"
+            )
+
+        stdout = io.StringIO()
+        with (
+            _PatchEnv(self.project_root),
+            redirect_stdout(stdout),
+            patch(
+                "story_automator.commands.state.acquire_run_lock",
+                side_effect=_explode,
+            ),
+        ):
+            code = cmd_build_state_doc(args)
+
+        self.assertEqual(code, expected_code)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload, {"ok": False, "error": expected_error})
+        # The payload file at lock_path must never be created on a
+        # validation-failure path.
+        self.assertFalse(
+            (self.output_dir / ".state-build.lock").exists(),
+            "validation errors must not leave a .state-build.lock payload",
+        )
+
+    def test_missing_template_does_not_acquire_lock(self) -> None:
+        self._assert_lock_untouched(
+            [
+                "--template",
+                str(self.template.parent / "no-such-template.md"),
+                "--output-folder",
+                str(self.output_dir),
+                "--config-json",
+                json.dumps(_config()),
+            ],
+            expected_error="missing_template_or_output",
+        )
+
+    def test_missing_config_does_not_acquire_lock(self) -> None:
+        self._assert_lock_untouched(
+            [
+                "--template",
+                str(self.template),
+                "--output-folder",
+                str(self.output_dir),
+                "--config-json",
+                "",
+            ],
+            expected_error="missing_config",
+        )
+
+    def test_invalid_config_json_does_not_acquire_lock(self) -> None:
+        self._assert_lock_untouched(
+            [
+                "--template",
+                str(self.template),
+                "--output-folder",
+                str(self.output_dir),
+                "--config-json",
+                "{not valid json",
+            ],
+            expected_error="missing_config",
         )
 
 
