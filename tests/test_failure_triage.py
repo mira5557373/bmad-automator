@@ -374,7 +374,13 @@ class ImportAndSizeDisciplineTests(unittest.TestCase):
 
         self.assertEqual(
             set(failure_triage.__all__),
-            {"Classification", "Confidence", "FailureClass", "IMPLIES_GRAPH"},
+            {
+                "Classification",
+                "Confidence",
+                "FailureClass",
+                "IMPLIES_GRAPH",
+                "classify",
+            },
         )
 
 

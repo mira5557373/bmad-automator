@@ -118,6 +118,7 @@ __all__ = [
     "Confidence",
     "FailureClass",
     "IMPLIES_GRAPH",
+    "classify",
 ]
 
 
@@ -286,4 +287,29 @@ def _classify_tmux_crash(event: TmuxSessionCrashed) -> Classification:
 
 
 def _classify_escalation(event: EscalationTriggered) -> Classification:
-    raise NotImplementedError  # implemented in Task 11
+    """Map an ``EscalationTriggered`` event onto a classification.
+
+    Default is ``REVIEW_REJECTED`` / ``MEDIUM`` — most escalations are
+    routed to a human reviewer. When the ``trigger`` field (spec REQ-11
+    names it; M01 ships ``trigger_id`` / ``severity`` / ``message`` only)
+    begins with the ``policy:`` namespace prefix, upgrade the verdict to
+    ``POLICY_VIOLATION`` / ``HIGH`` with ``REVIEW_REJECTED`` implied so
+    downstream M08 retry policy can refuse to retry policy escalations.
+    """
+    event_id = getattr(event, "event_id", None)
+    trigger = getattr(event, "trigger", "") or ""
+    if trigger.startswith("policy:"):
+        return Classification(
+            primary=FailureClass.POLICY_VIOLATION,
+            implies=(FailureClass.REVIEW_REJECTED,),
+            confidence=Confidence.HIGH,
+            reason="policy_trigger_prefix",
+            event_id=event_id,
+        )
+    return Classification(
+        primary=FailureClass.REVIEW_REJECTED,
+        implies=(),
+        confidence=Confidence.MEDIUM,
+        reason="escalation_default",
+        event_id=event_id,
+    )
