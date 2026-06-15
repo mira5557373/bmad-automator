@@ -254,9 +254,7 @@ class FindExistingTestTests(unittest.TestCase):
         from story_automator.core.feature_tester import _find_existing_test
 
         with tempfile.TemporaryDirectory() as tmp:
-            self._write(
-                Path(tmp), "test_compliance_req_99.py", '"""REQ-99 done."""'
-            )
+            self._write(Path(tmp), "test_compliance_req_99.py", '"""REQ-99 done."""')
             self.assertIsNone(_find_existing_test(Path(tmp), "REQ-07"))
 
     def test_finds_match_in_docstring(self) -> None:
@@ -298,9 +296,7 @@ class FindExistingTestTests(unittest.TestCase):
         from story_automator.core.feature_tester import _find_existing_test
 
         with tempfile.TemporaryDirectory() as tmp:
-            self._write(
-                Path(tmp), "test_compliance_b.py", '"""REQ-07 in B."""\n'
-            )
+            self._write(Path(tmp), "test_compliance_b.py", '"""REQ-07 in B."""\n')
             first = self._write(
                 Path(tmp), "test_compliance_a.py", '"""REQ-07 in A."""\n'
             )
@@ -386,9 +382,7 @@ class PlanFeatureTestsHappyPathTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tests_dir = Path(tmp)
-            plan = plan_feature_tests(
-                [_make_verdict("REQ-07")], tests_dir=tests_dir
-            )
+            plan = plan_feature_tests([_make_verdict("REQ-07")], tests_dir=tests_dir)
             self.assertEqual(len(plan), 1)
             entry = plan[0]
             self.assertEqual(entry.req_id, "REQ-07")
@@ -409,19 +403,13 @@ class PlanFeatureTestsHappyPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tests_dir = Path(tmp)
             existing = tests_dir / "test_compliance_req_07.py"
-            existing.write_text(
-                '"""REQ-07 already covered."""\n', encoding="utf-8"
-            )
+            existing.write_text('"""REQ-07 already covered."""\n', encoding="utf-8")
             original_bytes = existing.read_bytes()
-            plan = plan_feature_tests(
-                [_make_verdict("REQ-07")], tests_dir=tests_dir
-            )
+            plan = plan_feature_tests([_make_verdict("REQ-07")], tests_dir=tests_dir)
             self.assertEqual(len(plan), 1)
             entry = plan[0]
             self.assertEqual(entry.action, "found")
-            self.assertEqual(
-                entry.existing_test_path, str(existing.resolve())
-            )
+            self.assertEqual(entry.existing_test_path, str(existing.resolve()))
             self.assertIsNone(entry.created_test_path)
             # Idempotency: existing file is not touched.
             self.assertEqual(existing.read_bytes(), original_bytes)
@@ -432,14 +420,10 @@ class PlanFeatureTestsHappyPathTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tests_dir = Path(tmp) / "nested" / "tests"
-            plan = plan_feature_tests(
-                [_make_verdict("REQ-07")], tests_dir=tests_dir
-            )
+            plan = plan_feature_tests([_make_verdict("REQ-07")], tests_dir=tests_dir)
             self.assertEqual(plan[0].action, "created")
             self.assertTrue(tests_dir.is_dir())
-            self.assertTrue(
-                (tests_dir / "test_compliance_req_07.py").exists()
-            )
+            self.assertTrue((tests_dir / "test_compliance_req_07.py").exists())
 
     def test_processes_multiple_implemented_verdicts(self) -> None:
         from story_automator.core.feature_tester import plan_feature_tests
@@ -462,9 +446,7 @@ class PlanFeatureTestsHappyPathTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
-                plan_feature_tests(
-                    [_make_verdict("not-a-req")], tests_dir=Path(tmp)
-                )
+                plan_feature_tests([_make_verdict("not-a-req")], tests_dir=Path(tmp))
 
 
 class PlanFeatureTestsStatusFilterTests(unittest.TestCase):
@@ -480,9 +462,7 @@ class PlanFeatureTestsStatusFilterTests(unittest.TestCase):
                 tests_dir=tests_dir,
             )
             self.assertEqual(plan, [])
-            self.assertEqual(
-                list(tests_dir.glob("test_compliance_*.py")), []
-            )
+            self.assertEqual(list(tests_dir.glob("test_compliance_*.py")), [])
 
     def test_partial_verdicts_dropped(self) -> None:
         from story_automator.core.feature_tester import plan_feature_tests
@@ -509,9 +489,7 @@ class PlanFeatureTestsStatusFilterTests(unittest.TestCase):
                 ],
                 tests_dir=tests_dir,
             )
-            self.assertEqual(
-                sorted(e.req_id for e in plan), ["REQ-07", "REQ-10"]
-            )
+            self.assertEqual(sorted(e.req_id for e in plan), ["REQ-07", "REQ-10"])
 
     def test_dropped_verdicts_do_not_validate_req_id(self) -> None:
         """Dropped early — a malformed missing/partial id must NOT raise."""
@@ -546,9 +524,7 @@ class PlanFeatureTestsDryRunTests(unittest.TestCase):
             would_be = Path(entry.created_test_path)
             self.assertEqual(would_be.name, "test_compliance_req_07.py")
             self.assertFalse(would_be.exists())
-            self.assertEqual(
-                list(tests_dir.glob("test_compliance_*.py")), []
-            )
+            self.assertEqual(list(tests_dir.glob("test_compliance_*.py")), [])
 
     def test_dry_run_does_not_create_tests_dir(self) -> None:
         from story_automator.core.feature_tester import plan_feature_tests
@@ -579,9 +555,7 @@ class PlanFeatureTestsDryRunTests(unittest.TestCase):
                 dry_run=True,
             )
             self.assertEqual(plan[0].action, "found")
-            self.assertEqual(
-                plan[0].existing_test_path, str(existing.resolve())
-            )
+            self.assertEqual(plan[0].existing_test_path, str(existing.resolve()))
 
 
 class PublicAPIDocstringTests(unittest.TestCase):

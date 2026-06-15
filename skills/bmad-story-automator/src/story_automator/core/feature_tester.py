@@ -100,9 +100,7 @@ def _normalize_req_id(req_id: str) -> tuple[str, str]:
     Raises: ValueError if the input does not match the required pattern.
     """
     if not _REQ_ID_RE.fullmatch(req_id):
-        raise ValueError(
-            f"req_id must match 'REQ-<digits>'; got {req_id!r}"
-        )
+        raise ValueError(f"req_id must match 'REQ-<digits>'; got {req_id!r}")
     return req_id.lower().replace("-", "_"), req_id.replace("-", "_")
 
 
@@ -230,7 +228,5 @@ def plan_feature_tests(
     for verdict in verdicts:
         if verdict.status != "implemented":
             continue
-        plan.append(
-            _plan_for_verdict(verdict, tests_dir=tests_dir, dry_run=dry_run)
-        )
+        plan.append(_plan_for_verdict(verdict, tests_dir=tests_dir, dry_run=dry_run))
     return plan
