@@ -90,12 +90,21 @@ pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
 BASE="${BASE:-origin/main}"
 if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then BASE=main; fi
 if git rev-parse --verify --quiet "$BASE" >/dev/null; then
-  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' \
+  # M12c — Gate 6 allows four retraction-related ADDITIONS (^+ only) so the
+  # retraction convention can land its worked example without falsely tripping
+  # prose-immutability. Deletions (^-) under docs/changelog/*.md remain
+  # forbidden, preserving the original M11 intent.
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' ':!docs/changelog/260617.md' \
     | grep -E '^[+-][^+-]' \
-    | grep -vE '^[+-]## [0-9]{6}' || true)
+    | grep -vE '^[+-]## [0-9]{6}' \
+    | grep -vE '^\+### Retractions[[:space:]]*$' \
+    | grep -vE '^\+### Notes[[:space:]]*$' \
+    | grep -vE '^\+- \[20[0-9]{2}-[0-9]{2}-[0-9]{2}\] Retracted by \[[0-9]{6}#[a-z0-9_-]+\]\(\./[0-9]{6}\.md#[a-z0-9_-]+\): [^[:space:]].*$' \
+    | grep -vE '^\+Retracts: \[[0-9]{6}#[a-z0-9_-]+\]\(\./[0-9]{6}\.md#[a-z0-9_-]+\)[[:space:]]*$' \
+    || true)
   [ -z "$NON_HEADING" ] || fail "REQ-10 prose-immutability: non-heading changes under docs/changelog/:
 $NON_HEADING"
-  pass "REQ-10 prose-immutability (only dated headings changed vs $BASE)"
+  pass "REQ-10 prose-immutability (only dated headings + retraction additions changed vs $BASE)"
 
   # Whitespace hygiene on every changed file we are responsible for.
   git diff --check "$BASE"...HEAD -- 'docs/changelog/*.md' CONTRIBUTING.md scripts/m11-vocabulary-gates.sh >/dev/null \
