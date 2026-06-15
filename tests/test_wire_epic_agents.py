@@ -177,5 +177,42 @@ class AgentsResolveRetryWiringTests(unittest.TestCase):
             )
 
 
+class RetroAgentWiringTests(unittest.TestCase):
+    def test_retro_fired_emit_uses_frontmatter_agentConfig(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            state_file = tmp / "state.md"
+            state_file.write_text(
+                "---\n"
+                "epic: 9\n"
+                "agentConfig:\n"
+                "  epic: 9\n"
+                "  storiesCompleted: 3\n"
+                "  totalCostUsd: 2.50\n"
+                "  durationSeconds: 360.0\n"
+                "---\n# state\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    epic_agents, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    epic_agents, "get_project_root", return_value=str(tmp)
+                ),
+            ):
+                rc = epic_agents.retro_agent_action(["--state-file", str(state_file)])
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            retros = [e for e in events if e["event_type"] == "retro_fired"]
+            self.assertEqual(len(retros), 1)
+            ev = retros[0]
+            self.assertEqual(ev["epic"], "9")
+            self.assertEqual(ev["stories_completed"], 3)
+            self.assertEqual(ev["total_cost_usd"], 2.5)
+            self.assertEqual(ev["duration_s"], 360.0)
+
+
 if __name__ == "__main__":
     unittest.main()

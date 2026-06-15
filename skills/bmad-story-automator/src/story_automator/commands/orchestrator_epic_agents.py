@@ -804,7 +804,14 @@ def _load_agent_config_from_state(state_file: str) -> dict:
                     if isinstance(task_cfg, dict):
                         task_cfg[key.strip()] = _parse_scalar(raw.strip())
 
-    return parse_agent_config(json.dumps(config))
+    parsed = parse_agent_config(json.dumps(config))
+    # Preserve top-level scalar agentConfig fields (epic, storiesCompleted,
+    # totalCostUsd, durationSeconds, ...) that parse_agent_config does not
+    # surface — retro_agent_action reads them for RetroFired emit (REQ-10).
+    for key, value in config.items():
+        if key not in parsed:
+            parsed[key] = value
+    return parsed
 
 
 def _parse_scalar(raw: str) -> object:
