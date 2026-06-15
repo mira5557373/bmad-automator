@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..core.atomic_io import RunLockBusy, acquire_run_lock, write_atomic_text  # noqa: F401
+from ..core.atomic_io import RunLockBusy, acquire_run_lock, write_atomic_text
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
 from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_effective_policy
 from ..core.agent_config import normalize_model as _model_or_none
@@ -183,7 +183,13 @@ def cmd_build_state_doc(args: list[str]) -> int:
     for key, value in body.items():
         text = text.replace(key, value)
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
-    write_atomic_text(output_path, text)
+    lock_path = Path(output_folder).resolve() / _STATE_BUILD_LOCK_NAME
+    try:
+        with acquire_run_lock(lock_path, run_id=stamp, timeout=0.0):
+            write_atomic_text(output_path, text)
+    except RunLockBusy:
+        write_json({"ok": False, "error": "run_lock_busy"})
+        return 1
     write_json({"ok": True, "path": str(output_path), "createdAt": now})
     return 0
 
