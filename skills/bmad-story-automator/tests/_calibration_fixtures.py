@@ -8,6 +8,7 @@ from pathlib import Path
 from story_automator.core import telemetry_events as _events_mod
 from story_automator.core.common import compact_json, ensure_dir
 from story_automator.core.telemetry_events import StoryCompleted, StoryFailed
+from story_automator.core.calibration import CalibrationEntry, CalibrationTable
 
 
 @contextlib.contextmanager
@@ -141,3 +142,57 @@ class _ExtendedEventShim:
         _Widened.EVENT_TYPE = event_type
         _events_mod.Event._REGISTRY[event_type] = _Widened
         return _Widened
+
+
+def _make_entry(
+    *,
+    model_id: str = "claude-opus-4",
+    task_kind: str = "code",
+    success_rate: float = 0.8750,
+    sample_count: int = 8,
+    last_seen_iso: str = "2026-06-14T12:00:00Z",
+) -> CalibrationEntry:
+    """Build a CalibrationEntry for tests. Defaults are the canonical
+    opus/code/0.875/8 fixture used by lookup and report tests.
+    """
+
+    return CalibrationEntry(
+        model_id=model_id,
+        task_kind=task_kind,
+        success_rate=success_rate,
+        sample_count=sample_count,
+        last_seen_iso=last_seen_iso,
+    )
+
+
+def _make_table(
+    entries=None,
+    *,
+    generated_at: str = "2026-06-14T13:00:00Z",
+    source_path: str = "/tmp/t.jsonl",
+    total_events_scanned: int | None = None,
+) -> CalibrationTable:
+    """Build a CalibrationTable for tests.
+
+    `entries` may be an iterable of CalibrationEntry (keyed by
+    (model_id, task_kind)) or a pre-built dict. `total_events_scanned`
+    defaults to `sum(e.sample_count for e in entries)` when omitted.
+    """
+
+    if entries is None:
+        entries_dict: dict[tuple[str, str], CalibrationEntry] = {}
+    elif isinstance(entries, dict):
+        entries_dict = entries
+    else:
+        entries_dict = {(e.model_id, e.task_kind): e for e in entries}
+    scanned: int = (
+        total_events_scanned
+        if total_events_scanned is not None
+        else sum(e.sample_count for e in entries_dict.values())
+    )
+    return CalibrationTable(
+        entries=entries_dict,
+        generated_at=generated_at,
+        source_path=source_path,
+        total_events_scanned=scanned,
+    )
