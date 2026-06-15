@@ -40,7 +40,7 @@ class FailureClassTests(unittest.TestCase):
         for member in FailureClass:
             self.assertEqual(member.value, member.name)
 
-    def test_failure_class_is_str_enum_subclass(self) -> None:
+    def test_failure_class_is_enum_subclass(self) -> None:
         import enum
 
         from story_automator.core.failure_triage import FailureClass
@@ -79,6 +79,8 @@ class ClassificationDataclassTests(unittest.TestCase):
         self.assertTrue(is_dataclass(Classification))
 
     def test_classification_is_frozen(self) -> None:
+        import dataclasses
+
         from story_automator.core.failure_triage import (
             Classification,
             Confidence,
@@ -92,7 +94,7 @@ class ClassificationDataclassTests(unittest.TestCase):
             reason="x",
             event_id=None,
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             c.reason = "y"  # type: ignore[misc]
 
     def test_classification_field_names_and_order(self) -> None:
