@@ -409,3 +409,182 @@ class ClassifyDispatchSkeletonTests(unittest.TestCase):
         self.assertEqual(result.confidence, Confidence.LOW)
         self.assertEqual(result.reason, "non_failure_event")
         self.assertIsNone(result.event_id)
+
+
+class ClassifyStoryFailedTests(unittest.TestCase):
+    def _make_event(self, *, reason: str, error_class: str = "") -> object:
+        from story_automator.core.telemetry_events import StoryFailed
+
+        return StoryFailed(
+            timestamp="2026-01-01T00:00:00Z",
+            run_id="run-1",
+            epic="E1",
+            story_key="S1",
+            error_class=error_class,
+            reason=reason,
+            attempts=1,
+            final_session="sess",
+        )
+
+    def test_timeout_substring_returns_timeout_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="job timeout after 600s"))
+        self.assertEqual(result.primary, FailureClass.TIMEOUT)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_policy_substring_returns_policy_violation_high_implies_review(
+        self,
+    ) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="policy refusal: PII"))
+        self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
+        self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_guardrail_substring_returns_policy_violation(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        result = classify(self._make_event(reason="guardrail tripped on output"))
+        self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
+        self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
+
+    def test_test_substring_returns_test_failure_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="unit test assertion failed"))
+        self.assertEqual(result.primary, FailureClass.TEST_FAILURE)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_pytest_substring_returns_test_failure(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        result = classify(self._make_event(reason="pytest exit code 1"))
+        self.assertEqual(result.primary, FailureClass.TEST_FAILURE)
+
+    def test_parse_substring_returns_parse_error_medium(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="failed to parse model output"))
+        self.assertEqual(result.primary, FailureClass.PARSE_ERROR)
+        self.assertEqual(result.confidence, Confidence.MEDIUM)
+
+    def test_json_substring_returns_parse_error(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        result = classify(self._make_event(reason="invalid json payload"))
+        self.assertEqual(result.primary, FailureClass.PARSE_ERROR)
+
+    def test_refused_substring_returns_agent_refused_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="agent refused to write code"))
+        self.assertEqual(result.primary, FailureClass.AGENT_REFUSED)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_refusal_substring_returns_agent_refused(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        result = classify(self._make_event(reason="model refusal at turn 3"))
+        self.assertEqual(result.primary, FailureClass.AGENT_REFUSED)
+
+    def test_budget_substring_returns_budget_exceeded_implies_gate_defer(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="budget cap hit at 110%"))
+        self.assertEqual(result.primary, FailureClass.BUDGET_EXCEEDED)
+        self.assertIn(FailureClass.GATE_DEFER, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_cost_substring_returns_budget_exceeded(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        result = classify(self._make_event(reason="cost exceeded epic cap"))
+        self.assertEqual(result.primary, FailureClass.BUDGET_EXCEEDED)
+        self.assertIn(FailureClass.GATE_DEFER, result.implies)
+
+    def test_unmatched_reason_returns_unknown_low(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        result = classify(self._make_event(reason="ambient disk pressure"))
+        self.assertEqual(result.primary, FailureClass.UNKNOWN)
+        self.assertEqual(result.implies, ())
+        self.assertEqual(result.confidence, Confidence.LOW)
+
+    def test_error_class_field_is_inspected(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        # `reason` is empty; the signal lives on the `error_class` M01
+        # field (spec said `error_kind` but M01 names it `error_class`).
+        result = classify(self._make_event(reason="", error_class="timeout"))
+        self.assertEqual(result.primary, FailureClass.TIMEOUT)
+
+    def test_implementation_chooses_timeout_when_both_substrings_present(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        # Spec REQ-08 LISTS its substring rules in declaration order but
+        # does not literally mandate that order as runtime precedence
+        # when multiple substrings co-occur. This test pins the M07b
+        # implementation's choice (rules applied in REQ-08 declaration
+        # order — timeout first) so a future spec amendment that
+        # re-orders the rules has a known regression test to update.
+        # Do not delete this test without updating the spec preamble.
+        result = classify(self._make_event(reason="timeout policy"))
+        self.assertEqual(result.primary, FailureClass.TIMEOUT)
+
+    def test_error_kind_injected_attribute_is_inspected(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        # Spec REQ-08 names the second inspected field `error_kind`;
+        # M01 ships `error_class`. The classifier defensively reads
+        # BOTH names so the spec-named field still works when injected
+        # by a downstream caller (or by a future M01 schema update).
+        # This test locks in the `error_kind` injection path so it
+        # cannot be silently removed and so the coverage gate sees it.
+        event = self._make_event(reason="", error_class="")
+        event.error_kind = "budget"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.BUDGET_EXCEEDED)
+
+    def test_substring_match_is_not_word_bounded_pinned_behaviour(self) -> None:
+        from story_automator.core.failure_triage import FailureClass, classify
+
+        # Spec REQ-08 specifies *substring* matching, not word-boundary
+        # matching. As a documented consequence, `"latest"` matches the
+        # `"test"` rule and classifies as TEST_FAILURE. This is the
+        # spec's chosen behaviour; tightening to word boundaries would
+        # require adding `re` to the M07a import allowlist. This test
+        # pins the substring behaviour so the spec change is deliberate.
+        result = classify(self._make_event(reason="latest model build"))
+        self.assertEqual(result.primary, FailureClass.TEST_FAILURE)
