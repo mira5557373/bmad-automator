@@ -9,11 +9,13 @@ from pathlib import Path
 
 from tests.golden_trace_helpers import (
     GoldenTraceError,
+    GoldenTraceRecorder,
     TraceDiff,
     TraceEntry,
     TraceMismatch,
     compare_traces,
     load_golden,
+    notify_claude_p,
     serialize_trace,
 )
 
@@ -28,12 +30,14 @@ class ModuleImportTests(unittest.TestCase):
         expected = {
             "Channel",
             "GoldenTraceError",
+            "GoldenTraceRecorder",
             "MismatchField",
             "TraceDiff",
             "TraceEntry",
             "TraceMismatch",
             "compare_traces",
             "load_golden",
+            "notify_claude_p",
             "serialize_trace",
         }
         self.assertEqual(set(module.__all__), expected)
@@ -487,6 +491,20 @@ class TraceDiffSummaryIntegrationTests(unittest.TestCase):
         text = diff.summary()
         self.assertIn("seq=0", text)
         self.assertIn("length", text)
+
+
+class RecorderSurfaceTests(unittest.TestCase):
+    def test_recorder_exported(self) -> None:
+        module = importlib.import_module("tests.golden_trace_helpers")
+        self.assertIn("GoldenTraceRecorder", module.__all__)
+        self.assertIn("notify_claude_p", module.__all__)
+
+    def test_notify_claude_p_is_noop_when_no_recorder_active(self) -> None:
+        self.assertIsNone(notify_claude_p(["claude", "-p", "x"]))
+
+    def test_recorder_constructs_with_no_args(self) -> None:
+        rec = GoldenTraceRecorder()
+        self.assertEqual(rec.entries, [])
 
 
 if __name__ == "__main__":

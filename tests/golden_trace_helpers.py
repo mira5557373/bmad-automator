@@ -8,6 +8,7 @@ events, no state mutations, and no claude_p invocations.
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -21,12 +22,14 @@ _REQUIRED_KEYS: tuple[str, ...] = ("seq", "channel", "kind", "payload")
 __all__ = [
     "Channel",
     "GoldenTraceError",
+    "GoldenTraceRecorder",
     "MismatchField",
     "TraceDiff",
     "TraceEntry",
     "TraceMismatch",
     "compare_traces",
     "load_golden",
+    "notify_claude_p",
     "serialize_trace",
 ]
 
@@ -228,3 +231,48 @@ def _field_value(entry: TraceEntry, field: MismatchField) -> object | None:
         return entry.payload
     # "length" is handled by the caller (one side has no entry).
     return None
+
+
+def notify_claude_p(argv: list[str]) -> None:
+    """Hook surface for `claude -p` invocations.
+
+    No-op when no recorder is active. GoldenTraceRecorder.__enter__
+    swaps the module-level _CLAUDE_P_HOOK slot (NOT this function
+    itself) in a later task, so callers that did
+    `from tests.golden_trace_helpers import notify_claude_p` still
+    see the active recorder because the function body re-reads the
+    module-global slot on every call.
+    """
+    return None
+
+
+class GoldenTraceRecorder:
+    """Context manager that records arrival-ordered observations of
+    telemetry emits, state-document mutations, and claude_p invocations.
+
+    See REQ-01/REQ-03/REQ-04/REQ-05/REQ-06/REQ-13/REQ-14 in the M10 spec.
+    """
+
+    def __init__(self, *, repo_root: Path | None = None) -> None:
+        self._entries: list[TraceEntry] = []
+        self._lock = threading.Lock()
+        self._repo_root: Path | None = repo_root
+        self._installed = False
+
+    @property
+    def entries(self) -> list[TraceEntry]:
+        """Defensive copy so callers cannot mutate the recorder's buffer."""
+        return list(self._entries)
+
+    def __enter__(self) -> GoldenTraceRecorder:
+        self._installed = True
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        self._installed = False
+        return None
