@@ -1,5 +1,12 @@
 ### Features
 
+- feat(budget-ceilings): parse well-formed ceilings preserving order (M03 REQ-03/04) (857725d)
+- feat(budget-ceilings): tolerate missing policy/cost_ceilings keys (M03 REQ-04) (dfa7936)
+- feat(budget-ceilings): parse_ceilings_config skeleton handles missing file (M03 REQ-04) (32db967)
+- feat(budget-ceilings): add _PARSE_WARNINGS module-level list (M03 REQ-05) (3fb210c)
+- feat(budget-ceilings): add BudgetCeiling dataclass (M03 REQ-03) (dd7d5c9)
+- feat(budget-ceilings): add CeilingDecision enum (M03 REQ-02) (92427ba)
+- feat(budget-ceilings): scaffold core module and test file (M03-M1) (ea01197)
 - feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
 - feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
 - feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
@@ -42,6 +49,7 @@
 
 ### Bug Fixes
 
+- fix(budget-ceilings): post-impl review fixes for M03-M1 (b7a22dc)
 - fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
 - fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
 - fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
@@ -87,12 +95,16 @@
 
 ### Refactoring
 
+- refactor(budget-ceilings): inline temp-dir helpers to satisfy 500-LOC test gate (5742d46)
+- refactor(budget-ceilings): compact tests via hoisted imports and shared fixtures (6b0e0bc)
 - refactor: dedup sentinel normalizer; simplify review branch; smoke covers --model (e256244)
 - refactor: repackage automator as self-contained skills (c845938)
 - refactor: route create validation through verifier (5ea8540)
 
 ### Documentation
 
+- docs(budget-ceilings): finalize module docstring and add REQ-01 prelude tests (d1fb1d5)
+- docs: update generated documentation (d35997e)
 - docs: update generated documentation (d4116e4)
 - docs: update generated documentation (5087813)
 - docs: update generated documentation (e98fb89)
@@ -117,6 +129,8 @@
 
 ### Tests
 
+- test(budget-ceilings): establish REQ-15 ledger-fixture pattern via compact_json (f370c0a)
+- test(budget-ceilings): cover malformed entry skipping and warnings (M03 REQ-05/14) (65e3c02)
 - test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
 - test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
 - test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
@@ -160,6 +174,9 @@
 
 ### Other
 
+- plan: m03-m1 data types and config TDD plan with gap analysis (ae33af6)
+- build: gitignore sw init outputs (c60ed8f)
+- spec: copy m03-budget-ceilings spec into worktree (62bb257)
 - plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
 - plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
 - plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
