@@ -8,4 +8,19 @@ helper, and BMAD step wiring are scheduled for M03-M2 / M03-M3.
 
 from __future__ import annotations
 
-__all__ = []
+import enum
+
+__all__ = ["CeilingDecision"]
+
+
+class CeilingDecision(enum.Enum):
+    """Tri-state verdict returned by ceiling evaluation.
+
+    Declaration order is load-bearing: callers may compare verdicts by
+    member index when merging multi-ceiling results (REQ-10), so the
+    sequence ALLOW < WARN < BLOCK must never be reordered.
+    """
+
+    ALLOW = "ALLOW"
+    WARN = "WARN"
+    BLOCK = "BLOCK"
