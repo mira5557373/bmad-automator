@@ -522,5 +522,39 @@ class ImportAllowlistGuardrailTests(unittest.TestCase):
                 self.assertNotIn(token, source)
 
 
+class NoFileWritesStaticGuardrailTests(unittest.TestCase):
+    """REQ-12: the calibration module must never write to disk.
+
+    Static-grep for write-mode token shapes.  Future cache support
+    must wait for an explicit follow-up milestone.
+    """
+
+    # Non-greedy `[^)]*?` is REQUIRED here. A greedy quantifier would
+    # consume the inner `"w"` and leave only `)` for `["\']w` to match,
+    # silently letting real `open("file", "w")` violations through.
+    FORBIDDEN_PATTERNS = (
+        r'open\([^)]*?["\']w',
+        r'open\([^)]*?["\']a',
+        r'\.open\([^)]*?["\']w',
+        r'\.open\([^)]*?["\']a',
+        r"\.write_text\(",
+        r"\.write_bytes\(",
+        r"os\.write\(",
+    )
+
+    def test_no_write_mode_tokens_in_module_source(self) -> None:
+        import re
+
+        from story_automator.core import calibration
+
+        source = Path(calibration.__file__).read_text(encoding="utf-8")
+        for pattern in self.FORBIDDEN_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(
+                    re.search(pattern, source),
+                    f"REQ-12 violation: pattern {pattern!r} matched in calibration.py",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
