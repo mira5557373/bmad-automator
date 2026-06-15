@@ -106,8 +106,6 @@ def build_calibration(jsonl_path: str | Path) -> CalibrationTable:
     entries: dict[tuple[str, str], CalibrationEntry] = {}
     for (model_id, task_kind), (completed, failed, last_seen) in buckets.items():
         sample_count = completed + failed
-        if sample_count == 0:
-            continue
         success_rate = round(completed / sample_count, 4)
         entries[(model_id, task_kind)] = CalibrationEntry(
             model_id=model_id,

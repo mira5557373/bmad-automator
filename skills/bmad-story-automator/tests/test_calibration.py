@@ -342,6 +342,42 @@ class BuildCalibrationParsingTolerationTests(unittest.TestCase):
         self.assertEqual(table.total_events_scanned, 2)
         self.assertEqual(set(table.entries.keys()), {("m", "t")})
 
+    def test_non_string_model_id_or_task_kind_is_skipped(self) -> None:
+        from story_automator.core.calibration import build_calibration
+        from story_automator.core.telemetry_events import StoryCompleted
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            good = _completed_line(
+                "2026-06-14T10:00:00Z", "r1", "S-1", "claude-opus-4", "code"
+            )
+            base = StoryCompleted(
+                timestamp="2026-06-14T10:01:00Z",
+                run_id="r2",
+                epic="EP-1",
+                story_key="S-2",
+                duration_s=10.0,
+                cost_usd=0.1,
+                tokens_in=10,
+                tokens_out=10,
+                attempts=1,
+            ).to_dict()
+            bad_model = dict(base)
+            bad_model["model_id"] = 42
+            bad_model["task_kind"] = "code"
+            bad_task = dict(base)
+            bad_task["model_id"] = "claude-opus-4"
+            bad_task["task_kind"] = None
+            _write_jsonl(
+                ledger,
+                [good, compact_json(bad_model), compact_json(bad_task)],
+            )
+            table = build_calibration(ledger)
+
+        self.assertEqual(table.total_events_scanned, 3)
+        self.assertEqual(set(table.entries.keys()), {("claude-opus-4", "code")})
+        self.assertEqual(table.entries[("claude-opus-4", "code")].sample_count, 1)
+
 
 class LookupSuccessRateTests(unittest.TestCase):
     def _make_table(self):
@@ -399,8 +435,11 @@ class FormatCalibrationReportTests(unittest.TestCase):
         )
         text = format_calibration_report(table)
 
-        self.assertTrue(text.endswith("\n"))
-        self.assertIn("/tmp/telemetry.jsonl", text.splitlines()[0])
+        expected = (
+            "source: /tmp/telemetry.jsonl\n"
+            "model_id\ttask_kind\tsuccess_rate\tsample_count\tlast_seen_iso\n"
+        )
+        self.assertEqual(text, expected)
 
     def test_rows_sorted_by_model_id_then_task_kind(self) -> None:
         from story_automator.core.calibration import (
