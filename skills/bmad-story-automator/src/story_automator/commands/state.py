@@ -11,6 +11,21 @@ from ..core.agent_config import normalize_model as _model_or_none
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
 
 
+_LEGACY_STATE_BUILD_MARKER_NAME = ".state-build.marker"
+_STATE_BUILD_LOCK_NAME = ".state-build.lock"
+
+
+def _cleanup_legacy_state_build_marker(output_folder: Path) -> None:
+    """Best-effort delete a legacy `.state-build.marker` sentinel left by a
+    pre-M05 build. Single `unlink(missing_ok=True)` call — does not block
+    startup, does not raise.
+
+    REQ-11: "any legacy marker discovered at startup must be deleted with a
+    single best-effort ``Path.unlink(missing_ok=True)`` call".
+    """
+    (output_folder / _LEGACY_STATE_BUILD_MARKER_NAME).unlink(missing_ok=True)
+
+
 def cmd_build_state_doc(args: list[str]) -> int:
     template = ""
     output_folder = ""
@@ -39,6 +54,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
         write_json({"ok": False, "error": "missing_config"})
         return 1
     ensure_dir(output_folder)
+    _cleanup_legacy_state_build_marker(Path(output_folder))
     now = now_utc_z()
     stamp = now_utc().strftime("%Y%m%d-%H%M%S")
     epic = str(config.get("epic") or "epic")
