@@ -158,5 +158,43 @@ class OutputFixtureShapeTests(unittest.TestCase):
             )
 
 
+class SkillMdReq01Tests(unittest.TestCase):
+    """REQ-01: SKILL bundle at skills/trust-but-verify/ with single SKILL.md
+    that names the three M06a modules and declares L1 -> L2 -> L3 order."""
+
+    def setUp(self) -> None:
+        self.text = _require_markdown(self, SKILL_MD)
+
+    def test_skill_dir_contains_only_skill_md(self) -> None:
+        names = sorted(
+            p.name for p in SKILL_DIR.iterdir() if not p.name.startswith(".")
+        )
+        self.assertEqual(
+            names,
+            ["SKILL.md"],
+            msg=f"skills/trust-but-verify/ must contain only SKILL.md, got {names}",
+        )
+
+    def test_skill_md_names_all_three_layer_module_paths(self) -> None:
+        for module_path in (
+            "core/gap_validator.py",
+            "core/spec_compliance.py",
+            "core/feature_tester.py",
+        ):
+            self.assertIn(
+                module_path,
+                self.text,
+                msg=f"SKILL.md must name layer module path {module_path!r}",
+            )
+
+    def test_skill_md_declares_invocation_order(self) -> None:
+        l1 = self.text.find("Layer 1")
+        l2 = self.text.find("Layer 2")
+        l3 = self.text.find("Layer 3")
+        self.assertNotEqual(l1, -1, msg="SKILL.md missing 'Layer 1' marker")
+        self.assertGreater(l2, l1, msg="'Layer 2' must appear after 'Layer 1'")
+        self.assertGreater(l3, l2, msg="'Layer 3' must appear after 'Layer 2'")
+
+
 if __name__ == "__main__":
     unittest.main()
