@@ -18,7 +18,7 @@ __all__ = [  # noqa: F822
 ]
 
 from dataclasses import dataclass  # noqa: F401
-from enum import Enum  # noqa: F401
+from enum import Enum
 
 from .calibration import CalibrationTable  # noqa: F401
 from .common import iso_now  # noqa: F401
@@ -27,3 +27,12 @@ STABLE_MAX = 0.05
 MINOR_MAX = 0.10
 MAJOR_MAX = 0.20
 _MISSING_RATE_DEFAULT = 0.5
+
+
+class DriftClassification(Enum):
+    """Four-tier categorical band over |delta|."""
+
+    STABLE = "stable"
+    MINOR_DRIFT = "minor_drift"
+    MAJOR_DRIFT = "major_drift"
+    SEVERE_DRIFT = "severe_drift"
