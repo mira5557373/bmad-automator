@@ -422,6 +422,15 @@ class EvaluateCeilingsLineEndingTests(unittest.TestCase):
         # fmt: on
         self.assertIn("spent=3.0000", reason)
 
+    def test_nan_or_inf_cost_is_skipped(self) -> None:
+        """NaN/Inf would poison ``total`` and silently flip BLOCK→ALLOW."""
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(cost=bad):
+                _, r = _eval_events(
+                    [_completed(bad), _completed(3.0)], [_ceiling(limit_usd=100.0)]
+                )
+                self.assertIn("spent=3.0000", r)
+
 
 class BypassAllowedTests(unittest.TestCase):
     ENV = "BMAD_ALLOW_CEILING_BYPASS"

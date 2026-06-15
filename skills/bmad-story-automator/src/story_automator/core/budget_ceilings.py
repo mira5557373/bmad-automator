@@ -293,6 +293,12 @@ def _compute_spent(
             cost = getattr(event, "cost_usd", None)
             if not isinstance(cost, (int, float)) or isinstance(cost, bool):
                 continue
+            cost_f = float(cost)
+            # Defense in depth: NaN/Inf would poison `total` and silently
+            # flip every verdict to ALLOW (NaN comparisons are False).
+            # parse_event accepts these via json.loads, so we filter here.
+            if not math.isfinite(cost_f):
+                continue
             if anchor is not None:
                 ts = _parse_iso_timestamp(getattr(event, "timestamp", ""))
                 if ts is None:
@@ -302,7 +308,7 @@ def _compute_spent(
                 # further out than the window are both excluded.
                 if abs((anchor - ts).total_seconds()) > delta_seconds:
                     continue
-            total += float(cost)
+            total += cost_f
     return total
 
 
