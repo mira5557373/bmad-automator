@@ -19,6 +19,8 @@ overlay that pins `LANG=C.UTF-8` for deterministic locale.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Literal
 
 # Names below are populated by subsequent M06a-M2 tasks (T2-T7); ruff F822
 # flags them as undefined here, but plain `import` works because `__all__` is
@@ -49,3 +51,23 @@ class ComplianceError(Exception):
     The function MUST NOT silently downgrade a parse failure into a
     `"missing"` verdict — REQ-10 forbids that.
     """
+
+
+@dataclass(frozen=True, kw_only=True)
+class ReqVerdict:
+    """Verdict for one REQ from the spec compared against the diff.
+
+    Preconditions: `req_id` is a non-empty string (e.g. "REQ-07");
+        `status` is exactly one of "implemented", "missing", "partial";
+        `evidence` is a human-readable string (may be empty);
+        `confidence` lies in `[0.0, 1.0]`. The dataclass itself does not
+        enforce these constraints — `_parse_envelope` (Task 7) does so
+        before constructing instances.
+    Postconditions: instance is frozen; all four fields are present.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    req_id: str
+    status: Literal["implemented", "missing", "partial"]
+    evidence: str
+    confidence: float

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import sys
@@ -64,3 +65,57 @@ class ComplianceErrorTests(unittest.TestCase):
 
         err = ComplianceError("subprocess exited 2")
         self.assertEqual(str(err), "subprocess exited 2")
+
+
+class ReqVerdictDataclassTests(unittest.TestCase):
+    """REQ-07: frozen kw_only @dataclass with four fields."""
+
+    def test_req_verdict_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        self.assertTrue(dataclasses.is_dataclass(ReqVerdict))
+        params = ReqVerdict.__dataclass_params__
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_req_verdict_field_names(self) -> None:
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        names = sorted(f.name for f in dataclasses.fields(ReqVerdict))
+        self.assertEqual(
+            names,
+            ["confidence", "evidence", "req_id", "status"],
+        )
+
+    def test_req_verdict_construction_requires_keyword_args(self) -> None:
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        with self.assertRaises(TypeError):
+            ReqVerdict("REQ-01", "implemented", "", 0.9)  # type: ignore[misc]
+
+    def test_req_verdict_instances_are_immutable(self) -> None:
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        v = ReqVerdict(
+            req_id="REQ-01",
+            status="implemented",
+            evidence="seen",
+            confidence=0.9,
+        )
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            v.status = "missing"  # type: ignore[misc]
+
+    def test_req_verdict_does_not_subclass_other_dataclasses(self) -> None:
+        # NFR: dataclasses must not subclass other dataclasses.
+        from story_automator.core.spec_compliance import ReqVerdict
+
+        ancestors = [
+            base
+            for base in ReqVerdict.__mro__
+            if base is not ReqVerdict and base is not object
+        ]
+        for base in ancestors:
+            self.assertFalse(
+                dataclasses.is_dataclass(base),
+                f"ReqVerdict unexpectedly inherits from dataclass {base!r}",
+            )
