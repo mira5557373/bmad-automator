@@ -731,3 +731,17 @@ class RealModelIntegrationTests(unittest.TestCase):
                 timeout_s=30,
             )
             self.assertGreaterEqual(len(report.verdicts), 0)
+
+
+class SpecPathErrorTests(unittest.TestCase):
+    """Bad input (missing spec) raises FileNotFoundError — NOT
+    ComplianceError. Compliance errors are reserved for subprocess
+    boundary failures (REQ-10)."""
+
+    def test_missing_spec_path_raises_file_not_found(self) -> None:
+        from story_automator.core.spec_compliance import check_compliance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "nope.md"
+            with self.assertRaises(FileNotFoundError):
+                check_compliance(spec_path=missing, diff_text="d")
