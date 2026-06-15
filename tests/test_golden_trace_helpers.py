@@ -1479,5 +1479,27 @@ class M05FixtureTests(unittest.TestCase):
         )
 
 
+class M05DeterminismTests(unittest.TestCase):
+    """Quality gate: M05 fixture passes ten consecutive runs with byte-
+    identical serialized output, confirming determinism under composite-
+    identity lock + heartbeat thread + concurrent worker threads.
+    """
+
+    def test_ten_consecutive_recordings_byte_identical(self) -> None:
+        outputs: list[bytes] = []
+        for _ in range(10):
+            with tempfile.TemporaryDirectory() as tmp:
+                entries = _build_m05_recording(Path(tmp).resolve())
+                outputs.append(serialize_trace(entries).encode("utf-8"))
+        first = outputs[0]
+        for idx, out in enumerate(outputs[1:], start=1):
+            self.assertEqual(
+                out,
+                first,
+                f"run #{idx} diverged from run #0 byte-wise; "
+                f"M05 concurrent-thread fixture is non-deterministic",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
