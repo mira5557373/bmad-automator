@@ -556,5 +556,31 @@ class NoFileWritesStaticGuardrailTests(unittest.TestCase):
                 )
 
 
+class NoFileWritesRuntimeGuardrailTests(_ShimmedEventCase):
+    """REQ-12 runtime verification: calling build_calibration and
+    format_calibration_report must not create or modify any file
+    on disk other than the JSONL fixture the test itself wrote.
+    """
+
+    def test_build_and_format_create_no_disk_artifacts(self) -> None:
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            _write_jsonl(
+                ledger,
+                [
+                    _completed_line("2026-06-14T10:00:00Z", "r1", "S-1", "m", "t"),
+                    _failed_line("2026-06-14T10:01:00Z", "r2", "S-2", "m", "t"),
+                ],
+            )
+
+            before = {p.relative_to(tmpdir).as_posix() for p in tmpdir.rglob("*")}
+            table = build_calibration(ledger)
+            _ = format_calibration_report(table)
+            after = {p.relative_to(tmpdir).as_posix() for p in tmpdir.rglob("*")}
+
+        self.assertEqual(before, after)
+        self.assertEqual(before, {"telemetry.jsonl"})
+
+
 if __name__ == "__main__":
     unittest.main()
