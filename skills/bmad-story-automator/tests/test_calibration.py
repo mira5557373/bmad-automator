@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import tempfile
 import unittest
+from pathlib import Path
+
+from story_automator.core.common import ensure_dir
 
 
 class ModuleSurfaceTests(unittest.TestCase):
@@ -111,6 +116,33 @@ class CalibrationTableShapeTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             CalibrationTable({}, "x", "y", 0)  # type: ignore[misc]
+
+
+@contextlib.contextmanager
+def _fixture_dir():
+    """REQ-14 compliant fixture directory.
+
+    Creates the parent via `ensure_dir` before opening the
+    `tempfile.TemporaryDirectory`. Yields a `pathlib.Path`.
+    """
+    parent = Path(tempfile.gettempdir()) / "m08_calibration_fixtures"
+    ensure_dir(parent)
+    with tempfile.TemporaryDirectory(dir=str(parent)) as tmpdir:
+        yield Path(tmpdir)
+
+
+class BuildCalibrationMissingPathTests(unittest.TestCase):
+    def test_missing_path_returns_empty_table_without_raising(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            missing = tmpdir / "does-not-exist.jsonl"
+            table = build_calibration(missing)
+
+        self.assertEqual(table.entries, {})
+        self.assertEqual(table.total_events_scanned, 0)
+        self.assertEqual(table.source_path, str(missing))
+        self.assertTrue(table.generated_at.endswith("Z"))
 
 
 if __name__ == "__main__":

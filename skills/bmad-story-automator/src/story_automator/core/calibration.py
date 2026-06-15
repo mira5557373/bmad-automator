@@ -16,6 +16,9 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
+from pathlib import Path
+
+from .common import iso_now
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -49,3 +52,25 @@ class CalibrationTable:
     generated_at: str
     source_path: str
     total_events_scanned: int
+
+
+def build_calibration(jsonl_path: str | Path) -> CalibrationTable:
+    """Build a CalibrationTable by streaming a JSONL telemetry ledger.
+
+    Missing paths return an empty table (not an exception). Each
+    successfully parsed line increments `total_events_scanned`;
+    only StoryCompleted / StoryFailed records contribute to `entries`.
+    """
+
+    path = Path(jsonl_path)
+    source_path = str(path)
+    if not path.is_file():
+        return CalibrationTable(
+            entries={},
+            generated_at=iso_now(),
+            source_path=source_path,
+            total_events_scanned=0,
+        )
+    # Real aggregation lands in Task 6; placeholder so a green file
+    # cannot silently pass without the streaming path being written.
+    raise NotImplementedError("streaming aggregation lands in Task 6")
