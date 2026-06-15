@@ -32,3 +32,20 @@ __all__ = [  # noqa: F822
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class ComplianceError(Exception):
+    """Raised when `check_compliance` cannot return a meaningful report.
+
+    Preconditions: caller supplies a single human-readable message.
+    Postconditions: instance is a plain `Exception` carrying the message.
+    Raises: nothing — this is the exception type itself.
+
+    Raised by `check_compliance` when:
+      - the `claude -p` subprocess exits non-zero
+      - the subprocess times out (TimeoutExpired)
+      - the subprocess stdout cannot be parsed as the expected JSON envelope
+
+    The function MUST NOT silently downgrade a parse failure into a
+    `"missing"` verdict — REQ-10 forbids that.
+    """

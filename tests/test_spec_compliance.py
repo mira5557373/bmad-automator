@@ -49,3 +49,18 @@ class ModuleImportContractTests(unittest.TestCase):
             spec_compliance.logger.name,
             "story_automator.core.spec_compliance",
         )
+
+
+class ComplianceErrorTests(unittest.TestCase):
+    """REQ-10: module-level Exception subclass."""
+
+    def test_compliance_error_is_exception_subclass(self) -> None:
+        from story_automator.core.spec_compliance import ComplianceError
+
+        self.assertTrue(issubclass(ComplianceError, Exception))
+
+    def test_compliance_error_carries_message(self) -> None:
+        from story_automator.core.spec_compliance import ComplianceError
+
+        err = ComplianceError("subprocess exited 2")
+        self.assertEqual(str(err), "subprocess exited 2")
