@@ -163,3 +163,73 @@ class ComplianceReportDataclassTests(unittest.TestCase):
         self.assertEqual(r.spec_path, "docs/foo.md")
         self.assertEqual(r.diff_sha, "deadbeef")
         self.assertEqual(r.model_invocation_ms, 4231)
+
+
+class PromptRenderingTests(unittest.TestCase):
+    """REQ-11: spec/diff embedded as fenced code blocks, four-letter
+    placeholder tokens escaped in the spec only."""
+
+    def test_render_prompt_wraps_spec_in_fenced_block(self) -> None:
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="hello", diff_text="world")
+        self.assertIn("## Spec\n\n```text\nhello\n```", out)
+
+    def test_render_prompt_wraps_diff_in_fenced_block(self) -> None:
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="spec body", diff_text="diff body")
+        self.assertIn("## Diff\n\n```text\ndiff body\n```", out)
+
+    def test_render_prompt_escapes_four_letter_uppercase_placeholder(self) -> None:
+        # REQ-11: {{NAME}} (4-letter uppercase body) must be escaped.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="Hello {{NAME}}!", diff_text="d")
+        self.assertIn("{{ESC:NAME}}", out)
+        self.assertNotIn("{{NAME}}", out)
+
+    def test_render_prompt_does_not_escape_three_letter_token(self) -> None:
+        # "four-letter" means exactly four — leave others alone.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="Hello {{HI}}", diff_text="d")
+        self.assertIn("{{HI}}", out)
+        self.assertNotIn("ESC:HI", out)
+
+    def test_render_prompt_does_not_escape_lowercase_token(self) -> None:
+        # Spec says "four-letter" — interpret as uppercase letters
+        # (the BMAD template convention). Lowercase identifiers are
+        # human prose, not template directives.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="Hello {{name}}", diff_text="d")
+        self.assertIn("{{name}}", out)
+        self.assertNotIn("ESC:name", out)
+
+    def test_render_prompt_does_not_escape_diff_tokens(self) -> None:
+        # REQ-11 scopes the escape to the spec; diff is verbatim.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="clean", diff_text="diff has {{NAME}}")
+        self.assertIn("{{NAME}}", out)
+        self.assertNotIn("ESC:NAME", out)
+
+    def test_render_prompt_states_expected_json_shape(self) -> None:
+        # The model must be told which JSON envelope to return.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="s", diff_text="d")
+        self.assertIn("verdicts", out)
+        self.assertIn("model_invocation_ms", out)
+
+    def test_render_prompt_forbids_markdown_fences_in_response(self) -> None:
+        # Real claude -p often wraps JSON in ```json fences by default.
+        # The prompt must instruct otherwise, else `_parse_envelope`
+        # raises ComplianceError on the fenced output. This test pins
+        # the contract so a future header edit can't quietly drop the
+        # instruction.
+        from story_automator.core.spec_compliance import _render_prompt
+
+        out = _render_prompt(spec_text="s", diff_text="d")
+        self.assertRegex(out, r"no markdown fences")

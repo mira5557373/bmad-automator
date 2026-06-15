@@ -19,6 +19,7 @@ overlay that pins `LANG=C.UTF-8` for deterministic locale.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -91,3 +92,42 @@ class ComplianceReport:
     spec_path: str
     diff_sha: str
     model_invocation_ms: int
+
+
+_PLACEHOLDER_RE: re.Pattern[str] = re.compile(r"\{\{([A-Z]{4})\}\}")
+
+
+def _escape_placeholders(spec_text: str) -> str:
+    """Replace four-letter uppercase `{{XXXX}}` tokens with `{{ESC:XXXX}}`.
+
+    REQ-11: unresolved four-letter placeholder tokens in the spec must
+    be escaped so the subprocess does not treat them as template
+    directives intended for human authoring.
+    """
+    return _PLACEHOLDER_RE.sub(r"{{ESC:\1}}", spec_text)
+
+
+_PROMPT_HEADER: str = (
+    "You are verifying spec compliance. Compare the diff against the listed "
+    "REQ-NN requirements in the spec. Output ONLY a single raw JSON object — "
+    "no markdown fences, no preamble, no trailing prose — of shape: "
+    '{"verdicts": [{"req_id": "...", "status": "implemented|missing|partial", '
+    '"evidence": "...", "confidence": 0.0-1.0}], "model_invocation_ms": <int>}.'
+)
+
+
+def _render_prompt(*, spec_text: str, diff_text: str) -> str:
+    """Render the `claude -p` prompt with fenced code blocks.
+
+    Preconditions: `spec_text` and `diff_text` are strings (may be empty).
+    Postconditions: returned string contains the prompt header, a fenced
+        `## Spec` block holding `_escape_placeholders(spec_text)`, and a
+        fenced `## Diff` block holding `diff_text` verbatim.
+    Raises: nothing.
+    """
+    safe_spec = _escape_placeholders(spec_text)
+    return (
+        f"{_PROMPT_HEADER}\n\n"
+        f"## Spec\n\n```text\n{safe_spec}\n```\n\n"
+        f"## Diff\n\n```text\n{diff_text}\n```\n"
+    )
