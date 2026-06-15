@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import sys
@@ -57,6 +58,69 @@ class ModuleImportContractTests(unittest.TestCase):
         from story_automator.core import feature_tester  # noqa: F401
 
         self.assertNotIn("story_automator.core.gap_validator", sys.modules)
+
+
+class TestPlanEntryDataclassTests(unittest.TestCase):
+    """REQ-12: frozen kw_only @dataclass with four fields."""
+
+    def test_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        self.assertTrue(dataclasses.is_dataclass(TestPlanEntry))
+        params = TestPlanEntry.__dataclass_params__  # type: ignore[attr-defined]
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_does_not_subclass_other_dataclass(self) -> None:
+        """NFR: dataclasses must not subclass other dataclasses."""
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        for base in TestPlanEntry.__mro__[1:]:
+            if base is object:
+                continue
+            self.assertFalse(
+                dataclasses.is_dataclass(base),
+                f"{TestPlanEntry.__name__} must not subclass dataclass {base.__name__}",
+            )
+
+    def test_has_required_fields(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        field_map = {f.name: f.type for f in dataclasses.fields(TestPlanEntry)}
+        self.assertEqual(
+            set(field_map),
+            {"req_id", "existing_test_path", "created_test_path", "action"},
+        )
+
+    def test_positional_construction_rejected(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        with self.assertRaises(TypeError):
+            TestPlanEntry("REQ-07", None, None, "found")  # type: ignore[misc]
+
+    def test_kw_construction_round_trips(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        entry = TestPlanEntry(
+            req_id="REQ-07",
+            existing_test_path="tests/test_compliance_req_07.py",
+            created_test_path=None,
+            action="found",
+        )
+        self.assertEqual(entry.req_id, "REQ-07")
+        self.assertEqual(entry.action, "found")
+
+    def test_frozen_rejects_attribute_assignment(self) -> None:
+        from story_automator.core.feature_tester import TestPlanEntry
+
+        entry = TestPlanEntry(
+            req_id="REQ-07",
+            existing_test_path=None,
+            created_test_path="tests/test_compliance_req_07.py",
+            action="created",
+        )
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            entry.action = "skipped"  # type: ignore[misc]
 
 
 if __name__ == "__main__":  # pragma: no cover

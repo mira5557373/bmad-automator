@@ -18,14 +18,40 @@ loads `spec_compliance.py`.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from story_automator.core.spec_compliance import ReqVerdict  # noqa: F401
 
-__all__ = [  # noqa: F822 — symbols added in subsequent tasks
+__all__ = [  # noqa: F822 — plan_feature_tests added in a subsequent task
     "TestPlanEntry",
     "plan_feature_tests",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, kw_only=True)
+class TestPlanEntry:
+    """One row of the feature-test plan: what to do for a single REQ.
+
+    Preconditions: `req_id` is a non-empty string matching ``REQ-\\d+``
+        (the regex is enforced by `plan_feature_tests`, not by this
+        dataclass itself); `action` is exactly one of "found", "created",
+        "skipped"; when `action == "found"`, `existing_test_path` is the
+        absolute string path of the located test file and
+        `created_test_path` is `None`; when `action == "created"`,
+        `existing_test_path` is `None` and `created_test_path` is the
+        absolute string path of the freshly written skeleton; when
+        `action == "skipped"`, `existing_test_path` is `None` and
+        `created_test_path` is the absolute string path that *would*
+        have been written had `dry_run=False`.
+    Postconditions: instance is frozen; all four fields are present.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    req_id: str
+    existing_test_path: str | None
+    created_test_path: str | None
+    action: Literal["found", "created", "skipped"]
