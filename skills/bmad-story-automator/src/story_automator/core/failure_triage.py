@@ -21,8 +21,17 @@ land in M07b.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator  # noqa: F401  # used in stringified annotations only under `from __future__ import annotations`
 from dataclasses import dataclass
 import enum
+
+from story_automator.core.telemetry_events import (
+    EscalationTriggered,
+    Event,
+    StoryDeferred,
+    StoryFailed,
+    TmuxSessionCrashed,
+)
 
 
 class FailureClass(enum.Enum):
@@ -110,3 +119,54 @@ __all__ = [
     "FailureClass",
     "IMPLIES_GRAPH",
 ]
+
+
+def classify(event: Event) -> Classification:
+    """Classify a single telemetry event into a ``Classification`` verdict.
+
+    Pure-functional: no I/O, no clock reads, no allocations beyond the
+    returned ``Classification`` and the implies tuple. Never raises on a
+    well-formed concrete event subclass shipped in M01 — unknown shapes
+    return the ``UNKNOWN`` sentinel with ``LOW`` confidence rather than
+    propagating an exception (REQ-06).
+
+    Dispatch order matches the spec REQ-07 list: ``StoryFailed`` →
+    ``_classify_story_failed``, ``StoryDeferred`` →
+    ``_classify_story_deferred``, ``TmuxSessionCrashed`` →
+    ``_classify_tmux_crash``, ``EscalationTriggered`` →
+    ``_classify_escalation``. Every other event subtype — including
+    ``UnknownEvent`` and the success-shaped events — short-circuits to
+    the ``non_failure_event`` UNKNOWN verdict.
+    """
+    event_id = getattr(event, "event_id", None)
+    if isinstance(event, StoryFailed):
+        return _classify_story_failed(event)
+    if isinstance(event, StoryDeferred):
+        return _classify_story_deferred(event)
+    if isinstance(event, TmuxSessionCrashed):
+        return _classify_tmux_crash(event)
+    if isinstance(event, EscalationTriggered):
+        return _classify_escalation(event)
+    return Classification(
+        primary=FailureClass.UNKNOWN,
+        implies=(),
+        confidence=Confidence.LOW,
+        reason="non_failure_event",
+        event_id=event_id,
+    )
+
+
+def _classify_story_failed(event: StoryFailed) -> Classification:
+    raise NotImplementedError  # implemented in Task 5
+
+
+def _classify_story_deferred(event: StoryDeferred) -> Classification:
+    raise NotImplementedError  # implemented in Task 9
+
+
+def _classify_tmux_crash(event: TmuxSessionCrashed) -> Classification:
+    raise NotImplementedError  # implemented in Task 7
+
+
+def _classify_escalation(event: EscalationTriggered) -> Classification:
+    raise NotImplementedError  # implemented in Task 11
