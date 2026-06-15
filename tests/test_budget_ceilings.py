@@ -17,22 +17,43 @@ from story_automator.core.common import compact_json, ensure_dir
 from story_automator.core.telemetry_events import StoryCompleted, parse_event
 
 
-def _c(
-    name="bad", window="per_run", limit_usd=10.0, warn_at=0.5, gate_names=None, **kw
-):
-    """Create test ceiling dict with defaults to reduce LOC."""
-    if gate_names is None:
-        gate_names = ["init"]
+def _c(name="bad", window="per_run", limit_usd=10.0, warn_at=0.5, gate_names=None):
+    """Build a ceiling dict with sane defaults. ``warn_at=None`` omits the key."""
     d = {
         "name": name,
         "window": window,
         "limit_usd": limit_usd,
-        "gate_names": gate_names,
+        "gate_names": ["init"] if gate_names is None else gate_names,
     }
     if warn_at is not None:
         d["warn_at"] = warn_at
-    d.update(kw)
     return d
+
+
+def _run_ceilings(ceilings):
+    """Write ``ceilings`` into a temp workflow.json and run the parser."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(
+            compact_json({"policy": {"cost_ceilings": ceilings}}), encoding="utf-8"
+        )
+        return parse_ceilings_config(path)
+
+
+def _run_payload(payload):
+    """Write arbitrary JSON-serializable ``payload`` and run the parser."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(compact_json(payload), encoding="utf-8")
+        return parse_ceilings_config(path)
+
+
+def _run_raw(text):
+    """Write raw ``text`` (may be invalid JSON) and run the parser."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(text, encoding="utf-8")
+        return parse_ceilings_config(path)
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -66,8 +87,7 @@ class BudgetCeilingShapeTests(unittest.TestCase):
     def test_field_names_exact(self) -> None:
         names = [f.name for f in dataclasses.fields(BudgetCeiling)]
         self.assertEqual(
-            names,
-            ["name", "window", "limit_usd", "warn_at", "gate_names"],
+            names, ["name", "window", "limit_usd", "warn_at", "gate_names"]
         )
 
     def test_can_construct_with_keywords(self) -> None:
@@ -99,15 +119,11 @@ class ParseWarningsModuleStateTests(unittest.TestCase):
 class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
     def test_missing_file_returns_empty_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            missing = Path(tmp) / "does-not-exist.json"
-            result = parse_ceilings_config(missing)
-            self.assertEqual(result, [])
+            self.assertEqual(parse_ceilings_config(Path(tmp) / "nope.json"), [])
 
     def test_missing_file_accepts_str_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            missing = str(Path(tmp) / "does-not-exist.json")
-            result = parse_ceilings_config(missing)
-            self.assertEqual(result, [])
+            self.assertEqual(parse_ceilings_config(str(Path(tmp) / "nope.json")), [])
 
     def test_missing_file_clears_parse_warnings(self) -> None:
         budget_ceilings._PARSE_WARNINGS.append(
@@ -120,112 +136,48 @@ class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
 
 class ParseCeilingsConfigMissingKeysTests(unittest.TestCase):
     def test_empty_object_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(compact_json({}), encoding="utf-8")
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(_run_payload({}), [])
 
     def test_no_policy_key_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(compact_json({"other": {"foo": "bar"}}), encoding="utf-8")
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(_run_payload({"other": {"foo": "bar"}}), [])
 
     def test_no_cost_ceilings_key_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json({"policy": {"unrelated": 1}}), encoding="utf-8"
-            )
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(_run_payload({"policy": {"unrelated": 1}}), [])
 
     def test_cost_ceilings_not_a_list_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json({"policy": {"cost_ceilings": {"not": "a list"}}}),
-                encoding="utf-8",
-            )
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(
+            _run_payload({"policy": {"cost_ceilings": {"not": "a list"}}}), []
+        )
 
     def test_top_level_not_object_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(compact_json([1, 2, 3]), encoding="utf-8")
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(_run_payload([1, 2, 3]), [])
 
     def test_invalid_json_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text("not json {", encoding="utf-8")
-            self.assertEqual(parse_ceilings_config(path), [])
+        self.assertEqual(_run_raw("not json {"), [])
 
 
 class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
     def test_missing_required_key_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                _c(name="bad", warn_at=None),
-                                _c(name="good"),
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings([_c(name="bad", warn_at=None), _c(name="good")])
         self.assertEqual([c.name for c in result], ["good"])
         self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
         self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "missing_keys")
         self.assertIn("warn_at", budget_ceilings._PARSE_WARNINGS[0]["detail"])
 
-    def test_invalid_window_string_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json({"policy": {"cost_ceilings": [_c(window="1h")]}}),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
-        self.assertEqual(result, [])
-        self.assertEqual(budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_window")
-
     def test_bad_limit_usd_value(self) -> None:
         """Negative and zero limits are rejected."""
         for limit_val in [-1.0, 0.0]:
             with self.subTest(limit_usd=limit_val):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json(
-                            {"policy": {"cost_ceilings": [_c(limit_usd=limit_val)]}}
-                        ),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(limit_usd=limit_val)])
                 self.assertEqual(result, [])
                 self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"],
-                    "bad_limit_usd_value",
+                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_value"
                 )
 
     def test_warn_at_out_of_range_is_skipped(self) -> None:
         for warn_at in [0.0, -0.1, 1.5]:
             with self.subTest(warn_at=warn_at):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json(
-                            {"policy": {"cost_ceilings": [_c(warn_at=warn_at)]}}
-                        ),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(warn_at=warn_at)])
                 self.assertEqual(result, [])
                 self.assertTrue(
                     budget_ceilings._PARSE_WARNINGS[0]["reason"].startswith(
@@ -234,118 +186,56 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
                 )
 
     def test_boundary_warn_at_one_is_allowed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {"policy": {"cost_ceilings": [_c(name="ok", warn_at=1.0)]}}
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings([_c(name="ok", warn_at=1.0)])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].warn_at, 1.0)
 
     def test_non_object_entry_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {"policy": {"cost_ceilings": ["not an object", 42, None]}}
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings(["not an object", 42, None])
         self.assertEqual(result, [])
         self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 3)
         for warning in budget_ceilings._PARSE_WARNINGS:
             self.assertEqual(warning["reason"], "not_object")
 
     def test_gate_names_must_be_list_of_strings(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                _c(gate_names="init"),
-                                _c(name="bad2", gate_names=[1, 2]),
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings(
+            [_c(gate_names="init"), _c(name="bad2", gate_names=[1, 2])]
+        )
         self.assertEqual(result, [])
         reasons = [w["reason"] for w in budget_ceilings._PARSE_WARNINGS]
         self.assertEqual(reasons, ["bad_gate_names", "bad_gate_names"])
 
     def test_warnings_cleared_on_each_call(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            bad_path = Path(tmp) / "workflow.json"
-            bad_path.write_text(
-                compact_json({"policy": {"cost_ceilings": [_c(window="nope")]}}),
-                encoding="utf-8",
-            )
-            parse_ceilings_config(bad_path)
-            self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
-            good_path = Path(tmp) / "workflow2.json"
-            good_path.write_text(
-                compact_json({"policy": {"cost_ceilings": [_c(name="ok")]}}),
-                encoding="utf-8",
-            )
-            parse_ceilings_config(good_path)
-            self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
+        _run_ceilings([_c(window="nope")])
+        self.assertEqual(len(budget_ceilings._PARSE_WARNINGS), 1)
+        _run_ceilings([_c(name="ok")])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
     def test_bad_limit_usd_type(self) -> None:
         """bool and str types rejected; True is int in Python."""
         for val in [True, "10.0"]:
             with self.subTest(limit_usd=val):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json(
-                            {"policy": {"cost_ceilings": [_c(limit_usd=val)]}}
-                        ),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(limit_usd=val)])
                 self.assertEqual(result, [])
                 self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"],
-                    "bad_limit_usd_type",
+                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_type"
                 )
 
     def test_bad_warn_at_type(self) -> None:
         """bool and str types rejected."""
         for val in [True, "0.5"]:
             with self.subTest(warn_at=val):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json({"policy": {"cost_ceilings": [_c(warn_at=val)]}}),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(warn_at=val)])
                 self.assertEqual(result, [])
                 self.assertEqual(
-                    budget_ceilings._PARSE_WARNINGS[0]["reason"],
-                    "bad_warn_at_type",
+                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_warn_at_type"
                 )
 
     def test_bad_name(self) -> None:
         """Non-string and empty string names are rejected."""
         for val in [42, ""]:
             with self.subTest(name=val):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json({"policy": {"cost_ceilings": [_c(name=val)]}}),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(name=val)])
                 self.assertEqual(result, [])
                 self.assertEqual(
                     budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_name"
@@ -355,13 +245,7 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
         """Non-string and invalid window strings are rejected."""
         for val in [42, "1h"]:
             with self.subTest(window=val):
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "workflow.json"
-                    path.write_text(
-                        compact_json({"policy": {"cost_ceilings": [_c(window=val)]}}),
-                        encoding="utf-8",
-                    )
-                    result = parse_ceilings_config(path)
+                result = _run_ceilings([_c(window=val)])
                 self.assertEqual(result, [])
                 self.assertEqual(
                     budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_window"
@@ -369,41 +253,23 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
 
     def test_utf8_non_ascii_name_round_trips(self) -> None:
         """REQ-04 says UTF-8 reading; confirm non-ASCII names survive."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {"policy": {"cost_ceilings": [_c(name="ceiling-ünïcödé")]}}
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings([_c(name="ceiling-ünïcödé")])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].name, "ceiling-ünïcödé")
 
 
 class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
     def test_single_well_formed_ceiling_parses(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                _c(
-                                    name="per_run_cap",
-                                    limit_usd=25.0,
-                                    warn_at=0.8,
-                                    gate_names=["init", "story_start"],
-                                )
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings(
+            [
+                _c(
+                    name="per_run_cap",
+                    limit_usd=25.0,
+                    warn_at=0.8,
+                    gate_names=["init", "story_start"],
+                )
+            ]
+        )
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], BudgetCeiling)
         self.assertEqual(result[0].name, "per_run_cap")
@@ -413,70 +279,33 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
         self.assertEqual(result[0].gate_names, ("init", "story_start"))
 
     def test_gate_names_become_tuple_not_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {"policy": {"cost_ceilings": [_c(name="c1", window="24h")]}}
-                ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+        result = _run_ceilings([_c(name="c1", window="24h")])
         self.assertIsInstance(result[0].gate_names, tuple)
 
     def test_multiple_ceilings_preserve_file_order(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                _c(name="first", limit_usd=5.0),
-                                _c(
-                                    name="second",
-                                    window="24h",
-                                    limit_usd=10.0,
-                                    warn_at=0.6,
-                                    gate_names=["story_start"],
-                                ),
-                                _c(
-                                    name="third",
-                                    window="7d",
-                                    limit_usd=50.0,
-                                    warn_at=0.9,
-                                    gate_names=["retry_start"],
-                                ),
-                            ]
-                        }
-                    }
+        result = _run_ceilings(
+            [
+                _c(name="first", limit_usd=5.0),
+                _c(
+                    name="second",
+                    window="24h",
+                    limit_usd=10.0,
+                    warn_at=0.6,
+                    gate_names=["story_start"],
                 ),
-                encoding="utf-8",
-            )
-            result = parse_ceilings_config(path)
+                _c(
+                    name="third",
+                    window="7d",
+                    limit_usd=50.0,
+                    warn_at=0.9,
+                    gate_names=["retry_start"],
+                ),
+            ]
+        )
         self.assertEqual([c.name for c in result], ["first", "second", "third"])
 
     def test_happy_path_leaves_parse_warnings_empty(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflow.json"
-            path.write_text(
-                compact_json(
-                    {
-                        "policy": {
-                            "cost_ceilings": [
-                                _c(
-                                    name="c1",
-                                    window="30d",
-                                    limit_usd=100.0,
-                                    warn_at=0.75,
-                                )
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            parse_ceilings_config(path)
+        _run_ceilings([_c(name="c1", window="30d", limit_usd=100.0, warn_at=0.75)])
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
@@ -547,8 +376,7 @@ class LedgerFixturePatternTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ensure_dir(tmp)
             ledger = Path(tmp) / "events.jsonl"
-            line = compact_json(event.to_dict())
-            ledger.write_text(line + "\n", encoding="utf-8")
+            ledger.write_text(compact_json(event.to_dict()) + "\n", encoding="utf-8")
             with ledger.open("r", encoding="utf-8") as handle:
                 first = handle.readline().rstrip("\n")
             parsed = parse_event(first)
