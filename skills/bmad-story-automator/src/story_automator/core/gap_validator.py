@@ -65,3 +65,19 @@ class GapStatus:
     symbol_present: bool
     confidence: float
     notes: list[str]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ValidationReport:
+    """Aggregate report from `validate_gaps`.
+
+    Preconditions: `statuses` must be a list (possibly empty);
+        `overall_confidence` in `[0.0, 1.0]`; `validated_at` is an
+        ISO-8601 timestamp produced by `core.common.iso_now()`.
+    Postconditions: instance is frozen.
+    Raises: TypeError if constructed with positional args (kw_only).
+    """
+
+    statuses: list[GapStatus]
+    overall_confidence: float
+    validated_at: str

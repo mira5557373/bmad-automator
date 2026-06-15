@@ -155,3 +155,24 @@ class GapStatusDataclassTests(unittest.TestCase):
         self.assertIs(s.gap, g)
         self.assertEqual(s.notes, [])
         self.assertEqual(s.confidence, 0.95)
+
+
+class ValidationReportDataclassTests(unittest.TestCase):
+    """REQ-03: frozen kw_only @dataclass with three fields."""
+
+    def test_validation_report_is_frozen_kw_only_dataclass(self) -> None:
+        from story_automator.core.gap_validator import ValidationReport
+
+        self.assertTrue(dataclasses.is_dataclass(ValidationReport))
+        params = ValidationReport.__dataclass_params__
+        self.assertTrue(params.frozen)
+        self.assertTrue(params.kw_only)
+
+    def test_validation_report_field_names(self) -> None:
+        from story_automator.core.gap_validator import ValidationReport
+
+        names = sorted(f.name for f in dataclasses.fields(ValidationReport))
+        self.assertEqual(
+            names,
+            ["overall_confidence", "statuses", "validated_at"],
+        )
