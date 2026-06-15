@@ -394,5 +394,97 @@ class BuildCalibrationAggregationTests(unittest.TestCase):
         self.assertEqual(entry.last_seen_iso, "2026-06-14T11:00:00Z")
 
 
+class BuildCalibrationMixedAggregationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        _ExtendedEventShim.install()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _ExtendedEventShim.uninstall()
+
+    def test_mixed_completed_and_failed_for_same_key_rounds_to_four_places(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            lines = []
+            lines.append(
+                _completed_line(
+                    timestamp="2026-06-14T10:00:00Z",
+                    run_id="r1",
+                    epic="EP-1",
+                    story_key="S-1",
+                    model_id="claude-opus-4",
+                    task_kind="code",
+                )
+            )
+            lines.append(
+                _completed_line(
+                    timestamp="2026-06-14T11:00:00Z",
+                    run_id="r2",
+                    epic="EP-1",
+                    story_key="S-2",
+                    model_id="claude-opus-4",
+                    task_kind="code",
+                )
+            )
+            lines.append(
+                _failed_line(
+                    timestamp="2026-06-14T12:00:00Z",
+                    run_id="r3",
+                    epic="EP-1",
+                    story_key="S-3",
+                    model_id="claude-opus-4",
+                    task_kind="code",
+                )
+            )
+            _write_jsonl(ledger, lines)
+            table = build_calibration(ledger)
+
+        entry = table.entries[("claude-opus-4", "code")]
+        self.assertEqual(entry.success_rate, 0.6667)
+        self.assertEqual(entry.sample_count, 3)
+        self.assertEqual(entry.last_seen_iso, "2026-06-14T12:00:00Z")
+        self.assertEqual(table.total_events_scanned, 3)
+
+    def test_last_seen_iso_picks_lexicographic_max(self) -> None:
+        from story_automator.core.calibration import build_calibration
+
+        with _fixture_dir() as tmpdir:
+            ledger = Path(tmpdir) / "telemetry.jsonl"
+            lines = [
+                _completed_line(
+                    timestamp="2026-06-14T15:00:00Z",
+                    run_id="r1",
+                    epic="EP-1",
+                    story_key="S-1",
+                    model_id="m",
+                    task_kind="t",
+                ),
+                _completed_line(
+                    timestamp="2026-06-14T09:00:00Z",
+                    run_id="r2",
+                    epic="EP-1",
+                    story_key="S-2",
+                    model_id="m",
+                    task_kind="t",
+                ),
+                _failed_line(
+                    timestamp="2026-06-14T12:00:00Z",
+                    run_id="r3",
+                    epic="EP-1",
+                    story_key="S-3",
+                    model_id="m",
+                    task_kind="t",
+                ),
+            ]
+            _write_jsonl(ledger, lines)
+            table = build_calibration(ledger)
+
+        entry = table.entries[("m", "t")]
+        self.assertEqual(entry.last_seen_iso, "2026-06-14T15:00:00Z")
+
+
 if __name__ == "__main__":
     unittest.main()
