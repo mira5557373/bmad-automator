@@ -110,10 +110,9 @@ class ParseWarningsModuleStateTests(unittest.TestCase):
         self.assertTrue(hasattr(budget_ceilings, "_PARSE_WARNINGS"))
         self.assertIsInstance(budget_ceilings._PARSE_WARNINGS, list)
 
-    def test_parse_warnings_starts_empty(self) -> None:
-        first = budget_ceilings._PARSE_WARNINGS
-        second = budget_ceilings._PARSE_WARNINGS
-        self.assertIs(first, second)
+    def test_parse_warnings_is_empty_after_clean_call(self) -> None:
+        _run_ceilings([_c(name="ok")])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 
 class ParseCeilingsConfigMissingFileTests(unittest.TestCase):
@@ -257,6 +256,27 @@ class ParseCeilingsConfigMalformedEntryTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].name, "ceiling-ünïcödé")
 
+    def test_non_finite_limit_usd_is_skipped(self) -> None:
+        """NaN/Infinity slip past the ``<= 0`` check; math.isfinite catches them."""
+        prefix = (
+            '{"policy":{"cost_ceilings":[{"name":"x","window":"per_run","limit_usd":'
+        )
+        suffix = ',"warn_at":0.5,"gate_names":["init"]}]}}'
+        for raw in ["NaN", "Infinity", "-Infinity"]:
+            with self.subTest(limit_usd=raw):
+                result = _run_raw(prefix + raw + suffix)
+                self.assertEqual(result, [])
+                self.assertEqual(
+                    budget_ceilings._PARSE_WARNINGS[0]["reason"], "bad_limit_usd_value"
+                )
+
+    def test_non_utf8_file_returns_empty_list(self) -> None:
+        """Tolerant-by-design: invalid UTF-8 bytes return [] instead of crashing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_bytes(b"\xff\xfe\xfd not utf-8")
+            self.assertEqual(parse_ceilings_config(path), [])
+
 
 class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
     def test_single_well_formed_ceiling_parses(self) -> None:
@@ -306,6 +326,10 @@ class ParseCeilingsConfigHappyPathTests(unittest.TestCase):
 
     def test_happy_path_leaves_parse_warnings_empty(self) -> None:
         _run_ceilings([_c(name="c1", window="30d", limit_usd=100.0, warn_at=0.75)])
+        self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
+
+    def test_empty_cost_ceilings_list_returns_empty_list(self) -> None:
+        self.assertEqual(_run_ceilings([]), [])
         self.assertEqual(budget_ceilings._PARSE_WARNINGS, [])
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import enum
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -124,7 +125,8 @@ def _validate_ceiling_dict(index: int, raw: object) -> BudgetCeiling | None:
             }
         )
         return None
-    if float(limit_usd) <= 0.0:
+    limit_usd_f = float(limit_usd)
+    if not math.isfinite(limit_usd_f) or limit_usd_f <= 0.0:
         _PARSE_WARNINGS.append(
             {
                 "index": str(index),
@@ -166,7 +168,7 @@ def _validate_ceiling_dict(index: int, raw: object) -> BudgetCeiling | None:
     return BudgetCeiling(
         name=name,
         window=window,
-        limit_usd=float(limit_usd),
+        limit_usd=limit_usd_f,
         warn_at=warn_at_f,
         gate_names=tuple(gate_names),
     )
@@ -187,7 +189,7 @@ def parse_ceilings_config(workflow_json_path: str | Path) -> list[BudgetCeiling]
         return []
     try:
         raw_text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return []
     try:
         payload = json.loads(raw_text)
