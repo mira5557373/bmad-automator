@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
+import os
 import tempfile
 import threading as _threading
 import unittest
@@ -14,6 +15,7 @@ from tests.golden_trace_helpers import (
     TraceDiff,
     TraceEntry,
     TraceMismatch,
+    _to_repo_relative_posix,
     compare_traces,
     load_golden,
     notify_claude_p,
@@ -538,6 +540,37 @@ class RecorderArrivalOrderingTests(unittest.TestCase):
         seqs = sorted(e.seq for e in rec.entries)
         self.assertEqual(seqs, list(range(200)))
         self.assertEqual(len(rec.entries), 200)
+
+
+class PathNormalizationTests(unittest.TestCase):
+    def test_absolute_path_under_repo_becomes_repo_relative_posix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            inner = root / "telemetry" / "events.jsonl"
+            inner.parent.mkdir(parents=True)
+            inner.write_text("", encoding="utf-8")
+            out = _to_repo_relative_posix(inner, repo_root=root)
+        self.assertEqual(out, "telemetry/events.jsonl")
+
+    def test_unrelated_absolute_path_returned_as_posix_absolute(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            outside = Path(tempfile.gettempdir()).resolve() / "unrelated.txt"
+            out = _to_repo_relative_posix(outside, repo_root=root)
+        self.assertEqual(out, outside.as_posix())
+
+    def test_relative_path_preserved_as_posix(self) -> None:
+        out = _to_repo_relative_posix(Path("tests") / "foo.json", repo_root=Path.cwd())
+        self.assertEqual(out, "tests/foo.json")
+
+    def test_backslashes_normalized_to_forward_slashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "a").mkdir()
+            (root / "a" / "b.txt").write_text("", encoding="utf-8")
+            out = _to_repo_relative_posix(root / "a" / "b.txt", repo_root=root)
+        self.assertNotIn(os.sep if os.sep == "\\" else "\x00", out)
+        self.assertEqual(out, "a/b.txt")
 
 
 if __name__ == "__main__":

@@ -233,6 +233,25 @@ def _field_value(entry: TraceEntry, field: MismatchField) -> object | None:
     return None
 
 
+def _to_repo_relative_posix(path: Path, *, repo_root: Path) -> str:
+    """Return a repo-relative POSIX path string for ``path`` (REQ-04/05).
+
+    If ``path`` lies inside ``repo_root``, return the relative POSIX
+    form. Otherwise return ``path`` as an absolute POSIX string — the
+    spec is explicit about not normalizing beyond repo-relative
+    conversion (see Out of scope #4).
+    """
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = Path(path)
+    try:
+        rel = resolved.relative_to(repo_root.resolve())
+    except ValueError:
+        return resolved.as_posix() if resolved.is_absolute() else Path(path).as_posix()
+    return rel.as_posix()
+
+
 def notify_claude_p(argv: list[str]) -> None:
     """Hook surface for `claude -p` invocations.
 
