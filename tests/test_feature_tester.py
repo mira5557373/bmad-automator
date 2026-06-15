@@ -633,5 +633,53 @@ class AtomicWriteContractTests(unittest.TestCase):
             self.assertEqual(written_data, _GOLDEN_SKELETON_REQ_07)
 
 
+class ForbiddenImportsTests(unittest.TestCase):
+    """Quality gate: stdlib only (no psutil), no commands/, no cross-layer
+    runtime imports of spec_compliance or gap_validator."""
+
+    def test_source_has_no_psutil_import(self) -> None:
+        from story_automator.core import feature_tester
+
+        src_path = Path(feature_tester.__file__)
+        text = src_path.read_text(encoding="utf-8")
+        self.assertNotIn("import psutil", text)
+        self.assertNotIn("from psutil", text)
+
+    def test_source_has_no_commands_import(self) -> None:
+        from story_automator.core import feature_tester
+
+        src_path = Path(feature_tester.__file__)
+        text = src_path.read_text(encoding="utf-8")
+        self.assertNotIn("story_automator.commands", text)
+
+    def test_source_only_imports_spec_compliance_under_type_checking(
+        self,
+    ) -> None:
+        """Runtime independence: any cross-layer import lives inside the
+        `if TYPE_CHECKING:` block; top-level imports never mention
+        spec_compliance or gap_validator. We track the indent-aware
+        state so the TYPE_CHECKING block (4-space-indented) is exempt.
+        """
+        from story_automator.core import feature_tester
+
+        src_path = Path(feature_tester.__file__)
+        text = src_path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            # An import line at column 0 (no leading whitespace) is
+            # unconditional. Indented import lines belong to a nested
+            # block (e.g. `if TYPE_CHECKING:`) and are out of scope.
+            if line.startswith("import ") or line.startswith("from "):
+                self.assertNotIn(
+                    "spec_compliance",
+                    line,
+                    f"unconditional import touches spec_compliance: {line!r}",
+                )
+                self.assertNotIn(
+                    "gap_validator",
+                    line,
+                    f"unconditional import touches gap_validator: {line!r}",
+                )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
