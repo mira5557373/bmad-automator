@@ -578,3 +578,54 @@ class AcquireRunLockHappyPathTests(unittest.TestCase):
         handle = acquire_run_lock(lock_path, run_id="run-idem")
         handle.release()
         handle.release()
+
+
+class AcquireRunLockTimeoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_filelock_timeout_is_translated_to_run_lock_busy(self) -> None:
+        from filelock import Timeout
+
+        from story_automator.core.atomic_io import (
+            RunLockBusy,
+            acquire_run_lock,
+        )
+
+        lock_path = self.dir / "run.payload"
+
+        class BusyFileLock:
+            def __init__(self, p: str, *a: object, **kw: object) -> None:
+                pass
+
+            def acquire(self, timeout: float = -1) -> None:
+                raise Timeout("simulated busy lock")
+
+            def release(self, force: bool = False) -> None:
+                return None
+
+        with patch("story_automator.core.atomic_io.FileLock", BusyFileLock):
+            with self.assertRaises(RunLockBusy) as ctx:
+                acquire_run_lock(lock_path, run_id="run-busy", timeout=0.0)
+
+        self.assertIsInstance(ctx.exception.__cause__, Timeout)
+        self.assertFalse(lock_path.exists())
+
+    def test_acquire_zero_timeout_does_not_block(self) -> None:
+        from story_automator.core.atomic_io import (
+            RunLockBusy,
+            acquire_run_lock,
+        )
+
+        lock_path = self.dir / "run.payload"
+        outer = acquire_run_lock(lock_path, run_id="run-outer", timeout=0.0)
+        try:
+            t0 = time.monotonic()
+            with self.assertRaises(RunLockBusy):
+                acquire_run_lock(lock_path, run_id="run-inner", timeout=0.0)
+            elapsed = time.monotonic() - t0
+            self.assertLess(elapsed, 2.0)
+        finally:
+            outer.release()
