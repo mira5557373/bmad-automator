@@ -371,5 +371,57 @@ class CompareTracesFieldMismatchTests(unittest.TestCase):
         self.assertEqual([m.field for m in diff.mismatches], ["payload", "channel"])
 
 
+class CompareTracesLengthMismatchTests(unittest.TestCase):
+    def test_actual_longer_than_golden(self) -> None:
+        golden = [TraceEntry(seq=0, channel="event", kind="A", payload={})]
+        extra = TraceEntry(seq=1, channel="event", kind="B", payload={})
+        actual = [golden[0], extra]
+        diff = compare_traces(actual, golden)
+        self.assertFalse(diff.ok)
+        self.assertEqual(diff.matched, 1)
+        self.assertEqual(len(diff.mismatches), 1)
+        m = diff.mismatches[0]
+        self.assertEqual(m.seq, 1)
+        self.assertEqual(m.field, "length")
+        self.assertEqual(m.actual, extra)
+        self.assertIsNone(m.expected)
+
+    def test_golden_longer_than_actual(self) -> None:
+        actual = [TraceEntry(seq=0, channel="event", kind="A", payload={})]
+        missing = TraceEntry(seq=1, channel="event", kind="B", payload={})
+        golden = [actual[0], missing]
+        diff = compare_traces(actual, golden)
+        self.assertFalse(diff.ok)
+        self.assertEqual(diff.matched, 1)
+        self.assertEqual(len(diff.mismatches), 1)
+        m = diff.mismatches[0]
+        self.assertEqual(m.seq, 1)
+        self.assertEqual(m.field, "length")
+        self.assertIsNone(m.actual)
+        self.assertEqual(m.expected, missing)
+
+    def test_length_mismatch_with_prior_field_mismatch(self) -> None:
+        actual = [
+            TraceEntry(seq=0, channel="event", kind="A", payload={"x": 1}),
+        ]
+        golden = [
+            TraceEntry(
+                seq=0, channel="event", kind="A", payload={"x": 2}
+            ),  # payload differs
+            TraceEntry(
+                seq=1, channel="event", kind="B", payload={}
+            ),  # missing in actual
+        ]
+        diff = compare_traces(actual, golden)
+        self.assertEqual(diff.matched, 0)
+        self.assertEqual(len(diff.mismatches), 2)
+        # First mismatch is the payload diff at seq=0; second is the length
+        # mismatch at seq=1 — ordering matters for diagnostics.
+        self.assertEqual(diff.mismatches[0].field, "payload")
+        self.assertEqual(diff.mismatches[0].seq, 0)
+        self.assertEqual(diff.mismatches[1].field, "length")
+        self.assertEqual(diff.mismatches[1].seq, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
