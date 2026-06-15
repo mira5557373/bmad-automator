@@ -237,7 +237,28 @@ def _classify_story_deferred(event: StoryDeferred) -> Classification:
 
 
 def _classify_tmux_crash(event: TmuxSessionCrashed) -> Classification:
-    raise NotImplementedError  # implemented in Task 7
+    """Map a ``TmuxSessionCrashed`` event onto a ``CRASH`` classification.
+
+    Always returns ``CRASH`` / ``HIGH``. If the event carries an
+    ``exit_signal`` hint that matches SIGPIPE, SIGHUP, or contains the
+    substring ``network``, the result additionally implies
+    ``NETWORK_ERROR``. The M01 dataclass does not define ``exit_signal``
+    today (spec REQ-09 names it but M01 ships ``exit_code`` and
+    ``last_capture_chars`` only), so ``getattr`` with an empty-string
+    default ensures the default branch is taken on canonical M01 events.
+    """
+    event_id = getattr(event, "event_id", None)
+    exit_signal = getattr(event, "exit_signal", "") or ""
+    implies: tuple[FailureClass, ...] = ()
+    if exit_signal in ("SIGPIPE", "SIGHUP") or "network" in exit_signal:
+        implies = (FailureClass.NETWORK_ERROR,)
+    return Classification(
+        primary=FailureClass.CRASH,
+        implies=implies,
+        confidence=Confidence.HIGH,
+        reason="tmux_crash",
+        event_id=event_id,
+    )
 
 
 def _classify_escalation(event: EscalationTriggered) -> Classification:
