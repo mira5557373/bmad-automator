@@ -463,7 +463,7 @@ class FormatCalibrationReportTests(unittest.TestCase):
             source_path="/tmp/t.jsonl",
         )
         text = format_calibration_report(table)
-        text.encode("ascii")
+        self.assertTrue(text.isascii())
 
 
 class IterEventLinesTests(unittest.TestCase):
