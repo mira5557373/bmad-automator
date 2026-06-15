@@ -1,5 +1,6 @@
 ### Features
 
+- feat(m12c): widen m11 gate 6 to allow retraction additions (de49770)
 - feat(m12b): add retraction format verifier script and gate doc (0cff17c)
 - feat(m11): add line-ending portability gate to vocabulary gates (8666730)
 - feat(m11): add prose-immutability + whitespace gate (REQ-10) to vocabulary gates (47a2452)
@@ -63,6 +64,10 @@
 
 ### Documentation
 
+- docs(m12c): record m12c worked retraction milestone in changelog (ea40439)
+- docs(m12c): add reciprocal Retracts line to 260413-09:14:32 fix entry (2195e99)
+- docs(m12c): retract 260413-08:39:42 verify-step contract by 09:14:32 fix (d2e5e09)
+- docs: update generated documentation (a7ca80a)
 - docs: update generated documentation (9634259)
 - docs(m12a): describe both gate modifications in changelog entry (96f5f05)
 - docs(m12a): exclude new M12a entry from REQ-10 immutability gate (e0a2c23)
@@ -92,10 +97,12 @@
 
 ### Tests
 
+- test(m12c): add failing round-trip test for worked retraction example (1c55d3b)
 - test: strengthen unicode assertions to verify content preservation (7a521f8)
 
 ### Chores
 
+- chore(m12c): refresh m11 gate 5 line-number signature for 260413.md (e0965e9)
 - chore(m11): expose vocabulary gate as npm run gates:vocab (df4c0aa)
 - chore: release 1.15.0 (acafaed)
 - chore: prepare next preview supersession (ef18ba5)
@@ -112,6 +119,7 @@
 
 ### Other
 
+- plan(m12c): implementation plan for worked retraction example (1ca29dc)
 - plan(m12b): implementation plan for retraction format verifier script (a1d2b91)
 - plan(m12a): implementation plan for retraction-as-changelog convention docs (7fbf972)
 - build: gitignore sw init outputs (4d954c1)
