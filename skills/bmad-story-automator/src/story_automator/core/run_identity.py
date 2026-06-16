@@ -16,12 +16,15 @@ the id could not be derived.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from .runtime_layout import active_marker_path
 from .utils import md5_hex8
 
 __all__ = ["current_run_id"]
+
+logger = logging.getLogger(__name__)
 
 
 def current_run_id(project_root: str | Path | None = None) -> str:
@@ -31,13 +34,27 @@ def current_run_id(project_root: str | Path | None = None) -> str:
     and self-describing in the JSONL. Returns ``""`` when the marker is absent,
     unreadable, malformed, or missing ``createdAt`` (which preserves the prior
     empty-run_id behavior, making this change purely additive).
+
+    The "no active run" case (``FileNotFoundError``) is silent and normal; an
+    *abnormal* failure (unreadable or malformed marker) is logged at WARNING so
+    a chronically broken correlation key leaves an operator trail instead of
+    every event silently getting an empty run_id with no explanation.
     """
+    marker = active_marker_path(project_root)
     try:
-        marker = active_marker_path(project_root)
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = marker.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""  # normal: no active run in progress
+    except OSError as exc:
+        logger.warning("run_id correlation: active marker unreadable (%s): %s", marker, exc)
+        return ""
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        logger.warning("run_id correlation: active marker is malformed JSON (%s): %s", marker, exc)
         return ""
     if not isinstance(payload, dict):
+        logger.warning("run_id correlation: active marker payload is not an object (%s)", marker)
         return ""
     created = str(payload.get("createdAt") or "")
     if not created:

@@ -24,6 +24,7 @@ from .utils import (
     read_text,
     run_cmd,
 )
+from .run_identity import current_run_id
 from .runtime_layout import runtime_provider
 from .telemetry_emitter import TelemetryEmitter, emitter_for_project_root
 from .telemetry_events import (
@@ -48,6 +49,11 @@ RUNNER_MODE_ENV = "SA_TMUX_RUNTIME"
 VALID_RUNTIME_MODES = {"legacy", "runner", "auto"}
 SIGNAL_EXIT_CODES = {130, 131, 143}
 SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,160}$")
+# Fast tmux control-plane probes (has-session / display / show-environment /
+# list-sessions) are sub-second metadata queries. Bound them well under the
+# 600s default so a wedged tmux socket cannot freeze a monitor poll tick for
+# ten minutes; the long-running agent-payload paths keep the default timeout.
+PROBE_TIMEOUT = 15
 
 
 @dataclass(frozen=True)
@@ -153,17 +159,18 @@ def session_paths(session: str, project_root: str | None = None) -> SessionPaths
 
 def tmux_has_session(session: str) -> bool:
     return (
-        command_exists("tmux") and run_cmd("tmux", "has-session", "-t", session)[1] == 0
+        command_exists("tmux")
+        and run_cmd("tmux", "has-session", "-t", session, timeout=PROBE_TIMEOUT)[1] == 0
     )
 
 
 def tmux_display(session: str, fmt: str) -> str:
-    output, _ = run_cmd("tmux", "display-message", "-t", session, "-p", fmt)
+    output, _ = run_cmd("tmux", "display-message", "-t", session, "-p", fmt, timeout=PROBE_TIMEOUT)
     return output.strip()
 
 
 def tmux_show_environment(session: str, key: str) -> str:
-    output, code = run_cmd("tmux", "show-environment", "-t", session, key)
+    output, code = run_cmd("tmux", "show-environment", "-t", session, key, timeout=PROBE_TIMEOUT)
     if code != 0:
         return ""
     parts = output.strip().split("=", 1)
@@ -173,7 +180,7 @@ def tmux_show_environment(session: str, key: str) -> str:
 def tmux_list_sessions(project_only: bool) -> tuple[list[str], int]:
     if not command_exists("tmux"):
         return ([], 1)
-    output, code = run_cmd("tmux", "list-sessions", "-F", "#{session_name}")
+    output, code = run_cmd("tmux", "list-sessions", "-F", "#{session_name}", timeout=PROBE_TIMEOUT)
     if code != 0:
         return ([], code)
     sessions = [
@@ -318,7 +325,7 @@ def _emit_tmux_spawned(session: str, project_root: str | None) -> None:
     _telemetry_emitter(project_root).emit(
         TmuxSessionSpawned(
             timestamp=iso_now(),
-            run_id="",
+            run_id=current_run_id(project_root or get_project_root()),
             session_name=session,
             story_key=_story_key_from_session_name(session),
             pid=pid,
@@ -420,10 +427,18 @@ def _emit_tmux_completed(
 ) -> None:
     exit_code = _safe_int(state.get("exitCode"))
     duration_s = float(state.get("durationSeconds") or 0.0)
+    if not duration_s:
+        # durationSeconds is never written into runner state; derive it from the
+        # recorded ISO start/finish stamps so the telemetry field is live rather
+        # than a constant 0.0. Falls back to 0.0 if either stamp is unparseable.
+        started = _parse_iso(str(state.get("startedAt") or ""))
+        finished = _parse_iso(str(state.get("finishedAt") or "")) or _parse_iso(iso_now())
+        if started and finished:
+            duration_s = max(0.0, finished.timestamp() - started.timestamp())
     _telemetry_emitter(project_root).emit(
         TmuxSessionCompleted(
             timestamp=iso_now(),
-            run_id="",
+            run_id=current_run_id(project_root or get_project_root()),
             session_name=session,
             story_key=_story_key_from_session_name(session),
             exit_code=exit_code,
@@ -439,10 +454,18 @@ def _emit_tmux_crashed(
 ) -> None:
     exit_code = _safe_int(state.get("exitCode"))
     last_capture = _safe_int(state.get("lastCaptureChars"))
+    if not last_capture:
+        # lastCaptureChars is never written into runner state; derive it from the
+        # captured output artifact so the crash event carries a real signal of how
+        # much the agent produced before dying (best-effort, never raises).
+        try:
+            last_capture = len(session_paths(session, project_root).output.read_text(encoding="utf-8"))
+        except OSError:
+            last_capture = 0
     _telemetry_emitter(project_root).emit(
         TmuxSessionCrashed(
             timestamp=iso_now(),
-            run_id="",
+            run_id=current_run_id(project_root or get_project_root()),
             session_name=session,
             story_key=_story_key_from_session_name(session),
             exit_code=exit_code,
@@ -598,6 +621,12 @@ def _spawn_runner(
         "CLAUDECODE=",
         "-e",
         "BASH_ENV=",
+        # Never expose the audit HMAC signing key to the child agent's shell.
+        # tmux -e VAR= sets it empty in the pane; load_key_from_env treats empty
+        # as absent, so the child cannot forge/verify audit records while the
+        # parent's os.environ is untouched.
+        "-e",
+        "BMAD_AUDIT_KEY=",
         *PLACEHOLDER_COMMAND,
     )
     if create_code != 0:
@@ -698,6 +727,10 @@ def _spawn_legacy(
         f"AI_AGENT={selected_agent}",
         "-e",
         "CLAUDECODE=",
+        # Never expose the audit HMAC signing key to the child agent's shell
+        # (see _spawn_runner): empty value reads as absent in load_key_from_env.
+        "-e",
+        "BMAD_AUDIT_KEY=",
     )
     if code != 0:
         return (output, code)

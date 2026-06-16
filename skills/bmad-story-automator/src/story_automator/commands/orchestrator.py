@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -66,8 +67,26 @@ from ._audit_hooks import _audit_path_for, _maybe_audit_event
 from .state import audit_state_change
 
 
+logger = logging.getLogger(__name__)
+
+
 def _telemetry_emitter() -> TelemetryEmitter:
     return emitter_for_project_root(get_project_root())
+
+
+def _emit_safe(event) -> None:
+    """Emit a telemetry event as a best-effort side channel.
+
+    The emitter does filelock + fsync I/O; a failure (full disk, fsync error,
+    lock contention) must degrade observability, not crash the command and
+    break the orchestrator's jq parse of stdout. Mirrors the guard in
+    record_cost.py. The swallowed failure is logged so a chronically broken
+    telemetry sink leaves an operator trail instead of vanishing silently.
+    """
+    try:
+        _telemetry_emitter().emit(event)
+    except OSError as exc:
+        logger.warning("telemetry emit failed for %s: %s", type(event).__name__, exc)
 
 
 def cmd_orchestrator_helper(args: list[str]) -> int:
@@ -316,7 +335,7 @@ def _marker(args: list[str]) -> int:
             "projectSlug": options["project-slug"],
         }
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
-        _telemetry_emitter().emit(
+        _emit_safe(
             StoryStarted(
                 timestamp=iso_now(),
                 run_id=current_run_id(get_project_root()),
@@ -563,7 +582,7 @@ def _escalate(args: list[str]) -> int:
             session = _parse_context_str(context, "session")
             norm = normalize_story_key(get_project_root(), story) if story else None
             epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
-            _telemetry_emitter().emit(
+            _emit_safe(
                 StoryFailed(
                     timestamp=iso_now(),
                     run_id=current_run_id(get_project_root()),
@@ -627,7 +646,7 @@ def _commit_ready(args: list[str]) -> int:
         if out.strip():
             norm = normalize_story_key(project_root, args[0])
             epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
-            _telemetry_emitter().emit(
+            _emit_safe(
                 StoryCompleted(
                     timestamp=iso_now(),
                     run_id=current_run_id(get_project_root()),
@@ -759,7 +778,7 @@ def _verify_code_review(args: list[str]) -> int:
     )
     norm = normalize_story_key(get_project_root(), args[0])
     epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
-    _telemetry_emitter().emit(
+    _emit_safe(
         ReviewCycle(
             timestamp=iso_now(),
             run_id=current_run_id(get_project_root()),

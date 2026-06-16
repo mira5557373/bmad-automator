@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import time
 from pathlib import Path
 
 from story_automator.core.prompt_rendering import render_step_prompt
-from story_automator.core.runtime_layout import runtime_provider
+from story_automator.core.runtime_layout import active_marker_path, runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
 from story_automator.core.success_verifiers import resolve_success_contract, run_success_verifier
 from story_automator.core.tmux_runtime import (
@@ -23,11 +24,36 @@ from story_automator.core.tmux_runtime import (
     tmux_list_sessions,
 )
 from story_automator.core.utils import (
+    atomic_write,
     get_project_root,
+    iso_now,
     print_json,
     project_hash,
     project_slug,
 )
+
+
+def _refresh_active_marker_heartbeat(project_root: str | None) -> None:
+    """Best-effort refresh of the active-run marker heartbeat.
+
+    monitor-session is the long-lived in-process supervisor of a story's child
+    session, so it is the natural place to advance the orchestration marker's
+    heartbeat. Keeping it fresh lets the stop hook's staleness-based crash
+    detection tell a healthy long-running story apart from a crashed
+    orchestrator. Best-effort by design: a marker IO/parse error must never
+    disrupt monitoring.
+    """
+    try:
+        marker = active_marker_path(project_root or get_project_root())
+        if not marker.exists():
+            return
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return
+        payload["heartbeat"] = iso_now()
+        atomic_write(marker, json.dumps(payload, indent=2) + "\n")
+    except (OSError, ValueError):
+        return
 
 
 def cmd_tmux_wrapper(args: list[str]) -> int:
@@ -347,6 +373,10 @@ def cmd_monitor_session(args: list[str]) -> int:
     last_done = 0
     last_total = 0
     for _ in range(1, max_polls + 1):
+        # Advance the orchestration marker heartbeat each tick so the stop
+        # hook's staleness check sees a live supervisor (this loop runs for the
+        # duration of the story's child session, which can exceed the window).
+        _refresh_active_marker_heartbeat(project_root)
         if time.time() - start >= timeout_minutes * 60:
             return _emit_monitor(json_output, "timeout", last_done, last_total, "", f"exceeded_{timeout_minutes}m")
         status = session_status(session, full=False, codex=agent == "codex", project_root=project_root, mode=runtime_mode())

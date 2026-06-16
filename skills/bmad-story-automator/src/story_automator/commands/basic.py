@@ -7,6 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from ..core.run_liveness import run_is_stale
 from ..core.runtime_layout import active_marker_path, runtime_provider
 from ..core.stop_hooks import HookConfigError, ensure_stop_hook
 from ..core.utils import (
@@ -155,6 +156,13 @@ def cmd_stop_hook(_: list[str]) -> int:
     if isinstance(remaining, str) and remaining.isdigit():
         remaining = int(remaining)
     if not remaining:
+        return 0
+    if run_is_stale(payload):
+        # The orchestrator's heartbeat is provably older than the staleness
+        # window, so it has very likely crashed/exited. Release the stop hook so
+        # the agent can halt instead of being blocked forever by a dead
+        # supervisor. A fresh/missing/malformed heartbeat falls through to the
+        # normal block (run_is_stale is False unless the age is past the window).
         return 0
     reason = (
         "Story Automator active "
