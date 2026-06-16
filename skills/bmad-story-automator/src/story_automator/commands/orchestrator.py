@@ -60,6 +60,8 @@ from story_automator.core.telemetry_events import (
     StoryStarted,
 )
 from story_automator.core.run_identity import current_run_id
+from story_automator.core.run_liveness import run_is_live
+from story_automator.core.common import safe_int
 from ._audit_hooks import _audit_path_for, _maybe_audit_event
 from .state import audit_state_change
 
@@ -282,15 +284,35 @@ def _marker(args: list[str]) -> int:
                 idx += 2
             else:
                 idx += 1
+        # Refuse to clobber a live run's marker: if one already exists with a
+        # provably-fresh heartbeat, a second orchestrator (or a re-run that
+        # raced an in-flight one) would silently overwrite it and double-drive
+        # the same project. A stale/corrupt/timestamp-less marker is treated as
+        # abandoned and may be overwritten, so a crash never permanently blocks
+        # a legitimate re-run.
+        if marker_file.exists():
+            try:
+                existing = json.loads(marker_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+            if run_is_live(existing):
+                print_json(
+                    {
+                        "ok": False,
+                        "error": "run_already_active",
+                        "marker": str(marker_file),
+                    }
+                )
+                return 1
         ensure_dir(marker_file.parent)
         payload = {
             "epic": options["epic"],
             "currentStory": options["story"],
-            "storiesRemaining": int(options["remaining"] or "0"),
+            "storiesRemaining": safe_int(options["remaining"], 0),
             "stateFile": options["state-file"],
             "createdAt": iso_now(),
             "heartbeat": options["heartbeat"] or iso_now(),
-            "pid": int(options["pid"] or "0"),
+            "pid": safe_int(options["pid"], 0),
             "projectSlug": options["project-slug"],
         }
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
@@ -314,8 +336,15 @@ def _marker(args: list[str]) -> int:
         return 0
     if args[0] == "check":
         if marker_file.exists():
+            try:
+                content = marker_file.read_text(encoding="utf-8")
+            except OSError:
+                print_json(
+                    {"exists": True, "file": str(marker_file), "error": "marker_unreadable"}
+                )
+                return 1
             print(f'{{"exists":true,"file":"{marker_file}"}}')
-            print(marker_file.read_text(encoding="utf-8"), end="")
+            print(content, end="")
             return 0
         print('{"exists":false}')
         return 0
@@ -323,7 +352,17 @@ def _marker(args: list[str]) -> int:
         if not marker_file.exists():
             print("No marker file to update")
             return 1
-        payload = json.loads(marker_file.read_text(encoding="utf-8"))
+        # A truncated/corrupt marker (crash mid-write, partial sync) must not
+        # crash the supervising orchestrator loop with an uncaught decode error;
+        # degrade to a recoverable structured error like runtime_policy._read_json.
+        try:
+            payload = json.loads(marker_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            print_json({"exists": True, "error": "marker_corrupt"})
+            return 1
+        if not isinstance(payload, dict):
+            print_json({"exists": True, "error": "marker_corrupt"})
+            return 1
         payload["heartbeat"] = iso_now()
         atomic_write(marker_file, json.dumps(payload, indent=2) + "\n")
         print(f"Heartbeat updated: {payload['heartbeat']}")
@@ -430,7 +469,15 @@ def _state_update(args: list[str]) -> int:
     idx = 1
     while idx < len(args):
         if args[idx] == "--set" and idx + 1 < len(args):
-            key, value = args[idx + 1].split("=", 1)
+            operand = args[idx + 1]
+            if "=" not in operand:
+                # A `--set key` with no `=value` would unpack-crash; surface the
+                # malformed operand as a structured error instead of a traceback.
+                print_json(
+                    {"ok": False, "error": "invalid_set_operand", "operand": operand}
+                )
+                return 1
+            key, value = operand.split("=", 1)
             replaced, count = re.subn(
                 rf"(?m)^{re.escape(key)}:.*$",
                 lambda m, k=key, v=value: f"{k}: {v}",
@@ -445,7 +492,11 @@ def _state_update(args: list[str]) -> int:
     if not updated:
         print_json({"ok": False, "error": "keys_not_found", "updated": []})
         return 1
-    Path(args[0]).write_text(text, encoding="utf-8")
+    # Atomic write: a plain write_text truncates the live orchestration-*.md
+    # state doc in place, so a crash mid-write or a concurrent reader can see a
+    # half-written/empty state document. Every other durable write in this
+    # codebase goes through atomic_write (temp file + fsync + os.replace).
+    atomic_write(Path(args[0]), text)
 
     # REQ-12: audit after the write succeeds. Failures from append are
     # re-raised by audit_state_change so the state mutation is never

@@ -12,7 +12,7 @@ from pathlib import Path
 from filelock import FileLock, Timeout
 import psutil
 
-from story_automator.core.common import compact_json, iso_now
+from story_automator.core.common import compact_json, fsync_dir, iso_now
 
 __all__ = [
     "AtomicWriteRetryExhausted",
@@ -279,6 +279,7 @@ def _write_once(path: Path, data: str, encoding: str) -> None:
     except BaseException:
         _silent_unlink(tmp_path)
         raise
+    fsync_dir(path.parent)
 
 
 def _silent_unlink(path: Path) -> None:

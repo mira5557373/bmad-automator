@@ -285,6 +285,15 @@ def spawn_session(
     project_root: str | None = None,
     mode: str | None = None,
 ) -> tuple[str, int]:
+    # Refuse a duplicate spawn for a session that already exists. Both spawn
+    # paths immediately call cleanup_runtime_artifacts(), which unlinks the
+    # state/command/runner/output files; if a live session by this name is
+    # already running, that cleanup would corrupt its artifacts before the
+    # (doomed) tmux new-session even fails. Returning early leaves the live
+    # session untouched. (Inert when tmux is unavailable: tmux_has_session
+    # short-circuits to False.)
+    if tmux_has_session(session):
+        return (f"session {session} already exists\n", 1)
     resolved_mode = _resolve_spawn_mode(mode)
     if resolved_mode == "legacy":
         output, code = _spawn_legacy(session, command, selected_agent, project_root)

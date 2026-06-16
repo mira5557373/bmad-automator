@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from story_automator.core.common import fsync_dir
+
 
 DEFAULT_COMMAND_TIMEOUT = 600
 COMMAND_TIMEOUT_EXIT = 124
@@ -69,12 +71,18 @@ def write_atomic(path: str | Path, data: str | bytes) -> None:
     ensure_dir(path.parent)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        mode = "wb" if isinstance(data, bytes) else "w"
-        with os.fdopen(fd, mode) as handle:
-            handle.write(data)
+        # Always write UTF-8 bytes in binary mode. A text-mode "w" handle uses
+        # the platform default encoding (cp1252 on Windows), which raises
+        # UnicodeEncodeError on non-Latin-1 content, and applies newline
+        # translation that can double-CR text already containing \r\n. Binary
+        # UTF-8 is portable and byte-exact, matching common.write_atomic.
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+        fsync_dir(path.parent)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)

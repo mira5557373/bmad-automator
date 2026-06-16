@@ -54,6 +54,7 @@ def write_atomic(path: str | Path, data: str | bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, target)
+        fsync_dir(target.parent)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_name)
@@ -61,6 +62,27 @@ def write_atomic(path: str | Path, data: str | bytes) -> None:
 
 def ensure_dir(path: str | Path) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def fsync_dir(directory: str | Path) -> None:
+    """Best-effort fsync of a directory so a preceding rename is crash-durable.
+
+    On POSIX the directory entry created by ``os.replace`` is not guaranteed
+    durable until the directory inode itself is fsynced; a power loss after the
+    rename returns can otherwise leave the target missing even though the data
+    block was synced. No-op where directory fsync is unsupported (notably
+    Windows, which has no O_RDONLY directory handle for fsync).
+    """
+    try:
+        dir_fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except (OSError, ValueError):  # pragma: no cover - platform-dependent
+        pass
+    finally:
+        os.close(dir_fd)
 
 
 def file_exists(path: str | Path) -> bool:

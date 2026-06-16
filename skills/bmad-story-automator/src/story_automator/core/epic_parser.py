@@ -103,6 +103,11 @@ def parse_story(epic_file: str | Path, story_id: str, rules_file: str | Path) ->
             description_lines.append(stripped)
     description = " ".join(" ".join(description_lines).split())
     rules = json.loads(read_text(rules_file))
+    if not isinstance(rules, dict):
+        # A valid-JSON but non-object rules file (e.g. a top-level array) would
+        # otherwise raise AttributeError on the .get() calls below, escaping as
+        # an uncaught traceback. Route it into the caller's ValueError handler.
+        raise ValueError("invalid_rules_file")
     content_for_score = " ".join(part for part in [title, description, " ".join(acceptance_criteria)] if part).strip()
     score = 0
     reasons: list[str] = []

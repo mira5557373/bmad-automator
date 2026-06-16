@@ -35,7 +35,7 @@ from .commands.tmux import (
     cmd_tmux_wrapper,
 )
 from .commands.validate_story_creation import cmd_validate_story_creation
-from .core.common import help_flag, print_json
+from .core.common import help_flag, print_json, safe_int
 from .core.epic_parser import (
     epic_complete,
     parse_epic_file,
@@ -62,7 +62,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Unknown command: {command}", file=sys.stderr)
         _usage(sys.stderr)
         return 1
-    return handler(rest)
+    try:
+        return handler(rest)
+    except Exception as exc:  # noqa: BLE001 - top-level JSON-contract backstop
+        # Any handler that escapes with an unexpected exception would otherwise
+        # leak a Python traceback to stderr and emit no JSON, silently breaking
+        # the orchestrator step scripts that parse stdout. Preserve the uniform
+        # machine-readable error contract instead.
+        print_json(
+            {
+                "ok": False,
+                "error": "internal_error",
+                "command": command,
+                "detail": str(exc),
+            }
+        )
+        return 1
 
 
 def _command_registry() -> dict[str, Command]:
@@ -158,7 +173,10 @@ def _cmd_parse_story(args: list[str]) -> int:
 
 def _cmd_parse_story_range(args: list[str]) -> int:
     user_input = _arg_value(args, "--input")
-    total = int(_arg_value(args, "--total") or 0)
+    # safe_int funnels a non-numeric --total (e.g. an unexpanded shell var) to 0,
+    # which parse_story_range rejects with ValueError -> the existing structured
+    # error below, instead of an uncaught traceback that breaks the JSON contract.
+    total = safe_int(_arg_value(args, "--total"), 0)
     ids = _arg_value(args, "--ids") or ""
     try:
         print_json(parse_story_range(user_input, total, ids))
