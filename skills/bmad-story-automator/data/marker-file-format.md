@@ -18,7 +18,7 @@ If a runtime is explicitly selected but the installed story-automator skill is d
   "currentStory": "{first_story_id}",
   "storiesRemaining": {story_count},
   "stateFile": "{path_to_state_document}",
-  "startedAt": "{timestamp}",
+  "createdAt": "{timestamp}",
   "heartbeat": "{timestamp}",
   "pid": {process_id},
   "projectSlug": "{project_slug}"
@@ -35,8 +35,8 @@ If a runtime is explicitly selected but the installed story-automator skill is d
 | `currentStory` | Current story being processed (e.g., "5.3") |
 | `storiesRemaining` | Count of stories left in queue |
 | `stateFile` | Path to orchestration state document |
-| `startedAt` | Orchestration start timestamp (ISO 8601) |
-| `heartbeat` | Last activity timestamp, updated periodically |
+| `createdAt` | Run creation timestamp (ISO 8601), set once at marker create |
+| `heartbeat` | Last activity timestamp, refreshed during a run (see below) |
 | `pid` | Process ID of orchestrator (crash detection) |
 | `projectSlug` | (v2.0) Project identifier for session naming |
 
@@ -44,9 +44,9 @@ If a runtime is explicitly selected but the installed story-automator skill is d
 
 ## Heartbeat Updates
 
-The orchestrator should update the heartbeat timestamp every ~5 minutes during long-running operations. This prevents the marker from going stale if the orchestrator is still running but taking a while on a complex story.
+`monitor-session` refreshes the heartbeat on each poll tick while it supervises a story's child session, which keeps the marker fresh through long-running stories. The orchestration loop should also refresh it (`orchestrator-helper marker heartbeat`) at iteration boundaries so the heartbeat never drifts past the staleness window between stories.
 
-**Staleness threshold:** 30 minutes (see story-automator stop-hook)
+**Staleness threshold:** 30 minutes. The stop hook treats a marker whose heartbeat is older than this window as a crashed/abandoned run and releases, so the agent is not blocked forever by a dead orchestrator (see story-automator stop-hook).
 
 ---
 

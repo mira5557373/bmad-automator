@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -54,6 +55,8 @@ SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,160}$")
 # 600s default so a wedged tmux socket cannot freeze a monitor poll tick for
 # ten minutes; the long-running agent-payload paths keep the default timeout.
 PROBE_TIMEOUT = 15
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -1255,9 +1258,23 @@ def _status_mode(session: str, project_root: str | None, mode: str | None) -> st
     if configured in {"legacy", "runner"}:
         return configured
     state = load_session_state(session_paths(session, project_root).state)
-    if int(state.get("schemaVersion") or 0) == STATE_SCHEMA_VERSION:
+    version = int(state.get("schemaVersion") or 0)
+    if version == STATE_SCHEMA_VERSION:
         return "runner"
-    return "legacy"
+    if version > STATE_SCHEMA_VERSION:
+        # State written by a newer runtime: do NOT silently downgrade to the
+        # legacy reader (which would misparse the newer format). Read it
+        # best-effort with the current runner reader and log the version skew so
+        # the mismatch is diagnosable rather than silent.
+        logger.warning(
+            "session %s state schemaVersion %d is newer than supported %d; "
+            "reading best-effort as runner format",
+            session,
+            version,
+            STATE_SCHEMA_VERSION,
+        )
+        return "runner"
+    return "legacy"  # version 0 / absent: a genuine pre-schema legacy state
 
 
 def _resolve_spawn_mode(mode: str | None) -> str:

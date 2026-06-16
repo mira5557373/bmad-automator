@@ -62,6 +62,15 @@ calls; the CLI is the control plane the workflow shells out to.
 
 Security posture and reporting are documented in [SECURITY.md](SECURITY.md).
 
+## Security
+
+The orchestrator spawns child agent sessions in **autonomous mode** — Claude with
+`--dangerously-skip-permissions` and Codex with `--full-auto` — so they edit the working
+tree and run commands without per-action confirmation. Run it only on a project and branch
+you trust, ideally under version control. The audit HMAC signing key (`BMAD_AUDIT_KEY`) is
+never exposed to child agent shells. See [SECURITY.md](SECURITY.md) for the full posture and
+how to report a vulnerability.
+
 ## Development
 
 ```bash

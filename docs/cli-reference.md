@@ -185,7 +185,33 @@ Legacy compatibility:
 "$scripts" validate-story-creation check 1.2 --state-file "$state_file"
 ```
 
+## Error Contract
+
+Commands emit machine-readable JSON on stdout. On failure they print a single
+object of the form `{"ok": false, "error": "<code>", ...}` and return a non-zero
+exit code, so step scripts can branch on `.error` via `jq`. The error `code` is
+a stable snake_case token. Common codes:
+
+| Code | Meaning |
+|------|---------|
+| `internal_error` | An unexpected exception was caught by the top-level boundary in `main` (the `detail` field carries the message). |
+| `file_not_found` / `folder_not_found` | A required path argument did not resolve. |
+| `invalid_json` / `invalid_config_json` | A file that must contain JSON was malformed. |
+| `invalid_rules_file` | The complexity-rules file parsed to JSON but is not an object. |
+| `missing_input_or_total` | `parse-story-range` was given no/invalid `--input` or `--total`. |
+| `invalid_set_operand` | `state-update --set` received an operand with no `=`. |
+| `marker_corrupt` / `marker_unreadable` | The active-run marker could not be parsed/read. |
+| `run_already_active` | `marker create` refused to clobber a live run's marker. |
+| `audit_key_missing` | `audit-verify` found no `BMAD_AUDIT_KEY` in the environment. |
+| `invalid_gate` | `ceiling-check` was given a `--gate` outside `init`/`story_start`/`retry_start`. |
+| `corrupt_telemetry` / `invalid_event` | A telemetry line/event could not be parsed. |
+
+This vocabulary is additive: new codes may be introduced, but existing codes
+keep their meaning. A `version` command and `--version`/`-v` flag report the
+runtime version for compatibility checks.
+
 ## Read Next
 
 - [Agents And Monitoring](./agents-and-monitoring.md)
 - [Troubleshooting](./troubleshooting.md)
+- [Operations & Recovery](./operations.md)

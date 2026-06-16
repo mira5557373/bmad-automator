@@ -13,8 +13,10 @@ PYTHONPATH=skills/bmad-story-automator/src python3 -m story_automator --help
 
 `npm run verify` expands to:
 
+- `npm run lint:python`
 - `npm run test:python`
 - `npm run pack:dry-run`
+- `npm run test:cli`
 - `npm run test:smoke`
 
 ## Smoke Test Coverage
@@ -33,9 +35,11 @@ The smoke suite validates:
 
 ```mermaid
 flowchart TD
-    A["Edit installer, skills, or runtime"] --> B["Run npm run test:python"]
+    A["Edit installer, skills, or runtime"] --> L["Run npm run lint:python"]
+    L --> B["Run npm run test:python"]
     B --> C["Run npm run pack:dry-run"]
-    C --> D["Run npm run test:smoke"]
+    C --> T["Run npm run test:cli"]
+    T --> D["Run npm run test:smoke"]
     D --> E["Run npm run verify"]
 ```
 
