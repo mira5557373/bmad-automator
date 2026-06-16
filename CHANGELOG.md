@@ -1,5 +1,22 @@
 ### Features
 
+- feat(telemetry): populate story_key on TmuxSessionCompleted + Crashed (REQ-11) (01ec804)
+- feat(telemetry): populate story_key on TmuxSessionSpawned (REQ-11) (9fda1b7)
+- feat(telemetry): add _story_key_from_session_name helper for tmux wiring (REQ-11) (75eab76)
+- feat(telemetry): populate story_key/epic/final_session on session_crash StoryFailed (REQ-09) (e2f1dc9)
+- feat(telemetry): derive epic from story_key in _commit_ready wiring (REQ-09) (60e0261)
+- feat(telemetry): derive epic from story_key in _verify_code_review wiring (REQ-09) (e026108)
+- feat(telemetry): wire orchestrator StoryStarted/Completed/Failed + ReviewCycle + RetroFired (1e7fb5f)
+- feat(telemetry): wire RetryAttempt + EscalationTriggered emits in epic_agents (1e2a3c6)
+- feat(telemetry): wire tmux_runtime spawn/completed/crashed emits (c64f685)
+- feat(telemetry): TelemetryReader.retro_inputs (most-recent-wins per epic) (a1add4b)
+- feat(telemetry): TelemetryReader.attempts_by_story aggregation (8dcb290)
+- feat(telemetry): TelemetryReader.cost_by_epic aggregation (ea6a641)
+- feat(telemetry): TelemetryReader scaffolding + missing/empty file handling (838df37)
+- feat(telemetry): TelemetryEmitter run_id stamping (ctor fills empty, caller wins) (798fdf4)
+- feat(telemetry): TelemetryEmitter cross-process FileLock + threading.Lock (d1f043a)
+- feat(telemetry): TelemetryEmitter.emit append + fsync + lazy dir create (bce906e)
+- feat(telemetry): TelemetryEmitter scaffolding (ctor only) (6436287)
 - feat(telemetry): export 13 concrete event classes in __all__ (25b4dae)
 - feat(telemetry): 13 concrete event classes + round-trip + registry tests (c9817a4)
 - feat(telemetry): export UnknownEvent and parse_event; refresh module docstring (c7755bb)
@@ -25,6 +42,10 @@
 
 ### Bug Fixes
 
+- fix(telemetry): post-impl + production hardening for m3 wire log sites (c54deaf)
+- fix(telemetry): preserve scalar agentConfig fields so RetroFired emit populates epic/stories/cost/duration (REQ-10) (9acadb3)
+- fix: post-impl review fixes for M02 reader + aggregations wiring (929d160)
+- fix: post-impl review fixes for M02 telemetry emitter (9a611a4)
 - fix: post-impl review fixes for m01-m3-concrete-events (7ae1072)
 - fix(story-keys): complete non-numeric epic support (#23) (51a3cbc)
 - fix(stop-hooks): resolve codex project trust from global config (#26) (417993d)
@@ -72,6 +93,9 @@
 
 ### Documentation
 
+- docs: update generated documentation (d4116e4)
+- docs: update generated documentation (5087813)
+- docs: update generated documentation (e98fb89)
 - docs(m01-m4): make Task 1 baseline resumable across Prior Work Handling range (4329a23)
 - docs(m01-m4): plan for tests and quality gates (REQ-08, REQ-09, REQ-10, REQ-11, NFR) (84d9c49)
 - docs: update generated documentation (f1b92d1)
@@ -93,6 +117,16 @@
 
 ### Tests
 
+- test(telemetry): integration: wired emits flow through TelemetryReader (REQ-09/10/11) (fc5500e)
+- test(telemetry): pin agents_resolve RetryAttempt emit threshold (REQ-10) (7f06603)
+- test(telemetry): pin check_blocking EscalationTriggered wiring (REQ-10) (99e8f65)
+- test(telemetry): pin _marker create StoryStarted wiring (REQ-09) (fb61d24)
+- test(telemetry): M02 quality gates green (lint, format, coverage 100%, allowlist, size) (9b56473)
+- test(telemetry): emit→read integration over mixed event types (dda9637)
+- test(telemetry): reader blank-line skip, malformed propagation, streaming (870ab6c)
+- test(telemetry): emit→parse round-trip for all 13 M01 event types (740cfa1)
+- test(telemetry): codify fsync-before-unlock ordering invariant (REQ-04, REQ-12) (3e51bd3)
+- test(telemetry): scaffold TelemetryEmitter ctor tests (failing) (0edfd36)
 - test(telemetry): NoMutableDefaultsTests codify NFR via AST scan of Event subclasses (349d604)
 - test(telemetry): PEP604UnionTypesTests codify ``T | None`` NFR via textual source scan (55940db)
 - test(telemetry): ModuleSizeTests codify 500-line NFR ceiling and baseline drift gate (be1d7a8)
@@ -126,6 +160,11 @@
 
 ### Other
 
+- plan(m03): TDD plan for wire-log-sites (REQ-09/10/11, gap-analysis converged) (e855ab6)
+- plan(m02): TDD plan for reader + aggregations (gap-analysis converged) (dd217b8)
+- plan(m02): TDD plan for telemetry emitter + reader + wiring (gap-analysis converged) (5014d7d)
+- spec(m14): SECURITY.md rewrite spec (sw lint-spec 100/100 after placeholder-word indirection) (79020b3)
+- spec(m02,m04,m05,m11): port milestone specs (sw lint-spec 100/100) (ff6bd6c)
 - plan(m01-m1): event base — slice plan + ultrathink gap-fix pass 1 (42314c2)
 - build: gitignore sw init outputs (workflow.json + skills/commands) (6f2adb6)
 - build: gitignore archived telemetry from prior sonnet run (c00f7d5)

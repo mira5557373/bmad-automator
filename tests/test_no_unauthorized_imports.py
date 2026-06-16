@@ -20,6 +20,9 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "skills" / "bmad-story-automato
 FIRST_PARTY = {"story_automator"}
 # Names not present in sys.stdlib_module_names but always importable.
 EXTRA_ALLOWED = {"__future__"}
+# Declared third-party runtime deps (pyproject [project.dependencies]); keep in
+# sync with the in-suite allowlist in test_telemetry_events.py.
+DECLARED_DEPS = {"filelock", "psutil"}
 
 
 def _top_level_imports(tree: ast.AST) -> set[str]:
@@ -39,7 +42,7 @@ def _top_level_imports(tree: ast.AST) -> set[str]:
 class NoUnauthorizedImportsTests(unittest.TestCase):
     def test_runtime_imports_are_stdlib_or_first_party(self) -> None:
         self.assertTrue(SRC_ROOT.is_dir(), f"source root not found: {SRC_ROOT}")
-        allowed = set(sys.stdlib_module_names) | FIRST_PARTY | EXTRA_ALLOWED
+        allowed = set(sys.stdlib_module_names) | FIRST_PARTY | EXTRA_ALLOWED | DECLARED_DEPS
         violations: dict[str, set[str]] = {}
         py_files = sorted(SRC_ROOT.rglob("*.py"))
         self.assertTrue(py_files, "no python files discovered under src")
