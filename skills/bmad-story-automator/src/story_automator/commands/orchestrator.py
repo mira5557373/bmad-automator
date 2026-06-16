@@ -59,6 +59,9 @@ from story_automator.core.telemetry_events import (
     StoryFailed,
     StoryStarted,
 )
+from ._audit_hooks import _audit_path_for, _maybe_audit_event
+from .state import audit_state_change
+from story_automator.core.audit_events import EscalationRaised
 
 
 def _telemetry_emitter() -> TelemetryEmitter:
@@ -463,6 +466,7 @@ def _state_update(args: list[str]) -> int:
         print_json({"ok": False, "error": "file_not_found"})
         return 1
     text = read_text(args[0])
+    fields_before = parse_simple_frontmatter(text)
     updated: list[str] = []
     idx = 1
     while idx < len(args):
@@ -485,6 +489,24 @@ def _state_update(args: list[str]) -> int:
     # Atomic write: _state_update mutates the recovery-critical orchestration
     # state document, so a crash mid-write must not leave it truncated.
     atomic_write(args[0], text)
+
+    # REQ-12 (m04): audit after the write succeeds. Failures from append are
+    # re-raised by audit_state_change so the state mutation is never silently
+    # divorced from its audit record.
+    if "status" in updated:
+        fields_after = parse_simple_frontmatter(text)
+        try:
+            policy = load_runtime_policy(get_project_root(), state_file=args[0])
+        except (FileNotFoundError, PolicyError):
+            policy = {}
+        audit_state_change(
+            policy,
+            _audit_path_for(get_project_root()),
+            story=str(fields_before.get("currentStory") or ""),
+            from_status=str(fields_before.get("status") or ""),
+            to_status=str(fields_after.get("status") or ""),
+            correlation_id=f"state-update:{Path(args[0]).name}",
+        )
     print_json({"ok": True, "updated": updated})
     return 0
 
@@ -502,6 +524,8 @@ def _escalate(args: list[str]) -> int:
                 continue
             idx += 1
     except PolicyError as exc:
+        # Legacy contract: arg-parse PolicyError → escalate=True. No audit
+        # — we never loaded a policy, so the gate state is unknown.
         print_json({"escalate": True, "reason": str(exc)})
         return 0
     try:
@@ -511,22 +535,22 @@ def _escalate(args: list[str]) -> int:
         # recoverable crash/review retry into an immediate hard escalation.
         policy = load_runtime_policy(get_project_root(), state_file=state_file, resolve_assets=False)
     except (FileNotFoundError, PolicyError) as exc:
+        # Legacy contract: policy-load failure → escalate=True. Same
+        # rationale as above; do not audit when we have no policy.
         print_json({"escalate": True, "reason": str(exc)})
         return 0
+
     if trigger == "review-loop":
         cycles = _parse_context_int(context, "cycles")
         limit = review_max_cycles(policy)
         if cycles >= limit:
-            print_json(
-                {
-                    "escalate": True,
-                    "reason": f"Review loop exceeded max cycles ({cycles}/{limit})",
-                }
-            )
+            result: dict = {
+                "escalate": True,
+                "reason": f"Review loop exceeded max cycles ({cycles}/{limit})",
+            }
         else:
-            print_json({"escalate": False})
-        return 0
-    if trigger == "session-crash":
+            result = {"escalate": False}
+    elif trigger == "session-crash":
         retries = _parse_context_int(context, "retries")
         limit = crash_max_retries(policy)
         if retries >= limit:
@@ -546,27 +570,40 @@ def _escalate(args: list[str]) -> int:
                     final_session=session,
                 )
             )
-            print_json(
-                {"escalate": True, "reason": f"Session crashed after {retries} retries"}
-            )
+            result = {
+                "escalate": True,
+                "reason": f"Session crashed after {retries} retries",
+            }
         else:
-            print_json({"escalate": False, "action": "retry"})
-        return 0
-    if trigger == "story-validation":
+            result = {"escalate": False, "action": "retry"}
+    elif trigger == "story-validation":
         created = _parse_context_int(context, "created")
         if created != 1:
-            print_json(
-                {
-                    "escalate": True,
-                    "reason": "No story file created"
-                    if created == 0
-                    else f"Runaway creation: {created} files",
-                }
-            )
+            result = {
+                "escalate": True,
+                "reason": "No story file created"
+                if created == 0
+                else f"Runaway creation: {created} files",
+            }
         else:
-            print_json({"escalate": False})
-        return 0
-    print_json({"escalate": False, "reason": "Unknown trigger"})
+            result = {"escalate": False}
+    else:
+        result = {"escalate": False, "reason": "Unknown trigger"}
+
+    # REQ-11: audit before the user-visible print, but only on actual
+    # escalations. A non-escalating dispatch is not a security event.
+    if result.get("escalate"):
+        _maybe_audit_event(
+            policy,
+            _audit_path_for(get_project_root()),
+            EscalationRaised(
+                trigger=trigger,
+                reason=str(result.get("reason", "")),
+                correlation_id=_escalate_correlation_id(state_file, trigger),
+            ),
+        )
+
+    print_json(result)
     return 0
 
 
@@ -791,6 +828,16 @@ def _parse_context_int(context: str, key: str) -> int:
 def _parse_context_str(context: str, key: str) -> str:
     match = re.search(rf"(?:^|\s){re.escape(key)}=(\S+)", context)
     return match.group(1) if match else ""
+
+
+def _escalate_correlation_id(state_file: str, trigger: str) -> str:
+    """Stable correlation id for one escalation event.
+
+    Combines the state-file basename (or empty) with the trigger so the
+    audit record can be cross-referenced against the orchestration log.
+    """
+    base = Path(state_file).name if state_file else ""
+    return f"escalate:{trigger}:{base}"
 
 
 def _flag_value(args: list[str], idx: int, flag: str) -> str:
