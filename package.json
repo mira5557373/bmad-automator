@@ -25,6 +25,7 @@
     "pack:dry-run": "npm pack --dry-run",
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",
+    "gates:vocab": "sh scripts/m11-vocabulary-gates.sh",
     "verify": "npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
   },
   "engines": {
