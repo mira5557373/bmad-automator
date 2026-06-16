@@ -154,7 +154,12 @@ def _find_existing_test(tests_dir: Path, req_id: str) -> str | None:
     if not tests_dir.exists():
         return None
     needle = re.compile(rf"(?<!\w){re.escape(req_id)}(?!\w)")
-    for path in sorted(tests_dir.glob("test_compliance_*.py")):
+    # Sort by name string, not Path object: Path.__lt__ is case-insensitive
+    # on Windows but byte-ordered on POSIX, so sorting bare Path objects
+    # picks a different "first" match per-OS for case-colliding names (e.g.
+    # test_compliance_B.py vs test_compliance_a.py), breaking the documented
+    # lexicographic-determinism contract and the cross-platform guardrail.
+    for path in sorted(tests_dir.glob("test_compliance_*.py"), key=lambda p: p.name):
         if needle.search(path.read_text(encoding="utf-8")):
             return str(path.resolve())
     return None

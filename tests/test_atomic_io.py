@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -9,6 +10,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+import psutil
 
 
 class ModuleImportTests(unittest.TestCase):
@@ -820,13 +823,16 @@ class ImportAllowlistTests(unittest.TestCase):
 class IsStaleTrueBranchTests(unittest.TestCase):
     """REQ-09 / REQ-13: dead PID + heartbeat older than 600s ⇒ True."""
 
-    def _identity(self, *, pid: int, heartbeat_iso: str):  # type: ignore[no-untyped-def]
+    def _identity(self, *, pid: int, heartbeat_iso: str, start_time: float = 0.0):  # type: ignore[no-untyped-def]
         from story_automator.core.atomic_io import RunLockIdentity
 
+        # Use the real hostname so is_stale's composite-identity check
+        # exercises the local-host branch (pid liveness) rather than
+        # short-circuiting on a foreign-host mismatch.
         return RunLockIdentity(
             pid=pid,
-            start_time=0.0,
-            hostname="h",
+            start_time=start_time,
+            hostname=socket.gethostname(),
             heartbeat_iso=heartbeat_iso,
             run_id="r",
         )
@@ -854,33 +860,71 @@ class IsStaleTrueBranchTests(unittest.TestCase):
 class IsStaleFalseBranchTests(unittest.TestCase):
     """REQ-09 / REQ-13: each of the three False cells of the truth table."""
 
-    def _identity(self, *, pid: int, heartbeat_iso: str):  # type: ignore[no-untyped-def]
+    def _identity(self, *, pid: int, heartbeat_iso: str, start_time: float = 0.0):  # type: ignore[no-untyped-def]
         from story_automator.core.atomic_io import RunLockIdentity
 
+        # Real hostname so the local-host (pid liveness) branch is taken.
         return RunLockIdentity(
             pid=pid,
-            start_time=0.0,
-            hostname="h",
+            start_time=start_time,
+            hostname=socket.gethostname(),
             heartbeat_iso=heartbeat_iso,
             run_id="r",
         )
 
-    def test_live_pid_with_aged_heartbeat_is_not_stale(self) -> None:
+    def test_live_pid_with_matching_identity_and_aged_heartbeat_is_not_stale(
+        self,
+    ) -> None:
         # A long-running process whose heartbeat is far behind must NOT be
-        # reclaimed if the PID is still alive — the runtime might be wedged
-        # but it has not actually died.
+        # reclaimed when the PID is alive AND its create_time matches the
+        # recorded start_time on the recording host — it may be wedged but
+        # it has not died and the PID has not been recycled.
+        from story_automator.core.atomic_io import is_stale
+
+        pid = os.getpid()
+        identity = self._identity(
+            pid=pid,
+            heartbeat_iso="1970-01-01T00:00:00Z",
+            start_time=psutil.Process(pid).create_time(),
+        )
+        now = 3600.0  # heartbeat parses to 0.0; age == now.
+        # No pid_exists mock: this PID is genuinely alive, so the real
+        # composite-identity check (pid_exists + create_time match) runs.
+        self.assertFalse(is_stale(identity, now=now))
+
+    def test_live_pid_with_mismatched_start_time_is_stale(self) -> None:
+        # PID-reuse defense: the recorded PID is alive but its create_time
+        # does NOT match the recorded start_time, so the original owner is
+        # gone (the OS recycled the PID for an unrelated process) and the
+        # dead run's lock is reclaimable.
         from story_automator.core.atomic_io import is_stale
 
         identity = self._identity(
             pid=os.getpid(),
             heartbeat_iso="1970-01-01T00:00:00Z",
+            start_time=1.0,  # deliberately != this process's create_time
         )
-        now = 3600.0  # heartbeat parses to 0.0; age == now.
+        self.assertTrue(is_stale(identity, now=3600.0))
+
+    def test_foreign_host_with_aged_heartbeat_is_stale(self) -> None:
+        # Cross-host shared-FS lock: the local pid table is meaningless, so
+        # an aged heartbeat alone marks a foreign-host lock reclaimable, even
+        # when the recorded PID happens to be alive on THIS host.
+        from story_automator.core.atomic_io import RunLockIdentity, is_stale
+
+        identity = RunLockIdentity(
+            pid=os.getpid(),
+            start_time=0.0,
+            hostname=socket.gethostname() + "-not-this-host",
+            heartbeat_iso="1970-01-01T00:00:00Z",
+            run_id="r",
+        )
+        # pid_exists must not even be consulted on the foreign-host branch.
         with patch(
-            "story_automator.core.atomic_io.psutil.pid_exists",
-            return_value=True,
-        ):
-            self.assertFalse(is_stale(identity, now=now))
+            "story_automator.core.atomic_io.psutil.pid_exists"
+        ) as pid_exists_spy:
+            self.assertTrue(is_stale(identity, now=3600.0))
+            pid_exists_spy.assert_not_called()
 
     def test_dead_pid_with_fresh_heartbeat_is_not_stale(self) -> None:
         # A crashed process whose lock is less than 600s old must NOT be

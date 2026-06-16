@@ -235,6 +235,24 @@ def _iter_record_lines(handle: Any) -> "Iterator[bytes]":
 _REQUIRED_RECORD_FIELDS = ("seq", "ts", "event", "payload", "tag")
 
 
+def _validate_prev_tag(prev_tag_hex: Any) -> None:
+    """Reject a malformed previous-record tag before it reaches
+    ``_compute_tag`` (whose ``bytes.fromhex`` would raise an opaque
+    ValueError/TypeError on non-hex/odd-length/non-str input). ``verify()``
+    applies the same 64-char lowercase-hex guard before reusing a tag; the
+    append path must match. The tag value itself is never echoed.
+    """
+    if (
+        not isinstance(prev_tag_hex, str)
+        or len(prev_tag_hex) != 64
+        or any(c not in "0123456789abcdef" for c in prev_tag_hex)
+    ):
+        raise ValueError(
+            "audit chain corrupt: previous record tag is not a 64-char "
+            "lowercase hex string; refusing to append"
+        )
+
+
 @dataclasses.dataclass(kw_only=True)
 class AuditLog:
     """Append-only, hash-chained JSONL audit log.
@@ -326,8 +344,30 @@ class AuditLog:
                     seq = 1
                     prev_tag_hex = None
                 else:
-                    seq = int(prev["seq"]) + 1
+                    # The trailing line may be valid JSON yet not a
+                    # well-formed audit record (e.g. an array, a scalar, or
+                    # a dict missing fields). Validate before chaining so a
+                    # corrupt log surfaces a clear, key-free corruption error
+                    # instead of an opaque TypeError/KeyError/ValueError.
+                    # verify() already performs exactly this check; append()
+                    # must be just as strict.
+                    if not isinstance(prev, dict) or any(
+                        field not in prev for field in _REQUIRED_RECORD_FIELDS
+                    ):
+                        raise ValueError(
+                            "audit log corruption: trailing record is not a "
+                            "well-formed audit record (expected a JSON object "
+                            "with seq/ts/event/payload/tag); refusing to append"
+                        )
+                    prev_seq = prev["seq"]
+                    if not isinstance(prev_seq, int) or isinstance(prev_seq, bool):
+                        raise ValueError(
+                            "audit log corruption: trailing record has a "
+                            "non-integer seq; refusing to append"
+                        )
                     prev_tag_hex = prev["tag"]
+                    _validate_prev_tag(prev_tag_hex)
+                    seq = prev_seq + 1
 
             ts = iso_now()
             event_name = event.event_name

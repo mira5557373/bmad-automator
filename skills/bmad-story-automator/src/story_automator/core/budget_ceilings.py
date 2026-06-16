@@ -387,4 +387,14 @@ def bypass_allowed() -> bool:
     """
     if os.environ.get("BMAD_ALLOW_CEILING_BYPASS") != "1":
         return False
-    return bool(sys.stdin.isatty())
+    # Fail closed in any non-interactive context. sys.stdin is None under
+    # Windows pythonw.exe / GUI / service / detached launches, and
+    # isatty() can raise ValueError (closed stream) or OSError on some
+    # platforms — all of which mean "no TTY", not "crash the gate".
+    stdin = sys.stdin
+    if stdin is None:
+        return False
+    try:
+        return bool(stdin.isatty())
+    except (ValueError, OSError):
+        return False

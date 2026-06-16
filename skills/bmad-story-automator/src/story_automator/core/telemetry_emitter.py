@@ -49,18 +49,27 @@ class TelemetryEmitter:
 
 
 _PROJECT_EMITTERS: dict[Path, TelemetryEmitter] = {}
+_PROJECT_EMITTERS_LOCK: threading.Lock = threading.Lock()
 
 
 def emitter_for_project_root(project_root: str | Path) -> TelemetryEmitter:
     # Shared cache keyed by the resolved telemetry file path so every wiring
     # call site in the same process serializes through the same threading.Lock.
+    # Double-checked locking (mirroring core.atomic_io._lock_for_path) closes
+    # the unlocked check-then-act race where two concurrent callers for a
+    # not-yet-cached path would each construct a distinct emitter (and lock),
+    # defeating the one-emitter-per-path-per-process invariant.
     path = (Path(project_root) / "telemetry" / "events.jsonl").resolve()
     cached = _PROJECT_EMITTERS.get(path)
     if cached is not None:
         return cached
-    emitter = TelemetryEmitter(path)
-    _PROJECT_EMITTERS[path] = emitter
-    return emitter
+    with _PROJECT_EMITTERS_LOCK:
+        cached = _PROJECT_EMITTERS.get(path)
+        if cached is not None:
+            return cached
+        emitter = TelemetryEmitter(path)
+        _PROJECT_EMITTERS[path] = emitter
+        return emitter
 
 
 __all__ = ["TelemetryEmitter", "emitter_for_project_root"]

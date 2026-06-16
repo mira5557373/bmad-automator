@@ -105,8 +105,14 @@ def _accumulate_buckets(
             bucket[0] += 1
         else:
             bucket[1] += 1
-        if event.timestamp > bucket[2]:
-            bucket[2] = event.timestamp
+        # Guard the order comparison: dataclasses do not enforce field
+        # annotations and parse_event does cls(**payload), so a numeric or
+        # null timestamp can slip through. A bare `>` against the "" seed
+        # would raise TypeError ('int' > 'str'). Only strings participate
+        # in last-seen tracking; ISO lexicographic ordering is preserved.
+        ts = event.timestamp
+        if isinstance(ts, str) and ts > bucket[2]:
+            bucket[2] = ts
     return total_scanned, buckets
 
 

@@ -18,6 +18,7 @@ module-size quality gates land in m01-m4.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 from dataclasses import asdict, dataclass
@@ -115,7 +116,12 @@ class UnknownEvent(Event):
             "timestamp": self.timestamp,
             "run_id": self.run_id,
         }
-        data.update(self.raw_fields)
+        # Deep-copy so the returned dict's nested containers are not the
+        # same objects the instance holds. The base Event.to_dict uses
+        # asdict() (which deep-copies); without this, mutating a nested
+        # value of the returned dict would corrupt this instance's
+        # raw_fields and break the byte-equal round-trip invariant.
+        data.update(copy.deepcopy(self.raw_fields))
         return data
 
 
@@ -315,6 +321,17 @@ def parse_event(line: str) -> Event:
     if "event_type" not in payload:
         raise ValueError(f"event missing 'event_type' field: {line[:80]!r}")
     event_type = payload.pop("event_type")
+    # A container-valued event_type (JSON array/object) is unhashable and
+    # would raise a raw TypeError from the dict lookup below — outside the
+    # documented error matrix. A non-string scalar (e.g. 123) would instead
+    # route silently to UnknownEvent with a non-str raw_event_type,
+    # violating its annotation. Surface both as the ValueError-for-
+    # undispatchable contract.
+    if not isinstance(event_type, str):
+        raise ValueError(
+            f"event_type must be a string, got "
+            f"{type(event_type).__name__}: {line[:80]!r}"
+        )
     cls = Event._REGISTRY.get(event_type)
     if cls is None:
         return UnknownEvent(

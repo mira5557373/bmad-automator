@@ -232,7 +232,13 @@ def _check_line_in_range(
     if not text:
         line_count = 0
     else:
-        line_count = len(text.splitlines())
+        # Count newline-delimited lines the way editors and grep number them
+        # (file:line references originate from those tools). str.splitlines()
+        # also breaks on form-feed, vertical-tab, and Unicode line
+        # separators, over-counting relative to the line a reviewer cites.
+        # Normalize CRLF/CR to LF, then count \n boundaries.
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        line_count = normalized.count("\n") + (0 if normalized.endswith("\n") else 1)
     if 1 <= line <= line_count:
         return True, None
     return False, f"line {line} outside file range 1..{line_count}"

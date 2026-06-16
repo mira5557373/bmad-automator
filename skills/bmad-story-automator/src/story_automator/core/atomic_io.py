@@ -323,13 +323,37 @@ def is_stale(
 
     The check is intentionally ordered cheap-first (timestamp arithmetic
     before the syscall in ``psutil.pid_exists``).
+
+    Composite-identity liveness (beyond the bare REQ-09 pid check): the
+    recorded ``hostname`` and ``start_time`` are also consulted so a
+    foreign-host lock on a shared filesystem and a recycled-PID false
+    negative are both reclaimable once the heartbeat has aged out:
+
+    - foreign host: the local PID table is meaningless, so an aged
+      heartbeat alone marks the lock stale (``pid_exists`` is not called);
+    - same host: the PID must both exist AND have a process-creation time
+      matching the recorded ``start_time`` — otherwise the PID was recycled
+      by an unrelated process and the original owner is gone.
     """
     age = (now if now is not None else time.time()) - parse_iso_seconds(
         identity.heartbeat_iso
     )
     if age <= _STALE_HEARTBEAT_WINDOW_S:
         return False
-    return not psutil.pid_exists(identity.pid)
+    if identity.hostname != socket.gethostname():
+        # Foreign-host lock: the local pid table is irrelevant. The aged
+        # heartbeat is the only liveness signal we can trust.
+        return True
+    if not psutil.pid_exists(identity.pid):
+        return True
+    try:
+        proc = psutil.Process(identity.pid)
+        # 1.0s tolerance bridges the resolution gap between the recorded
+        # start_time (time.time() float) and psutil's create_time().
+        same_owner = abs(proc.create_time() - identity.start_time) < 1.0
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        same_owner = False
+    return not same_owner
 
 
 class HeartbeatThread(threading.Thread):

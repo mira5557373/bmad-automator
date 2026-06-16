@@ -204,7 +204,12 @@ def _parse_envelope(payload: str) -> tuple[list[ReqVerdict], int]:
                 f"{type(evidence_raw).__name__}"
             )
         status = raw["status"]
-        if status not in _ALLOWED_STATUSES:
+        # `isinstance(str)` must short-circuit BEFORE the frozenset
+        # membership test: an unhashable status from the untrusted
+        # subprocess (e.g. ["implemented"] or {"x": 1}) would otherwise
+        # raise a raw TypeError out of `status not in _ALLOWED_STATUSES`
+        # instead of the ComplianceError that REQ-10 mandates.
+        if not isinstance(status, str) or status not in _ALLOWED_STATUSES:
             raise ComplianceError(
                 f"verdicts[{index}].status must be one of "
                 f"{sorted(_ALLOWED_STATUSES)!r}, got {status!r}"
