@@ -45,12 +45,31 @@ skill_file() {
   printf '%s/%s/SKILL.md\n' "$TARGET_SKILLS_REL" "$skill_name"
 }
 
+KEEP_BACKUPS="${BMAD_INSTALL_KEEP_BACKUPS:-3}"
+
+prune_backups() {
+  # Bound the timestamped backups of "$path" so repeated re-installs do not
+  # accumulate stale copies forever. Keeps the most recent $KEEP_BACKUPS
+  # (the suffix is sortable: .backup-YYYYMMDDTHHMMSSZ) and removes older ones.
+  local path="$1"
+  local backups count old
+  backups="$(ls -d "${path}.backup-"* 2>/dev/null | sort || true)"
+  [ -n "$backups" ] || return 0
+  count="$(printf '%s\n' "$backups" | grep -c . || true)"
+  if [ "$count" -gt "$KEEP_BACKUPS" ]; then
+    printf '%s\n' "$backups" | head -n "$((count - KEEP_BACKUPS))" | while IFS= read -r old; do
+      [ -n "$old" ] && rm -rf "$old"
+    done
+  fi
+}
+
 backup_if_exists() {
   local path="$1"
   if [ -e "$path" ]; then
     local backup="${path}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
     mv "$path" "$backup"
     echo "Backup: ${backup#$TARGET_ROOT/}"
+    prune_backups "$path"
   fi
 }
 
@@ -264,6 +283,7 @@ SKILL_SOURCE_ROOT="$SCRIPT_DIR/skills"
 STORY_SOURCE="$SKILL_SOURCE_ROOT/bmad-story-automator"
 STORY_REVIEW_SOURCE="$SKILL_SOURCE_ROOT/bmad-story-automator-review"
 
+command -v python3 >/dev/null 2>&1 || err "Python 3.11+ is required but 'python3' was not found on PATH (the installed runtime execs 'python3 -m story_automator')."
 [ -d "$TARGET_BMAD" ] || err "Target is not a BMAD project: missing $TARGET_BMAD"
 [ -d "$SKILL_SOURCE_ROOT" ] || err "Missing skills root: $SKILL_SOURCE_ROOT"
 [ -d "$STORY_SOURCE" ] || err "Missing story-automator skill: $STORY_SOURCE"

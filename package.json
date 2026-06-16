@@ -15,6 +15,9 @@
     "!skills/**/__pycache__/",
     "!skills/**/*.pyc",
     "!skills/**/*.pyo",
+    "!skills/**/tests/",
+    "!docs/superpowers/",
+    "!docs/plans/",
     "README.md",
     "ref.png",
     ".claude-plugin/"
@@ -25,8 +28,9 @@
     "pack:dry-run": "npm pack --dry-run",
     "test:python": "PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests",
     "test:smoke": "bash scripts/smoke-test.sh",
+    "lint:python": "ruff check skills tests",
     "gates:vocab": "sh scripts/m11-vocabulary-gates.sh",
-    "verify": "npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
+    "verify": "npm run lint:python && npm run test:python && npm run pack:dry-run && npm run test:cli && npm run test:smoke"
   },
   "engines": {
     "node": ">=18"

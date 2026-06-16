@@ -1,0 +1,16 @@
+# Pinned lint configuration for the bmad-story-automator Python runtime.
+#
+# Wired into `npm run lint:python` and `npm run verify`, and into CI, so the
+# Python sources and tests stay free of unused imports, undefined names, and the
+# other correctness-class lints below. The ruleset is pinned (rather than left
+# to ruff's evolving defaults) so the gate is deterministic across ruff versions.
+target-version = "py311"
+line-length = 100
+extend-exclude = ["external", "node_modules", "**/__pycache__", "dist", "build"]
+
+[lint]
+# Pyflakes (F: unused imports/names, redefinitions) plus the pycodestyle error
+# subsets that catch real syntax/runtime hazards (E4 imports, E7 statements,
+# E9 syntax). Intentionally excludes stylistic-only rules (E501 line length,
+# formatting) to keep the gate about correctness, not cosmetics.
+select = ["E4", "E7", "E9", "F"]

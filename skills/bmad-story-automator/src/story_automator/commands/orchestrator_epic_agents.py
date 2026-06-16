@@ -39,12 +39,11 @@ from story_automator.core.telemetry_events import (
     RetroAgentDispatched,
 )
 from story_automator.core.run_identity import current_run_id
+from ._audit_hooks import _audit_path_for, _maybe_audit_event
 
 
 def _telemetry_emitter() -> TelemetryEmitter:
     return emitter_for_project_root(get_project_root())
-
-from ._audit_hooks import _audit_path_for, _maybe_audit_event
 
 
 def check_epic_complete_action(args: list[str]) -> int:

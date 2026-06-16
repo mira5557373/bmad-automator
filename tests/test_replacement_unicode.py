@@ -14,7 +14,7 @@ import json
 import shutil
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from story_automator.commands.orchestrator import cmd_orchestrator_helper

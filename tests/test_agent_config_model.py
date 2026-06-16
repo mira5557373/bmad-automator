@@ -11,7 +11,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.core.agent_config import (
-    AgentTaskConfig,
     build_agents_file,
     parse_agent_config_json,
     resolve_agent_for_task,
