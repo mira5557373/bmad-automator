@@ -10,6 +10,8 @@ scripts: '../scripts/story-automator'
 ensureStopHook: '../scripts/story-automator'
 stateHelper: '../scripts/story-automator'
 settingsFile: '{project-root}/.claude/settings.json'
+eventsLedger: '{output_folder}/story-automator/events.jsonl'
+workflowJson: '{project-root}/workflow.json'
 ---
 
 # Step 1: Initialize
@@ -121,6 +123,37 @@ Please run the **sprint-planning** workflow first to generate it.
 **IF sprint_ok == true:**
 - Store for later reference during preflight
 - Will be used to check if earlier stories need completion
+
+### 5b. Budget Ceiling Preflight (init gate)
+
+Refuse to begin a run if a configured cost ceiling is already breached.
+
+```bash
+ceiling=$("{scripts}" ceiling-check --gate init \
+  --events "{eventsLedger}" --workflow "{workflowJson}")
+verdict=$(echo "$ceiling" | jq -r '.verdict')
+reason=$(echo "$ceiling" | jq -r '.reason')
+bypass=$(echo "$ceiling" | jq -r '.bypass_allowed')
+case "$verdict" in
+  BLOCK) echo "❌ Budget ceiling reached: $reason"
+         [ "$bypass" = "true" ] && read -r -p "Bypass? [y/N] " ans
+         [ "$ans" = "y" ] || [ "$ans" = "Y" ] || exit 1 ;;
+  WARN)  echo "⚠️ Budget ceiling warning: $reason" ;;
+  ALLOW) : ;;
+esac
+```
+
+**IF verdict == "BLOCK" and bypass != "true":**
+Display: `**Budget ceiling reached** — $reason`
+**HALT** — Do not proceed.
+
+**IF verdict == "BLOCK" and bypass == "true":**
+Display: `**Budget ceiling reached** — $reason\nBypass requires explicit operator confirmation.`
+Wait for the operator's confirmation prompt above. If not confirmed, **HALT**.
+
+**IF verdict == "WARN":**
+Display: `⚠️ Budget ceiling warning: $reason`
+Continue.
 
 ### 6. Setup
 Ensure `{outputFolder}` exists.
