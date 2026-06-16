@@ -38,6 +38,7 @@ from story_automator.core.telemetry_events import (
     RetryAttempt,
     RetroAgentDispatched,
 )
+from story_automator.core.run_identity import current_run_id
 
 
 def _telemetry_emitter() -> TelemetryEmitter:
@@ -255,7 +256,7 @@ def check_blocking_action(args: list[str]) -> int:
             _telemetry_emitter().emit(
                 EscalationTriggered(
                     timestamp=iso_now(),
-                    run_id="",
+                    run_id=current_run_id(get_project_root()),
                     epic=epic,
                     story_key=norm.id,
                     trigger_id=0,
@@ -425,7 +426,7 @@ def agents_resolve_action(args: list[str]) -> int:
             _telemetry_emitter().emit(
                 RetryAttempt(
                     timestamp=iso_now(),
-                    run_id="",
+                    run_id=current_run_id(get_project_root()),
                     epic=epic,
                     story_key=options["story"],
                     attempt_num=attempt_num,
@@ -471,7 +472,7 @@ def retro_agent_action(args: list[str]) -> int:
     _telemetry_emitter().emit(
         RetroFired(
             timestamp=iso_now(),
-            run_id="",
+            run_id=current_run_id(get_project_root()),
             epic=str(config.get("epic") or ""),
             stories_completed=int(config.get("storiesCompleted") or 0),
             total_cost_usd=float(config.get("totalCostUsd") or 0.0),

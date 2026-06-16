@@ -59,6 +59,7 @@ from story_automator.core.telemetry_events import (
     StoryFailed,
     StoryStarted,
 )
+from story_automator.core.run_identity import current_run_id
 from ._audit_hooks import _audit_path_for, _maybe_audit_event
 from .state import audit_state_change
 
@@ -296,7 +297,7 @@ def _marker(args: list[str]) -> int:
         _telemetry_emitter().emit(
             StoryStarted(
                 timestamp=iso_now(),
-                run_id="",
+                run_id=current_run_id(get_project_root()),
                 epic=options["epic"],
                 story_key=options["story"],
                 agent="",
@@ -514,7 +515,7 @@ def _escalate(args: list[str]) -> int:
             _telemetry_emitter().emit(
                 StoryFailed(
                     timestamp=iso_now(),
-                    run_id="",
+                    run_id=current_run_id(get_project_root()),
                     epic=epic,
                     story_key=story,
                     error_class="session_crash",
@@ -578,7 +579,7 @@ def _commit_ready(args: list[str]) -> int:
             _telemetry_emitter().emit(
                 StoryCompleted(
                     timestamp=iso_now(),
-                    run_id="",
+                    run_id=current_run_id(get_project_root()),
                     epic=epic,
                     story_key=args[0],
                     duration_s=0.0,
@@ -710,7 +711,7 @@ def _verify_code_review(args: list[str]) -> int:
     _telemetry_emitter().emit(
         ReviewCycle(
             timestamp=iso_now(),
-            run_id="",
+            run_id=current_run_id(get_project_root()),
             epic=epic,
             story_key=args[0],
             cycle_num=int(payload.get("cycle") or 0),

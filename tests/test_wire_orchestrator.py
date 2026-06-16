@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from story_automator.commands import orchestrator
+from story_automator.core.run_identity import current_run_id
 from story_automator.core.telemetry_emitter import TelemetryEmitter
 
 
@@ -171,6 +172,81 @@ class MarkerCreateWiringTests(unittest.TestCase):
             self.assertEqual(ev["agent"], "")
             self.assertEqual(ev["model"], "")
             self.assertEqual(ev["complexity"], "")
+
+
+class RunIdCorrelationWiringTests(unittest.TestCase):
+    """run_id is the per-run correlation key derived from the active marker.
+
+    The marker-create path writes the active marker before emitting, so the
+    StoryStarted event carries a populated, marker-derived run_id end-to-end.
+    Emit sites that run without a marker present fall back to "" (the prior
+    behavior), so the change is purely additive.
+    """
+
+    def test_story_started_run_id_populated_from_real_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+            ):
+                rc = orchestrator._marker(
+                    [
+                        "create",
+                        "--epic",
+                        "8",
+                        "--story",
+                        "8.4",
+                        "--remaining",
+                        "3",
+                        "--state-file",
+                        str(tmp / "state.md"),
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                expected = current_run_id(str(tmp))
+            started = [
+                e
+                for e in _read_lines(tmp / "events.jsonl")
+                if e["event_type"] == "story_started"
+            ]
+            self.assertEqual(len(started), 1)
+            run_id = started[0]["run_id"]
+            self.assertTrue(run_id.startswith("run-"))
+            self.assertNotEqual(run_id, "run-")
+            # The marker written by `_marker create` is the same one
+            # current_run_id reads, so the IDs must match exactly.
+            self.assertEqual(run_id, expected)
+
+    def test_review_cycle_run_id_empty_without_marker(self) -> None:
+        # _verify_code_review does not create a marker; with none present the
+        # run_id must fall back to "" (regression guard for the additive change).
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            _, factory = _patched_emitter_factory(tmp)
+            with (
+                mock.patch.object(
+                    orchestrator, "emitter_for_project_root", side_effect=factory
+                ),
+                mock.patch.object(
+                    orchestrator, "get_project_root", return_value=str(tmp)
+                ),
+                mock.patch.object(
+                    orchestrator,
+                    "verify_code_review_completion",
+                    return_value={"verified": True, "cycle": 2, "issuesFound": 0},
+                ),
+            ):
+                rc = orchestrator._verify_code_review(["1.3"])
+            self.assertEqual(rc, 0)
+            events = _read_lines(tmp / "events.jsonl")
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["run_id"], "")
 
 
 if __name__ == "__main__":
