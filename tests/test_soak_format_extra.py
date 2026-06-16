@@ -266,7 +266,19 @@ class ContributingGrepGateTests(unittest.TestCase):
     def test_contributing_md_has_no_placeholder_tokens(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         text = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-        self.assertIsNone(
-            stdlib_re.search(r"\[[A-Z]{4}\]", text),
-            "CONTRIBUTING.md contains an unresolved four-letter placeholder token",
+        # M11 introduced a legitimate bracketed scope vocabulary
+        # ([FULL]/[LITE]/[SKELETON]/[DEFERRED]). Two of those ([FULL],
+        # [LITE]) are exactly four uppercase letters, so the original
+        # `\[[A-Z]{4}\]` gate false-positives on the vocabulary once M11
+        # and M13 are integrated. Allowlist the M11 vocabulary and flag
+        # any *other* bracketed all-caps token as an unresolved
+        # placeholder (the deferred-work family).
+        m11_vocab = {"FULL", "LITE", "SKELETON", "DEFERRED"}
+        bracketed = stdlib_re.findall(r"\[([A-Z]{3,})\]", text)
+        placeholders = [tok for tok in bracketed if tok not in m11_vocab]
+        self.assertEqual(
+            placeholders,
+            [],
+            "CONTRIBUTING.md contains unresolved placeholder token(s): "
+            f"{placeholders}",
         )

@@ -472,8 +472,11 @@ class PathExistsAndEscapeTests(unittest.TestCase):
         outside_dir.mkdir(exist_ok=True)
         outside_file = outside_dir / "leak.py"
         outside_file.write_text("secret = 1\n", encoding="utf-8")
-        self.addCleanup(lambda: outside_file.unlink(missing_ok=True))
+        # Cleanups run LIFO: register the directory removal FIRST so the
+        # file unlink runs before it — otherwise rmdir() hits a non-empty
+        # directory and raises OSError(39) during teardown on POSIX.
         self.addCleanup(lambda: outside_dir.rmdir())
+        self.addCleanup(lambda: outside_file.unlink(missing_ok=True))
 
         link = self.root / "leak.py"
         link.symlink_to(outside_file)
