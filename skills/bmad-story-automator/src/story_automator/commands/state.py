@@ -5,13 +5,33 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..core.atomic_io import RunLockBusy, acquire_run_lock, write_atomic_text
 from ..core.frontmatter import extract_frontmatter, parse_simple_frontmatter
-from ..core.runtime_policy import PolicyError, load_policy_for_state, snapshot_effective_policy
+from ..core.runtime_policy import (
+    PolicyError,
+    load_policy_for_state,
+    snapshot_effective_policy,
+)
 from ..core.agent_config import normalize_model as _model_or_none
 from ..core.sprint import sprint_status_in_text
 from ..core.utils import count_matches, ensure_dir, file_exists, get_project_root, now_utc, now_utc_z, read_text, write_json
 from ..core.audit import audit_for_policy
 from ..core.audit_events import StoryStateChanged
+
+
+_LEGACY_STATE_BUILD_MARKER_NAME = ".state-build.marker"
+_STATE_BUILD_LOCK_NAME = ".state-build.lock"
+
+
+def _cleanup_legacy_state_build_marker(output_folder: Path) -> None:
+    """Best-effort delete a legacy `.state-build.marker` sentinel left by a
+    pre-M05 build. Single `unlink(missing_ok=True)` call — does not block
+    startup, does not raise.
+
+    REQ-11: "any legacy marker discovered at startup must be deleted with a
+    single best-effort ``Path.unlink(missing_ok=True)`` call".
+    """
+    (output_folder / _LEGACY_STATE_BUILD_MARKER_NAME).unlink(missing_ok=True)
 
 
 def _max_parallel(overrides: dict[str, Any]) -> int | None:
@@ -59,6 +79,7 @@ def cmd_build_state_doc(args: list[str]) -> int:
         write_json({"ok": False, "error": "missing_config"})
         return 1
     ensure_dir(output_folder)
+    _cleanup_legacy_state_build_marker(Path(output_folder))
     now = now_utc_z()
     stamp = now_utc().strftime("%Y%m%d-%H%M%S")
     epic = str(config.get("epic") or "epic")
@@ -101,7 +122,11 @@ def cmd_build_state_doc(args: list[str]) -> int:
         text,
     )
     custom_instructions = json.dumps(config.get("customInstructions", ""))
-    text = re.sub(r"(?m)^customInstructions:.*$", lambda m: f"customInstructions: {custom_instructions}", text)
+    text = re.sub(
+        r"(?m)^customInstructions:.*$",
+        lambda m: f"customInstructions: {custom_instructions}",
+        text,
+    )
     agent_config = config.get("agentConfig")
     if isinstance(agent_config, dict):
         per_task = agent_config.get("perTask", {})
@@ -137,7 +162,9 @@ def cmd_build_state_doc(args: list[str]) -> int:
         # motivated this — without preserving the explicit clear, retro/dev
         # tasks silently re-inherited `defaultModel` after persistence.
         if "defaultModel" in agent_config:
-            lines.append(f"  defaultModel: {json.dumps(_model_or_none(agent_config.get('defaultModel')))}")
+            lines.append(
+                f"  defaultModel: {json.dumps(_model_or_none(agent_config.get('defaultModel')))}"
+            )
         if isinstance(per_task, dict) and per_task:
             lines.append("  perTask:")
             for task in sorted(per_task):
@@ -149,9 +176,13 @@ def cmd_build_state_doc(args: list[str]) -> int:
                     lines.append(f"      primary: {json.dumps(entry['primary'])}")
                 if "fallback" in entry:
                     value = entry["fallback"]
-                    lines.append(f"      fallback: {'false' if value is False else json.dumps(value)}")
+                    lines.append(
+                        f"      fallback: {'false' if value is False else json.dumps(value)}"
+                    )
                 if "model" in entry:
-                    lines.append(f"      model: {json.dumps(_model_or_none(entry.get('model')))}")
+                    lines.append(
+                        f"      model: {json.dumps(_model_or_none(entry.get('model')))}"
+                    )
         complexity_overrides = agent_config.get("complexityOverrides", {})
         if isinstance(complexity_overrides, dict) and complexity_overrides:
             lines.append("  complexityOverrides:")
@@ -169,15 +200,27 @@ def cmd_build_state_doc(args: list[str]) -> int:
                         lines.append(f"        primary: {json.dumps(entry['primary'])}")
                     if "fallback" in entry:
                         value = entry["fallback"]
-                        lines.append(f"        fallback: {'false' if value is False else json.dumps(value)}")
+                        lines.append(
+                            f"        fallback: {'false' if value is False else json.dumps(value)}"
+                        )
                     if "model" in entry:
-                        lines.append(f"        model: {json.dumps(_model_or_none(entry.get('model')))}")
+                        lines.append(
+                            f"        model: {json.dumps(_model_or_none(entry.get('model')))}"
+                        )
         block = "\n".join(lines) + "\n"
         text = re.sub(r"(?m)^agentConfig:\n(?:(?:\s{2}.*\n)*)", block, text)
     for key, value in replacements.items():
-        text = re.sub(rf"(?m)^{re.escape(key)}:.*$", lambda m, k=key, v=value: f"{k}: {json.dumps(v)}", text)
-    story_range = [item for item in config.get("storyRange", []) if isinstance(item, str)]
-    progress_rows = "\n".join(f"| {story_id} | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | pending |" for story_id in story_range)
+        text = re.sub(
+            rf"(?m)^{re.escape(key)}:.*$",
+            lambda m, k=key, v=value: f"{k}: {json.dumps(v)}",
+            text,
+        )
+    story_range = [
+        item for item in config.get("storyRange", []) if isinstance(item, str)
+    ]
+    progress_rows = "\n".join(
+        f"| {story_id} | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | pending |" for story_id in story_range
+    )
     body = {
         "{{epicName}}": str(config.get("epicName", "")),
         "{{epic}}": str(config.get("epic", "")),
@@ -190,7 +233,13 @@ def cmd_build_state_doc(args: list[str]) -> int:
     for key, value in body.items():
         text = text.replace(key, value)
     text = text.replace("<!-- Progress rows will be appended here -->", progress_rows)
-    output_path.write_text(text, encoding="utf-8")
+    lock_path = Path(output_folder).resolve() / _STATE_BUILD_LOCK_NAME
+    try:
+        with acquire_run_lock(lock_path, run_id=stamp, timeout=0.0):
+            write_atomic_text(output_path, text)
+    except RunLockBusy:
+        write_json({"ok": False, "error": "run_lock_busy"})
+        return 1
     write_json({"ok": True, "path": str(output_path), "createdAt": now})
     return 0
 
@@ -210,7 +259,11 @@ def cmd_sprint_compare(args: list[str]) -> int:
         write_json({"ok": False, "error": "sprint_not_found"})
         return 1
     fields = parse_simple_frontmatter(read_text(state))
-    story_range = fields.get("storyRange", []) if isinstance(fields.get("storyRange"), list) else []
+    story_range = (
+        fields.get("storyRange", [])
+        if isinstance(fields.get("storyRange"), list)
+        else []
+    )
     current_story = fields.get("currentStory")
     before = list(story_range)
     if isinstance(current_story, str) and current_story in story_range:
@@ -256,7 +309,10 @@ def cmd_state_metrics(args: list[str]) -> int:
             parts = [part.strip() for part in line.split("|")]
             if len(parts) >= 8 and parts[1]:
                 total += 1
-                if any(token in parts[7].lower() for token in ("done", "complete", "completed")):
+                if any(
+                    token in parts[7].lower()
+                    for token in ("done", "complete", "completed")
+                ):
                     completed += 1
             continue
         if in_table and not line.startswith("|"):
@@ -300,19 +356,34 @@ def cmd_validate_state(args: list[str]) -> int:
         if validator and not validator(value):
             issues.append(f"Invalid {key}")
 
-    allowed = {"INITIALIZING", "READY", "IN_PROGRESS", "PAUSED", "EXECUTION_COMPLETE", "COMPLETE", "ABORTED"}
+    allowed = {
+        "INITIALIZING",
+        "READY",
+        "IN_PROGRESS",
+        "PAUSED",
+        "EXECUTION_COMPLETE",
+        "COMPLETE",
+        "ABORTED",
+    }
     required("epic")
     required("epicName")
     required("storyRange")
     required("status", lambda value: isinstance(value, str) and value in allowed)
-    required("lastUpdated", lambda value: isinstance(value, str) and re.search(r"\d{4}-\d{2}-\d{2}T", value))
+    required(
+        "lastUpdated",
+        lambda value: (
+            isinstance(value, str) and re.search(r"\d{4}-\d{2}-\d{2}T", value)
+        ),
+    )
     if not _has_runtime_command_config(fields, frontmatter):
         issues.append("Missing or empty aiCommand")
     try:
         load_policy_for_state(state)
     except PolicyError as exc:
         issues.append(str(exc))
-    write_json({"ok": True, "structure": "issues" if issues else "ok", "issues": issues})
+    write_json(
+        {"ok": True, "structure": "issues" if issues else "ok", "issues": issues}
+    )
     return 0
 
 
@@ -336,8 +407,17 @@ def _has_agent_config_block(frontmatter: str) -> bool:
         if not stripped or stripped.startswith("#") or ":" not in stripped:
             continue
         key, raw = stripped.split(":", 1)
-        if key.strip() in {"defaultPrimary", "defaultFallback", "perTask", "complexityOverrides", "retro"}:
-            if key.strip() in {"perTask", "complexityOverrides", "retro"} or raw.strip():
+        if key.strip() in {
+            "defaultPrimary",
+            "defaultFallback",
+            "perTask",
+            "complexityOverrides",
+            "retro",
+        }:
+            if (
+                key.strip() in {"perTask", "complexityOverrides", "retro"}
+                or raw.strip()
+            ):
                 return True
     return False
 
