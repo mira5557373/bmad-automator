@@ -42,4 +42,3 @@ packages = ["src/story_automator"]
 "steps-v" = "story_automator/skills/bmad-story-automator/steps-v"
 "workflow.md" = "story_automator/skills/bmad-story-automator/workflow.md"
 "SKILL.md" = "story_automator/skills/bmad-story-automator/SKILL.md"
-"../bmad-story-automator-review" = "story_automator/skills/bmad-story-automator-review"

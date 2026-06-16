@@ -46,7 +46,7 @@ Important behavior:
 
 - child sessions are always spawned through `tmux-wrapper spawn`
 - `--command` is mandatory
-- long commands are written to `/tmp/sa-cmd-<session>.sh`
+- under the default runner runtime the command and runner scripts are always written to `<tmpdir>/.sa-<hash>-session-<session>-command.sh` and `<tmpdir>/.sa-<hash>-session-<session>-runner.sh` (the legacy runtime only writes a command file for commands over 500 chars)
 - review and retro prompts are assembled from resolved sibling skill/workflow files
 
 ## tmux Lifecycle
@@ -63,7 +63,7 @@ sequenceDiagram
     O->>T: build-cmd <step>
     O->>T: spawn <step> --command "<built command>"
     T->>P: Create detached session with env vars
-    T->>F: Optional /tmp/sa-cmd-<session>.sh
+    T->>F: Write .sa-<hash>-session-<session>-command.sh + -runner.sh
     O->>M: monitor-session <session>
     M->>P: Poll pane capture and pane state
     M->>F: Write /tmp/sa-<hash>-output-<session>.txt
@@ -131,7 +131,8 @@ During monitoring, the runtime may write:
 
 - `/tmp/sa-<hash>-output-<session>.txt`
 - `/tmp/.sa-<hash>-session-<session>-state.json`
-- `/tmp/sa-cmd-<session>.sh`
+- `/tmp/.sa-<hash>-session-<session>-command.sh`
+- `/tmp/.sa-<hash>-session-<session>-runner.sh`
 
 These are runtime scratch files. They are cleaned on normal session kill.
 

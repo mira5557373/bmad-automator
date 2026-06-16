@@ -119,11 +119,17 @@ When tmux commands fail silently:
 
 **Symptoms identical to the terminal-width issue**, but with a different root cause.
 
-When `spawn` receives a command longer than 500 characters, it writes the command to a script file (`/tmp/sa-cmd-{session}.sh`) and sends the path via `tmux send-keys`. However, the path was sent **without the `bash` prefix**, so the shell received a raw file path instead of an executable command.
+> Applies to the **legacy** runtime only (`SA_TMUX_RUNTIME=legacy`). The default
+> runner runtime always writes a per-session command file
+> (`<tmpdir>/.sa-<hash>-session-<session>-command.sh`) plus a `…-runner.sh`, and
+> executes it via `tmux respawn-pane … bash <runner-script>` — it never uses
+> `tmux send-keys` for the command and has no 500-char threshold.
+
+In the legacy runtime, when `spawn` receives a command longer than 500 characters, it writes the command to a script file (`<tmpdir>/.sa-<hash>-session-<session>-command.sh`) and sends the path via `tmux send-keys`. However, the path was sent **without the `bash` prefix**, so the shell received a raw file path instead of an executable command.
 
 **Affected commands:** Retrospective prompts (~1577 chars) — all other steps (create-story, dev-story, code-review) are under 500 chars and use direct `send-keys`.
 
-**Fix:** `src/story_automator/commands/tmux.py` — changed the long-command fallback to send `bash /tmp/sa-cmd-{session}.sh` instead of a raw script path, and fail fast if the temp script write or `tmux send-keys` path breaks.
+**Fix:** `src/story_automator/commands/tmux.py` — changed the legacy long-command fallback to send `bash <tmpdir>/.sa-<hash>-session-<session>-command.sh` instead of a raw script path, and fail fast if the temp script write or `tmux send-keys` path breaks.
 
 **Lesson:** Two independent failure modes can produce identical symptoms (`never_active`). The `-x 200 -y 50` fix handles line-wrapping for direct `send-keys`, but the script-file fallback path had its own bug. Always check both paths when debugging.
 

@@ -136,7 +136,7 @@ If tmux sessions exist but are not tracked:
 
 ## Long Command Issues
 
-Long prompts are written to `/tmp/sa-cmd-<session>.sh`.
+Under the default runner runtime the command is always written to `<tmpdir>/.sa-<hash>-session-<session>-command.sh` (with a sibling `…-runner.sh`); only the legacy runtime gates this on commands over 500 chars.
 
 If a long command path fails:
 

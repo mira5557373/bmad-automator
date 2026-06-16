@@ -42,7 +42,7 @@ Your stories by complexity:
 
 **Agent Details:**
 - **Claude:** `claude --dangerously-skip-permissions` + natural language skill prompt
-- **Codex:** `codex exec --full-auto` + natural language prompt (no command prefix)
+- **Codex:** `codex exec` + natural language prompt (no command prefix)
 
 **Suggested Complexity-Based Configuration:**
 
@@ -76,7 +76,7 @@ Your stories by complexity:
 
 **Agent Details:**
 - **Claude:** `claude --dangerously-skip-permissions` + natural language skill prompt
-- **Codex:** `codex exec --full-auto` + natural language prompt (no command prefix)
+- **Codex:** `codex exec` + natural language prompt (no command prefix)
 
 **Suggested Complexity-Based Configuration:**
 

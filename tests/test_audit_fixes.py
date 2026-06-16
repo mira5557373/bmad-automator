@@ -326,6 +326,18 @@ class ActiveTaskCsvTests(unittest.TestCase):
         self.assertIn("a.py", result)
 
 
+class ProjectRootIdiomTests(unittest.TestCase):
+    """An explicitly-empty PROJECT_ROOT must fall back to cwd, not return ''."""
+
+    def test_empty_project_root_falls_back_to_cwd(self) -> None:
+        from story_automator.core.utils import get_project_root
+
+        with mock.patch.dict(os.environ, {"PROJECT_ROOT": ""}, clear=False):
+            self.assertTrue(get_project_root())  # not empty
+        with mock.patch.dict(os.environ, {"PROJECT_ROOT": "/tmp/some-root"}, clear=False):
+            self.assertEqual(get_project_root(), "/tmp/some-root")
+
+
 class SpawnCollisionTests(unittest.TestCase):
     """R05: a name collision with a live session must not clobber its state."""
 
