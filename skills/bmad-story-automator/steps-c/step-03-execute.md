@@ -10,6 +10,8 @@ outputFile: '{outputFolder}/orchestration-{epic_id}-{timestamp}.md'
 retryStrategy: '../data/retry-fallback-strategy.md'
 executionPatterns: '../data/execution-patterns.md'
 subagentPrompts: '../data/subagent-prompts.md'
+eventsLedger: '{output_folder}/story-automator/events.jsonl'
+workflowJson: '{project-root}/workflow.json'
 ---
 
 ## 🚨 CRITICAL: Load Data File Index FIRST
@@ -99,6 +101,29 @@ awk -v row="| {story_id} | - | - | - | - | - | in-progress |" '
   { print }
 ' "$state_file" > "$tmp_state" && mv "$tmp_state" "$state_file"
 ```
+
+#### Budget Ceiling Preflight (story_start gate)
+
+Refuse to start the next story if a configured ceiling has been reached.
+
+```bash
+ceiling=$("$scripts" ceiling-check --gate story_start \
+  --events "{eventsLedger}" --workflow "{workflowJson}")
+verdict=$(echo "$ceiling" | jq -r '.verdict')
+reason=$(echo "$ceiling" | jq -r '.reason')
+bypass=$(echo "$ceiling" | jq -r '.bypass_allowed')
+case "$verdict" in
+  BLOCK) echo "❌ story_start ceiling breached: $reason"
+         [ "$bypass" = "true" ] && read -r -p "Bypass? [y/N] " ans
+         [ "$ans" = "y" ] || [ "$ans" = "Y" ] || exit 1 ;;
+  WARN)  echo "⚠️ story_start ceiling warning: $reason" ;;
+  ALLOW) : ;;
+esac
+```
+
+**IF verdict == "BLOCK" and bypass != "true":** stop the story loop and surface `$reason` to the operator. Do not spawn this story.
+**IF verdict == "WARN":** surface `$reason` and continue with the spawn.
+**IF verdict == "ALLOW":** silent.
 
 Display: "**Story {N}/{total}: {title}**"
 Use compact operator output format for routine progress:

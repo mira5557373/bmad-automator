@@ -1,0 +1,76 @@
+"""``sw ceiling-check`` CLI subcommand wrapping ``evaluate_ceilings``.
+
+Thin shell-callable wrapper around ``core.budget_ceilings.evaluate_ceilings``
+(M03 REQ-13). Prints a single compact JSON object to stdout describing
+the verdict so BMAD step markdown can branch on ``ALLOW`` / ``WARN`` /
+``BLOCK`` via ``jq``. Read-only by design — does not write the ledger,
+does not call audit-log routines, and does not prompt for input
+(REQ-11, REQ-12).
+"""
+
+from __future__ import annotations
+
+from ..core.budget_ceilings import bypass_allowed, evaluate_ceilings
+from ..core.common import iso_now, print_json
+
+
+_VALID_GATES = ("init", "story_start", "retry_start")
+
+
+def _flag_map(args: list[str]) -> dict[str, str]:
+    output: dict[str, str] = {}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token.startswith("--") and index + 1 < len(args):
+            output[token[2:]] = args[index + 1]
+            index += 2
+            continue
+        index += 1
+    return output
+
+
+def cmd_ceiling_check(args: list[str]) -> int:
+    """Entry point for ``story-automator ceiling-check`` (REQ-13).
+
+    Required flags:
+        --gate {init,story_start,retry_start}
+        --events <path-to-events.jsonl>
+    """
+    params = _flag_map(args)
+    gate = params.get("gate", "")
+    events_path = params.get("events", "")
+    if not gate:
+        print_json({"ok": False, "error": "missing_gate"})
+        return 1
+    if gate not in _VALID_GATES:
+        print_json({"ok": False, "error": "invalid_gate", "gate": gate})
+        return 1
+    if not events_path:
+        print_json({"ok": False, "error": "missing_events"})
+        return 1
+    workflow_path: str | None = params.get("workflow") or None
+    now_iso = params.get("now") or iso_now()
+    try:
+        verdict, reason = evaluate_ceilings(
+            events_path,
+            gate,
+            now_iso,
+            workflow_json_path=workflow_path,
+        )
+    except OSError as exc:
+        # A real I/O error (e.g., PermissionError on an existing ledger)
+        # would emit a stack trace to stderr — the skill markdown parses
+        # stdout JSON via jq and would silently treat non-JSON as ALLOW.
+        # Surface it as a structured failure with ok=false instead.
+        print_json({"ok": False, "error": "io_error", "detail": str(exc)})
+        return 1
+    print_json(
+        {
+            "ok": True,
+            "verdict": verdict.value,
+            "reason": reason,
+            "bypass_allowed": bypass_allowed(),
+        }
+    )
+    return 0

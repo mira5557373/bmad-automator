@@ -6,6 +6,8 @@ scriptsDir: '../scripts/story-automator'
 outputFile: '{output_folder}/story-automator/orchestration-{epic_id}-{timestamp}.md'
 retryStrategy: '../data/retry-fallback-strategy.md'
 reviewLoop: '../data/code-review-loop.md'
+eventsLedger: '{output_folder}/story-automator/events.jsonl'
+workflowJson: '{project-root}/workflow.json'
 ---
 
 # Step 3a: Execute Review Phase
@@ -55,6 +57,28 @@ result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
   Display: `[story {N}/{total}] automate -> done`
   → proceed to D
 - FAILURE → retry up to 3 attempts (non-blocking, so fewer retries), then log warning:
+
+  Before each retry attempt, check the retry_start ceiling:
+
+  ```bash
+  ceiling=$("$scripts" ceiling-check --gate retry_start \
+    --events "{eventsLedger}" --workflow "{workflowJson}")
+  verdict=$(echo "$ceiling" | jq -r '.verdict')
+  reason=$(echo "$ceiling" | jq -r '.reason')
+  bypass=$(echo "$ceiling" | jq -r '.bypass_allowed')
+  case "$verdict" in
+    BLOCK) echo "❌ retry_start ceiling breached: $reason"
+           [ "$bypass" = "true" ] && read -r -p "Bypass? [y/N] " ans
+           [ "$ans" = "y" ] || [ "$ans" = "Y" ] || exit 1 ;;
+    WARN)  echo "⚠️ retry_start ceiling warning: $reason" ;;
+    ALLOW) : ;;
+  esac
+  ```
+
+  **IF verdict == "BLOCK" and bypass != "true":** stop retrying this story and mark it `skip` per the existing failure path. Surface `$reason` to the operator.
+  **IF verdict == "WARN":** surface `$reason` and continue with the retry.
+  **IF verdict == "ALLOW":** silent.
+
   ```bash
   # Update Story Progress: mark automate skipped
   tmp_state=$(mktemp)
