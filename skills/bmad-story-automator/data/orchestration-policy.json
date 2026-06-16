@@ -3,6 +3,9 @@
   "snapshot": {
     "relativeDir": "_bmad-output/story-automator/policy-snapshots"
   },
+  "security": {
+    "audit_trail": false
+  },
   "runtime": {
     "parser": {
       "provider": "claude",

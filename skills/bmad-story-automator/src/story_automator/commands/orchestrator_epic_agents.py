@@ -17,6 +17,7 @@ from story_automator.core.story_keys import (
     normalize_story_key,
     normalize_story_key_for_epic,
 )
+from story_automator.core.runtime_policy import PolicyError, load_runtime_policy
 from story_automator.core.utils import (
     file_exists,
     get_project_root,
@@ -35,11 +36,14 @@ from story_automator.core.telemetry_events import (
     EscalationTriggered,
     RetroFired,
     RetryAttempt,
+    RetroAgentDispatched,
 )
 
 
 def _telemetry_emitter() -> TelemetryEmitter:
     return emitter_for_project_root(get_project_root())
+
+from ._audit_hooks import _audit_path_for, _maybe_audit_event
 
 
 def check_epic_complete_action(args: list[str]) -> int:
@@ -474,6 +478,27 @@ def retro_agent_action(args: list[str]) -> int:
             duration_s=float(config.get("durationSeconds") or 0.0),
         )
     )
+
+    # REQ-13: audit each retro-agent selection with the same correlation
+    # id surface that surrounding telemetry uses (the state-file basename).
+    try:
+        policy = load_runtime_policy(
+            get_project_root(), state_file=options["state-file"]
+        )
+    except (FileNotFoundError, PolicyError):
+        policy = {}
+    correlation_id = f"retro:{Path(options['state-file']).name}"
+    _maybe_audit_event(
+        policy,
+        _audit_path_for(get_project_root()),
+        RetroAgentDispatched(
+            primary=primary,
+            fallback=fallback,
+            model=model,
+            correlation_id=correlation_id,
+        ),
+    )
+
     print_json(
         {
             "ok": True,

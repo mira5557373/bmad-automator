@@ -18,6 +18,7 @@ module-size quality gates land in m01-m4.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
@@ -325,7 +326,82 @@ def parse_event(line: str) -> Event:
     return cls(**payload)
 
 
+# ---------------------------------------------------------------------------
+# Audit-event payload carriers (M04 — integrated 2026-06-16)
+#
+# These are NOT part of the telemetry-stream `Event` hierarchy above: they do
+# not subclass `Event`, carry no `EVENT_TYPE`, never auto-register, and never
+# pass through `parse_event`. They are frozen kw-only payload carriers that
+# satisfy the structural `audit.Event` Protocol (an `event_name` class
+# attribute plus a `to_dict()` method) and are consumed by
+# `commands/_audit_hooks.py -> core.audit.AuditLog.append`. M04 originally
+# shipped them in its own minimal `telemetry_events.py`; during integration
+# they are co-located here because the audit-wiring call sites import them as
+# `from story_automator.core.telemetry_events import EscalationRaised, ...`.
+# Names are intentionally distinct from the telemetry events
+# `EscalationTriggered` / `RetroFired`.
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class EscalationRaised:
+    """Operator-visible escalation raised by ``commands/orchestrator.py``."""
+
+    event_name: str = dataclasses.field(default="EscalationRaised", init=False)
+    trigger: str
+    reason: str
+    correlation_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trigger": self.trigger,
+            "reason": self.reason,
+            "correlation_id": self.correlation_id,
+        }
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class StoryStateChanged:
+    """State-doc frontmatter transition written by the state-update path."""
+
+    event_name: str = dataclasses.field(default="StoryStateChanged", init=False)
+    story: str
+    from_status: str
+    to_status: str
+    correlation_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "story": self.story,
+            "from_status": self.from_status,
+            "to_status": self.to_status,
+            "correlation_id": self.correlation_id,
+        }
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class RetroAgentDispatched:
+    """Retro-agent selection emitted by ``orchestrator_epic_agents.py``."""
+
+    event_name: str = dataclasses.field(default="RetroAgentDispatched", init=False)
+    primary: str
+    fallback: str
+    model: str
+    correlation_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "primary": self.primary,
+            "fallback": self.fallback,
+            "model": self.model,
+            "correlation_id": self.correlation_id,
+        }
+
+
 __all__ = [
+    "EscalationRaised",
+    "RetroAgentDispatched",
+    "StoryStateChanged",
     "BudgetAlert",
     "CostCharged",
     "EscalationTriggered",
