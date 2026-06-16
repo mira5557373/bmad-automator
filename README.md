@@ -69,12 +69,36 @@ Then run the installed skill from your supported entrypoint session:
 Use the bmad-story-automator skill.
 ```
 
-Manual skill copy:
+Manual skill copy (replace `.claude` with `.agents` or `.codex` to match your runtime; the helper must stay executable):
 
 ```bash
-cp -a skills/bmad-story-automator /absolute/path/to/project/.claude/skills/
-cp -a skills/bmad-story-automator-review /absolute/path/to/project/.claude/skills/
+SKILLS=.claude/skills   # or .agents/skills, or .codex/skills
+cp -a skills/bmad-story-automator /absolute/path/to/project/$SKILLS/
+cp -a skills/bmad-story-automator-review /absolute/path/to/project/$SKILLS/
+chmod +x /absolute/path/to/project/$SKILLS/bmad-story-automator/scripts/story-automator
 ```
+
+### Use From A Local Clone
+
+To use your own clone (e.g. a fork) instead of the published npm package, run the bundled installer directly from the clone against your BMAD project:
+
+```bash
+git clone https://github.com/<you>/bmad-automator
+cd bmad-automator
+./install.sh /absolute/path/to/your-bmad-project    # or: node bin/bmad-story-automator /absolute/path/to/your-bmad-project
+```
+
+The installer preflights host tools (`bash`, `python3`, `jq`; warns on missing `tmux`) and requires the BMAD dependency skills (`bmad-create-story`, `bmad-dev-story`, `bmad-retrospective`) to already be installed in the project. Install BMAD-Method into the project first if they are missing.
+
+### Starting The Orchestrator
+
+The orchestrator is not a standalone process — it is a skill you invoke **inside a Claude Code (or Codex) session opened in the BMAD project root**. After installing, start a session there and say:
+
+```text
+Use the bmad-story-automator skill.
+```
+
+It then drives the deterministic helper CLI and spawns per-story `claude`/`codex` child sessions in tmux. **Skip Automate** is a preflight option: set it to `true` to skip the optional automated QA step (`bmad-qa-generate-e2e-tests`) when that skill is not installed.
 
 ## BMAD Method Install Channels
 
@@ -191,12 +215,15 @@ Practical shape:
 
 ## Requirements
 
-Host requirements:
+Host requirements (all must be on `PATH`):
 
-- `python3` 3.11+
-- `tmux`
-- Claude Code or Codex runtime access
-- macOS, Linux, or Windows via WSL
+- `python3` 3.11+ — the helper runtime
+- `bash` and `jq` — the orchestration steps build commands and parse the helper's JSON with `jq`; a missing `jq` makes those steps fail silently
+- `tmux` — child agent sessions run in detached tmux panes
+- `git` — used by `commit-ready` / `commit-story`
+- a child agent CLI on `PATH`: `claude` (Claude Code) and/or `codex`
+- `node` 18+ — only for the `npx` / `bin/bmad-story-automator` install path
+- Linux or macOS. Windows is supported **only via WSL** — the npm launcher refuses native Windows, and `tmux` is POSIX-only.
 
 Target project requirements:
 

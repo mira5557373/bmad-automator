@@ -2,6 +2,14 @@
 
 This doc collects the failure modes that matter most during real runs.
 
+## First-run / local-setup failures
+
+- **Steps silently do nothing / wrong branch taken** — `jq` is missing. The orchestration steps parse the helper's JSON with `jq`; without it, captured values are empty and guards never fire. Install `jq` (`brew install jq` / `sudo apt-get install -y jq`). The installer now preflights this.
+- **Child sessions never start** — `tmux` is missing or not on `PATH`. Install it (`brew install tmux` / `sudo apt-get install -y tmux`); it is POSIX-only (use WSL on Windows).
+- **`story file not found` / verification can't find the story** — the story lives somewhere other than where the tool looks. The tool reads `implementation_artifacts` / `output_folder` from `_bmad/bmm/config.yaml`; if your project set a custom location, confirm `sprint-status.yaml` and `<story-key>.md` are under that resolved directory (default `_bmad-output/implementation-artifacts/`).
+- **`sprint-status` reported missing** — there is no `sprint-status.yaml` under the resolved implementation-artifacts dir. Run BMAD sprint-planning to generate it, or create it before resuming.
+- **Dependency skill missing** — install BMAD-Method's `bmad-create-story`, `bmad-dev-story`, `bmad-retrospective` (and optional `bmad-qa-generate-e2e-tests`) under a supported skill root before installing the automator.
+
 ## `never_active`
 
 `never_active` means the monitor concluded that a child session never really started doing work.

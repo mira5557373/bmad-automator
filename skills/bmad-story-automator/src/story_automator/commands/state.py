@@ -236,10 +236,15 @@ def cmd_state_metrics(args: list[str]) -> int:
     if not state or not file_exists(state):
         write_json({"ok": False, "error": "state_not_found"})
         return 1
+    raw_text = read_text(state)
+    # Strip HTML-comment placeholders (e.g. "<!-- Escalations ... here -->")
+    # so the metric counters below don't tally template boilerplate as real
+    # review cycles / escalations.
+    metrics_text = re.sub(r"<!--.*?-->", "", raw_text, flags=re.DOTALL)
     total = 0
     completed = 0
     in_table = False
-    for line in read_text(state).splitlines():
+    for line in raw_text.splitlines():
         if line.startswith("| Story "):
             in_table = True
             continue
@@ -260,8 +265,8 @@ def cmd_state_metrics(args: list[str]) -> int:
                 "ok": True,
                 "storiesCompleted": completed,
                 "total": total,
-                "reviewCycles": count_matches(read_text(state), r"review cycle|code review cycle"),
-                "escalations": count_matches(read_text(state), r"escalation|escalated"),
+                "reviewCycles": count_matches(metrics_text, r"review cycle|code review cycle"),
+                "escalations": count_matches(metrics_text, r"escalation|escalated"),
             },
             separators=(",", ":"),
         )

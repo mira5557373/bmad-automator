@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, parser_runtime_config, step_contract
+from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, parser_runtime_config, resolve_parse_schema, step_contract
 from story_automator.core.utils import COMMAND_TIMEOUT_EXIT, extract_json_line, print_json, read_text, run_cmd, trim_lines
 
 
@@ -37,8 +37,12 @@ def parse_output_action(args: list[str]) -> int:
     # drop the very signal it needs to judge SUCCESS/FAILURE/proceed/retry.
     lines = trim_lines(content)[-150:]
     try:
-        policy = load_runtime_policy(state_file=state_file)
+        # resolve_assets=False so a missing/unresolvable dependency skill for an
+        # unrelated step can't break output classification; then resolve just
+        # this step's parse schema (bundled data, independent of skill assets).
+        policy = load_runtime_policy(state_file=state_file, resolve_assets=False)
         contract = step_contract(policy, step)
+        resolve_parse_schema(contract)
         parse_contract = _load_parse_contract(contract)
         parser_cfg = parser_runtime_config(policy)
     except (FileNotFoundError, json.JSONDecodeError, ValueError, PolicyError):

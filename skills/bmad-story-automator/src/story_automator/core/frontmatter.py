@@ -79,14 +79,47 @@ def find_frontmatter_value(path: str | Path, key: str) -> str:
     return str(value)
 
 
+def _document_preamble(text: str) -> list[str]:
+    """Lines from the top of a doc up to its first ``## `` section heading.
+
+    BMAD story files (bmad-create-story/template.md) carry ``Status:`` as a
+    plain line after the ``# Story`` title rather than inside a ``---`` fence,
+    so a fence-only reader would never see it. Scanning the preamble recovers
+    those values without misreading body prose.
+    """
+    out: list[str] = []
+    for line in trim_lines(text):
+        if line.lstrip().startswith("## "):
+            break
+        out.append(line)
+    return out
+
+
 def find_frontmatter_value_case(path: str | Path, key: str) -> str:
-    front = extract_frontmatter(read_text(path))
-    for line in trim_lines(front):
+    text = read_text(path)
+    front = extract_frontmatter(text)
+    # Prefer a real --- fence (story-automator state docs); fall back to the
+    # document preamble for fenceless BMAD story files.
+    lines = trim_lines(front) if front else _document_preamble(text)
+    for line in lines:
         if ":" not in line:
             continue
         left, raw = line.split(":", 1)
         if left.strip().lower() == key.lower():
             return unquote_scalar(raw.strip())
+    return ""
+
+
+def extract_title(text: str) -> str:
+    """Title from a BMAD story's first H1 (``# Story 1.1: Login`` -> ``Login``).
+
+    BMAD story files put the title in the heading, not a ``Title:`` field.
+    """
+    for line in trim_lines(text):
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            heading = stripped[2:].strip()
+            return heading.split(":", 1)[1].strip() if ":" in heading else heading
     return ""
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from story_automator.core.artifact_paths import implementation_artifacts_dir
 from story_automator.core.frontmatter import (
     extract_last_action,
+    extract_title,
     find_frontmatter_value,
     find_frontmatter_value_case,
     parse_frontmatter,
@@ -163,7 +164,10 @@ def _sprint_status(args: list[str]) -> int:
             print_json({"found": True, "story": status.story, "status": status.status, "done": status.done})
             return 0
         if args[0] == "exists":
-            print("true" if file_exists(sprint_status_file(project_root)) else "false")
+            # JSON (not a bare string) so the skill steps can parse it with
+            # `jq -r '.exists'`, consistent with the error path below and every
+            # other sprint-status subcommand.
+            print_json({"exists": file_exists(sprint_status_file(project_root))})
             return 0
         if args[0] == "check-epic":
             if len(args) < 2:
@@ -382,7 +386,11 @@ def _escalate(args: list[str]) -> int:
         print_json({"escalate": True, "reason": str(exc)})
         return 0
     try:
-        policy = load_runtime_policy(get_project_root(), state_file=state_file)
+        # Escalation only reads numeric workflow config (review.maxCycles /
+        # crash.maxRetries), so skip skill/template/schema asset resolution.
+        # Otherwise a transient or post-upgrade unresolvable skill turns a
+        # recoverable crash/review retry into an immediate hard escalation.
+        policy = load_runtime_policy(get_project_root(), state_file=state_file, resolve_assets=False)
     except (FileNotFoundError, PolicyError) as exc:
         print_json({"escalate": True, "reason": str(exc)})
         return 0
@@ -424,7 +432,12 @@ def _commit_ready(args: list[str]) -> int:
         print_json({"ready": False, "reason": str(exc), "story": args[0]})
         return 1
     if status.done:
-        out, _ = run_cmd("git", "-C", project_root, "status", "--porcelain")
+        out, code = run_cmd("git", "-C", project_root, "status", "--porcelain")
+        if code != 0:
+            # git missing or not a repo: distinguish from a clean tree so the
+            # operator gets a real error instead of "No uncommitted changes".
+            print_json({"ready": False, "reason": "git_status_failed", "exit_code": code, "story": args[0]})
+            return 0
         if out.strip():
             print_json({"ready": True, "story": args[0], "status": "done", "uncommitted_changes": True})
             return 0
@@ -476,7 +489,8 @@ def _story_file_status(args: list[str]) -> int:
     if not matches:
         print_json({"ok": False, "error": "story file not found", "prefix": norm.prefix})
         return 1
-    print_json({"ok": True, "story_key": norm.key, "file": str(matches[0]), "status": find_frontmatter_value_case(matches[0], "Status") or "unknown", "title": find_frontmatter_value_case(matches[0], "Title")})
+    title = find_frontmatter_value_case(matches[0], "Title") or extract_title(read_text(matches[0]))
+    print_json({"ok": True, "story_key": norm.key, "file": str(matches[0]), "status": find_frontmatter_value_case(matches[0], "Status") or "unknown", "title": title})
     return 0
 
 
