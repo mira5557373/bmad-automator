@@ -89,6 +89,8 @@ result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
 
 ### D. Code Review Loop
 
+**Review preflight:** Before this section runs, execute the spec-compliance gate at [`skills/bmad-story-automator/steps-c/step-03ab-spec-compliance.md`](./step-03ab-spec-compliance.md) and proceed only if the chain's `decision` literal is `pass` or `warn` (M06b REQ-06, REQ-10).
+
 **See `{reviewLoop}` for complete script-based review cycle with v2.3 per-task agent configuration.**
 
 **MANDATORY log-summary contract (every review cycle):**
