@@ -11,6 +11,43 @@ const packageJson = JSON.parse(
 );
 const args = process.argv.slice(2);
 
+function resolveBash() {
+  // On macOS/Linux the PATH "bash" is correct. On Windows the installer is a
+  // pure file-copy bash script (install.sh validates dirs and cp -a's the skill
+  // folders), so run it under any available POSIX bash (Git Bash / WSL) instead
+  // of refusing the OS outright. Returns null when no bash can be located.
+  if (process.platform !== "win32") {
+    return "bash";
+  }
+  const candidates = [];
+  if (process.env.SHELL) {
+    candidates.push(process.env.SHELL);
+  }
+  const where = spawnSync("where", ["bash"], { encoding: "utf8" });
+  if (where.status === 0 && typeof where.stdout === "string") {
+    for (const line of where.stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed) {
+        candidates.push(trimmed);
+      }
+    }
+  }
+  candidates.push(
+    "C:\\Program Files\\Git\\bin\\bash.exe",
+    "C:\\Program Files\\Git\\usr\\bin\\bash.exe"
+  );
+  for (const candidate of candidates) {
+    try {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch (_err) {
+      /* ignore and try the next candidate */
+    }
+  }
+  return null;
+}
+
 function printUsage() {
   console.log(`bmad-story-automator v${packageJson.version}
 
@@ -34,19 +71,23 @@ if (args.includes("-v") || args.includes("--version")) {
   process.exit(0);
 }
 
-if (process.platform === "win32") {
-  console.error("Error: Unsupported OS: Windows (supported: macOS, Linux)");
-  process.exit(1);
-}
-
 if (args.length > 1) {
   printUsage();
   process.exit(1);
 }
 
+const bashCmd = resolveBash();
+if (!bashCmd) {
+  console.error(
+    "Error: bash is required to install. On Windows, install Git for Windows " +
+      "(provides Git Bash) or run inside WSL, then re-run this command."
+  );
+  process.exit(1);
+}
+
 const targetRoot = args.length === 0 ? process.cwd() : args[0];
 
-const result = spawnSync("bash", [installScript, targetRoot], {
+const result = spawnSync(bashCmd, [installScript, targetRoot], {
   cwd: rootDir,
   stdio: "inherit"
 });

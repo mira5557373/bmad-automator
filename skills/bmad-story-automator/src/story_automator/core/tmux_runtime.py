@@ -42,7 +42,7 @@ STATE_SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 200
 DEFAULT_HEIGHT = 50
 REMAIN_ON_EXIT = "on"
-PLACEHOLDER_COMMAND = ("/bin/sleep", "86400")
+PLACEHOLDER_COMMAND = (shutil.which("sleep") or "/bin/sleep", "86400")
 ARTIFACT_TTL_SECONDS = 24 * 60 * 60
 RECONCILE_GRACE_SECONDS = 1.0
 RUNNER_MODE_ENV = "SA_TMUX_RUNTIME"
@@ -87,7 +87,9 @@ def resolve_command_shell() -> str:
         resolved = _resolve_shell_path(candidate)
         if resolved:
             return resolved
-    return "/bin/sh"
+    # Prefer sh wherever it actually lives on PATH; the absolute literal is only
+    # a last resort for hosts where sh is not discoverable (NixOS/musl layouts).
+    return shutil.which("sh") or "/bin/sh"
 
 
 _STORY_KEY_RE = re.compile(r"-e(\d+)-s(\d+)-(\d+)-[A-Za-z][A-Za-z0-9]*(?:-r\d+)?$")

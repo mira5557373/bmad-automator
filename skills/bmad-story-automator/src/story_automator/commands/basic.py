@@ -25,7 +25,9 @@ def _workflow_doc_relative(doc_name: str) -> str:
     doc_path = _workflow_root() / "data" / doc_name
     project_root = Path(os.environ.get("PROJECT_ROOT") or os.getcwd()).resolve()
     try:
-        return str(doc_path.resolve().relative_to(project_root))
+        # Forward-slashed relative path for the cross-platform doc reference
+        # (str() would emit backslashes on Windows).
+        return doc_path.resolve().relative_to(project_root).as_posix()
     except ValueError:
         return str(doc_path.resolve())
 

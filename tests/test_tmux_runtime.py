@@ -118,11 +118,17 @@ class TmuxRuntimeStateTests(unittest.TestCase):
         self.assertEqual(skill_prefix("codex"), "none")
 
     def test_resolve_command_shell_prefers_tmux_default_shell(self) -> None:
+        # Force the tmux default-shell candidate through validation as-is, so the
+        # assertion is hermetic on every OS. The prior os.path.isfile/os.access
+        # mocks left host shutil.which resolution free to win on Windows (where
+        # it returned bash.EXE instead of the mocked /bin/zsh).
         with (
             mock.patch("story_automator.core.tmux_runtime.command_exists", return_value=True),
             mock.patch("story_automator.core.tmux_runtime.run_cmd", return_value=("/bin/zsh\n", 0)),
-            mock.patch("story_automator.core.tmux_runtime.os.path.isfile", return_value=True),
-            mock.patch("story_automator.core.tmux_runtime.os.access", return_value=True),
+            mock.patch(
+                "story_automator.core.tmux_runtime._resolve_shell_path",
+                side_effect=lambda candidate: candidate,
+            ),
         ):
             self.assertEqual(resolve_command_shell(), "/bin/zsh")
 

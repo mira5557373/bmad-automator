@@ -657,6 +657,10 @@ class RetroAgentModelFromStateTests(unittest.TestCase):
         self.assertEqual(payload["model"], "claude-opus-4-7[1m]")
 
 
+@unittest.skipUnless(
+    shutil.which("bash") and shutil.which("python3"),
+    "requires POSIX bash + python3 (skipped on hosts without them, e.g. Windows)",
+)
 class MarkdownHandoffShellContractTests(unittest.TestCase):
     """Mirrors the bash pattern used by the workflow markdown snippets.
 

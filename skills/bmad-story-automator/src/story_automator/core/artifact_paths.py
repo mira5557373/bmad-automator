@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .utils import read_text, strip_inline_yaml_comment, unquote_scalar
 
@@ -52,7 +52,11 @@ def resolve_artifact_glob(project_root: str | Path, pattern: str) -> tuple[Path,
     artifacts_root = implementation_artifacts_dir(root)
     legacy_artifacts_root = root / DEFAULT_OUTPUT_FOLDER / IMPLEMENTATION_ARTIFACTS
     raw = Path(pattern)
-    if raw.is_absolute():
+    # OS-independent absolute check: on Windows a POSIX-absolute glob like
+    # "/tmp/x-*.md" is not Path.is_absolute() (no drive), so it would slip past
+    # the guard and be joined under the cwd drive. Reject any leading-separator
+    # or POSIX-absolute pattern regardless of host OS.
+    if raw.is_absolute() or PurePosixPath(pattern).is_absolute() or pattern.startswith(("/", "\\")):
         raise ValueError("success.config.glob must be relative to implementation artifacts")
     resolved = (root / raw).resolve()
     try:

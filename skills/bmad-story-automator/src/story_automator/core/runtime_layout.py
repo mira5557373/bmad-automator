@@ -175,7 +175,10 @@ def active_marker_project_entry(project_root: str | Path | None = None) -> str:
     root = _project_root(project_root)
     marker = active_marker_path(root)
     try:
-        return str(marker.relative_to(root))
+        # as_posix() keeps the persisted relative path forward-slashed; plain
+        # str() yields backslashes on Windows, which mismatch the gitignore
+        # entry and the cross-platform relative-path contract.
+        return marker.relative_to(root).as_posix()
     except ValueError:
         return str(marker)
 

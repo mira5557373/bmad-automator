@@ -395,7 +395,6 @@ def _resolve_step_assets(step: str, assets: dict[str, Any], project_root: Path) 
         skill_dir = resolve_skill_dir(project_root, skill_name)
     except ValueError as exc:
         raise PolicyError(str(exc)) from exc
-    skills_root = skill_dir.parent
     required = set(assets.get("required") or [])
     files = {
         "skill": _resolve_required_file(skill_dir / "SKILL.md", project_root, required, "skill", step),
@@ -494,7 +493,9 @@ def _stable_policy_json(policy: dict[str, Any]) -> str:
 
 def _display_path(path: Path, project_root: Path) -> str:
     try:
-        return str(path.resolve().relative_to(project_root.resolve()))
+        # Forward-slashed for a stable cross-platform relative path (str() would
+        # emit backslashes on Windows).
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
     except ValueError:
         return str(path.resolve())
 
