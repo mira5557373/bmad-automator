@@ -52,3 +52,21 @@ htmlcov/
 .claude/skills/
 .claude/commands/
 .claude/sw-run-stdout.log
+
+# sw init outputs
+.claude/workflow.json
+.claude/settings.local.json
+.claude/skills/
+.claude/commands/
+
+# sw init outputs
+.claude/workflow.json
+.claude/settings.local.json
+.claude/skills/
+.claude/commands/
+
+# sw init outputs
+.claude/workflow.json
+.claude/settings.local.json
+.claude/skills/
+.claude/commands/

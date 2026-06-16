@@ -25,6 +25,17 @@ from .utils import (
     run_cmd,
 )
 from .runtime_layout import runtime_provider
+from .telemetry_emitter import TelemetryEmitter, emitter_for_project_root
+from .telemetry_events import (
+    TmuxSessionCompleted,
+    TmuxSessionCrashed,
+    TmuxSessionSpawned,
+)
+
+
+def _telemetry_emitter(project_root: str | None) -> TelemetryEmitter:
+    return emitter_for_project_root(project_root or get_project_root())
+
 
 STATE_SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 200
@@ -62,11 +73,35 @@ def runtime_mode() -> str:
 
 
 def resolve_command_shell() -> str:
-    for candidate in (_tmux_default_shell(), os.environ.get("SHELL", "").strip(), shutil.which("bash") or ""):
+    for candidate in (
+        _tmux_default_shell(),
+        os.environ.get("SHELL", "").strip(),
+        shutil.which("bash") or "",
+    ):
         resolved = _resolve_shell_path(candidate)
         if resolved:
             return resolved
     return "/bin/sh"
+
+
+_STORY_KEY_RE = re.compile(r"-e(\d+)-s(\d+)-(\d+)-[A-Za-z][A-Za-z0-9]*(?:-r\d+)?$")
+
+
+def _story_key_from_session_name(session: str) -> str:
+    """Extract dotted story_key (e.g. "2.7") from a session name produced by
+    generate_session_name(): `sa-{slug}-{stamp}-e{epic}-s{suffix}-{step}[-r{cycle}]`
+    where `suffix` is `story_id.replace(".", "-")`.
+
+    Anchored to end-of-string so a project slug that happens to contain a
+    similar `-eN-sM-K-` fragment cannot win the match.
+
+    Returns "" when the pattern does not match — for legacy / hand-crafted
+    session names — so the emit path stays warning-free.
+    """
+    match = _STORY_KEY_RE.search(session)
+    if not match:
+        return ""
+    return f"{match.group(2)}.{match.group(3)}"
 
 
 def generate_session_name(step: str, epic: str, story_id: str, cycle: str = "") -> str:
@@ -117,7 +152,9 @@ def session_paths(session: str, project_root: str | None = None) -> SessionPaths
 
 
 def tmux_has_session(session: str) -> bool:
-    return command_exists("tmux") and run_cmd("tmux", "has-session", "-t", session)[1] == 0
+    return (
+        command_exists("tmux") and run_cmd("tmux", "has-session", "-t", session)[1] == 0
+    )
 
 
 def tmux_display(session: str, fmt: str) -> str:
@@ -139,7 +176,9 @@ def tmux_list_sessions(project_only: bool) -> tuple[list[str], int]:
     output, code = run_cmd("tmux", "list-sessions", "-F", "#{session_name}")
     if code != 0:
         return ([], code)
-    sessions = [line.strip() for line in output.splitlines() if line.strip().startswith("sa-")]
+    sessions = [
+        line.strip() for line in output.splitlines() if line.strip().startswith("sa-")
+    ]
     if project_only:
         prefix = f"sa-{project_slug()}-"
         sessions = [line for line in sessions if line.startswith(prefix)]
@@ -187,11 +226,15 @@ def cleanup_runtime_artifacts(session: str, project_root: str | None = None) -> 
     paths = session_paths(session, project_root)
     for path in (paths.state, paths.command, paths.runner, paths.output):
         path.unlink(missing_ok=True)
-    fallback = paths.output.with_name(f"{paths.output.stem}-fallback{paths.output.suffix}")
+    fallback = paths.output.with_name(
+        f"{paths.output.stem}-fallback{paths.output.suffix}"
+    )
     fallback.unlink(missing_ok=True)
 
 
-def cleanup_stale_terminal_artifacts(project_root: str | None = None, ttl_seconds: int = ARTIFACT_TTL_SECONDS) -> None:
+def cleanup_stale_terminal_artifacts(
+    project_root: str | None = None, ttl_seconds: int = ARTIFACT_TTL_SECONDS
+) -> None:
     root_hash = project_hash(project_root)
     cutoff = time.time() - ttl_seconds
     tmp_dir = _artifact_base_dir()
@@ -244,8 +287,47 @@ def spawn_session(
 ) -> tuple[str, int]:
     resolved_mode = _resolve_spawn_mode(mode)
     if resolved_mode == "legacy":
-        return _spawn_legacy(session, command, selected_agent, project_root)
-    return _spawn_runner(session, command, selected_agent, project_root)
+        output, code = _spawn_legacy(session, command, selected_agent, project_root)
+    else:
+        output, code = _spawn_runner(session, command, selected_agent, project_root)
+    if code == 0:
+        _emit_tmux_spawned(session, project_root)
+    return output, code
+
+
+def _emit_tmux_spawned(session: str, project_root: str | None) -> None:
+    pid = _safe_int(_session_pid(session))
+    geom_out, geom_code = run_cmd(
+        "tmux",
+        "display-message",
+        "-p",
+        "-t",
+        session,
+        "#{pane_width}x#{pane_height}",
+    )
+    geometry = geom_out.strip() if geom_code == 0 else ""
+    _telemetry_emitter(project_root).emit(
+        TmuxSessionSpawned(
+            timestamp=iso_now(),
+            run_id="",
+            session_name=session,
+            story_key=_story_key_from_session_name(session),
+            pid=pid,
+            pane_geometry=geometry,
+        )
+    )
+
+
+def _session_pid(session: str) -> str:
+    out, code = run_cmd(
+        "tmux",
+        "display-message",
+        "-p",
+        "-t",
+        session,
+        "#{pane_pid}",
+    )
+    return out.strip() if code == 0 else ""
 
 
 def heartbeat_check(
@@ -270,7 +352,11 @@ def heartbeat_check(
 
     if _is_terminal_state(state):
         pid = str(state.get("childPid") or "")
-        status = "completed" if str(state.get("result") or "") == "success" else "dead"
+        result = str(state.get("result") or "")
+        status = "completed" if result == "success" else "dead"
+        if not bool(state.get("telemetryEmitted")):
+            _emit_heartbeat_terminal(session, state, status, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return (status, 0.0, pid, prompt)
 
     child_pid = _safe_int(state.get("childPid"))
@@ -282,13 +368,78 @@ def heartbeat_check(
         return (("alive" if cpu > 0.1 else "idle"), cpu, str(child_pid), prompt)
 
     _wait_for_terminal_state(state_path)
-    status = session_status(session, full=False, codex=selected_agent == "codex", project_root=project_root, mode=resolved_mode)
+    # Reload after the wait — fields like exitCode/durationSeconds are only
+    # populated once the runner finalizes the state file.
+    state = load_session_state(state_path) or state
+    status = session_status(
+        session,
+        full=False,
+        codex=selected_agent == "codex",
+        project_root=project_root,
+        mode=resolved_mode,
+    )
     public = str(status["session_state"])
     if public == "completed":
+        if not bool(state.get("telemetryEmitted")):
+            _emit_tmux_completed(session, state, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return ("completed", 0.0, str(child_pid), prompt)
     if public in {"crashed", "stuck", "not_found"}:
+        if not bool(state.get("telemetryEmitted")):
+            _emit_tmux_crashed(session, state, project_root)
+            update_session_state(state_path, telemetryEmitted=True)
         return ("dead", 0.0, str(child_pid), prompt)
     return ("idle", 0.0, str(child_pid), prompt)
+
+
+def _emit_heartbeat_terminal(
+    session: str,
+    state: dict,
+    status: str,
+    project_root: str | None,
+) -> None:
+    if status == "completed":
+        _emit_tmux_completed(session, state, project_root)
+    else:
+        _emit_tmux_crashed(session, state, project_root)
+
+
+def _emit_tmux_completed(
+    session: str,
+    state: dict,
+    project_root: str | None,
+) -> None:
+    exit_code = _safe_int(state.get("exitCode"))
+    duration_s = float(state.get("durationSeconds") or 0.0)
+    _telemetry_emitter(project_root).emit(
+        TmuxSessionCompleted(
+            timestamp=iso_now(),
+            run_id="",
+            session_name=session,
+            story_key=_story_key_from_session_name(session),
+            exit_code=exit_code,
+            duration_s=duration_s,
+        )
+    )
+
+
+def _emit_tmux_crashed(
+    session: str,
+    state: dict,
+    project_root: str | None,
+) -> None:
+    exit_code = _safe_int(state.get("exitCode"))
+    last_capture = _safe_int(state.get("lastCaptureChars"))
+    _telemetry_emitter(project_root).emit(
+        TmuxSessionCrashed(
+            timestamp=iso_now(),
+            run_id="",
+            session_name=session,
+            story_key=_story_key_from_session_name(session),
+            exit_code=exit_code,
+            last_capture_chars=last_capture,
+        )
+    )
 
 
 def session_status(
@@ -301,8 +452,12 @@ def session_status(
 ) -> dict[str, str | int]:
     resolved_mode = _status_mode(session, project_root, mode)
     if resolved_mode == "legacy":
-        return _legacy_session_status(session, full=full, codex=codex, project_root=project_root)
-    return _runner_session_status(session, full=full, codex=codex, project_root=project_root)
+        return _legacy_session_status(
+            session, full=full, codex=codex, project_root=project_root
+        )
+    return _runner_session_status(
+        session, full=full, codex=codex, project_root=project_root
+    )
 
 
 def pane_status(session: str) -> str:
@@ -318,8 +473,18 @@ def pane_status(session: str) -> str:
     return "alive"
 
 
-def verify_or_create_output(output_file: str, session_name: str, hash_value: str, *, project_root: str | None = None) -> str:
-    if output_file and file_exists(output_file) and Path(output_file).stat().st_size > 0:
+def verify_or_create_output(
+    output_file: str,
+    session_name: str,
+    hash_value: str,
+    *,
+    project_root: str | None = None,
+) -> str:
+    if (
+        output_file
+        and file_exists(output_file)
+        and Path(output_file).stat().st_size > 0
+    ):
         return output_file
     expected = _artifact_base_dir() / f"sa-{hash_value}-output-{session_name}.txt"
     if tmux_has_session(session_name):
@@ -338,7 +503,9 @@ def verify_or_create_output(output_file: str, session_name: str, hash_value: str
 
 
 def extract_active_task(capture: str) -> str:
-    pattern = re.compile(r"(?i)(Musing|Thinking|Working|Running|Loading|Creating|Galloping|Beaming|Razzmatazzing|ctrl\+c to interrupt|✻|·|⏺)")
+    pattern = re.compile(
+        r"(?i)(Musing|Thinking|Working|Running|Loading|Creating|Galloping|Beaming|Razzmatazzing|ctrl\+c to interrupt|✻|·|⏺)"
+    )
     active = ""
     for line in capture.splitlines():
         if pattern.search(line):
@@ -351,7 +518,9 @@ def extract_active_task(capture: str) -> str:
 def detect_codex_session(session: str, capture: str) -> str:
     if tmux_show_environment(session, "AI_AGENT") == "codex":
         return "codex"
-    if re.search(r"(?i)OpenAI Codex|codex exec|gpt-[0-9]+-codex|tokens used|codex-cli", capture):
+    if re.search(
+        r"(?i)OpenAI Codex|codex exec|gpt-[0-9]+-codex|tokens used|codex-cli", capture
+    ):
         return "codex"
     return "claude"
 
@@ -378,7 +547,9 @@ def estimate_wait(task: str, done: int, total: int) -> int:
     return 60
 
 
-def _spawn_runner(session: str, command: str, selected_agent: str, project_root: str | None) -> tuple[str, int]:
+def _spawn_runner(
+    session: str, command: str, selected_agent: str, project_root: str | None
+) -> tuple[str, int]:
     if not command_exists("tmux"):
         return ("tmux not found\n", 1)
     bash_path = shutil.which("bash")
@@ -392,7 +563,11 @@ def _spawn_runner(session: str, command: str, selected_agent: str, project_root:
     cleanup_runtime_artifacts(session, str(root))
 
     _write_private_text(paths.command, _command_file_content(command), 0o700)
-    _write_private_text(paths.runner, _runner_file_content(paths, bash_path, command_shell, str(root)), 0o700)
+    _write_private_text(
+        paths.runner,
+        _runner_file_content(paths, bash_path, command_shell, str(root)),
+        0o700,
+    )
 
     create_out, create_code = run_cmd(
         "tmux",
@@ -425,7 +600,9 @@ def _spawn_runner(session: str, command: str, selected_agent: str, project_root:
         tmux_kill_session(session, str(root))
         return ("failed to resolve tmux pane id\n", 1)
 
-    set_out, set_code = run_cmd("tmux", "set-option", "-t", pane_id, "remain-on-exit", REMAIN_ON_EXIT)
+    set_out, set_code = run_cmd(
+        "tmux", "set-option", "-t", pane_id, "remain-on-exit", REMAIN_ON_EXIT
+    )
     if set_code != 0:
         tmux_kill_session(session, str(root))
         return (set_out, set_code)
@@ -460,7 +637,9 @@ def _spawn_runner(session: str, command: str, selected_agent: str, project_root:
         },
     )
 
-    respawn_out, respawn_code = run_cmd("tmux", "respawn-pane", "-k", "-t", pane_id, bash_path, str(paths.runner))
+    respawn_out, respawn_code = run_cmd(
+        "tmux", "respawn-pane", "-k", "-t", pane_id, bash_path, str(paths.runner)
+    )
     if respawn_code != 0:
         tmux_kill_session(session, str(root))
         return (respawn_out, respawn_code)
@@ -484,7 +663,9 @@ def _spawn_runner(session: str, command: str, selected_agent: str, project_root:
     return ("", 0)
 
 
-def _spawn_legacy(session: str, command: str, selected_agent: str, project_root: str | None) -> tuple[str, int]:
+def _spawn_legacy(
+    session: str, command: str, selected_agent: str, project_root: str | None
+) -> tuple[str, int]:
     if not command_exists("tmux"):
         return ("tmux not found\n", 1)
     root = project_root or get_project_root()
@@ -531,7 +712,9 @@ def _runner_session_status(
     state = load_session_state(paths.state)
     if not state:
         if tmux_has_session(session):
-            return _legacy_session_status(session, full=full, codex=codex, project_root=root)
+            return _legacy_session_status(
+                session, full=full, codex=codex, project_root=root
+            )
         return _not_found_status()
 
     if _is_terminal_state(state):
@@ -546,7 +729,9 @@ def _runner_session_status(
     if str(state.get("lifecycle") or "") == "running" and not child_alive:
         refreshed = _wait_for_terminal_state(paths.state)
         if _is_terminal_state(refreshed):
-            return _terminal_runner_status(session, refreshed, full=full, project_root=root)
+            return _terminal_runner_status(
+                session, refreshed, full=full, project_root=root
+            )
         state = _reconcile_runner_state(paths, refreshed or state, pane)
         if _is_terminal_state(state):
             return _terminal_runner_status(session, state, full=full, project_root=root)
@@ -647,7 +832,9 @@ def _terminal_runner_status(
     }
 
 
-def _reconcile_runner_state(paths: SessionPaths, state: dict[str, object], pane: PaneSnapshot | None = None) -> dict[str, object]:
+def _reconcile_runner_state(
+    paths: SessionPaths, state: dict[str, object], pane: PaneSnapshot | None = None
+) -> dict[str, object]:
     if _is_terminal_state(state):
         return state
 
@@ -669,7 +856,9 @@ def _reconcile_runner_state(paths: SessionPaths, state: dict[str, object], pane:
                 "updatedAt": finished,
                 "lifecycle": "finished",
                 "result": result,
-                "exitCode": pane_snapshot.dead_status if pane_snapshot.dead_status is not None else "",
+                "exitCode": pane_snapshot.dead_status
+                if pane_snapshot.dead_status is not None
+                else "",
                 "failureReason": reason,
             },
         )
@@ -691,7 +880,11 @@ def _reconcile_runner_state(paths: SessionPaths, state: dict[str, object], pane:
         )
         return load_session_state(paths.state)
 
-    if lifecycle in {"created", "launching"} and not pane_snapshot.exists and _state_age_seconds(state) > RECONCILE_GRACE_SECONDS:
+    if (
+        lifecycle in {"created", "launching"}
+        and not pane_snapshot.exists
+        and _state_age_seconds(state) > RECONCILE_GRACE_SECONDS
+    ):
         save_session_state(
             paths.state,
             {
@@ -767,7 +960,9 @@ def _legacy_session_status(
     project_root: str | None,
 ) -> dict[str, str | int]:
     if codex:
-        return _legacy_codex_session_status(session, full=full, project_root=project_root)
+        return _legacy_codex_session_status(
+            session, full=full, project_root=project_root
+        )
     return _legacy_claude_session_status(session, full=full, project_root=project_root)
 
 
@@ -778,26 +973,68 @@ def _legacy_codex_session_status(
     project_root: str | None,
 ) -> dict[str, str | int]:
     if not session:
-        return {"status": "error", "todos_done": 0, "todos_total": 0, "active_task": "no_session", "wait_estimate": 30, "session_state": "error"}
+        return {
+            "status": "error",
+            "todos_done": 0,
+            "todos_total": 0,
+            "active_task": "no_session",
+            "wait_estimate": 30,
+            "session_state": "error",
+        }
     if not tmux_has_session(session):
         return _not_found_status()
     capture = _capture_text(session, start=-120)
     todos_done, todos_total = _todo_counts(capture)
     if re.search(r"tokens used|❯\s*(\d+[smh]\s*)?\d{1,2}:\d{2}:\d{2}\s*$", capture):
         output = _write_capture(session, capture, project_root=project_root)
-        return {"status": "idle", "todos_done": max(1, todos_done), "todos_total": max(1, todos_total or 1), "active_task": output if full else "", "wait_estimate": 0, "session_state": "completed"}
+        return {
+            "status": "idle",
+            "todos_done": max(1, todos_done),
+            "todos_total": max(1, todos_total or 1),
+            "active_task": output if full else "",
+            "wait_estimate": 0,
+            "session_state": "completed",
+        }
     heartbeat, cpu, _, prompt = _legacy_heartbeat_check(session, "codex")
     if heartbeat == "alive":
         label = extract_active_task(capture) or f"Codex working (CPU: {cpu:.1f}%)"
-        return {"status": "active", "todos_done": todos_done, "todos_total": todos_total, "active_task": label, "wait_estimate": 90, "session_state": "in_progress"}
+        return {
+            "status": "active",
+            "todos_done": todos_done,
+            "todos_total": todos_total,
+            "active_task": label,
+            "wait_estimate": 90,
+            "session_state": "in_progress",
+        }
     if prompt == "true":
         output = _write_capture(session, capture, project_root=project_root)
-        return {"status": "idle", "todos_done": max(1, todos_done), "todos_total": max(1, todos_total or 1), "active_task": output if full else "", "wait_estimate": 0, "session_state": "completed"}
+        return {
+            "status": "idle",
+            "todos_done": max(1, todos_done),
+            "todos_total": max(1, todos_total or 1),
+            "active_task": output if full else "",
+            "wait_estimate": 0,
+            "session_state": "completed",
+        }
     if todos_done or todos_total:
         output = _write_capture(session, capture, project_root=project_root)
-        return {"status": "idle", "todos_done": todos_done, "todos_total": todos_total, "active_task": output if full else "", "wait_estimate": 0, "session_state": "completed"}
+        return {
+            "status": "idle",
+            "todos_done": todos_done,
+            "todos_total": todos_total,
+            "active_task": output if full else "",
+            "wait_estimate": 0,
+            "session_state": "completed",
+        }
     output = _write_capture(session, capture, project_root=project_root)
-    return {"status": "idle", "todos_done": 0, "todos_total": 0, "active_task": output if full else "", "wait_estimate": 0, "session_state": "stuck"}
+    return {
+        "status": "idle",
+        "todos_done": 0,
+        "todos_total": 0,
+        "active_task": output if full else "",
+        "wait_estimate": 0,
+        "session_state": "stuck",
+    }
 
 
 def _legacy_claude_session_status(
@@ -807,7 +1044,14 @@ def _legacy_claude_session_status(
     project_root: str | None,
 ) -> dict[str, str | int]:
     if not session:
-        return {"status": "error", "todos_done": 0, "todos_total": 0, "active_task": "no_session", "wait_estimate": 30, "session_state": "error"}
+        return {
+            "status": "error",
+            "todos_done": 0,
+            "todos_total": 0,
+            "active_task": "no_session",
+            "wait_estimate": 30,
+            "session_state": "error",
+        }
 
     root = project_root or get_project_root()
     state_path = session_paths(session, root).state
@@ -837,7 +1081,14 @@ def _legacy_claude_session_status(
 
     capture = _capture_text(session, start=-50)
     if not capture:
-        return {"status": "error", "todos_done": 0, "todos_total": 0, "active_task": "capture_failed", "wait_estimate": 30, "session_state": "error"}
+        return {
+            "status": "error",
+            "todos_done": 0,
+            "todos_total": 0,
+            "active_task": "capture_failed",
+            "wait_estimate": 30,
+            "session_state": "error",
+        }
 
     current_status_time = _parse_statusline_time(capture)
     todos_done, todos_total = _todo_counts(capture)
@@ -862,7 +1113,9 @@ def _legacy_claude_session_status(
         }
 
     pane_pid = _safe_int(tmux_display(session, "#{pane_pid}"))
-    claude_running = pane_pid > 0 and run_cmd("pgrep", "-P", str(pane_pid), "-f", "claude")[1] == 0
+    claude_running = (
+        pane_pid > 0 and run_cmd("pgrep", "-P", str(pane_pid), "-f", "claude")[1] == 0
+    )
     activity_detected = bool(
         re.search(
             r"(?i)ctrl\+c to interrupt|Musing|Thinking|Working|Running|Loading|Beaming|Galloping|Razzmatazzing|Creating|⏺|✻|·",
@@ -896,7 +1149,11 @@ def _legacy_claude_session_status(
     elif int(state["poll_count"]) <= 10:
         session_state = "just_started"
     elif current_status_time and str(state["last_statusline_time"]):
-        session_state = "just_started" if current_status_time != str(state["last_statusline_time"]) else "stuck"
+        session_state = (
+            "just_started"
+            if current_status_time != str(state["last_statusline_time"])
+            else "stuck"
+        )
     elif current_status_time:
         session_state = "just_started"
 
@@ -922,7 +1179,9 @@ def _legacy_claude_session_status(
     }
 
 
-def _legacy_heartbeat_check(session: str, selected_agent: str) -> tuple[str, float, str, str]:
+def _legacy_heartbeat_check(
+    session: str, selected_agent: str
+) -> tuple[str, float, str, str]:
     if not session:
         return ("error", 0.0, "", "no_session")
     if not tmux_has_session(session):
@@ -964,7 +1223,9 @@ def _resolve_spawn_mode(mode: str | None) -> str:
     return "runner"
 
 
-def _runner_file_content(paths: SessionPaths, bash_path: str, command_shell: str, project_root: str) -> str:
+def _runner_file_content(
+    paths: SessionPaths, bash_path: str, command_shell: str, project_root: str
+) -> str:
     state_file = shlex.quote(str(paths.state))
     command_file = shlex.quote(str(paths.command))
     resolved_command_shell = shlex.quote(command_shell)
@@ -1120,20 +1381,28 @@ def _resolve_shell_path(candidate: str) -> str:
     if not candidate:
         return ""
     if os.path.isabs(candidate):
-        return candidate if os.path.isfile(candidate) and os.access(candidate, os.X_OK) else ""
+        return (
+            candidate
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+            else ""
+        )
     return shutil.which(candidate) or ""
 
 
 def _capture_text(session: str, *, start: int) -> str:
     if not tmux_has_session(session):
         return ""
-    capture, code = run_cmd("tmux", "capture-pane", "-t", session, "-p", "-S", str(start))
+    capture, code = run_cmd(
+        "tmux", "capture-pane", "-t", session, "-p", "-S", str(start)
+    )
     if code != 0:
         return ""
     return filter_input_box(capture)
 
 
-def _write_capture(session: str, capture: str, *, project_root: str | None = None, max_lines: int = 200) -> str:
+def _write_capture(
+    session: str, capture: str, *, project_root: str | None = None, max_lines: int = 200
+) -> str:
     path = session_paths(session, project_root).output
     lines = capture.splitlines()[:max_lines]
     _write_private_text(path, "\n".join(lines), 0o600)
@@ -1141,13 +1410,17 @@ def _write_capture(session: str, capture: str, *, project_root: str | None = Non
 
 
 def _write_full_capture(session: str, *, project_root: str | None = None) -> str:
-    return _write_capture(session, _capture_text(session, start=-300), project_root=project_root)
+    return _write_capture(
+        session, _capture_text(session, start=-300), project_root=project_root
+    )
 
 
 def _export_output_file(session: str, project_root: str) -> str:
     paths = session_paths(session, project_root)
     hash_value = project_hash(project_root)
-    return verify_or_create_output(str(paths.output), session, hash_value, project_root=project_root)
+    return verify_or_create_output(
+        str(paths.output), session, hash_value, project_root=project_root
+    )
 
 
 def _output_text(path: Path) -> str:
@@ -1172,7 +1445,13 @@ def _pane_snapshot(session: str) -> PaneSnapshot:
     pane_pid = _safe_int(tmux_display(session, "#{pane_pid}"))
     pane_dead = tmux_display(session, "#{pane_dead}") == "1"
     dead_status = tmux_display(session, "#{pane_dead_status}")
-    return PaneSnapshot(True, pane_id, pane_pid, pane_dead, _safe_int(dead_status) if dead_status else None)
+    return PaneSnapshot(
+        True,
+        pane_id,
+        pane_pid,
+        pane_dead,
+        _safe_int(dead_status) if dead_status else None,
+    )
 
 
 def _load_legacy_state(path: Path) -> dict[str, str | int | bool]:
@@ -1308,7 +1587,9 @@ def _parse_iso(value: str) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
     except ValueError:
         return None
 
@@ -1321,7 +1602,14 @@ def _safe_int(value: object) -> int:
 
 
 def _not_found_status() -> dict[str, str | int]:
-    return {"status": "not_found", "todos_done": 0, "todos_total": 0, "active_task": "", "wait_estimate": 0, "session_state": "not_found"}
+    return {
+        "status": "not_found",
+        "todos_done": 0,
+        "todos_total": 0,
+        "active_task": "",
+        "wait_estimate": 0,
+        "session_state": "not_found",
+    }
 
 
 def _validated_session_name(session: str) -> str:

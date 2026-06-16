@@ -1,0 +1,51 @@
+{
+  "layer1": {
+    "statuses": [
+      {
+        "gap": {
+          "file_path": "skills/bmad-story-automator/src/story_automator/core/gap_validator.py",
+          "line": 105,
+          "symbol": "parse_gap_list",
+          "description": "Sample Layer-1 input citing parse_gap_list as the entry point the chain consumes.",
+          "severity": "major"
+        },
+        "path_exists": true,
+        "line_in_range": true,
+        "symbol_present": true,
+        "confidence": 0.95,
+        "notes": []
+      }
+    ],
+    "overall_confidence": 0.95,
+    "validated_at": "2026-06-15T12:00:00Z"
+  },
+  "layer2": {
+    "verdicts": [
+      {
+        "req_id": "REQ-01",
+        "status": "implemented",
+        "evidence": "SKILL.md present at skills/trust-but-verify/SKILL.md and names the three layer module paths.",
+        "confidence": 0.9
+      },
+      {
+        "req_id": "REQ-07",
+        "status": "implemented",
+        "evidence": "step-03ab includes a When to run section referencing step-03a-execute-review.md.",
+        "confidence": 0.85
+      }
+    ],
+    "spec_path": "docs/superpowers/specs/2026-06-14-m06b-trust-verify-skill.md",
+    "diff_sha": "0000000000000000000000000000000000000000000000000000000000000000",
+    "model_invocation_ms": 1234
+  },
+  "layer3": [
+    {
+      "req_id": "REQ-01",
+      "existing_test_path": null,
+      "created_test_path": "tests/test_compliance_req_01.py",
+      "action": "created"
+    }
+  ],
+  "decision": "pass",
+  "verified_at": "2026-06-15T12:00:01Z"
+}
