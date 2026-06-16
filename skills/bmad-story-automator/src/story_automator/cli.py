@@ -13,6 +13,13 @@ from .commands.basic import (
     cmd_stop_hook,
 )
 from .commands.ceiling_check import cmd_ceiling_check
+from .commands.trust_verify import cmd_trust_verify
+from .commands.telemetry_report import cmd_telemetry_report
+from .commands.calibration_cmd import cmd_calibration
+from .commands.drift_cmd import cmd_drift
+from .commands.triage_cmd import cmd_triage
+from .commands.audit_verify_cmd import cmd_audit_verify
+from .commands.record_cost import cmd_record_cost
 from .commands.orchestrator import cmd_orchestrator_helper
 from .commands.state import (
     cmd_build_state_doc,
@@ -50,7 +57,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     command = args[0]
     rest = args[1:]
-    commands: dict[str, Command] = {
+    handler = _command_registry().get(command)
+    if not handler:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        _usage(sys.stderr)
+        return 1
+    return handler(rest)
+
+
+def _command_registry() -> dict[str, Command]:
+    """Single source of truth for the command surface.
+
+    Both ``main`` (dispatch) and ``_usage`` (help text) read this map so the
+    two can never drift. Built lazily at call time so the module-level
+    ``_cmd_*`` helpers defined later in this file resolve correctly.
+    Insertion order is the help-listing order.
+    """
+    return {
         "derive-project-slug": cmd_derive_project_slug,
         "ensure-marker-gitignore": cmd_ensure_marker_gitignore,
         "ensure-stop-hook": cmd_ensure_stop_hook,
@@ -74,44 +97,23 @@ def main(argv: list[str] | None = None) -> int:
         "orchestrator-helper": cmd_orchestrator_helper,
         "agent-config": cmd_agent_config,
         "ceiling-check": cmd_ceiling_check,
+        # Capability-delivery commands (analysis enhancement 2026-06-16):
+        # wire the previously dead-in-production core modules onto the CLI.
+        "trust_verify": cmd_trust_verify,
+        "telemetry-report": cmd_telemetry_report,
+        "calibration": cmd_calibration,
+        "drift": cmd_drift,
+        "triage": cmd_triage,
+        "audit-verify": cmd_audit_verify,
+        "record-cost": cmd_record_cost,
     }
-    handler = commands.get(command)
-    if not handler:
-        print(f"Unknown command: {command}", file=sys.stderr)
-        _usage(sys.stderr)
-        return 1
-    return handler(rest)
 
 
 def _usage(stream: object) -> None:
     print("story-automator <command> [args]", file=stream)
     print("", file=stream)
     print("Commands:", file=stream)
-    for name in (
-        "derive-project-slug",
-        "ensure-marker-gitignore",
-        "ensure-stop-hook",
-        "stop-hook",
-        "build-state-doc",
-        "commit-story",
-        "parse-epic",
-        "parse-story",
-        "parse-story-range",
-        "epic-complete",
-        "sprint-compare",
-        "state-metrics",
-        "validate-state",
-        "validate-story-creation",
-        "list-sessions",
-        "tmux-wrapper",
-        "heartbeat-check",
-        "codex-status-check",
-        "tmux-status-check",
-        "monitor-session",
-        "orchestrator-helper",
-        "agent-config",
-        "ceiling-check",
-    ):
+    for name in _command_registry():
         print(f"  {name}", file=stream)
 
 
