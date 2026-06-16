@@ -51,13 +51,16 @@ pass "REQ-13 contributor-guide (all four tags present as inline code)"
 EXPECTED="\
 docs/changelog/260401.md:3,26,61,85
 docs/changelog/260412.md:3,34
-docs/changelog/260413.md:3,27,51,77,104,129,148,168,195,215,250,277,302,330
+docs/changelog/260413.md:3,30,54,80,110,135,154,174,201,221,256,283,308,336
 docs/changelog/260414.md:3
 docs/changelog/260415.md:3,33,51
 docs/changelog/260506.md:3
 docs/changelog/260508.md:3,25,43
 docs/changelog/260517.md:3
-docs/changelog/260519.md:3"
+docs/changelog/260519.md:3
+docs/changelog/260615.md:3
+docs/changelog/260616.md:3
+docs/changelog/260617.md:3"
 
 ACTUAL=$(for F in docs/changelog/*.md; do
   LINES=$(grep -nE '^##+ [0-9]{6}' "$F" | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
@@ -83,15 +86,26 @@ pass "REQ-11 ordering-preservation (all nine files match frozen line signature)"
 # line is an addition, none describe a historical entry's prose, and REQ-10 only
 # constrains "the prose body, bullet content, file list, or QA notes of any
 # historical entry" (spec lines 22–23). The exclude pathspec keeps that intent.
+# 260615.md (the M12a milestone entry itself) is excluded for the same reason —
+# it is a wholly new entry, not a modification of an existing historical entry.
 BASE="${BASE:-origin/main}"
 if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then BASE=main; fi
 if git rev-parse --verify --quiet "$BASE" >/dev/null; then
-  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' \
+  # M12c — Gate 6 allows four retraction-related ADDITIONS (^+ only) so the
+  # retraction convention can land its worked example without falsely tripping
+  # prose-immutability. Deletions (^-) under docs/changelog/*.md remain
+  # forbidden, preserving the original M11 intent.
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' ':!docs/changelog/260617.md' \
     | grep -E '^[+-][^+-]' \
-    | grep -vE '^[+-]## [0-9]{6}' || true)
+    | grep -vE '^[+-]## [0-9]{6}' \
+    | grep -vE '^\+### Retractions[[:space:]]*$' \
+    | grep -vE '^\+### Notes[[:space:]]*$' \
+    | grep -vE '^\+- \[20[0-9]{2}-[0-9]{2}-[0-9]{2}\] Retracted by \[[0-9]{6}#[a-z0-9_-]+\]\(\./[0-9]{6}\.md#[a-z0-9_-]+\): [^[:space:]].*$' \
+    | grep -vE '^\+Retracts: \[[0-9]{6}#[a-z0-9_-]+\]\(\./[0-9]{6}\.md#[a-z0-9_-]+\)[[:space:]]*$' \
+    || true)
   [ -z "$NON_HEADING" ] || fail "REQ-10 prose-immutability: non-heading changes under docs/changelog/:
 $NON_HEADING"
-  pass "REQ-10 prose-immutability (only dated headings changed vs $BASE)"
+  pass "REQ-10 prose-immutability (only dated headings + retraction additions changed vs $BASE)"
 
   # Whitespace hygiene on every changed file we are responsible for.
   git diff --check "$BASE"...HEAD -- 'docs/changelog/*.md' CONTRIBUTING.md scripts/m11-vocabulary-gates.sh >/dev/null \
