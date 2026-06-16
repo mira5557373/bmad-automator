@@ -1,69 +1,48 @@
-# Story Automator
+# bmad-story-automator
 
-![Story Automator](./ref.png)
+Portable BMAD story-automator skill bundle — a Python port of `bma-d/bmad-story-automator-go`. Distributed as both a Claude Code plugin and an npm package.
 
-Portable BMAD `bmad-story-automator` skill/plugin bundle. This repo packages:
+**Version:** 1.15.0
+**Status:** Active development on `bma-d/sw-port-foundation` (M01 — Event types, typed-telemetry substrate)
+**Python:** 3.11, 3.12, 3.13 (CI); 3.14 required by spec REQ-01
 
-- `skills/bmad-story-automator`
-- `skills/bmad-story-automator-review`
-- the Python helper runtime inside `skills/bmad-story-automator`
+## Overview
 
-This is the Python port of [`bma-d/bmad-story-automator-go`](https://github.com/bma-d/bmad-story-automator-go). The Go README is the stylistic and operator-facing reference; this repo now documents the Python implementation in the same spirit, but with Python-specific behavior and Codex child-session support.
+`bmad-story-automator` orchestrates BMAD story workflows through a tmux-driven runtime with structured telemetry. The Python port retains the surface area of the Go implementation while running on a stdlib-first dependency budget (`stdlib + filelock + psutil`).
 
-The root `skills/` folder follows the Claude skill convention: each skill is a directory with its own `SKILL.md`. You can copy either skill folder directly into `.claude/skills/`. The repo also includes `.claude-plugin/plugin.json`, so the same root layout can be loaded as a Claude Code plugin with `claude --plugin-dir .`.
+Packaging is hybrid:
 
-## Claude Plugin Layout
+- **npm package** — `bin/bmad-story-automator` is a Node shim that wraps `install.sh` and refuses `process.platform === 'win32'`.
+- **Claude Code plugin** — the `skills/bmad-story-automator/` tree installs into `.claude/skills` as a pure skill bundle.
+- **Python distribution** — `hatchling`-built wheel of the `story_automator` package.
 
-This repo follows the Anthropic Claude Code plugin layout:
-
-```text
-.
-├── .claude-plugin/
-│   ├── plugin.json
-│   └── marketplace.json
-├── skills/
-│   ├── bmad-story-automator/
-│   │   └── SKILL.md
-│   └── bmad-story-automator-review/
-│       └── SKILL.md
-├── bin/
-└── README.md
-```
-
-- `.claude-plugin/plugin.json` is the plugin manifest.
-- `.claude-plugin/marketplace.json` is the marketplace catalog entry.
-- `skills/` stays at the plugin root, not inside `.claude-plugin/`.
-- `bin/` stays at the plugin root so plugin executables can be added to Claude Code's Bash path.
-
-Local plugin test:
-
-```bash
-claude --plugin-dir .
-```
-
-Local marketplace test:
-
-```text
-/plugin marketplace add .
-/plugin install bmad-automator@bmad-plugins
-```
+The active milestone (M01) defines the event-type substrate for typed telemetry. Subsequent milestones (M02–M10) layer the emitter, cost-capture path, HMAC chaining, and failure-classification consumers.
 
 ## Quickstart
 
-Install into the target BMAD project:
+### Install (npm)
 
 ```bash
-cd /absolute/path/to/your-bmad-project
-npx bmad-story-automator
+npm install -g bmad-story-automator
+bmad-story-automator --help
 ```
 
-Or install from anywhere:
+The Node shim invokes `install.sh`, which provisions the Python `story_automator` package. Windows is not supported by the shim — use WSL Ubuntu-26.04 for runtime verification gates.
+
+### Install (Claude Code plugin)
+
+Drop the contents of `skills/bmad-story-automator/` into `.claude/skills/bmad-story-automator/`. The skill markdown lives under `steps-c/`, `steps-e/`, and `steps-v/`.
+
+### Run the test suite
 
 ```bash
-npx bmad-story-automator /absolute/path/to/your-bmad-project
+npm run test:python          # full Python suite (unittest discover)
+npm run test:smoke           # smoke tests
+npm run verify               # full verify pipeline
+npm run pack:dry-run         # npm pack dry run
 ```
 
-Then run the installed skill from your supported entrypoint session:
+`pytest -q` is also supported — `pytest` discovers `unittest.TestCase` natively.
 
 ```text
 Use the bmad-story-automator skill.
@@ -101,66 +80,96 @@ Use the bmad-story-automator skill.
 It then drives the deterministic helper CLI and spawns per-story `claude`/`codex` child sessions in tmux. **Skip Automate** is a preflight option: set it to `true` to skip the optional automated QA step (`bmad-qa-generate-e2e-tests`) when that skill is not installed.
 
 ## BMAD Method Install Channels
-
-If you install Automator through the BMAD Method official module code `automator`, choose the channel explicitly.
-Run these from the target BMAD project root, or add `--directory /absolute/path/to/your-bmad-project`.
-
-Stable install, using the latest pure-semver tag:
+### Lint, format, coverage
 
 ```bash
-npx bmad-method install --modules automator --all-stable --tools claude-code --yes
+python -m ruff check <paths>
+python -m ruff format --check <paths>
+python -m coverage run --source=<src> -m unittest tests.<file>
+python -m coverage report -m --fail-under=85
 ```
 
-Stable pin to the first Codex-capable stable tag:
+## Architecture
 
-```bash
-npx bmad-method install --modules automator --pin automator=v1.15.0 --tools codex --yes
+```
+.
+├── skills/bmad-story-automator/
+│   ├── pyproject.toml                  # name=story-automator, py >=3.11
+│   ├── src/story_automator/
+│   │   ├── __init__.py                 # __version__ = "1.15.0"
+│   │   ├── __main__.py
+│   │   ├── cli.py                      # CLI entry point
+│   │   ├── adapters/                   # external adapters
+│   │   ├── commands/                   # orchestrator, retro, state, tmux, ...
+│   │   └── core/                       # shared helpers (namespace by convention)
+│   │       ├── common.py               # iso_now, compact_json, write_atomic, run_cmd
+│   │       ├── agent_config.py         # @dataclass conventions reference
+│   │       ├── tmux_runtime.py         # tmux session orchestration
+│   │       └── runtime_*.py
+│   ├── steps-c/, steps-e/, steps-v/    # skill markdown
+│   └── data/                           # prompts and templates
+├── tests/                              # ~13 unittest files
+├── docs/
+│   ├── superpowers/
+│   │   ├── specs/                      # sw-lint-passing specs + design docs
+│   │   └── plans/                      # implementation plans
+│   └── changelog/<YYMMDD>.md
+├── bin/bmad-story-automator            # Node shim (refuses Windows)
+├── install.sh                          # bash installer
+└── package.json                        # npm scripts
 ```
 
-Rollback to the pre-Codex stable tag if needed:
+### Key modules
 
-```bash
-npx bmad-method install --modules automator --pin automator=v1.14.2 --tools claude-code --yes
-```
+- **`core/common.py`** — canonical helpers (`iso_now`, `compact_json`, `write_atomic`, `ensure_dir`, `run_cmd`). Import from here; do not duplicate.
+- **`core/tmux_runtime.py`** — tmux session lifecycle. Runtime verification requires WSL Ubuntu-26.04 (M02 / M05 / M06 / M07 / M10).
+- **`commands/`** — orchestrator, retro, state, tmux command surfaces.
+- **`adapters/`** — external integrations.
 
-Codex preview branch, only for testing unpublished follow-up fixes:
+### Milestone scope
 
-```bash
-npx bmad-method install --custom-source https://github.com/bmad-code-org/bmad-automator@next/codex-runtime-support --tools codex --yes
-```
+| Milestone | Scope |
+|---|---|
+| **M01** | Event types — data definitions + parsing protocol (current) |
+| M02 | `TelemetryEmitter` + `TelemetryReader`; wire existing log sites |
+| M03 | Cost-capture path |
+| M04 | HMAC chaining |
+| M07 | Failure-classification consumers |
 
-Current caveat: the official registry sets `automator` to `default_channel: next`, so unqualified `--modules automator` and `--next automator` resolve to `main` HEAD. After this stable release lands on `main`, those commands include Codex support, but use `--all-stable` or `--pin` when you need reproducible stable behavior. For custom-source branch testing, verify the custom-source cache HEAD and installed runtime files instead of trusting installer exit status, summary text, or manifest channel fields alone.
+Recent work on M01 has landed the 13 concrete event classes (REQ-05 + REQ-06) — see commits `dfc2c22` through `7ae1072`.
 
-## Expectations
+## Contributing
 
-- This is an orchestrator, not a correctness guarantee. Bad planning artifacts still produce bad implementation runs.
-- The npm installer writes the skill into every supported dependency skill root that is complete: `.agents/skills`, `.claude/skills`, and/or `.codex/skills`.
-- Child sessions can use Claude or Codex depending on agent configuration.
-- Retrospectives inherit the configured primary agent by default, and can be overridden explicitly via `agentConfig`.
-- The automator expects sprint planning to be complete before it starts.
-- Review completion is gated by verification, not by child-session exit alone.
-- If the optional QA automate skill is missing, install still succeeds, but runs should use `Skip Automate = true`.
+### Conventions
 
-## What This Is
+- **Python source:** `from __future__ import annotations` at the top. Plain `@dataclass` (not `frozen`, not `slots`). PEP 604 unions (`str | None`, not `Optional[str]`). Imports grouped stdlib → third-party → local.
+- **Naming:** snake_case for Python attributes and JSON keys.
+- **Tests:** `unittest.TestCase` subclasses. Mixed `assert` and `self.assertEqual` is acceptable. No subprocess invocations, no tmux dependency in unit tests, cross-platform safe.
+- **File size:** target under ~500 LOC per file.
+- **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat(scope):`, `fix(scope):`, `test(scope):`, `refactor(scope):`, `docs(scope):`, `style(scope):`, `build(scope):`). One commit per task step. Add a `Generated-By` trailer.
 
-Story Automator automates the BMAD implementation loop for one or more stories:
+### Hard guardrails
 
-1. create story
-2. implement story
-3. optionally run automate/test generation
-4. run adversarial code review with retries
-5. commit verified work
-6. trigger retrospective when an epic is fully complete
+- **Dependency allowlist:** stdlib + `filelock` + `psutil`. Adding anything else requires operator approval (spec REQ-11 is grep-enforceable).
+- **No subprocess, network, or tmux** in unit tests.
+- **No modifications** to `bin/bmad-story-automator`, `install.sh`, or the `pyproject.toml` allowlist without flagging it as a behavioral change.
+- **No speculative planning docs.** Specs and plans live only under `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+- **No `--no-verify`.** If a pre-commit hook fails, fix the root cause.
+- **No force-push** to `main` or to a branch with an open upstream PR.
+- **Preserve pure skill-install behavior** under `.claude/skills`; legacy `_bmad/bmm` paths are migration-only.
 
-The core runtime model is:
+### Cross-platform requirement
 
-- one orchestrator session
-- one markdown state document
-- many short-lived tmux child sessions
-- one marker file guarding against accidental stop
-- `sprint-status.yaml` plus story files as the source of workflow truth
+Tests must pass on Windows git-bash, WSL Ubuntu, and Linux CI without modification. Runtime verification gates (M02 / M05 / M06 / M07 / M10) require WSL Ubuntu-26.04 because of tmux. M01 is pure data and runs on any platform.
 
-## How It Works
+### Specs and plans
+
+- M01 spec: `docs/superpowers/specs/2026-06-14-m01-event-types.md`
+- M01 design: `docs/superpowers/specs/2026-06-14-m01-event-types-design.md`
+- M01 plan: `docs/superpowers/plans/2026-06-14-m01-event-types.md`
+- Hybrid Node + Python decision: `DISCOVERY.md`
+
+### Pull requests
 
 ```mermaid
 flowchart TD
@@ -282,3 +291,4 @@ More: [Development](./docs/development.md#release)
 
 For BMAD Method stable tags, preview tags, registry `next`, and npm dist-tags,
 see [Versioning And Release Channels](./docs/versioning.md).
+Open PRs against `main`. Each milestone is tightly scoped — do not pull work forward from later milestones. Run `npm run verify` locally before requesting review.

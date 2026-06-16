@@ -1,0 +1,1759 @@
+from __future__ import annotations
+
+import unittest
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from story_automator.core.telemetry_events import Event
+
+
+class ModuleImportTests(unittest.TestCase):
+    def test_module_imports(self) -> None:
+        from story_automator.core import telemetry_events  # noqa: F401
+
+
+class EventBaseTests(unittest.TestCase):
+    def test_event_class_exposes_event_type_classvar(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        self.assertTrue(hasattr(Event, "EVENT_TYPE"))
+        self.assertEqual(Event.EVENT_TYPE, "")
+
+    def test_event_class_exposes_registry_classvar(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        self.assertTrue(hasattr(Event, "_REGISTRY"))
+        self.assertIsInstance(Event._REGISTRY, dict)
+
+    def test_event_dataclass_fields_are_timestamp_and_run_id(self) -> None:
+        from dataclasses import fields
+        from story_automator.core.telemetry_events import Event
+
+        field_names = {f.name for f in fields(Event)}
+        self.assertEqual(field_names, {"timestamp", "run_id"})
+
+    def test_event_field_types_are_str(self) -> None:
+        from dataclasses import fields
+        from story_automator.core.telemetry_events import Event
+
+        types_by_name = {f.name: f.type for f in fields(Event)}
+        # With `from __future__ import annotations` types are strings.
+        self.assertEqual(types_by_name["timestamp"], "str")
+        self.assertEqual(types_by_name["run_id"], "str")
+
+
+class _RegistryIsolationMixin:
+    """Snapshots Event._REGISTRY on setUp and restores it on tearDown.
+
+    Tests that DEFINE inner-class subclasses of Event mutate the module-
+    level registry. Without isolation, a leaked `_temp_*` key from one
+    test can break another. The snapshot/restore pattern is robust to
+    mid-`assertRaises` aborts.
+    """
+
+    def setUp(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        self._registry_snapshot = dict(Event._REGISTRY)
+
+    def tearDown(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        Event._REGISTRY.clear()
+        Event._REGISTRY.update(self._registry_snapshot)
+
+
+class EventRegistrationTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_subclass_with_event_type_is_registered(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempRegistered(Event):
+            EVENT_TYPE: ClassVar[str] = "_temp_registered"
+
+        self.assertIn("_temp_registered", Event._REGISTRY)
+        self.assertIs(Event._REGISTRY["_temp_registered"], _TempRegistered)
+
+    def test_subclass_without_event_type_is_not_registered(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempUnregistered(Event):
+            pass
+
+        # Confirm the class is usable AND not in the registry under "".
+        instance = _TempUnregistered(timestamp="t", run_id="r")
+        self.assertEqual(instance.timestamp, "t")
+        self.assertNotIn("", Event._REGISTRY)
+
+
+class EventDuplicateDetectionTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_duplicate_event_type_raises_runtime_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _DupFirst(Event):
+            EVENT_TYPE: ClassVar[str] = "_dup_key"
+
+        with self.assertRaises(RuntimeError):
+
+            @dataclass
+            class _DupSecond(Event):  # noqa: F841 — declaration triggers __init_subclass__
+                EVENT_TYPE: ClassVar[str] = "_dup_key"
+
+    def test_duplicate_error_message_contains_both_qualnames(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _DupQualA(Event):
+            EVENT_TYPE: ClassVar[str] = "_dup_qual"
+
+        with self.assertRaises(RuntimeError) as ctx:
+
+            @dataclass
+            class _DupQualB(Event):  # noqa: F841
+                EVENT_TYPE: ClassVar[str] = "_dup_qual"
+
+        message = str(ctx.exception)
+        self.assertIn("_dup_qual", message)
+        self.assertIn(_DupQualA.__qualname__, message)
+        # The second class's qualname is harder to obtain post-raise
+        # (the class binding never completes). The implementation must
+        # embed `cls.__qualname__` BEFORE raising, so assert the
+        # expected suffix shape:
+        self.assertIn("_DupQualB", message)
+
+
+class EventIdempotencyTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_same_class_reregistration_does_not_raise(self) -> None:
+        """Identity check `existing is not cls` lets the same class
+        re-trigger __init_subclass__ (e.g., under module reload) without
+        raising a spurious RuntimeError.
+
+        This is the canonical test for the idempotency NFR. We do NOT
+        use importlib.reload here — reload mutates the module's class
+        identity, which can pollute cross-TestCase state and confuse
+        the snapshot/restore mixin. Calling __init_subclass__ directly
+        on the same class exercises the exact code path that matters."""
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _Reentrant(Event):
+            EVENT_TYPE: ClassVar[str] = "_reentrant_check"
+
+        registered_first = Event._REGISTRY["_reentrant_check"]
+        self.assertIs(registered_first, _Reentrant)
+
+        # Python wraps __init_subclass__ as an implicit classmethod;
+        # __func__ gives the underlying function so we can invoke it
+        # with an explicit `cls` argument matching the same identity
+        # that's already in the registry.
+        init_subclass = Event.__init_subclass__.__func__  # type: ignore[attr-defined]
+        try:
+            init_subclass(_Reentrant)
+        except RuntimeError as exc:
+            self.fail(f"identity check failed: re-registration raised {exc!r}")
+
+        # Registry entry unchanged — not cleared, not duplicated.
+        self.assertIs(Event._REGISTRY["_reentrant_check"], registered_first)
+
+    def test_different_class_same_event_type_still_raises(self) -> None:
+        """Companion negative test: confirm the identity check is
+        SPECIFIC to identity — two different class objects sharing the
+        same EVENT_TYPE must still raise (this is REQ-03 from a
+        different angle and protects against an over-eager identity
+        check that accidentally accepts any class)."""
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _IdFirst(Event):
+            EVENT_TYPE: ClassVar[str] = "_idemp_negative"
+
+        with self.assertRaises(RuntimeError):
+
+            @dataclass
+            class _IdSecond(Event):  # noqa: F841
+                EVENT_TYPE: ClassVar[str] = "_idemp_negative"
+
+
+class EventToDictTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_to_dict_injects_event_type_from_classvar(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempToDict(Event):
+            EVENT_TYPE: ClassVar[str] = "_to_dict_test"
+
+        data = _TempToDict(timestamp="t", run_id="r").to_dict()
+        self.assertEqual(data["event_type"], "_to_dict_test")
+
+    def test_to_dict_event_type_is_first_key(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempOrder(Event):
+            EVENT_TYPE: ClassVar[str] = "_order_test"
+
+        keys = list(_TempOrder(timestamp="t", run_id="r").to_dict().keys())
+        self.assertEqual(keys[0], "event_type")
+
+    def test_to_dict_includes_envelope_fields(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempEnv(Event):
+            EVENT_TYPE: ClassVar[str] = "_env_test"
+
+        data = _TempEnv(timestamp="ts-value", run_id="rid-value").to_dict()
+        self.assertEqual(data["timestamp"], "ts-value")
+        self.assertEqual(data["run_id"], "rid-value")
+
+    def test_to_dict_returns_plain_dict(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempType(Event):
+            EVENT_TYPE: ClassVar[str] = "_type_test"
+
+        data = _TempType(timestamp="t", run_id="r").to_dict()
+        # to_dict must return a builtin dict for json.dumps compatibility.
+        self.assertIs(type(data), dict)
+
+
+class EventToJsonLineTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_to_json_line_is_single_line(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempLine(Event):
+            EVENT_TYPE: ClassVar[str] = "_line_test"
+
+        line = _TempLine(timestamp="t", run_id="r").to_json_line()
+        self.assertNotIn("\n", line)
+
+    def test_to_json_line_has_no_trailing_newline(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempNoNl(Event):
+            EVENT_TYPE: ClassVar[str] = "_no_nl_test"
+
+        line = _TempNoNl(timestamp="t", run_id="r").to_json_line()
+        self.assertFalse(line.endswith("\n"))
+
+    def test_to_json_line_uses_compact_separators(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempCompact(Event):
+            EVENT_TYPE: ClassVar[str] = "_compact_test"
+
+        line = _TempCompact(timestamp="t", run_id="r").to_json_line()
+        # compact_json uses (",", ":") — no whitespace after either.
+        self.assertNotIn(": ", line)
+        self.assertNotIn(", ", line)
+
+    def test_to_json_line_matches_to_dict_via_compact_json(self) -> None:
+        import json
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempMatch(Event):
+            EVENT_TYPE: ClassVar[str] = "_match_test"
+
+        instance = _TempMatch(timestamp="t", run_id="r")
+        line = instance.to_json_line()
+        # The line must parse back to the same dict to_dict returns.
+        self.assertEqual(json.loads(line), instance.to_dict())
+
+    def test_to_json_line_byte_output_is_deterministic(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import Event
+
+        @dataclass
+        class _TempBytes(Event):
+            EVENT_TYPE: ClassVar[str] = "_byte_stable"
+
+        line = _TempBytes(timestamp="ts1", run_id="rid1").to_json_line()
+        # Strict byte-level assertion: guards the future REQ-08 round-trip
+        # invariant against silent regressions in compact_json's separator
+        # policy, asdict's field ordering, or to_dict's key insertion order.
+        # The existing property tests (no spaces, event_type-first) catch
+        # the obvious cases; this one pins the exact wire format.
+        self.assertEqual(
+            line,
+            '{"event_type":"_byte_stable","timestamp":"ts1","run_id":"rid1"}',
+        )
+
+
+class EventImportContractTests(unittest.TestCase):
+    def test_module_re_exports_iso_now(self) -> None:
+        from story_automator.core import telemetry_events
+        from story_automator.core.common import iso_now as canonical
+
+        self.assertIs(telemetry_events.iso_now, canonical)
+
+    def test_module_re_exports_compact_json(self) -> None:
+        from story_automator.core import telemetry_events
+        from story_automator.core.common import compact_json as canonical
+
+        self.assertIs(telemetry_events.compact_json, canonical)
+
+    def test_module_all_lists_event_and_helpers(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("Event", telemetry_events.__all__)
+        self.assertIn("iso_now", telemetry_events.__all__)
+        self.assertIn("compact_json", telemetry_events.__all__)
+
+    def test_module_does_not_redefine_iso_now(self) -> None:
+        # Guard against a future regression where someone re-implements
+        # the helper inside this module. The function object must be
+        # IDENTITY-equal to the one in core.common.
+        from story_automator.core import telemetry_events
+        from story_automator.core import common
+
+        self.assertIs(telemetry_events.iso_now, common.iso_now)
+        self.assertIs(telemetry_events.compact_json, common.compact_json)
+
+
+class UnknownEventTests(unittest.TestCase):
+    def test_unknown_event_class_exists(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        self.assertTrue(hasattr(UnknownEvent, "EVENT_TYPE"))
+        self.assertEqual(UnknownEvent.EVENT_TYPE, "")
+
+    def test_unknown_event_dataclass_fields(self) -> None:
+        from dataclasses import fields
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        field_names = {f.name for f in fields(UnknownEvent)}
+        # Inherits timestamp + run_id from Event; adds raw_event_type + raw_fields.
+        self.assertEqual(
+            field_names,
+            {"timestamp", "run_id", "raw_event_type", "raw_fields"},
+        )
+
+    def test_unknown_event_constructs_with_required_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        instance = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="future_thing_M99",
+            raw_fields={"alpha": 1, "beta": "two"},
+        )
+        self.assertEqual(instance.timestamp, "t")
+        self.assertEqual(instance.run_id, "r")
+        self.assertEqual(instance.raw_event_type, "future_thing_M99")
+        self.assertEqual(instance.raw_fields, {"alpha": 1, "beta": "two"})
+
+    def test_unknown_event_not_in_registry(self) -> None:
+        from story_automator.core.telemetry_events import Event, UnknownEvent
+
+        # Direct lookup by the empty-string EVENT_TYPE must not return
+        # UnknownEvent (and must not even contain the empty string as a key).
+        self.assertNotIn("", Event._REGISTRY)
+        # Defense in depth: scan all registered classes to confirm
+        # UnknownEvent is not present under any key (e.g., if a future
+        # refactor accidentally registered it under a different string).
+        for registered_cls in Event._REGISTRY.values():
+            self.assertIsNot(registered_cls, UnknownEvent)
+
+
+class UnknownEventToDictTests(unittest.TestCase):
+    def test_to_dict_event_type_is_raw_event_type(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        instance = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="future_thing_M99",
+            raw_fields={"alpha": 1},
+        )
+        data = instance.to_dict()
+        self.assertEqual(data["event_type"], "future_thing_M99")
+
+    def test_to_dict_includes_envelope_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="ts-value",
+            run_id="rid-value",
+            raw_event_type="x",
+            raw_fields={},
+        ).to_dict()
+        self.assertEqual(data["timestamp"], "ts-value")
+        self.assertEqual(data["run_id"], "rid-value")
+
+    def test_to_dict_merges_raw_fields_at_top_level(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1, "beta": "two", "gamma": [3]},
+        ).to_dict()
+        self.assertEqual(data["alpha"], 1)
+        self.assertEqual(data["beta"], "two")
+        self.assertEqual(data["gamma"], [3])
+
+    def test_to_dict_excludes_internal_field_names(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1},
+        ).to_dict()
+        # The internal field names raw_event_type/raw_fields MUST NOT appear
+        # in the output dict — they are implementation details. The output is
+        # the wire representation: event_type + envelope + payload fields.
+        self.assertNotIn("raw_event_type", data)
+        self.assertNotIn("raw_fields", data)
+
+    def test_to_dict_key_order_is_event_type_then_envelope_then_fields(self) -> None:
+        from story_automator.core.telemetry_events import UnknownEvent
+
+        data = UnknownEvent(
+            timestamp="t",
+            run_id="r",
+            raw_event_type="x",
+            raw_fields={"alpha": 1, "beta": 2},
+        ).to_dict()
+        keys = list(data.keys())
+        # Canonical order: event_type, timestamp, run_id, then raw_fields keys
+        # in their insertion order. This is the contract that lets REQ-04's
+        # "byte-equal to the original input line" hold when the original input
+        # was itself canonically ordered.
+        self.assertEqual(keys[:3], ["event_type", "timestamp", "run_id"])
+        self.assertEqual(keys[3:], ["alpha", "beta"])
+
+
+class ParseEventHappyPathTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_parse_known_event_type_dispatches_to_subclass(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _ParsedFoo(Event):
+            EVENT_TYPE: ClassVar[str] = "_parsed_foo"
+            payload: str
+
+        line = compact_json(
+            {
+                "event_type": "_parsed_foo",
+                "timestamp": "t",
+                "run_id": "r",
+                "payload": "hi",
+            }
+        )
+        event = parse_event(line)
+        self.assertIs(type(event), _ParsedFoo)
+        self.assertEqual(event.timestamp, "t")
+        self.assertEqual(event.run_id, "r")
+        self.assertEqual(event.payload, "hi")
+
+    def test_parse_unknown_event_type_routes_to_unknown_event(self) -> None:
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        line = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "t",
+                "run_id": "r",
+                "anything": 42,
+                "other": "value",
+            }
+        )
+        event = parse_event(line)
+        self.assertIs(type(event), UnknownEvent)
+        self.assertEqual(event.raw_event_type, "future_thing_M99")
+        self.assertEqual(event.timestamp, "t")
+        self.assertEqual(event.run_id, "r")
+        self.assertEqual(event.raw_fields, {"anything": 42, "other": "value"})
+
+
+class ParseEventErrorPathTests(_RegistryIsolationMixin, unittest.TestCase):
+    def test_parse_missing_event_type_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import compact_json, parse_event
+
+        line = compact_json({"timestamp": "t", "run_id": "r"})
+        with self.assertRaises(ValueError) as ctx:
+            parse_event(line)
+        # The error message must mention the missing field by name so an
+        # operator scanning a log can identify the problem at a glance.
+        self.assertIn("event_type", str(ctx.exception))
+
+    def test_parse_invalid_json_propagates_json_decode_error(self) -> None:
+        import json
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(json.JSONDecodeError):
+            parse_event("this is not json {{{")
+
+    def test_parse_empty_string_propagates_json_decode_error(self) -> None:
+        import json
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(json.JSONDecodeError):
+            parse_event("")
+
+    def test_parse_typed_event_missing_required_field_raises_type_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _RequiresPayload(Event):
+            EVENT_TYPE: ClassVar[str] = "_requires_payload"
+            payload: str  # required, no default
+
+        line = compact_json(
+            {
+                "event_type": "_requires_payload",
+                "timestamp": "t",
+                "run_id": "r",
+                # 'payload' deliberately omitted
+            }
+        )
+        with self.assertRaises(TypeError) as ctx:
+            parse_event(line)
+        # Dataclass __init__ raises with the field name embedded so a
+        # consumer can identify the missing field. This is a property of
+        # CPython's dataclass implementation — REQ-07 relies on it.
+        self.assertIn("payload", str(ctx.exception))
+
+    def test_parse_typed_event_extra_field_raises_type_error(self) -> None:
+        from dataclasses import dataclass
+        from story_automator.core.telemetry_events import (
+            Event,
+            compact_json,
+            parse_event,
+        )
+
+        @dataclass
+        class _NoExtras(Event):
+            EVENT_TYPE: ClassVar[str] = "_no_extras"
+            # No additional fields — only inherits timestamp + run_id.
+
+        line = compact_json(
+            {
+                "event_type": "_no_extras",
+                "timestamp": "t",
+                "run_id": "r",
+                "uninvited": "guest",
+            }
+        )
+        with self.assertRaises(TypeError) as ctx:
+            parse_event(line)
+        # Dataclass __init__ rejects unexpected kwargs by name. Strict
+        # construction is a property of CPython we lean on for REQ-07.
+        self.assertIn("uninvited", str(ctx.exception))
+
+    def test_parse_top_level_array_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        # JSONL events are JSON objects. A top-level array can't be
+        # dispatched by event_type. Without the explicit isinstance
+        # guard this would surface as the less specific "missing
+        # event_type" ValueError (because "event_type" not in [1,2,3]
+        # is True). With the guard the message clearly identifies the
+        # type problem at the top of the function.
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("[1, 2, 3]")
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_string_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        # Catches the most dangerous of the non-object cases: a top-level
+        # JSON string that happens to contain the substring "event_type"
+        # used to slip past the membership check and fail with
+        # AttributeError on the subsequent payload.pop. The dict-type
+        # guard makes the error a clean ValueError instead.
+        with self.assertRaises(ValueError) as ctx:
+            parse_event('"event_type_in_a_string"')
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_number_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("42")
+        self.assertIn("JSON object", str(ctx.exception))
+
+    def test_parse_top_level_null_raises_value_error(self) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_event("null")
+        self.assertIn("JSON object", str(ctx.exception))
+
+
+class UnknownEventByteEqualPreservationTests(unittest.TestCase):
+    def test_round_trip_preserves_byte_equal_for_canonical_input(self) -> None:
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        # The original line is built via compact_json so it is canonically
+        # ordered (event_type, timestamp, run_id, then payload fields in
+        # insertion order). This is the contract REQ-04's "byte-equal to
+        # the original input line" relies on — lines produced by
+        # to_json_line are always canonically ordered, so round-trip is
+        # byte-equal for any input that came out of the typed-telemetry
+        # substrate. Hand-built JSON in arbitrary key order is NOT
+        # required to round-trip byte-equal (and m01-m4 does not extend
+        # that property either).
+        original = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+                "alpha": 1,
+                "beta": "two",
+                "gamma": [1, 2, 3],
+                "delta": {"nested": True},
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_event_type, "future_thing_M99")
+
+        reemitted = parsed.to_json_line()
+        # Strict byte-level equality: guards against any future regression
+        # in compact_json's separator policy, UnknownEvent.to_dict's key
+        # insertion order, or dict.update's behavior for raw_fields. The
+        # property-level tests in UnknownEventToDictTests (Task 4) catch
+        # the obvious cases; this one pins the exact wire format.
+        self.assertEqual(reemitted, original)
+
+
+class ParseEventExportContractTests(unittest.TestCase):
+    def test_module_exports_unknown_event_in_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("UnknownEvent", telemetry_events.__all__)
+
+    def test_module_exports_parse_event_in_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        self.assertIn("parse_event", telemetry_events.__all__)
+
+    def test_module_exports_are_callable_from_top_level(self) -> None:
+        # Both must be reachable via `from .telemetry_events import X`
+        # (smoke-tests that __all__ matches the actually-defined names).
+        from story_automator.core.telemetry_events import (  # noqa: F401
+            UnknownEvent,
+            parse_event,
+        )
+
+        self.assertTrue(callable(parse_event))
+        self.assertTrue(isinstance(UnknownEvent, type))
+
+
+class ConcreteEventRoundTripTests(unittest.TestCase):
+    """REQ-08: round-trip invariant for every concrete event class.
+
+    For each of the 13 concrete event classes the round trip
+    ``instance -> to_json_line -> parse_event`` must return an instance
+    of the same class that compares equal via dataclass ``__eq__`` and
+    whose own ``to_json_line`` output is byte-equal to the original
+    line. This catches any drift in field declaration order, in the
+    ``to_dict`` key insertion order, or in ``compact_json``'s separator
+    policy.
+    """
+
+    def _round_trip(self, event: Event) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        line = event.to_json_line()
+        parsed = parse_event(line)
+        self.assertIs(type(parsed), type(event))
+        self.assertEqual(parsed, event)
+        self.assertEqual(parsed.to_json_line(), line)
+
+    def test_story_started_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryStarted
+
+        self._round_trip(
+            StoryStarted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                agent="claude",
+                model="sonnet",
+                complexity="medium",
+            )
+        )
+
+    def test_story_completed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryCompleted
+
+        self._round_trip(
+            StoryCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                duration_s=42.5,
+                cost_usd=1.23,
+                tokens_in=1000,
+                tokens_out=500,
+                attempts=2,
+            )
+        )
+
+    def test_story_failed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryFailed
+
+        self._round_trip(
+            StoryFailed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                error_class="CRASH",
+                reason="exit code 1",
+                attempts=5,
+                final_session="sa-foo-abc123",
+            )
+        )
+
+    def test_story_deferred_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import StoryDeferred
+
+        self._round_trip(
+            StoryDeferred(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                reason="plateau",
+                tasks_completed=4,
+            )
+        )
+
+    def test_retry_attempt_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import RetryAttempt
+
+        self._round_trip(
+            RetryAttempt(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                attempt_num=3,
+                agent="claude",
+                model="opus",
+                prev_error_class="TIMEOUT",
+            )
+        )
+
+    def test_escalation_triggered_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import EscalationTriggered
+
+        self._round_trip(
+            EscalationTriggered(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                trigger_id=4,
+                severity="CRITICAL",
+                message="story file missing",
+            )
+        )
+
+    def test_review_cycle_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import ReviewCycle
+
+        self._round_trip(
+            ReviewCycle(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                cycle_num=2,
+                issues_found=3,
+                blocking=True,
+            )
+        )
+
+    def test_retro_fired_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import RetroFired
+
+        self._round_trip(
+            RetroFired(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                stories_completed=5,
+                total_cost_usd=12.34,
+                duration_s=300.0,
+            )
+        )
+
+    def test_tmux_session_spawned_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionSpawned
+
+        self._round_trip(
+            TmuxSessionSpawned(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                pid=12345,
+                pane_geometry="200x50",
+            )
+        )
+
+    def test_tmux_session_completed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionCompleted
+
+        self._round_trip(
+            TmuxSessionCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                exit_code=0,
+                duration_s=45.0,
+            )
+        )
+
+    def test_tmux_session_crashed_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import TmuxSessionCrashed
+
+        self._round_trip(
+            TmuxSessionCrashed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                session_name="sa-foo-abc123",
+                story_key="3.1",
+                exit_code=137,
+                last_capture_chars=4096,
+            )
+        )
+
+    def test_cost_charged_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import CostCharged
+
+        self._round_trip(
+            CostCharged(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                phase="dev",
+                cost_usd=0.45,
+                tokens_in=2000,
+                tokens_out=800,
+                model="sonnet",
+            )
+        )
+
+    def test_budget_alert_round_trip(self) -> None:
+        from story_automator.core.telemetry_events import BudgetAlert
+
+        self._round_trip(
+            BudgetAlert(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                threshold_pct=75,
+                total_cost_usd=15.0,
+                max_budget_usd=20.0,
+                epic="3",
+                story_key="3.1",
+            )
+        )
+
+
+class RegistryCompletenessTests(unittest.TestCase):
+    """REQ-06: after module import Event._REGISTRY contains exactly 13
+    entries keyed by the concrete classes' EVENT_TYPE strings; UnknownEvent
+    must NOT be present.
+
+    Uses a module-level filter that excludes leading-underscore keys so a
+    leaked ``_temp_*`` sentinel from a test that aborted before
+    ``_RegistryIsolationMixin.tearDown`` cleared it cannot mask a missing
+    production event_type.
+    """
+
+    EXPECTED_EVENT_TYPES = frozenset(
+        {
+            "story_started",
+            "story_completed",
+            "story_failed",
+            "story_deferred",
+            "retry_attempt",
+            "escalation_triggered",
+            "review_cycle",
+            "retro_fired",
+            "tmux_session_spawned",
+            "tmux_session_completed",
+            "tmux_session_crashed",
+            "cost_charged",
+            "budget_alert",
+        }
+    )
+
+    def test_registry_contains_exactly_thirteen_production_entries(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        production = {k for k in Event._REGISTRY if not k.startswith("_")}
+        self.assertEqual(len(production), 13)
+        self.assertEqual(production, self.EXPECTED_EVENT_TYPES)
+
+    def test_unknown_event_is_not_a_registered_value(self) -> None:
+        from story_automator.core.telemetry_events import Event, UnknownEvent
+
+        for cls in Event._REGISTRY.values():
+            self.assertIsNot(cls, UnknownEvent)
+
+    def test_each_registered_class_event_type_matches_its_key(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        # Guards against a future regression where the registry key drifts
+        # from the class's own EVENT_TYPE classvar (e.g., a subclass that
+        # overrides EVENT_TYPE after registration in an init hook).
+        for key, cls in Event._REGISTRY.items():
+            self.assertEqual(cls.EVENT_TYPE, key)
+
+
+class ConcreteEventExportContractTests(unittest.TestCase):
+    """REQ-05 implication: the 13 concrete classes must be importable
+    via the documented module path. ``__all__`` pins the surface so
+    ``from story_automator.core.telemetry_events import *`` works as
+    documented in the design doc, and so future renames are caught
+    by this gate rather than at downstream call sites.
+    """
+
+    # Only the 13 concrete classes. The base ``Event`` / fallback ``UnknownEvent`` /
+    # function ``parse_event`` / helpers ``iso_now`` + ``compact_json`` are pinned by
+    # m01-m1's ``EventImportContractTests`` and m01-m2's ``ParseEventExportContractTests``.
+    # This tuple is the m01-m3 delta — adding the base/fallback/parser here would
+    # double-cover them and tightly couple this test class to upstream slice contracts.
+    EXPECTED_NAMES = (
+        "BudgetAlert",
+        "CostCharged",
+        "EscalationTriggered",
+        "RetroFired",
+        "RetryAttempt",
+        "ReviewCycle",
+        "StoryCompleted",
+        "StoryDeferred",
+        "StoryFailed",
+        "StoryStarted",
+        "TmuxSessionCompleted",
+        "TmuxSessionCrashed",
+        "TmuxSessionSpawned",
+    )
+
+    def test_all_thirteen_concrete_classes_are_in_dunder_all(self) -> None:
+        from story_automator.core import telemetry_events
+
+        for name in self.EXPECTED_NAMES:
+            self.assertIn(
+                name,
+                telemetry_events.__all__,
+                f"{name} missing from __all__",
+            )
+
+    def test_all_thirteen_concrete_classes_are_importable_top_level(self) -> None:
+        # Smoke test: every name in EXPECTED_NAMES resolves to a class
+        # attribute on the module (and is not None / not a function).
+        from story_automator.core import telemetry_events
+
+        for name in self.EXPECTED_NAMES:
+            obj = getattr(telemetry_events, name, None)
+            self.assertIsNotNone(obj, f"{name} is not defined")
+            self.assertTrue(isinstance(obj, type), f"{name} is not a class")
+
+
+class ConcreteEventRoundTripExtendedTests(unittest.TestCase):
+    """REQ-08 broader sweep: round-trip holds under unicode, JSON-special
+    characters, and numeric / boolean edge cases.
+
+    m01-m3 verified the per-class happy path with ASCII fixtures. This
+    class broadens the verification to confirm that `compact_json`'s
+    `ensure_ascii=False` policy preserves unicode in string fields
+    byte-equal, that JSON-special characters in strings are escaped and
+    parsed back identically, and that integer / float / boolean
+    boundary values survive the serialization round-trip without drift.
+    """
+
+    def _round_trip(self, event: Event) -> None:
+        from story_automator.core.telemetry_events import parse_event
+
+        line = event.to_json_line()
+        parsed = parse_event(line)
+        self.assertIs(type(parsed), type(event))
+        self.assertEqual(parsed, event)
+        self.assertEqual(parsed.to_json_line(), line)
+
+    def test_round_trip_preserves_unicode_in_string_fields(self) -> None:
+        """REQ-08 + NFR: `compact_json(ensure_ascii=False)` must emit
+        non-ASCII codepoints natively (not as `\\uXXXX` escapes), and
+        parse_event must round-trip them byte-equal. Covers the operator's
+        real-world case of unicode in story titles or epic names.
+        """
+        from story_automator.core.telemetry_events import StoryStarted
+
+        self._round_trip(
+            StoryStarted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="エピック-3",
+                story_key="3.1-héllo-世界",
+                agent="クロード",
+                model="sonnet",
+                complexity="medium",
+            )
+        )
+
+    def test_round_trip_preserves_json_special_characters_in_strings(self) -> None:
+        """REQ-08 + NFR: JSON-special characters (`"`, `\\`, control
+        characters) must be escaped on emission and parsed back byte-
+        identically. The strict-byte-equal round-trip is the contract
+        that lets the JSONL stream be transported through any utf-8 pipe
+        without corruption.
+        """
+        from story_automator.core.telemetry_events import StoryFailed
+
+        self._round_trip(
+            StoryFailed(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                error_class="CRASH",
+                # Embedded double-quote, backslash, tab, and newline must all
+                # round-trip exactly. json.dumps escapes them; json.loads un-
+                # escapes them; the assertion is that the second emission of
+                # to_json_line yields the same escape sequences.
+                reason='exit code 1: "fatal" \\ stderr=foo\tbar\nline2',
+                attempts=5,
+                final_session="sa-foo-abc123",
+            )
+        )
+
+    def test_round_trip_preserves_numeric_edge_cases(self) -> None:
+        """REQ-08 + NFR: integer / float boundary values (zero, negative,
+        large, fractional) must survive the round-trip. ``json.dumps``
+        emits ``0`` for int zero and ``0.0`` for float zero — distinct
+        wire forms — so the round-trip preserves both type identity and
+        byte representation.
+        """
+        from story_automator.core.telemetry_events import StoryCompleted
+
+        self._round_trip(
+            StoryCompleted(
+                timestamp="2026-06-14T05:12:34Z",
+                run_id="20260614-051234",
+                epic="3",
+                story_key="3.1",
+                duration_s=0.0,
+                cost_usd=999_999.123456,
+                tokens_in=0,
+                tokens_out=2_147_483_648,
+                attempts=1,
+            )
+        )
+
+    def test_round_trip_preserves_boolean_both_values(self) -> None:
+        """REQ-08 + NFR: ``ReviewCycle.blocking`` is the only bool field
+        in the M01 type set. Both ``True`` and ``False`` must round-trip,
+        and the wire form must use lowercase JSON booleans (``true`` /
+        ``false``), not the Python repr (``True`` / ``False``). This is
+        guaranteed by ``json.dumps``; the test pins the behavior.
+        """
+        from story_automator.core.telemetry_events import ReviewCycle
+
+        for blocking_value in (True, False):
+            with self.subTest(blocking=blocking_value):
+                self._round_trip(
+                    ReviewCycle(
+                        timestamp="2026-06-14T05:12:34Z",
+                        run_id="20260614-051234",
+                        epic="3",
+                        story_key="3.1",
+                        cycle_num=2,
+                        issues_found=3,
+                        blocking=blocking_value,
+                    )
+                )
+
+
+class UnknownEventExtendedRoundTripTests(unittest.TestCase):
+    """REQ-09 broader sweep: byte-equal round-trip for arbitrary
+    unrecognized event_type strings and arbitrary JSON-primitive
+    raw_fields shapes.
+
+    m01-m3 verified one canonical fixture; m01-m4 broadens to multiple
+    event_type shapes (numeric-like, mixed-case, special chars) and
+    multiple raw_fields structures (nested, empty, JSON-primitive
+    leaves only).
+    """
+
+    def test_round_trip_preserves_byte_equal_across_event_type_shapes(self) -> None:
+        """REQ-09: arbitrary unrecognized event_type strings must round-
+        trip byte-equal. The pop-and-restore path in parse_event reads
+        the event_type string opaquely — no character class is privileged
+        — so any non-empty string the registry doesn't recognize routes
+        to UnknownEvent and is preserved verbatim.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        candidate_event_types = (
+            "future_thing_M99",
+            "v2.story_started",
+            "MixedCase_Event",
+            "with-dashes-and_underscores",
+            "with.dots.in.the.name",
+            "numeric_like_42",
+            "trailing_whitespace_chars",
+        )
+        for raw_event_type in candidate_event_types:
+            with self.subTest(event_type=raw_event_type):
+                original = compact_json(
+                    {
+                        "event_type": raw_event_type,
+                        "timestamp": "2026-06-14T05:12:34Z",
+                        "run_id": "20260614-051234",
+                        "alpha": 1,
+                    }
+                )
+                parsed = parse_event(original)
+                self.assertIsInstance(parsed, UnknownEvent)
+                self.assertEqual(parsed.raw_event_type, raw_event_type)
+                self.assertEqual(parsed.to_json_line(), original)
+
+    def test_round_trip_preserves_byte_equal_for_nested_raw_fields(self) -> None:
+        """REQ-09: nested JSON primitives (list-of-dicts, dict-of-lists,
+        bools, nulls) inside raw_fields must round-trip byte-equal. The
+        UnknownEvent.to_dict implementation merges raw_fields via
+        dict.update — which preserves insertion order, which `compact_json`
+        re-emits in the same order — making byte-equality hold for any
+        canonically-ordered input.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        original = compact_json(
+            {
+                "event_type": "future_thing_M99",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+                "nested_list_of_dicts": [
+                    {"key": "value-1", "num": 1},
+                    {"key": "value-2", "num": 2},
+                ],
+                "nested_dict_of_lists": {"odds": [1, 3, 5], "evens": [2, 4]},
+                "primitive_bool": True,
+                "primitive_null": None,
+                "primitive_zero_int": 0,
+                "primitive_zero_float": 0.0,
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.to_json_line(), original)
+
+    def test_round_trip_preserves_byte_equal_for_empty_raw_fields(self) -> None:
+        """REQ-09: UnknownEvent with empty raw_fields (only envelope +
+        event_type, no payload) must round-trip byte-equal. The dict.update
+        of an empty dict is a no-op; the output equals the envelope alone.
+        Pins the boundary where the parser receives an unknown event_type
+        without any unrecognized payload — a real possibility when an
+        older codebase consumes a stream emitted by a newer one whose new
+        event has no payload yet.
+        """
+        from story_automator.core.telemetry_events import (
+            UnknownEvent,
+            compact_json,
+            parse_event,
+        )
+
+        original = compact_json(
+            {
+                "event_type": "future_thing_no_payload",
+                "timestamp": "2026-06-14T05:12:34Z",
+                "run_id": "20260614-051234",
+            }
+        )
+        parsed = parse_event(original)
+        self.assertIsInstance(parsed, UnknownEvent)
+        self.assertEqual(parsed.raw_fields, {})
+        self.assertEqual(parsed.to_json_line(), original)
+
+
+class FieldTypeTests(unittest.TestCase):
+    """REQ-10 (4th design class): document M01's intentional no-type-
+    validation stance.
+
+    Python's ``@dataclass`` decorator does NOT validate field types at
+    ``__init__`` — it assigns whatever is passed. M01 intentionally
+    defers runtime type validation to M07 (failure_triage taxonomy)
+    where typed enums for ``severity`` / ``error_class`` / ``reason`` /
+    ``phase`` will be introduced alongside ``__post_init__`` validators.
+
+    These tests pin the M01 contract: types are documented (REQ-05
+    table) but not enforced. Round-trip still holds because JSON
+    serialization preserves whatever Python type was assigned. A future
+    contributor reading this class should understand that adding
+    ``__post_init__`` validation here is a SCOPE CHANGE — it belongs in
+    M07, not M01.
+    """
+
+    def test_int_field_accepts_float_silently_in_m01(self) -> None:
+        """M01 documents int fields (e.g., ``tokens_in``) without
+        enforcing the type. Passing 1.5 is silently accepted. The wire
+        form will serialize as ``1.5`` (JSON number) and parse back as
+        ``1.5`` (Python float). This is the M01 baseline; M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryCompleted,
+            parse_event,
+        )
+
+        event = StoryCompleted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            duration_s=42.5,
+            cost_usd=1.23,
+            tokens_in=1.5,  # documented as int; passed as float; not rejected
+            tokens_out=500,
+            attempts=2,
+        )
+        self.assertEqual(event.tokens_in, 1.5)
+        # Round-trip survives — the float is serialized as a JSON number
+        # and parsed back as a Python float. Equality holds.
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_float_field_accepts_int_silently_in_m01(self) -> None:
+        """M01 documents float fields (e.g., ``cost_usd``) without
+        enforcing the type. Passing the integer ``0`` is silently
+        accepted and stored as an int (NOT coerced to ``0.0`` because
+        @dataclass doesn't run converters). The wire form serializes as
+        ``0`` (JSON integer), not ``0.0`` — which is JSON-valid but a
+        type-strict downstream consumer might object. M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryCompleted,
+            parse_event,
+        )
+
+        event = StoryCompleted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            duration_s=42.5,
+            cost_usd=0,  # documented as float; passed as int; stored as int
+            tokens_in=1000,
+            tokens_out=500,
+            attempts=2,
+        )
+        self.assertEqual(event.cost_usd, 0)
+        self.assertIs(type(event.cost_usd), int)  # NOT coerced to float
+        # Round-trip still holds even though the wire form is 0 (int).
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_string_field_accepts_int_silently_in_m01(self) -> None:
+        """M01 documents string fields (e.g., ``epic``) without
+        enforcing the type. Passing ``42`` (int) is silently accepted.
+        The wire form serializes as ``42`` (JSON integer), and the
+        parsed value is an int — NOT a string. Equality holds at the
+        Python level, but downstream consumers expecting str will
+        fail. M07 may tighten.
+        """
+        from story_automator.core.telemetry_events import (
+            StoryStarted,
+            parse_event,
+        )
+
+        event = StoryStarted(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic=42,  # documented as str; passed as int; not rejected
+            story_key="3.1",
+            agent="claude",
+            model="sonnet",
+            complexity="medium",
+        )
+        self.assertEqual(event.epic, 42)
+        self.assertIs(type(event.epic), int)
+        # Round-trip equality holds because both instances have epic=42 (int).
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+    def test_bool_field_accepts_string_silently_in_m01(self) -> None:
+        """M01 documents bool fields (``ReviewCycle.blocking``) without
+        enforcing the type. Passing ``"yes"`` is silently accepted and
+        stored as a string. The wire form serializes as ``"yes"`` (JSON
+        string), not ``true`` — round-trip equality still holds because
+        parsed value is also the string "yes". M07 may tighten via a
+        ``__post_init__`` validator.
+        """
+        from story_automator.core.telemetry_events import (
+            ReviewCycle,
+            parse_event,
+        )
+
+        event = ReviewCycle(
+            timestamp="2026-06-14T05:12:34Z",
+            run_id="20260614-051234",
+            epic="3",
+            story_key="3.1",
+            cycle_num=2,
+            issues_found=3,
+            blocking="yes",  # documented as bool; passed as str; not rejected
+        )
+        self.assertEqual(event.blocking, "yes")
+        self.assertIs(type(event.blocking), str)
+        parsed = parse_event(event.to_json_line())
+        self.assertEqual(parsed, event)
+
+
+class ImportAllowlistTests(unittest.TestCase):
+    """REQ-11: ``core/telemetry_events.py`` must import only the Python
+    standard library plus ``filelock`` and ``psutil`` (and project-local
+    relative imports from ``story_automator.core``). Codified via AST
+    inspection so a future ``import some_third_party_pkg`` fails fast
+    here rather than waiting for a downstream environment to reveal it.
+
+    The allowlist intentionally mirrors the CLAUDE.md guardrail. Note:
+    pyproject.toml does NOT currently declare a ``[project.dependencies]``
+    list (the spec REQ-11 wording was aspirational); this in-suite gate
+    is the authoritative enforcement until that section exists.
+    """
+
+    # The set of top-level package names whose import is permitted in the
+    # M01 telemetry module. Stdlib roots are enumerated explicitly so the
+    # check stays portable across Python versions (sys.stdlib_module_names
+    # is 3.10+ and would be cleaner — see the alternate impl below).
+    ALLOWED_THIRD_PARTY = frozenset({"filelock", "psutil"})
+
+    # First-party root: a relative import (level >= 1) or an absolute
+    # import beginning with this string is always allowed.
+    FIRST_PARTY_ROOT = "story_automator"
+
+    def _module_imports(self) -> tuple[list[str], list[str]]:
+        """Return (top_level_absolute_imports, relative_module_names)
+        parsed from the telemetry_events module via AST. Avoids
+        importing the module twice — we read the source directly.
+
+        Anchors the source path on ``__file__`` rather than cwd so the
+        test runs identically under ``unittest discover`` from the
+        project root, under ``pytest`` from a subdirectory, and under
+        any IDE test runner with an arbitrary cwd.
+        """
+        import ast
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        source_path = (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+        absolute: list[str] = []
+        relative: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    absolute.append(alias.name.split(".", 1)[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    # Relative import — module may be None for "from . import X"
+                    relative.append(node.module or "")
+                else:
+                    if node.module:
+                        absolute.append(node.module.split(".", 1)[0])
+        return absolute, relative
+
+    def test_only_allowlisted_third_party_imports_in_telemetry_module(self) -> None:
+        """Every absolute import's top-level name must be either a
+        stdlib module OR in ALLOWED_THIRD_PARTY OR a first-party
+        ``story_automator.*`` import. This is the canonical REQ-11 gate.
+        """
+        import sys
+
+        absolute, _ = self._module_imports()
+        stdlib_names = (
+            sys.stdlib_module_names
+            if hasattr(sys, "stdlib_module_names")
+            else frozenset()
+        )
+        # Defensive fallback for Python < 3.10 (project requires 3.11+ so
+        # this branch never executes in practice; the fallback exists so
+        # the test is readable as a standalone gate).
+        if not stdlib_names:  # pragma: no cover
+            self.fail("sys.stdlib_module_names unavailable; Python 3.10+ required")
+
+        for top in absolute:
+            with self.subTest(import_name=top):
+                allowed = (
+                    top in stdlib_names
+                    or top in self.ALLOWED_THIRD_PARTY
+                    or top == self.FIRST_PARTY_ROOT
+                )
+                self.assertTrue(
+                    allowed,
+                    f"forbidden import {top!r} — not in stdlib, not in "
+                    f"{set(self.ALLOWED_THIRD_PARTY)!r}, not the first-party "
+                    f"root {self.FIRST_PARTY_ROOT!r}",
+                )
+
+    def test_relative_imports_stay_within_story_automator_core(self) -> None:
+        """Relative imports (``from .common import ...``) are allowed
+        only when they resolve within ``story_automator.core``. Pins the
+        module's seam — a future ``from ..adapters.something import X``
+        would broaden the module's coupling beyond core/ and fail here.
+        """
+        _, relative = self._module_imports()
+        for module_suffix in relative:
+            with self.subTest(module=module_suffix):
+                # Empty (``from . import X``) is OK — same package.
+                # ``common`` is the canonical sibling import.
+                # Anything else is suspect.
+                self.assertIn(
+                    module_suffix,
+                    ("", "common"),
+                    f"unexpected relative import target {module_suffix!r}; "
+                    f"core/telemetry_events.py is permitted to reach into "
+                    f"core/common.py only (M01 seam)",
+                )
+
+
+class ModuleSizeTests(unittest.TestCase):
+    """NFR: ``core/telemetry_events.py`` must be ≤ 500 source lines per
+    the CONTRIBUTING.md guideline. Codified here as an in-suite gate
+    so a future contributor exceeding the budget fails fast.
+
+    Counts logical lines via ``splitlines()`` (which omits the trailing-
+    newline artifact). Docstring stripping is NOT performed — the
+    baseline at the end of m01 (347 lines including docstrings) is far
+    enough under 500 that the simple count is the right gate. If a
+    future milestone genuinely needs more than 500 lines of code (sans
+    docstrings) the gate must be tightened to AST-strip docstrings;
+    that's a deliberate decision, not a quiet workaround.
+    """
+
+    MAX_SOURCE_LINES = 500
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def test_module_is_under_five_hundred_lines(self) -> None:
+        source_path = self._module_source_path()
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+        self.assertLessEqual(
+            len(source_lines),
+            self.MAX_SOURCE_LINES,
+            f"{source_path} is {len(source_lines)} lines; "
+            f"NFR ceiling is {self.MAX_SOURCE_LINES}. Split the module "
+            f"or move helpers to a new file in core/.",
+        )
+
+    def test_module_size_baseline_documented(self) -> None:
+        """The baseline at end-of-M01 should be well under the ceiling.
+        If this test fails with a count near 500, the module has grown
+        unexpectedly during M01 and should be reviewed before the next
+        milestone adds more content.
+        """
+        source_path = self._module_source_path()
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+        # Soft baseline: at end of m01 we expect ~347 lines. A spread of
+        # ±50 absorbs minor edits without becoming a churn test, while
+        # still flagging a >100-line surprise growth that should warrant
+        # a review before merging.
+        self.assertLess(
+            len(source_lines),
+            450,
+            f"{source_path} is {len(source_lines)} lines; the M01 "
+            f"baseline is ~347. If the module is approaching 450 there "
+            f"is likely a refactor opportunity worth surfacing.",
+        )
+
+
+class PEP604UnionTypesTests(unittest.TestCase):
+    """NFR: the M01 module must use PEP 604 union syntax (``str | None``)
+    rather than ``typing.Optional[str]`` or ``typing.Union[str, None]``.
+    Codified here as a textual gate against the module's source.
+
+    The source scan is intentionally textual (not AST) because PEP 604
+    annotations are syntactic — they appear in annotations and string-
+    quoted via ``from __future__ import annotations``. A textual grep
+    is the right granularity: any literal occurrence of ``Optional[`` or
+    ``Union[`` in the module source fails the gate.
+    """
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def test_module_does_not_use_legacy_optional(self) -> None:
+        source_path = self._module_source_path()
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Optional[",
+            source,
+            f"{source_path} contains legacy ``Optional[...]`` syntax; "
+            f"NFR requires PEP 604 ``T | None``. Replace with the modern form.",
+        )
+
+    def test_module_does_not_use_legacy_union(self) -> None:
+        source_path = self._module_source_path()
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Union[",
+            source,
+            f"{source_path} contains legacy ``Union[A, B]`` syntax; "
+            f"NFR requires PEP 604 ``A | B``. Replace with the modern form.",
+        )
+
+
+class NoMutableDefaultsTests(unittest.TestCase):
+    """NFR: no mutable default args and no shared mutable class attributes
+    on concrete event classes; ``Event._REGISTRY`` is the single documented
+    shared mutable state and is populated only at class-creation time.
+
+    Codified via AST inspection so a future contributor adding a mutable
+    default (e.g., ``tags: list[str] = []``) or a shared mutable class
+    attribute on a concrete subclass fails fast here rather than waiting
+    for cross-test contamination to reveal it. Parallel in structure to
+    ``ImportAllowlistTests`` (AST scan) and ``PEP604UnionTypesTests``
+    (textual scan) — closes the last in-suite-codifiable NFR gate.
+
+    Scope: every class in ``core/telemetry_events.py`` whose direct base
+    list names ``Event`` (covers ``Event`` itself via its body and every
+    concrete subclass). Only ``Event._REGISTRY`` is exempted by name per
+    the NFR's documented single-shared-mutable-state allowance.
+    """
+
+    EXEMPT_NAMES = frozenset({"_REGISTRY"})
+
+    MUTABLE_FACTORY_NAMES = frozenset(
+        {"list", "dict", "set", "List", "Dict", "Set", "bytearray"}
+    )
+
+    def _module_source_path(self):
+        """Anchor on ``__file__`` so the test is cwd-independent."""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        return (
+            project_root
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "telemetry_events.py"
+        )
+
+    def _is_immutable_constant(self, node) -> bool:
+        """Return True if the AST node represents an immutable constant.
+
+        Accepts ``ast.Constant`` (None, bool, int, float, str, bytes,
+        complex) and tuples of immutable constants. Rejects ``ast.Dict``,
+        ``ast.List``, ``ast.Set``, and any call expression — those are
+        either mutable containers or runtime-evaluated values that the
+        NFR forbids as class-level defaults on Event subclasses.
+        """
+        import ast
+
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.Tuple):
+            return all(self._is_immutable_constant(e) for e in node.elts)
+        return False
+
+    def _event_subclass_defs(self):
+        """Yield ``ast.ClassDef`` nodes for ``Event`` and every class
+        whose direct base list names ``Event``. Parsing the module via
+        AST avoids importing twice and keeps the gate cwd-independent.
+        """
+        import ast
+
+        source_path = self._module_source_path()
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            is_event_or_subclass = node.name == "Event" or any(
+                isinstance(b, ast.Name) and b.id == "Event" for b in node.bases
+            )
+            if is_event_or_subclass:
+                yield node
+
+    def test_no_mutable_class_level_defaults_on_event_subclasses(self) -> None:
+        """Every annotated class-level assignment on ``Event`` or one of
+        its direct subclasses must declare an immutable constant default
+        (or no default at all). ``Event._REGISTRY`` is the single
+        documented exception (NFR-allowed shared state).
+
+        Catches regressions like ``tags: list[str] = []`` or
+        ``known_keys: ClassVar[set[str]] = {"a", "b"}`` on a concrete
+        event class — both of which would silently share state across
+        instances and violate the NFR.
+        """
+        for class_node in self._event_subclass_defs():
+            import ast
+
+            for stmt in class_node.body:
+                if not isinstance(stmt, ast.AnnAssign):
+                    continue
+                if not isinstance(stmt.target, ast.Name):
+                    continue
+                attr_name = stmt.target.id
+                if stmt.value is None:
+                    continue
+                if attr_name in self.EXEMPT_NAMES:
+                    continue
+                with self.subTest(class_name=class_node.name, attr=attr_name):
+                    self.assertTrue(
+                        self._is_immutable_constant(stmt.value),
+                        f"{class_node.name}.{attr_name} has a non-constant "
+                        f"class-level default; M01 NFR forbids mutable "
+                        f"class-level defaults on Event subclasses. Move the "
+                        f"value to an instance field, or document the "
+                        f"exception in NoMutableDefaultsTests.EXEMPT_NAMES "
+                        f"with rationale.",
+                    )
+
+    def test_no_mutable_default_factory_on_dataclass_fields(self) -> None:
+        """Dataclass fields anywhere in the module must not use
+        ``field(default_factory=<mutable_constructor>)``. The current
+        M01 module declares all subclass fields without defaults
+        (``kw_only=True`` makes this possible despite Python's
+        non-default-after-default ordering constraint); this gate
+        prevents a future regression where ``tags: list[str] =
+        field(default_factory=list)`` slips in.
+
+        ``field()`` calls without ``default_factory`` are unaffected —
+        the gate inspects only the ``default_factory=`` keyword. The
+        check covers any ``field(...)`` call in the module, not just
+        those inside Event subclasses, because the typing scoping logic
+        does not reach into closures or helper functions; a top-level
+        ``field()`` outside a class body is not idiomatic anyway.
+        """
+        import ast
+
+        source_path = self._module_source_path()
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Name) or func.id != "field":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "default_factory":
+                    continue
+                if (
+                    isinstance(keyword.value, ast.Name)
+                    and keyword.value.id in self.MUTABLE_FACTORY_NAMES
+                ):
+                    self.fail(
+                        f"dataclass field uses "
+                        f"``default_factory={keyword.value.id}`` at "
+                        f"{source_path}:{node.lineno} — M01 NFR forbids "
+                        f"mutable defaults on Event subclasses."
+                    )
+
+    def test_registry_is_the_sole_documented_shared_mutable_state(self) -> None:
+        """Pin the NFR's documented exception: ``Event._REGISTRY`` is
+        the single shared mutable class attribute, populated only at
+        class-creation time via ``__init_subclass__``. If a future
+        contributor adds another mutable class attribute to ``Event``
+        and updates ``EXEMPT_NAMES`` to whitelist it, this test catches
+        the change explicitly so the rationale can be reviewed.
+        """
+        self.assertEqual(
+            self.EXEMPT_NAMES,
+            frozenset({"_REGISTRY"}),
+            "EXEMPT_NAMES has drifted from the documented NFR exception. "
+            "Only ``Event._REGISTRY`` is permitted as shared mutable "
+            "class state. If a new exception is genuinely required, "
+            "document the rationale here and update the NFR text in "
+            "docs/superpowers/specs/2026-06-14-m01-event-types.md.",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

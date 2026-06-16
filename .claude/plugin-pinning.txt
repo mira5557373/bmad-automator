@@ -1,0 +1,5 @@
+# Plugin version snapshot — captured at Sprint 0 start, 2026-06-14
+# Do not update Claude Code plugins until the bmad-automator port is complete.
+
+superpowers: 5.1.0
+superpowers: 6fd450765978
