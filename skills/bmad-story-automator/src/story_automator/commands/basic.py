@@ -152,7 +152,14 @@ def cmd_stop_hook(_: list[str]) -> int:
         return 0
     try:
         payload = json.loads(marker.read_text())
-    except json.JSONDecodeError:
+    except (OSError, ValueError):
+        # A read error or malformed JSON marker is not an actionable active run;
+        # allow the stop (matches the other liveness consumers' degrade path).
+        return 0
+    if not isinstance(payload, dict):
+        # A valid-JSON but non-object marker (e.g. 123, "", []) would crash the
+        # payload.get() below with AttributeError, escaping to the cli backstop
+        # and breaking the stop-hook contract. Treat it as no active run.
         return 0
     remaining = payload.get("storiesRemaining", 0)
     if isinstance(remaining, str) and remaining.isdigit():

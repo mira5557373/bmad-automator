@@ -11,7 +11,6 @@ even on a corrupt line or an I/O error.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ..core.common import print_json
@@ -96,11 +95,14 @@ def cmd_telemetry_report(args: list[str]) -> int:
             else:
                 payload["retro_inputs"] = None
                 payload["retro_note"] = "pass --epic for retro_inputs"
-    except json.JSONDecodeError as exc:
-        # A corrupt JSONL line propagates out of ``reader.iter_events`` as
-        # a JSONDecodeError. The skill markdown parses stdout JSON via
-        # ``jq`` and would silently treat a leaked stack trace as no data.
-        # Surface it as a structured failure with ok=false instead.
+    except (ValueError, TypeError) as exc:
+        # Corruption surfaces two ways from ``reader.iter_events`` ->
+        # ``parse_event``: a malformed JSONL line raises json.JSONDecodeError
+        # (a ValueError subclass), and a valid-JSON-but-malformed event raises
+        # ValueError/TypeError (missing/non-string event_type, missing kwargs).
+        # The skill markdown parses stdout JSON via ``jq`` and would silently
+        # treat a leaked traceback as no data, so surface all of these as a
+        # structured corrupt_telemetry failure instead of an internal_error.
         print_json({"ok": False, "error": "corrupt_telemetry", "detail": str(exc)})
         return 1
     except OSError as exc:

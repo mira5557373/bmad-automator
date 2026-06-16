@@ -40,13 +40,16 @@ def current_run_id(project_root: str | Path | None = None) -> str:
     a chronically broken correlation key leaves an operator trail instead of
     every event silently getting an empty run_id with no explanation.
     """
-    marker = active_marker_path(project_root)
     try:
+        marker = active_marker_path(project_root)
         text = marker.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""  # normal: no active run in progress
     except OSError as exc:
-        logger.warning("run_id correlation: active marker unreadable (%s): %s", marker, exc)
+        # Resolving the marker path (e.g. os.getcwd() when the cwd was removed)
+        # or reading it can raise OSError; never let that break an emit — the
+        # whole point of this helper is that it cannot fail a telemetry write.
+        logger.warning("run_id correlation: active marker unreadable: %s", exc)
         return ""
     try:
         payload = json.loads(text)

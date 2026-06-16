@@ -173,6 +173,12 @@ def cmd_trust_verify(args: list[str]) -> int:
         # parse_gap_list raises ValueError (incl. JSONDecodeError) on bad shape.
         print_json({"ok": False, "error": "invalid_gaps", "detail": str(exc)})
         return 1
+    except OSError as exc:
+        # A directory or unreadable --gaps path raises IsADirectoryError /
+        # PermissionError (OSError, but not FileNotFoundError); keep it a
+        # structured error rather than an internal_error.
+        print_json({"ok": False, "error": "gaps_unreadable", "detail": str(exc)})
+        return 1
     try:
         report1 = validate_gaps(gaps, repo_root=root)
     except NotADirectoryError as exc:
@@ -185,6 +191,9 @@ def cmd_trust_verify(args: list[str]) -> int:
         diff_text = read_text(diff_path)
     except FileNotFoundError:
         print_json({"ok": False, "error": "diff_file_not_found"})
+        return 1
+    except OSError as exc:
+        print_json({"ok": False, "error": "diff_unreadable", "detail": str(exc)})
         return 1
     try:
         report2 = check_compliance(spec_path=Path(spec_path), diff_text=diff_text)
@@ -200,7 +209,15 @@ def cmd_trust_verify(args: list[str]) -> int:
 
     # Layer 3: feature-test planning. dry_run=False writes skeletons for any
     # implemented REQ lacking a feature test (SKILL Output contract).
-    plan = plan_feature_tests(report2.verdicts, tests_dir=root / "tests", dry_run=False)
+    try:
+        plan = plan_feature_tests(report2.verdicts, tests_dir=root / "tests", dry_run=False)
+    except ValueError as exc:
+        # feature_tester._normalize_req_id raises ValueError on a verdict whose
+        # req_id is a non-empty string that does not match REQ-<digits> (Layer 2
+        # only enforces non-empty). Mirror the Layer-2 halt semantics: structured
+        # stdout error, no partial result.json, exit 1.
+        print_json({"ok": False, "error": "layer3_failed", "detail": str(exc)})
+        return 1
 
     decision = _decide(report1, report2, plan)
     result = {
