@@ -362,7 +362,9 @@ def _marker(args: list[str]) -> int:
                     {"exists": True, "file": str(marker_file), "error": "marker_unreadable"}
                 )
                 return 1
-            print(f'{{"exists":true,"file":"{marker_file}"}}')
+            # json.dumps escapes the path so a Windows backslash (or any quote)
+            # in the marker path can't produce invalid JSON on the status line.
+            print(json.dumps({"exists": True, "file": str(marker_file)}))
             print(content, end="")
             return 0
         print('{"exists":false}')

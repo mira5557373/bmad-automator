@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import difflib
 import sys
 from typing import Callable
 
+from . import __version__
 from .commands.agent_config_cmd import cmd_agent_config
 from .commands.basic import (
     cmd_commit_story,
@@ -55,11 +57,22 @@ def main(argv: list[str] | None = None) -> int:
     if help_flag(args[0]):
         _usage(sys.stdout)
         return 0
+    if args[0] in {"--version", "-v"}:
+        print_json({"ok": True, "version": __version__})
+        return 0
     command = args[0]
     rest = args[1:]
-    handler = _command_registry().get(command)
+    registry = _command_registry()
+    handler = registry.get(command)
     if not handler:
         print(f"Unknown command: {command}", file=sys.stderr)
+        matches = difflib.get_close_matches(command, list(registry), n=3)
+        if matches:
+            print(f"Did you mean: {', '.join(matches)}?", file=sys.stderr)
+        # The trust-but-verify command is registered with an underscore, which
+        # is easy to mistype as a hyphen; point there explicitly on a near miss.
+        if command == "trust-verify":
+            print("Note: the command is 'trust_verify' (underscore).", file=sys.stderr)
         _usage(sys.stderr)
         return 1
     try:
@@ -89,6 +102,7 @@ def _command_registry() -> dict[str, Command]:
     Insertion order is the help-listing order.
     """
     return {
+        "version": _cmd_version,
         "derive-project-slug": cmd_derive_project_slug,
         "ensure-marker-gitignore": cmd_ensure_marker_gitignore,
         "ensure-stop-hook": cmd_ensure_stop_hook,
@@ -130,6 +144,11 @@ def _usage(stream: object) -> None:
     print("Commands:", file=stream)
     for name in _command_registry():
         print(f"  {name}", file=stream)
+
+
+def _cmd_version(_args: list[str]) -> int:
+    print_json({"ok": True, "version": __version__})
+    return 0
 
 
 def _cmd_parse_epic(args: list[str]) -> int:
