@@ -326,6 +326,31 @@ class ActiveTaskCsvTests(unittest.TestCase):
         self.assertIn("a.py", result)
 
 
+class StateMetricsTests(unittest.TestCase):
+    """state-metrics must not count template placeholder comments as activity."""
+
+    def _metrics(self, body: str) -> dict:
+        from story_automator.commands.state import cmd_state_metrics
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "orchestration-1.md"
+            state.write_text(body, encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cmd_state_metrics(["--state", str(state)])
+            return json.loads(out.getvalue())
+
+    def test_placeholder_comment_not_counted(self) -> None:
+        payload = self._metrics(
+            "# State\n<!-- Escalations awaiting user input will be listed here -->\n"
+        )
+        self.assertEqual(payload["escalations"], 0)
+
+    def test_real_escalation_counted(self) -> None:
+        payload = self._metrics("# State\n- escalation: blocked on review\n")
+        self.assertEqual(payload["escalations"], 1)
+
+
 class ProjectRootIdiomTests(unittest.TestCase):
     """An explicitly-empty PROJECT_ROOT must fall back to cwd, not return ''."""
 
@@ -336,6 +361,76 @@ class ProjectRootIdiomTests(unittest.TestCase):
             self.assertTrue(get_project_root())  # not empty
         with mock.patch.dict(os.environ, {"PROJECT_ROOT": "/tmp/some-root"}, clear=False):
             self.assertEqual(get_project_root(), "/tmp/some-root")
+
+
+class OrchestratorAssetsFreeTests(unittest.TestCase):
+    """escalate/parse-output must not hard-fail when a dependency skill is absent."""
+
+    def test_sprint_status_exists_emits_json(self) -> None:
+        from story_automator.commands.orchestrator import cmd_orchestrator_helper
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}, clear=False):
+                _, payload = _capture_json(cmd_orchestrator_helper, ["sprint-status", "exists"])
+            self.assertIn("exists", payload)
+            self.assertEqual(payload["exists"], False)
+
+    def test_escalate_recoverable_does_not_escalate(self) -> None:
+        from story_automator.commands.orchestrator import cmd_orchestrator_helper
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}, clear=False):
+                _, review = _capture_json(cmd_orchestrator_helper, ["escalate", "review-loop", "cycles=0"])
+                _, crash = _capture_json(cmd_orchestrator_helper, ["escalate", "session-crash", "retries=0"])
+            self.assertFalse(review["escalate"])
+            self.assertFalse(crash["escalate"])
+            self.assertEqual(crash.get("action"), "retry")
+
+    def test_resolve_parse_schema_without_skills(self) -> None:
+        from story_automator.core.runtime_policy import load_runtime_policy, step_contract, resolve_parse_schema
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}, clear=False):
+                policy = load_runtime_policy(state_file="", resolve_assets=False)
+                contract = step_contract(policy, "dev")
+                resolve_parse_schema(contract)
+                self.assertTrue(Path(contract["parse"]["schemaPath"]).is_file())
+
+
+class BmadStoryFileReadingTests(unittest.TestCase):
+    """Real BMAD story files carry Status as a fenceless body line + title in H1."""
+
+    STORY = (
+        "# Story 1.1: User Authentication\n"
+        "\n"
+        "Status: done\n"
+        "\n"
+        "## Story\n"
+        "As a user, I want to log in.\n"
+        "Status: not-this-one\n"  # a later body line must not win
+    )
+
+    def test_status_read_from_fenceless_preamble(self) -> None:
+        from story_automator.core.frontmatter import find_frontmatter_value_case
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "1-1-user-authentication.md"
+            p.write_text(self.STORY, encoding="utf-8")
+            self.assertEqual(find_frontmatter_value_case(p, "Status"), "done")
+
+    def test_title_extracted_from_h1(self) -> None:
+        from story_automator.core.frontmatter import extract_title
+
+        self.assertEqual(extract_title(self.STORY), "User Authentication")
+        self.assertEqual(extract_title("# Plain Heading\n"), "Plain Heading")
+
+    def test_fenced_frontmatter_still_preferred(self) -> None:
+        from story_automator.core.frontmatter import find_frontmatter_value_case
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "state.md"
+            p.write_text("---\nStatus: COMPLETE\n---\n## body\nStatus: nope\n", encoding="utf-8")
+            self.assertEqual(find_frontmatter_value_case(p, "Status"), "COMPLETE")
 
 
 class SpawnCollisionTests(unittest.TestCase):

@@ -65,17 +65,26 @@ prune_backups() {
 
 backup_if_exists() {
   local path="$1"
-  if [ -e "$path" ]; then
-    # Declare and assign separately so a date(1) failure surfaces under
-    # set -e instead of being masked by the `local` builtin's exit status
-    # (shellcheck SC2155); quote the strip RHS so a TARGET_ROOT with glob
-    # chars is treated literally (SC2295).
-    local backup
-    backup="${path}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
-    mv "$path" "$backup"
-    echo "Backup: ${backup#"$TARGET_ROOT"/}"
-    prune_backups "$path"
+  [ -e "$path" ] || return 0
+  # Store backups OUTSIDE the skills root so a timestamped backup can never be
+  # discovered as a skill, and skip re-backing-up an identical tree so repeated
+  # local reinstalls stay idempotent instead of accumulating copies.
+  local backups_dir="$TARGET_ROOT/.bmad-story-automator-backups"
+  mkdir -p "$backups_dir"
+  local name
+  name="$(basename "$path")"
+  local prev="" candidate
+  for candidate in "$backups_dir/$name.backup-"*; do
+    [ -e "$candidate" ] || continue
+    prev="$candidate"  # timestamped names sort chronologically; last = newest
+  done
+  if [ -n "$prev" ] && diff -rq "$path" "$prev" >/dev/null 2>&1; then
+    rm -rf "$path"
+    return 0
   fi
+  local backup="$backups_dir/$name.backup-$(date -u +%Y%m%dT%H%M%SZ)"
+  mv "$path" "$backup"
+  echo "Backup: ${backup#$TARGET_ROOT/}"
 }
 
 backup_legacy_story_automator_installs() {
@@ -260,6 +269,10 @@ install_skill_root() {
   mkdir -p "$target_story" "$target_story_review"
   cp -a "$STORY_SOURCE"/. "$target_story"/
   cp -a "$STORY_REVIEW_SOURCE"/. "$target_story_review"/
+  # Strip any working-tree bytecode so a local-clone install matches the clean
+  # npm tarball and never ships stale/foreign-interpreter .pyc files.
+  find "$target_story" "$target_story_review" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$target_story" "$target_story_review" -name '*.py[co]' -delete 2>/dev/null || true
   chmod +x "$target_story/scripts/story-automator"
 
   echo "Installed skill root: $TARGET_SKILLS_REL"
@@ -279,6 +292,16 @@ if [ $# -ne 1 ]; then
   usage
   exit 1
 fi
+
+# --- host tool preflight: fail fast on missing required tooling instead of
+# deferring to a confusing mid-run failure. python3 and jq are required by the
+# runtime shim and the orchestrator's jq-based control flow; bash is the
+# installer/shim interpreter. tmux is a runtime (not install-time) requirement,
+# so warn rather than abort.
+for tool in bash python3 jq; do
+  command -v "$tool" >/dev/null 2>&1 || err "Required host tool not found: $tool. Install it before running (macOS: 'brew install $tool'; Debian/Ubuntu: 'sudo apt-get install -y $tool')."
+done
+command -v tmux >/dev/null 2>&1 || warn "tmux not found on PATH; it is required at runtime to spawn child sessions (macOS: 'brew install tmux'; Debian/Ubuntu: 'sudo apt-get install -y tmux'). Inspect-only commands still work."
 
 TARGET_ROOT="$(resolve_abs_dir "$1")"
 TARGET_BMAD="$TARGET_ROOT/_bmad"

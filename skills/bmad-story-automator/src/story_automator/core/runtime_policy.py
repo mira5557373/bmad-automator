@@ -424,6 +424,24 @@ def _resolve_success_paths(policy: dict[str, Any], *, project_root: Path, bundle
             _set_or_verify_hash(success, path_key="contractPath", hash_key="contractHash", label="policy success contract")
 
 
+def resolve_parse_schema(contract: dict[str, Any], *, project_root: str | Path | None = None) -> None:
+    """Resolve only the parse schema path/hash for a single step contract.
+
+    Lets parse-output classify a step's output after loading the policy with
+    resolve_assets=False, so a missing/unresolvable dependency *skill* for an
+    unrelated step does not break output classification (the parse schema is
+    bundled data, independent of any skill asset).
+    """
+    root = Path(project_root or get_project_root()).resolve()
+    bundle_root = bundled_skill_root(root)
+    parse = contract.setdefault("parse", {})
+    schema_file = str(parse.get("schemaFile") or "").strip()
+    if not schema_file:
+        raise PolicyError("missing parse schema")
+    parse["schemaPath"] = _resolve_data_path(schema_file, project_root=root, bundle_root=bundle_root)
+    _set_or_verify_hash(parse, path_key="schemaPath", hash_key="schemaHash", label="policy parse schema")
+
+
 def _resolve_step_assets(step: str, assets: dict[str, Any], project_root: Path) -> dict[str, str]:
     skill_name = str(assets.get("skillName") or "").strip()
     if not skill_name:
