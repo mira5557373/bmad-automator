@@ -43,7 +43,7 @@ Which AI coding agent should run your workflows?
 | Agent | CLI Command | Prompt Style | Best For |
 |-------|-------------|--------------|----------|
 | **Claude** | `claude --dangerously-skip-permissions` | Natural language skill prompt | BMAD workflows |
-| **Codex** | `codex exec --full-auto` | Natural language skill prompt | OpenAI Codex users |
+| **Codex** | `codex exec` | Natural language skill prompt | OpenAI Codex users |
 
 **Primary Agent:** (default: auto, resolves from active runtime provider)
 **Fallback Agent:** (default: false, disabled unless configured)

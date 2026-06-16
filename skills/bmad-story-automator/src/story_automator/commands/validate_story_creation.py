@@ -15,7 +15,12 @@ ARTIFACT_RESOLUTION_ERRORS = (OSError, ValueError)
 def cmd_validate_story_creation(args: list[str]) -> int:
     action = args[0] if args else ""
     rest = args[1:] if args else []
-    project_root = os.environ.get("PROJECT_ROOT", os.getcwd())
+    # `or` (not the 2-arg default) so an explicitly-empty PROJECT_ROOT behaves
+    # like unset, matching get_project_root()/common.project_root(). (Not
+    # .resolve()d here: downstream artifact/glob/policy resolution already
+    # resolves, and resolving the display path would diverge from the dir other
+    # consumers compute — e.g. /tmp vs /private/tmp, or Windows 8.3 names.)
+    project_root = os.environ.get("PROJECT_ROOT") or os.getcwd()
     default_artifacts_dir: Path | None = None
 
     def resolve_default_artifacts_dir() -> Path:

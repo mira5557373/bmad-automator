@@ -28,7 +28,7 @@ Agent selection is resolved via the deterministic agents file created in preflig
 | Agent | CLI | Prompt Style | Timeout | Todo Tracking |
 |-------|-----|--------------|---------|---------------|
 | Claude | `claude --dangerously-skip-permissions` | Natural language skill prompt | 60min | ☒/☐ checkboxes |
-| Codex | `codex exec --full-auto` | Natural language prompt | 90min (1.5x) | Not supported |
+| Codex | `codex exec` | Natural language prompt | 90min (1.5x) | Not supported |
 
 **CRITICAL:** Both Claude and Codex prompts must name the skill/workflow to execute and include the story ID.
 

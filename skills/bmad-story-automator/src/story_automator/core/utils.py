@@ -137,7 +137,9 @@ def get_pwd() -> str:
 
 
 def get_project_root() -> str:
-    return os.environ.get("PROJECT_ROOT", get_pwd())
+    # `or` so an explicitly-empty PROJECT_ROOT falls back to cwd, matching
+    # common.project_root() / runtime_layout / basic.py rather than returning "".
+    return os.environ.get("PROJECT_ROOT") or get_pwd()
 
 
 def get_project_slug(project_root: str | None = None) -> str:
