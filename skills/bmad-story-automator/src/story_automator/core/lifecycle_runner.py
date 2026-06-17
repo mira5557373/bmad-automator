@@ -105,9 +105,7 @@ def _default_verifier_dispatch(
 ) -> dict[str, Any]:
     from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
 
-    return run_lifecycle_verifier(
-        name, node=node, project_root=project_root, **kwargs
-    )
+    return run_lifecycle_verifier(name, node=node, project_root=project_root, **kwargs)
 
 
 def _emit_safe(emitter: Any, event: Any) -> None:
@@ -261,9 +259,7 @@ def run_next_node(
             ),
         )
         final_state = (
-            "awaiting_approval"
-            if terminal_state is NodeState.AWAITING_APPROVAL
-            else "complete"
+            "awaiting_approval" if terminal_state is NodeState.AWAITING_APPROVAL else "complete"
         )
         return RunResult(
             node_id=node_id,
@@ -315,9 +311,7 @@ def run_next_node(
     command = f"# lifecycle: invoke skill {node.skill} for node {node.id}"
     agent = node.agent_role
     try:
-        spawn_out, spawn_code = spawn_agent(
-            session, command, agent, project_root
-        )
+        spawn_out, spawn_code = spawn_agent(session, command, agent, project_root)
     except Exception as exc:  # noqa: BLE001
         return _fail(
             "spawn_raised",

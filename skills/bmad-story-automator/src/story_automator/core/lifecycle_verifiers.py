@@ -153,7 +153,6 @@ def run_lifecycle_verifier(
     verifier = LIFECYCLE_VERIFIERS.get(name)
     if verifier is None:
         raise VerifierError(
-            f"unknown lifecycle verifier {name!r}; "
-            f"known: {sorted(LIFECYCLE_VERIFIERS)!r}"
+            f"unknown lifecycle verifier {name!r}; known: {sorted(LIFECYCLE_VERIFIERS)!r}"
         )
     return verifier(node=node, project_root=project_root, **kwargs)

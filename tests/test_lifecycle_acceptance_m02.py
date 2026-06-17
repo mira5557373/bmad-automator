@@ -33,11 +33,7 @@ class W0M02AcceptanceTests(unittest.TestCase):
         self.status_path = self.root / "lifecycle-status.json"
 
     def test_two_node_run_advances_through_complete(self) -> None:
-        policy = load_policy(
-            (FIXTURE_DIR / "m02-two-node.policy.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        policy = load_policy((FIXTURE_DIR / "m02-two-node.policy.json").read_text(encoding="utf-8"))
         status = new_run_status(
             policy,
             run_id="acc-m02",
@@ -82,11 +78,7 @@ class W0M02AcceptanceTests(unittest.TestCase):
         self.assertEqual(revived.nodes["N1-first"].state, NodeState.COMPLETE)
         self.assertEqual(revived.nodes["N2-second"].state, NodeState.COMPLETE)
 
-        events = list(
-            TelemetryReader(
-                self.root / "telemetry" / "events.jsonl"
-            ).iter_events()
-        )
+        events = list(TelemetryReader(self.root / "telemetry" / "events.jsonl").iter_events())
         types = [type(e).__name__ for e in events]
         self.assertEqual(types.count("LifecyclePhaseStarted"), 2)
         self.assertEqual(types.count("LifecyclePhaseCompleted"), 2)
@@ -98,9 +90,7 @@ class W0M02AcceptanceTests(unittest.TestCase):
 
     def test_phase4_delegate_path_advances_and_emits(self) -> None:
         policy = load_policy(
-            (FIXTURE_DIR / "m02-phase4-delegate.policy.json").read_text(
-                encoding="utf-8"
-            )
+            (FIXTURE_DIR / "m02-phase4-delegate.policy.json").read_text(encoding="utf-8")
         )
         status = new_run_status(
             policy,
@@ -109,9 +99,7 @@ class W0M02AcceptanceTests(unittest.TestCase):
             started_at="2026-06-17T00:00:00Z",
         )
         (self.root / "epics").mkdir()
-        (self.root / "epics" / "e1.md").write_text(
-            "# e1\n", encoding="utf-8"
-        )
+        (self.root / "epics" / "e1.md").write_text("# e1\n", encoding="utf-8")
         status.nodes["B3-epics"].state = NodeState.COMPLETE
         save_status(self.status_path, status)
 
@@ -127,9 +115,7 @@ class W0M02AcceptanceTests(unittest.TestCase):
             return {"verified": True}
 
         def never_spawn(*a, **k):
-            raise AssertionError(
-                "spawn_agent must not be invoked for track=bmm phase=4"
-            )
+            raise AssertionError("spawn_agent must not be invoked for track=bmm phase=4")
 
         result = run_next_node(
             policy,
@@ -146,14 +132,8 @@ class W0M02AcceptanceTests(unittest.TestCase):
         self.assertEqual(result.final_state, "complete")
         self.assertEqual(delegate_invocations, ["B4-sprint"])
 
-        events = list(
-            TelemetryReader(
-                self.root / "telemetry" / "events.jsonl"
-            ).iter_events()
-        )
-        types = [
-            (type(e).__name__, getattr(e, "node_id", "")) for e in events
-        ]
+        events = list(TelemetryReader(self.root / "telemetry" / "events.jsonl").iter_events())
+        types = [(type(e).__name__, getattr(e, "node_id", "")) for e in events]
         self.assertIn(("LifecyclePhaseStarted", "B4-sprint"), types)
         self.assertIn(("LifecyclePhaseCompleted", "B4-sprint"), types)
 

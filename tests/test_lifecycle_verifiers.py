@@ -54,9 +54,7 @@ class LifecycleVerifiersModuleTests(unittest.TestCase):
             output_artifact="docs/x.md",
         )
         with self.assertRaises(VerifierError):
-            run_lifecycle_verifier(
-                "bogus_verifier_name", node=node, project_root="/tmp"
-            )
+            run_lifecycle_verifier("bogus_verifier_name", node=node, project_root="/tmp")
 
 
 class ArtifactExistsVerifierTests(unittest.TestCase):
@@ -76,9 +74,7 @@ class ArtifactExistsVerifierTests(unittest.TestCase):
             verifier="artifact_exists",
             output_artifact="docs/brief.md",
         )
-        result = run_lifecycle_verifier(
-            "artifact_exists", node=node, project_root=str(self.root)
-        )
+        result = run_lifecycle_verifier("artifact_exists", node=node, project_root=str(self.root))
         self.assertTrue(result["verified"])
         self.assertEqual(result["path"], "docs/brief.md")
 
@@ -90,9 +86,7 @@ class ArtifactExistsVerifierTests(unittest.TestCase):
             verifier="artifact_exists",
             output_artifact="docs/missing.md",
         )
-        result = run_lifecycle_verifier(
-            "artifact_exists", node=node, project_root=str(self.root)
-        )
+        result = run_lifecycle_verifier("artifact_exists", node=node, project_root=str(self.root))
         self.assertFalse(result["verified"])
         self.assertEqual(result["reason"], "artifact_missing")
 
@@ -107,9 +101,7 @@ class ArtifactExistsVerifierTests(unittest.TestCase):
             verifier="artifact_exists",
             output_artifact="epics/",
         )
-        result = run_lifecycle_verifier(
-            "artifact_exists", node=node, project_root=str(self.root)
-        )
+        result = run_lifecycle_verifier("artifact_exists", node=node, project_root=str(self.root))
         self.assertTrue(result["verified"])
 
     def test_empty_directory_fails(self) -> None:
@@ -121,9 +113,7 @@ class ArtifactExistsVerifierTests(unittest.TestCase):
             verifier="artifact_exists",
             output_artifact="epics/",
         )
-        result = run_lifecycle_verifier(
-            "artifact_exists", node=node, project_root=str(self.root)
-        )
+        result = run_lifecycle_verifier("artifact_exists", node=node, project_root=str(self.root))
         self.assertFalse(result["verified"])
         self.assertEqual(result["reason"], "artifact_empty")
 
@@ -140,10 +130,7 @@ class StructuralCompleteVerifierTests(unittest.TestCase):
         artifact = self.root / "docs" / "prd.md"
         artifact.parent.mkdir(parents=True)
         artifact.write_text(
-            "---\n"
-            'title: "PRD"\n'
-            "status: complete\n"
-            "---\n# PRD\n",
+            '---\ntitle: "PRD"\nstatus: complete\n---\n# PRD\n',
             encoding="utf-8",
         )
         node = _make_node(
@@ -231,9 +218,7 @@ class ValidatorSkillVerifierTests(unittest.TestCase):
 
         artifact = self.root / "docs" / "prd.md"
         artifact.parent.mkdir(parents=True)
-        artifact.write_text(
-            "---\nstatus: complete\n---\n# PRD\n", encoding="utf-8"
-        )
+        artifact.write_text("---\nstatus: complete\n---\n# PRD\n", encoding="utf-8")
 
         calls: list = []
 
@@ -255,9 +240,7 @@ class ValidatorSkillVerifierTests(unittest.TestCase):
         )
         self.assertTrue(result["verified"])
         self.assertEqual(result["validator"], "bmad-validate-prd")
-        self.assertEqual(
-            calls, [("bmad-validate-prd", "B2-prd", str(self.root))]
-        )
+        self.assertEqual(calls, [("bmad-validate-prd", "B2-prd", str(self.root))])
 
     def test_missing_validator_skill_field_fails(self) -> None:
         from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
@@ -290,9 +273,7 @@ class ValidatorSkillVerifierTests(unittest.TestCase):
             validator_skill="bmad-validate-prd",
         )
         with self.assertRaises(VerifierError):
-            run_lifecycle_verifier(
-                "validator_skill", node=node, project_root=str(self.root)
-            )
+            run_lifecycle_verifier("validator_skill", node=node, project_root=str(self.root))
 
     def test_dispatch_returning_verified_false_propagates(self) -> None:
         from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier

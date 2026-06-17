@@ -81,9 +81,7 @@ class StateTransitionPrimitiveTests(unittest.TestCase):
         )
         revived = load_status(status_path)
         self.assertEqual(revived.nodes["B1-brief"].state, NodeState.RUNNING)
-        self.assertEqual(
-            revived.nodes["B1-brief"].started_at, "2026-06-17T00:00:01Z"
-        )
+        self.assertEqual(revived.nodes["B1-brief"].started_at, "2026-06-17T00:00:01Z")
 
     def test_transition_to_complete_records_completed_at(self) -> None:
         from story_automator.core.lifecycle_runner import _transition_node
@@ -102,9 +100,7 @@ class StateTransitionPrimitiveTests(unittest.TestCase):
         )
         revived = load_status(status_path)
         self.assertEqual(revived.nodes["B1-brief"].state, NodeState.COMPLETE)
-        self.assertEqual(
-            revived.nodes["B1-brief"].completed_at, "2026-06-17T00:01:00Z"
-        )
+        self.assertEqual(revived.nodes["B1-brief"].completed_at, "2026-06-17T00:01:00Z")
 
     def test_transition_to_failed_records_last_error(self) -> None:
         from story_automator.core.lifecycle_runner import _transition_node
@@ -124,9 +120,7 @@ class StateTransitionPrimitiveTests(unittest.TestCase):
         )
         revived = load_status(status_path)
         self.assertEqual(revived.nodes["B1-brief"].state, NodeState.FAILED)
-        self.assertIn(
-            "agent_crashed", revived.nodes["B1-brief"].last_error
-        )
+        self.assertIn("agent_crashed", revived.nodes["B1-brief"].last_error)
 
 
 class SpawnPathTests(unittest.TestCase):
@@ -217,9 +211,7 @@ class SpawnPathTests(unittest.TestCase):
 
         def spy_spawn(session, command, agent, project_root, mode=None):
             on_disk = load_status(self.status_path)
-            observed_states_at_spawn.append(
-                on_disk.nodes["B1-brief"].state
-            )
+            observed_states_at_spawn.append(on_disk.nodes["B1-brief"].state)
             return ("", 0)
 
         run_next_node(
@@ -286,9 +278,7 @@ class Phase4DelegationTests(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.status_path = self.root / "lifecycle-status.json"
         (self.root / "epics").mkdir()
-        (self.root / "epics" / "epic-1.md").write_text(
-            "# E1\n", encoding="utf-8"
-        )
+        (self.root / "epics" / "epic-1.md").write_text("# E1\n", encoding="utf-8")
 
         from story_automator.core.lifecycle_policy import load_policy
         from story_automator.core.lifecycle_status import (
@@ -384,9 +374,7 @@ class Phase4DelegationTests(unittest.TestCase):
         self.assertEqual(result.final_state, "failed")
         on_disk = load_status(self.status_path)
         self.assertEqual(on_disk.nodes["B4-sprint"].state, NodeState.FAILED)
-        self.assertIn(
-            "p0_gate_failed", on_disk.nodes["B4-sprint"].last_error
-        )
+        self.assertIn("p0_gate_failed", on_disk.nodes["B4-sprint"].last_error)
 
 
 class VerifierAndGateTests(unittest.TestCase):
@@ -435,9 +423,7 @@ class VerifierAndGateTests(unittest.TestCase):
             monitor_session=lambda *a, **k: 0,
             verifier_dispatch=stub_verifier,
         )
-        self.assertEqual(
-            verifier_calls, [self.policy.nodes["B1-brief"].verifier]
-        )
+        self.assertEqual(verifier_calls, [self.policy.nodes["B1-brief"].verifier])
 
     def test_gate_human_with_verifier_pass_lands_awaiting_approval(self) -> None:
         from story_automator.core.lifecycle_runner import run_next_node
@@ -460,9 +446,7 @@ class VerifierAndGateTests(unittest.TestCase):
         self.assertEqual(result.final_state, "awaiting_approval")
         self.assertTrue(result.verified)
         on_disk = load_status(self.status_path)
-        self.assertEqual(
-            on_disk.nodes["B1-brief"].state, NodeState.AWAITING_APPROVAL
-        )
+        self.assertEqual(on_disk.nodes["B1-brief"].state, NodeState.AWAITING_APPROVAL)
 
     def test_gate_human_with_verifier_fail_lands_failed(self) -> None:
         from story_automator.core.lifecycle_runner import run_next_node
@@ -597,9 +581,7 @@ class TelemetryEmissionTests(unittest.TestCase):
             emitter=StubEmitter(),
         )
         types = [type(e).__name__ for e in emitted]
-        self.assertEqual(
-            types, ["LifecyclePhaseStarted", "LifecyclePhaseCompleted"]
-        )
+        self.assertEqual(types, ["LifecyclePhaseStarted", "LifecyclePhaseCompleted"])
         started, completed = emitted[0], emitted[1]
         self.assertIsInstance(started, LifecyclePhaseStarted)
         self.assertIsInstance(completed, LifecyclePhaseCompleted)
@@ -632,9 +614,7 @@ class TelemetryEmissionTests(unittest.TestCase):
             emitter=StubEmitter(),
         )
         types = [type(e).__name__ for e in emitted]
-        self.assertEqual(
-            types, ["LifecyclePhaseStarted", "LifecyclePhaseFailed"]
-        )
+        self.assertEqual(types, ["LifecyclePhaseStarted", "LifecyclePhaseFailed"])
         failed = emitted[1]
         self.assertIsInstance(failed, LifecyclePhaseFailed)
         self.assertEqual(failed.reason, "x")
