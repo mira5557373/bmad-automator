@@ -545,5 +545,120 @@ class VerifierAndGateTests(unittest.TestCase):
         self.assertTrue(result.verified)
 
 
+class TelemetryEmissionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.status_path = self.root / "lifecycle-status.json"
+
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            new_run_status,
+            save_status,
+        )
+
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "lifecycle"
+            / "greenfield-minimal.policy.json"
+        )
+        self.policy = load_policy(fixture.read_text(encoding="utf-8"))
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-tel",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        save_status(self.status_path, self.status)
+
+    def test_emits_started_and_completed_on_happy_path(self) -> None:
+        from story_automator.core.lifecycle_events import (
+            LifecyclePhaseCompleted,
+            LifecyclePhaseStarted,
+        )
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        emitted: list[Any] = []
+
+        class StubEmitter:
+            def emit(self, event):
+                emitted.append(event)
+
+        run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+            emitter=StubEmitter(),
+        )
+        types = [type(e).__name__ for e in emitted]
+        self.assertEqual(
+            types, ["LifecyclePhaseStarted", "LifecyclePhaseCompleted"]
+        )
+        started, completed = emitted[0], emitted[1]
+        self.assertIsInstance(started, LifecyclePhaseStarted)
+        self.assertIsInstance(completed, LifecyclePhaseCompleted)
+        self.assertEqual(started.node_id, "B1-brief")
+        self.assertEqual(started.phase, 1)
+        self.assertEqual(started.track, "bmm")
+        self.assertEqual(completed.gate_decision, "awaiting_approval")
+
+    def test_emits_started_and_failed_on_verifier_rejection(self) -> None:
+        from story_automator.core.lifecycle_events import LifecyclePhaseFailed
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        emitted: list[Any] = []
+
+        class StubEmitter:
+            def emit(self, event):
+                emitted.append(event)
+
+        run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {
+                "verified": False,
+                "reason": "x",
+            },
+            emitter=StubEmitter(),
+        )
+        types = [type(e).__name__ for e in emitted]
+        self.assertEqual(
+            types, ["LifecyclePhaseStarted", "LifecyclePhaseFailed"]
+        )
+        failed = emitted[1]
+        self.assertIsInstance(failed, LifecyclePhaseFailed)
+        self.assertEqual(failed.reason, "x")
+        self.assertEqual(failed.error_class, "VerifierRejected")
+
+    def test_emit_failure_does_not_crash_runner(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        class FlakyEmitter:
+            def emit(self, event):
+                raise OSError("disk full")
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+            emitter=FlakyEmitter(),
+        )
+        self.assertEqual(result.final_state, "awaiting_approval")
+
+
 if __name__ == "__main__":
     unittest.main()
