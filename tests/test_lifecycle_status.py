@@ -245,3 +245,76 @@ class StatusSaveLoadRoundTripTests(unittest.TestCase):
 
         loaded = load_status(target)
         self.assertEqual(loaded.run_id, "r-4")
+
+
+class StatusResumeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_status_resume_after_partial_completion(self) -> None:
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            ArtifactRecord,
+            NodeState,
+            load_status,
+            new_run_status,
+            save_status,
+        )
+
+        policy = load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        status = new_run_status(
+            policy, run_id="r-5", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        status.nodes["B1-brief"].state = NodeState.COMPLETE
+        status.nodes["B1-brief"].started_at = "2026-06-17T10:01:00Z"
+        status.nodes["B1-brief"].completed_at = "2026-06-17T10:05:00Z"
+        status.nodes["B1-brief"].attempts = 1
+        status.artifacts["docs/product-brief.md"] = ArtifactRecord(
+            path="docs/product-brief.md",
+            produced_by_node="B1-brief",
+            produced_at="2026-06-17T10:05:00Z",
+            sha256="a" * 64,
+        )
+
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, status)
+
+        loaded = load_status(target, expected_policy=policy)
+        self.assertEqual(loaded.nodes["B1-brief"].state, NodeState.COMPLETE)
+        self.assertEqual(loaded.nodes["B1-brief"].attempts, 1)
+        self.assertEqual(loaded.nodes["B2-prd"].state, NodeState.PENDING)
+        self.assertIn("docs/product-brief.md", loaded.artifacts)
+        self.assertEqual(
+            loaded.artifacts["docs/product-brief.md"].produced_by_node, "B1-brief"
+        )
+
+    def test_unknown_node_state_value_raises_clear_error(self) -> None:
+        from story_automator.core.lifecycle_status import load_status
+
+        bad = {
+            "version": 1,
+            "run_id": "r-6",
+            "mode": "greenfield",
+            "started_at": "2026-06-17T10:00:00Z",
+            "policy_hash": "0" * 64,
+            "nodes": {
+                "B1-brief": {
+                    "state": "not-a-real-state",
+                    "attempts": 0,
+                    "started_at": "",
+                    "completed_at": "",
+                    "last_error": "",
+                    "gate_decision": None,
+                    "gate_notes": "",
+                }
+            },
+            "artifacts": {},
+        }
+        target = self.dir / "lifecycle-status.json"
+        target.write_text(json.dumps(bad), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            load_status(target)
