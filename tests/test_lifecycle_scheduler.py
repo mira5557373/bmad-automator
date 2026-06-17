@@ -230,3 +230,102 @@ class RunnableNodesTests(unittest.TestCase):
             max_concurrency=10,
         )
         self.assertEqual(out, [])
+
+
+class ConcurrencyCapTests(unittest.TestCase):
+    def _diamond_policy(self):
+        import json as _json
+
+        from story_automator.core.lifecycle_policy import load_policy
+
+        raw = {
+            "version": 1,
+            "nodes": {
+                "B1": {
+                    "track": "bmm",
+                    "phase": 1,
+                    "skill": "bmad-noop",
+                    "validator_skill": None,
+                    "deps": [],
+                    "input_artifacts": [],
+                    "output_artifact": "docs/b1.md",
+                    "verifier": "structural",
+                    "gate": "auto",
+                    "modes": ["greenfield"],
+                    "agent_role": "analyst",
+                    "interactive": False,
+                },
+                **{
+                    name: {
+                        "track": "bmm",
+                        "phase": 2,
+                        "skill": "bmad-noop",
+                        "validator_skill": None,
+                        "deps": ["B1"],
+                        "input_artifacts": ["docs/b1.md"],
+                        "output_artifact": f"docs/{name}.md",
+                        "verifier": "structural",
+                        "gate": "auto",
+                        "modes": ["greenfield"],
+                        "agent_role": "analyst",
+                        "interactive": False,
+                    }
+                    for name in ("B2a", "B2b", "B2c")
+                },
+            },
+            "entry": {"greenfield": ["B1"], "brownfield": []},
+        }
+        return load_policy(_json.dumps(raw))
+
+    def test_cap_limits_returned_runnable_set(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState, new_run_status
+
+        policy = self._diamond_policy()
+        status = new_run_status(
+            policy, run_id="r-c", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        status.nodes["B1"].state = NodeState.COMPLETE
+
+        out = runnable_nodes(
+            policy,
+            status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=2,
+        )
+        self.assertEqual(out, ["B2a", "B2b"])
+
+        out1 = runnable_nodes(
+            policy,
+            status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=1,
+        )
+        self.assertEqual(out1, ["B2a"])
+
+        out_all = runnable_nodes(
+            policy,
+            status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=10,
+        )
+        self.assertEqual(out_all, ["B2a", "B2b", "B2c"])
+
+    def test_cap_zero_raises(self) -> None:
+        from story_automator.core.lifecycle_scheduler import (
+            SchedulerError,
+            runnable_nodes,
+        )
+        from story_automator.core.lifecycle_status import new_run_status
+
+        policy = self._diamond_policy()
+        status = new_run_status(
+            policy, run_id="r-c", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        with self.assertRaises(SchedulerError):
+            runnable_nodes(
+                policy,
+                status,
+                artifact_exists=lambda _p: True,
+                max_concurrency=0,
+            )
