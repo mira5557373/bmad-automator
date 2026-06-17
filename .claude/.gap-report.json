@@ -1,36 +1,29 @@
 {
-  "pass": 2,
+  "pass": 1,
   "critical_gaps": 0,
   "architectural_gaps": 0,
   "important_gaps": 0,
-  "minor_gaps": 0,
-  "deferred_gaps": 0,
-  "total_gaps_found": 3,
-  "gaps_fixed_this_pass": 3,
+  "minor_gaps": 11,
+  "deferred_gaps": 8,
+  "total_gaps_found": 28,
+  "gaps_fixed_this_pass": 9,
   "tests_green": true,
   "lint_clean": true,
   "converged": true,
-  "milestone": "m06a-m3-feature-tester",
-  "scope": {
-    "base_commit": "3b5bfa98e6c624ad6081c79f5db0e8890e92a956",
-    "files_reviewed": [
-      "skills/bmad-story-automator/src/story_automator/core/feature_tester.py",
-      "tests/test_feature_tester.py"
-    ],
-    "test_results": "tests.test_feature_tester: 53/53 OK",
-    "lint_results": "ruff check + ruff format --check clean",
-    "full_suite_note": "Repository-wide test failures (psutil/filelock-dependent tests in test_atomic_io etc.) are pre-existing environment issues unrelated to this milestone — same failure count before and after these changes."
-  },
+  "milestone": "w0-m01-data-model-scheduler",
+  "phase": "A (Plan + Ultrathink)",
+  "plan_path": "docs/superpowers/plans/2026-06-17-w0-m01-data-model-scheduler.md",
   "gap_summaries": [
-    "[post-impl] M1: _find_existing_test docstring claimed 'file-read errors propagate naturally as OSError', but path.read_text(encoding='utf-8') can also raise UnicodeDecodeError (subclass of ValueError, NOT OSError) on a non-UTF-8 file. Fixed: docstring now lists both OSError and UnicodeDecodeError as propagable.",
-    "[post-impl] M2: PlanFeatureTestsDryRunTests.test_dry_run_does_not_write_file constructed Path(entry.created_test_path) without first asserting it is not None — inconsistent with the parallel test_creates_skeleton_when_no_existing_test, which does assertIsNotNone before the Path() call. Fixed: added assertIsNotNone(entry.created_test_path) for symmetry and to make the None-narrowing visible to static type checkers.",
-    "[production] P1: Module declared logger = logging.getLogger(__name__) but emitted zero log records — an automation utility that walks REQs and writes files should provide actionable observability so the M06b orchestrator (and operators) can see which REQs were found, created, or skipped without re-deriving from the returned plan. Added logger.info() emissions at all three TestPlanEntry branch points (found/created/skipped) carrying req_id and resolved path; also factored str(target.resolve()) into target_str so the path is computed exactly once per non-found verdict instead of twice."
-  ],
-  "production_readiness": {
-    "artifact_type": "library",
-    "security": "ok — REQ id strictly validated via REQ-\\d+ fullmatch; tests_dir glob restricted to test_compliance_*.py; write goes through write_atomic_text (M05 atomic + per-path-lock semantics); no secrets, no SQL, no shell.",
-    "error_resilience": "ok — OSError/UnicodeDecodeError propagate by design; atomic_io handles Windows ERROR_SHARING_VIOLATION retries upstream; no swallowed exceptions.",
-    "testing": "ok — no time.sleep, no network, no subprocess; tests use tempfile.TemporaryDirectory; assertions verify exact values (golden-string byte-equality + path equality).",
-    "code_quality": "ok — zero TODO/FIXME/HACK markers; follows CLAUDE.md conventions (from __future__ import annotations, @dataclass(kw_only=True, frozen=True), PEP 604 unions, ruff clean, ruff format clean)."
-  }
+    "[ultrathink] CRITICAL: new_run_status seeded every node PENDING regardless of mode — out-of-mode nodes should be SKIPPED so status counts and downstream invariants stay honest. FIXED inline in Task 7 (new_run_status now marks node SKIPPED iff status.mode not in node.modes; added test_new_run_status_marks_out_of_mode_nodes_skipped).",
+    "[ultrathink] CRITICAL: runnable_nodes took mode= as a separate parameter while RunStatus already records status.mode — two-source-of-truth footgun where a test or caller could pass an inconsistent mode and silently mis-schedule. FIXED inline in Tasks 10-13 (runnable_nodes now derives mode from status.mode; all test call sites updated; topological_order still takes mode explicitly because it is a policy-shape function independent of any run).",
+    "[ultrathink] CRITICAL: status_from_dict accepted any string for mode on reload, meaning a hand-edited or corrupted status file with mode=midfield would silently corrupt scheduler behavior. FIXED inline in Task 7 (status_from_dict validates mode against _VALID_MODES and raises ValueError on mismatch; new_run_status applies the same check on construction; added test_new_run_status_rejects_unknown_mode).",
+    "[ultrathink] ARCHITECTURAL: scheduler does not enforce state-transition legality — a phase-runner that marks a gated node COMPLETE without going through AWAITING_APPROVAL would not be stopped by W0-M01. INTENTIONAL design (the scheduler is a pure read of what-is-runnable-next, not a state-machine guardian); the constraint belongs to W0-M02 phase-runner and W0-M03 approval-gate. DOCUMENTED as Design Decision #9 in the plan header so reviewers do not mistake omission for oversight.",
+    "[ultrathink] IMPORTANT: no test for json.JSONDecodeError to PolicyError translation. FIXED inline in Task 3 (added test_invalid_json_input_raises_policy_error + test_top_level_non_object_raises).",
+    "[ultrathink] IMPORTANT: Task 9 placed `import json` at the bottom of tests/test_lifecycle_status.py with a noqa-E402 hack. FIXED inline in Task 7 (imports consolidated at the top of the file when Task 7 first edits it; bottom-of-file import + noqa removed).",
+    "[ultrathink] IMPORTANT: _validate_acyclic loop carried a misleading comment (dep is guaranteed to be in nodes) in a loop that did not use the dep variable, plus an O(deps) increment instead of a single len(deps) assignment. FIXED inline in Task 5 (refactored to in_degree[node.id] = len(node.deps) with an accurate comment about where the closed-world invariant is actually used).",
+    "[ultrathink] IMPORTANT: Design Decision #6 originally claimed a default artifact_exists implementation exists; no such default is provided in the code (the parameter is required). FIXED inline (Design Decision #6 now says the caller — phase-runner in W0-M02 — constructs the appropriate callable; no default).",
+    "[ultrathink] IMPORTANT: no test for empty active-set scheduling (mode filter eliminates all nodes). FIXED inline in Task 10 (added test_topo_order_empty_active_set_returns_empty_list).",
+    "[ultrathink] MINOR (deliberately deferred, kept as-is): version:int accepts 0/negative; gate_decision is str|None without enum; ArtifactRecord.sha256 defaults to empty string; save_status output is not byte-stable across re-runs (only structurally equal); track/agent_role/verifier/validator_skill fields are free-form (extensible by design); interactive is permissive-truthy via bool(); full-both-modes.policy.json was listed in File Structure but no task consumes it (Note 8 documents this honestly); _VALID_MODES duplicated across lifecycle_policy.py and lifecycle_scheduler.py (acceptable — 1-line each). 11 total minor items kept as-is.",
+    "[ultrathink] DEFERRED (explicit non-goals of W0-M01, documented in the plan Scope section): phase-runner (W0-M02), verifier registry (W0-M02), approval-gate primitive (W0-M03), entry-mode router CLI (W0-M04), core/lifecycle_events.py (W0-M02), CLI status command (W0-M03/M04), multi-component policies (W10), WDS track integration (W9). 8 total deferred items."
+  ]
 }
