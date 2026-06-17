@@ -389,5 +389,161 @@ class Phase4DelegationTests(unittest.TestCase):
         )
 
 
+class VerifierAndGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.status_path = self.root / "lifecycle-status.json"
+
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            new_run_status,
+            save_status,
+        )
+
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "lifecycle"
+            / "greenfield-minimal.policy.json"
+        )
+        self.policy = load_policy(fixture.read_text(encoding="utf-8"))
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-vg",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        save_status(self.status_path, self.status)
+
+    def test_verifier_is_invoked(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        verifier_calls: list = []
+
+        def stub_verifier(name, *, node, project_root, **kwargs):
+            verifier_calls.append(name)
+            return {"verified": True, "verifier": name}
+
+        run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=stub_verifier,
+        )
+        self.assertEqual(
+            verifier_calls, [self.policy.nodes["B1-brief"].verifier]
+        )
+
+    def test_gate_human_with_verifier_pass_lands_awaiting_approval(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            load_status,
+        )
+
+        self.assertEqual(self.policy.nodes["B1-brief"].gate, "human")
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+        )
+        self.assertEqual(result.final_state, "awaiting_approval")
+        self.assertTrue(result.verified)
+        on_disk = load_status(self.status_path)
+        self.assertEqual(
+            on_disk.nodes["B1-brief"].state, NodeState.AWAITING_APPROVAL
+        )
+
+    def test_gate_human_with_verifier_fail_lands_failed(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            load_status,
+        )
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {
+                "verified": False,
+                "reason": "structural_check_failed",
+            },
+        )
+        self.assertEqual(result.final_state, "failed")
+        self.assertFalse(result.verified)
+        on_disk = load_status(self.status_path)
+        self.assertEqual(on_disk.nodes["B1-brief"].state, NodeState.FAILED)
+        self.assertIn(
+            "structural_check_failed",
+            on_disk.nodes["B1-brief"].last_error,
+        )
+
+    def test_no_verifier_dispatch_uses_lifecycle_verifiers_registry(self) -> None:
+        import json as _json
+
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_runner import run_next_node
+        from story_automator.core.lifecycle_status import (
+            new_run_status,
+            save_status,
+        )
+
+        minimal = {
+            "version": 1,
+            "nodes": {
+                "N1": {
+                    "track": "bmm",
+                    "phase": 1,
+                    "skill": "bmad-x",
+                    "validator_skill": None,
+                    "deps": [],
+                    "input_artifacts": [],
+                    "output_artifact": "out.md",
+                    "verifier": "artifact_exists",
+                    "gate": "auto",
+                    "modes": ["greenfield"],
+                    "agent_role": "analyst",
+                    "interactive": False,
+                }
+            },
+            "entry": {"greenfield": ["N1"], "brownfield": []},
+        }
+        policy = load_policy(_json.dumps(minimal))
+        status = new_run_status(
+            policy,
+            run_id="r-default-verifier",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        save_status(self.status_path, status)
+
+        (self.root / "out.md").write_text("# out\n", encoding="utf-8")
+
+        result = run_next_node(
+            policy,
+            status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+        )
+        self.assertEqual(result.final_state, "complete")
+        self.assertTrue(result.verified)
+
+
 if __name__ == "__main__":
     unittest.main()
