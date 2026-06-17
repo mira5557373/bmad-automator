@@ -94,8 +94,10 @@ def load_policy(json_text: str) -> Policy:
         )
 
     version = raw.get("version")
-    if not isinstance(version, int):
+    if isinstance(version, bool) or not isinstance(version, int):
         raise PolicyError(f"policy.version must be int, got {type(version).__name__}")
+    if version < 1:
+        raise PolicyError(f"policy.version must be >= 1, got {version!r}")
 
     nodes_raw = raw.get("nodes")
     if not isinstance(nodes_raw, dict) or not nodes_raw:
@@ -173,7 +175,13 @@ def _validate_closed_world(
 
     known = set(nodes.keys())
     for node_id, node in nodes.items():
+        seen_deps: set[str] = set()
         for dep in node.deps:
+            if dep in seen_deps:
+                raise PolicyError(
+                    f"node {node_id!r} has duplicate dep {dep!r} in deps list"
+                )
+            seen_deps.add(dep)
             if dep == node_id:
                 raise PolicyError(f"node {node_id!r} cannot depend on itself")
             if dep not in known:
@@ -190,6 +198,12 @@ def _validate_closed_world(
                 raise PolicyError(
                     f"entry.{mode_name} references unknown node {entry_id!r}"
                 )
+            if mode_name not in nodes[entry_id].modes:
+                raise PolicyError(
+                    f"entry.{mode_name} references node {entry_id!r} whose "
+                    f"modes={nodes[entry_id].modes!r} does not include "
+                    f"{mode_name!r}"
+                )
 
 
 def _parse_node(node_id: str, raw: Any) -> NodeDef:
@@ -202,12 +216,28 @@ def _parse_node(node_id: str, raw: Any) -> NodeDef:
         if key not in raw:
             raise PolicyError(f"node {node_id!r} missing required field {key!r}")
         value = raw[key]
+        if expected_type is int and isinstance(value, bool):
+            raise PolicyError(
+                f"node {node_id!r} field {key!r} must be int, got bool"
+            )
         if not isinstance(value, expected_type):
             raise PolicyError(
                 f"node {node_id!r} field {key!r} must be {expected_type.__name__}, "
                 f"got {type(value).__name__}"
             )
         return value
+
+    _KNOWN_NODE_FIELDS = frozenset({
+        "track", "phase", "skill", "validator_skill", "deps",
+        "input_artifacts", "output_artifact", "verifier", "gate",
+        "modes", "agent_role", "interactive",
+    })
+    unknown = sorted(set(raw.keys()) - _KNOWN_NODE_FIELDS)
+    if unknown:
+        raise PolicyError(
+            f"node {node_id!r} has unknown field(s) {unknown!r}; "
+            f"allowed: {sorted(_KNOWN_NODE_FIELDS)!r}"
+        )
 
     track = required("track", str)
     phase = required("phase", int)

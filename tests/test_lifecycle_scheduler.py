@@ -311,6 +311,31 @@ class ConcurrencyCapTests(unittest.TestCase):
         )
         self.assertEqual(out_all, ["B2a", "B2b", "B2c"])
 
+    def test_policy_status_drift_raises_scheduler_error(self) -> None:
+        """Phase-C gap: silently skipping a node missing from status (or
+        raising bare KeyError on a dep lookup) masks operator/programmer
+        errors. Drift must be loud."""
+        from story_automator.core.lifecycle_scheduler import (
+            SchedulerError,
+            runnable_nodes,
+        )
+        from story_automator.core.lifecycle_status import new_run_status
+
+        policy = self._diamond_policy()
+        status = new_run_status(
+            policy, run_id="r-drift", mode="greenfield",
+            started_at="2026-06-17T10:00:00Z",
+        )
+        # Drop the B1 node from status, simulating a hand-edited or stale file.
+        del status.nodes["B1"]
+        with self.assertRaises(SchedulerError) as ctx:
+            runnable_nodes(
+                policy, status,
+                artifact_exists=lambda _p: True, max_concurrency=10,
+            )
+        self.assertIn("B1", str(ctx.exception))
+        self.assertIn("drift", str(ctx.exception).lower())
+
     def test_cap_zero_raises(self) -> None:
         from story_automator.core.lifecycle_scheduler import (
             SchedulerError,

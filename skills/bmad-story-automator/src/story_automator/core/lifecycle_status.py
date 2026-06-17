@@ -113,11 +113,20 @@ def new_run_status(
       mode filtering, but recording the skip up front keeps node counts honest.
     - ``mode`` itself is validated against ``_VALID_MODES``; unknown values raise
       ``ValueError``.
+    - ``run_id`` and ``started_at`` must be non-empty strings — empty values
+      break correlation downstream (telemetry, resume) and are rejected up
+      front rather than silently propagated.
     """
 
     if mode not in _VALID_MODES:
         raise ValueError(
             f"mode must be one of {sorted(_VALID_MODES)!r}, got {mode!r}"
+        )
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError(f"run_id must be a non-empty string, got {run_id!r}")
+    if not isinstance(started_at, str) or not started_at:
+        raise ValueError(
+            f"started_at must be a non-empty string, got {started_at!r}"
         )
     return RunStatus(
         run_id=run_id,
@@ -163,7 +172,11 @@ def status_to_dict(status: RunStatus) -> dict[str, Any]:
 
 def status_from_dict(data: dict[str, Any]) -> RunStatus:
     """Inverse of ``status_to_dict``. Unknown NodeState values raise ValueError
-    via the Enum lookup (intentional — fail loud rather than coerce)."""
+    via the Enum lookup (intentional — fail loud rather than coerce). Missing
+    required top-level fields (``mode``, ``run_id``, ``started_at``,
+    ``policy_hash``) raise ``ValueError`` naming the missing field — callers
+    must not have to catch a bare ``KeyError`` to distinguish "corrupt status
+    file" from "programming error"."""
 
     if not isinstance(data, dict):
         raise ValueError(f"status payload must be an object, got {type(data).__name__}")
@@ -173,6 +186,12 @@ def status_from_dict(data: dict[str, Any]) -> RunStatus:
     artifacts_raw = data.get("artifacts", {})
     if not isinstance(artifacts_raw, dict):
         raise ValueError("status.artifacts must be an object")
+
+    for required_field in ("mode", "run_id", "started_at", "policy_hash"):
+        if required_field not in data:
+            raise ValueError(
+                f"status payload missing required field {required_field!r}"
+            )
 
     nodes = {
         node_id: NodeRun(
@@ -186,15 +205,20 @@ def status_from_dict(data: dict[str, Any]) -> RunStatus:
         )
         for node_id, run_raw in nodes_raw.items()
     }
-    artifacts = {
-        art_path: ArtifactRecord(
+    artifacts: dict[str, ArtifactRecord] = {}
+    for art_path, rec_raw in artifacts_raw.items():
+        for required_field in ("produced_by_node", "produced_at"):
+            if required_field not in rec_raw:
+                raise ValueError(
+                    f"status.artifacts[{art_path!r}] missing required field "
+                    f"{required_field!r}"
+                )
+        artifacts[art_path] = ArtifactRecord(
             path=str(rec_raw.get("path", art_path)),
             produced_by_node=str(rec_raw["produced_by_node"]),
             produced_at=str(rec_raw["produced_at"]),
             sha256=str(rec_raw.get("sha256", "")),
         )
-        for art_path, rec_raw in artifacts_raw.items()
-    }
     mode_value = str(data["mode"])
     if mode_value not in _VALID_MODES:
         raise ValueError(
@@ -213,9 +237,15 @@ def status_from_dict(data: dict[str, Any]) -> RunStatus:
 
 def save_status(path: Path, status: RunStatus) -> None:
     """Atomic write via ``core.atomic_io.write_atomic_text``. The caller must
-    ensure ``path.parent`` exists (matching the atomic_io convention)."""
+    ensure ``path.parent`` exists (matching the atomic_io convention).
 
-    payload = json.dumps(status_to_dict(status), separators=(",", ":"))
+    Keys are sorted so two saves of an equivalent status produce byte-equal
+    output — important for audit-log diffs and matches the canonical-form
+    convention used by :func:`lifecycle_policy.canonical_policy_json`."""
+
+    payload = json.dumps(
+        status_to_dict(status), sort_keys=True, separators=(",", ":")
+    )
     write_atomic_text(Path(path), payload)
 
 

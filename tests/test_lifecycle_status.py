@@ -292,6 +292,75 @@ class StatusResumeTests(unittest.TestCase):
             loaded.artifacts["docs/product-brief.md"].produced_by_node, "B1-brief"
         )
 
+    def test_status_missing_top_level_field_raises_value_error(self) -> None:
+        """Phase-C gap: missing 'mode'/'run_id'/'started_at'/'policy_hash'
+        previously surfaced as a bare KeyError, which is indistinguishable
+        from a programming bug. Callers need a typed signal."""
+        from story_automator.core.lifecycle_status import load_status
+
+        base = {
+            "version": 1,
+            "run_id": "r",
+            "mode": "greenfield",
+            "started_at": "2026-06-17T10:00:00Z",
+            "policy_hash": "0" * 64,
+            "nodes": {},
+            "artifacts": {},
+        }
+        for field_name in ("mode", "run_id", "started_at", "policy_hash"):
+            target = self.dir / f"missing-{field_name}.json"
+            payload = {k: v for k, v in base.items() if k != field_name}
+            target.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                load_status(target)
+            self.assertIn(field_name, str(ctx.exception))
+
+    def test_new_run_status_rejects_empty_run_id(self) -> None:
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import new_run_status
+
+        policy = load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        with self.assertRaises(ValueError):
+            new_run_status(
+                policy, run_id="", mode="greenfield",
+                started_at="2026-06-17T10:00:00Z",
+            )
+
+    def test_new_run_status_rejects_empty_started_at(self) -> None:
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import new_run_status
+
+        policy = load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        with self.assertRaises(ValueError):
+            new_run_status(policy, run_id="r", mode="greenfield", started_at="")
+
+    def test_save_status_output_is_key_sorted(self) -> None:
+        """Stable diff: two saves of equivalent status must be byte-equal."""
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import new_run_status, save_status
+
+        policy = load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        status = new_run_status(
+            policy, run_id="r-srt", mode="greenfield",
+            started_at="2026-06-17T10:00:00Z",
+        )
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, status)
+        first = target.read_bytes()
+        save_status(target, status)
+        second = target.read_bytes()
+        self.assertEqual(first, second)
+        # Sort-keys → top-level keys appear alphabetically; "artifacts" comes
+        # before "mode" / "nodes" / "policy_hash" / "run_id" / "started_at" /
+        # "version" — assert the lexicographic anchor.
+        self.assertTrue(first.startswith(b'{"artifacts":'))
+
     def test_unknown_node_state_value_raises_clear_error(self) -> None:
         from story_automator.core.lifecycle_status import load_status
 

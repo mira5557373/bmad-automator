@@ -118,13 +118,28 @@ def runnable_nodes(
             break
         node = active[node_id]
         run = status.nodes.get(node_id)
-        if run is None or run.state != NodeState.PENDING:
+        if run is None:
+            raise SchedulerError(
+                f"policy/status drift: node {node_id!r} present in policy but "
+                f"missing from status.nodes — refusing to schedule against a "
+                f"stale or hand-edited status file"
+            )
+        if run.state != NodeState.PENDING:
             continue
-        if not all(
-            status.nodes[dep].state == NodeState.COMPLETE
-            for dep in node.deps
-            if dep in active
-        ):
+        deps_complete = True
+        for dep in node.deps:
+            if dep not in active:
+                continue
+            dep_run = status.nodes.get(dep)
+            if dep_run is None:
+                raise SchedulerError(
+                    f"policy/status drift: dep {dep!r} of node {node_id!r} "
+                    f"missing from status.nodes"
+                )
+            if dep_run.state != NodeState.COMPLETE:
+                deps_complete = False
+                break
+        if not deps_complete:
             continue
         if not all(artifact_exists(path) for path in node.input_artifacts):
             continue

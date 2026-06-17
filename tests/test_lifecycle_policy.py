@@ -222,6 +222,88 @@ class PolicyCycleDetectionTests(unittest.TestCase):
         self.load_policy(_json.dumps(policy))
 
 
+class PolicyHardeningTests(unittest.TestCase):
+    """Coverage for the Phase-C review gaps: bool-as-int rejection,
+    unknown-field rejection, version-range, duplicate-dep guard, and entry-
+    mode mismatch guard. All are operator-error edges that previously
+    accepted silently or surfaced as the wrong error type."""
+
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import PolicyError, load_policy
+
+        self.PolicyError = PolicyError
+        self.load_policy = load_policy
+        self.base_text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(
+            encoding="utf-8"
+        )
+
+    def test_phase_bool_rejected_despite_int_subclass(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        raw["nodes"]["B2-prd"]["phase"] = True
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        msg = str(ctx.exception)
+        self.assertIn("phase", msg)
+        self.assertIn("bool", msg)
+
+    def test_version_bool_rejected(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        raw["version"] = True
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("version", str(ctx.exception))
+
+    def test_version_zero_or_negative_rejected(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        raw["version"] = 0
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("version", str(ctx.exception))
+        raw["version"] = -1
+        with self.assertRaises(self.PolicyError):
+            self.load_policy(_json.dumps(raw))
+
+    def test_unknown_node_field_rejected(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        raw["nodes"]["B1-brief"]["gat"] = "human"  # typo of 'gate'
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        msg = str(ctx.exception)
+        self.assertIn("B1-brief", msg)
+        self.assertIn("gat", msg)
+
+    def test_duplicate_dep_rejected(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        raw["nodes"]["B2-prd"]["deps"] = ["B1-brief", "B1-brief"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        msg = str(ctx.exception)
+        self.assertIn("B2-prd", msg)
+        self.assertIn("duplicate", msg)
+
+    def test_entry_mode_mismatch_rejected(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.base_text)
+        # B1-brief is greenfield-only; making it the brownfield entry must fail.
+        raw["entry"]["brownfield"] = ["B1-brief"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        msg = str(ctx.exception)
+        self.assertIn("brownfield", msg)
+        self.assertIn("B1-brief", msg)
+
+
 class PolicyRoundTripTests(unittest.TestCase):
     def setUp(self) -> None:
         from story_automator.core.lifecycle_policy import (
