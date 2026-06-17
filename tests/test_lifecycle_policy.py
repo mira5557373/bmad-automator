@@ -220,3 +220,49 @@ class PolicyCycleDetectionTests(unittest.TestCase):
             "entry": {"greenfield": ["B1"], "brownfield": []},
         }
         self.load_policy(_json.dumps(policy))
+
+
+class PolicyRoundTripTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import (
+            canonical_policy_json,
+            load_policy,
+            policy_to_dict,
+        )
+
+        self.canonical_policy_json = canonical_policy_json
+        self.load_policy = load_policy
+        self.policy_to_dict = policy_to_dict
+        self.text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(
+            encoding="utf-8"
+        )
+
+    def test_load_then_to_dict_then_load_is_identity(self) -> None:
+        import json as _json
+
+        policy = self.load_policy(self.text)
+        round_tripped = self.load_policy(_json.dumps(self.policy_to_dict(policy)))
+        self.assertEqual(
+            self.policy_to_dict(policy),
+            self.policy_to_dict(round_tripped),
+        )
+
+    def test_canonical_form_is_sorted_and_separators_compact(self) -> None:
+        policy = self.load_policy(self.text)
+        canonical = self.canonical_policy_json(policy)
+        self.assertNotIn(", ", canonical)
+        self.assertNotIn(": ", canonical)
+        self.assertTrue(canonical.startswith('{"entry":'))
+
+    def test_canonical_form_stable_across_dict_orderings(self) -> None:
+        import json as _json
+
+        raw = _json.loads(self.text)
+        permuted = {
+            "entry": raw["entry"],
+            "nodes": dict(reversed(list(raw["nodes"].items()))),
+            "version": raw["version"],
+        }
+        a = self.load_policy(self.text)
+        b = self.load_policy(_json.dumps(permuted))
+        self.assertEqual(self.canonical_policy_json(a), self.canonical_policy_json(b))
