@@ -21,6 +21,21 @@
   `bma-d/integration-all`; push to the fork `origin` (mira5557373/bmad-automator) — **no upstream PRs.**
 - **Eat our own dog food:** obey the simplicity gate (§7) — no gold-plating the orchestrator itself.
 
+## Non-functional requirements
+- **No new third-party Python deps** (stdlib + `filelock` + `psutil` only); external quality tools run as pluggable subprocesses.
+- **Cross-platform portability:** quality gates pass on Windows git-bash, WSL Ubuntu, and Linux CI without modification; canonical test gate is the Linux/WSL full suite (currently 1482 passing) + `ruff check skills tests` clean.
+- **Performance:** the macro layer adds negligible overhead to a sprint; per-node verification is risk-tiered so trivial work is not slowed.
+- **Security:** the audit HMAC key is never exposed to child sessions; no secrets in artifacts or logs.
+- **Observability:** every node and gate emits correlated (`run_id`) telemetry via the sibling `core/lifecycle_events.py`.
+- **Resilience:** all lifecycle state is atomic-write + resumable; macro failures degrade (retry/quarantine/circuit-break), never corrupt the tree.
+- **Determinism (tests):** all new tests are deterministic (injected RNG/seed/clock); no network or real-agent calls in unit tests.
+
+## Out of scope (for this core spec)
+- BMM Phase-1 analysis/brief and Phase-2 PRD nodes (interactive coached discovery) — separate spec.
+- The TEA quality track and the WDS design track — separate specs (WDS↔BMM handoff is the largest open design).
+- Phase-6 release/deploy, the dashboard/web UI, multi-component/infra/data topology, and the compliance track — later, tiered.
+- Modifying `core/telemetry_events.py`, the changelog vocabulary, or any existing milestone's artifacts.
+
 ---
 
 ## 1. Macro lifecycle layer — data model & state machine
@@ -35,7 +50,7 @@
 **Goal:** execute one node end-to-end, generalizing the sprint engine's spawn→monitor→verify.
 **Requirements:**
 - `phase-runner`: spawn a child agent for `node.skill` (reuse tmux runtime), monitor to completion, run `node.verifier`; on `track=bmm,phase=4` DELEGATE to the existing sprint orchestrator.
-- Phase-verifier registry generalizing `success_verifiers`: `artifact_exists`, `structural_complete` (no `[TBD]`), and validator-skill wrappers.
+- Phase-verifier registry generalizing `success_verifiers`: `artifact_exists`, `structural_complete` (rejects unresolved placeholder markers in an artifact), and validator-skill wrappers.
 - New telemetry in `core/lifecycle_events.py` (sibling, NOT telemetry_events.py): `LifecyclePhaseStarted/Completed/Failed`; correlate with the existing `run_id`.
 **Acceptance:** runner drives a node (mocked agent) → verify → advance; phase-4 node calls the sprint engine; events emit with run_id; tests mirror `test_orchestration_loop.py`.
 
