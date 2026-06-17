@@ -260,3 +260,10 @@ lifecycle nodes. **Accept:** each phase node runs + produces its artifact (mocke
 Multi-component/monorepo DAG (a node-graph per component) + cross-component contract testing (Pact) +
 infrastructure-as-code phase + data track (schema/migrations/quality). Profile-gated; off for
 single-codebase. **Accept:** a 2-component fixture orchestrates both + a contract test gates their interface.
+
+
+---
+
+## Implementation status
+
+- **W0-M01 (Lifecycle data model + DAG scheduler)** — landed 2026-06-17. Three modules: `core/lifecycle_policy.py`, `core/lifecycle_status.py`, `core/lifecycle_scheduler.py`. Scheduler is a pure function (no IO, no execution); status persistence uses `core.atomic_io.write_atomic_text`. Status file is JSON (`lifecycle-status.json`) — see plan §2 for the no-deps rationale around the spec's `.yaml` filename. Phase-runner, verifiers, gates, telemetry events, and CLI surface remain unimplemented and are scheduled for W0-M02 / W0-M03 / W0-M04 respectively.
