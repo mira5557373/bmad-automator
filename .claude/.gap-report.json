@@ -1,36 +1,35 @@
 {
-  "pass": 2,
+  "pass": 1,
   "critical_gaps": 0,
   "architectural_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 0,
-  "deferred_gaps": 0,
-  "total_gaps_found": 3,
-  "gaps_fixed_this_pass": 3,
+  "important_gaps": 2,
+  "minor_gaps": 8,
+  "deferred_gaps": 2,
+  "total_gaps_found": 20,
+  "gaps_fixed_this_pass": 8,
   "tests_green": true,
   "lint_clean": true,
   "converged": true,
-  "milestone": "m06a-m3-feature-tester",
-  "scope": {
-    "base_commit": "3b5bfa98e6c624ad6081c79f5db0e8890e92a956",
-    "files_reviewed": [
-      "skills/bmad-story-automator/src/story_automator/core/feature_tester.py",
-      "tests/test_feature_tester.py"
-    ],
-    "test_results": "tests.test_feature_tester: 53/53 OK",
-    "lint_results": "ruff check + ruff format --check clean",
-    "full_suite_note": "Repository-wide test failures (psutil/filelock-dependent tests in test_atomic_io etc.) are pre-existing environment issues unrelated to this milestone — same failure count before and after these changes."
-  },
   "gap_summaries": [
-    "[post-impl] M1: _find_existing_test docstring claimed 'file-read errors propagate naturally as OSError', but path.read_text(encoding='utf-8') can also raise UnicodeDecodeError (subclass of ValueError, NOT OSError) on a non-UTF-8 file. Fixed: docstring now lists both OSError and UnicodeDecodeError as propagable.",
-    "[post-impl] M2: PlanFeatureTestsDryRunTests.test_dry_run_does_not_write_file constructed Path(entry.created_test_path) without first asserting it is not None — inconsistent with the parallel test_creates_skeleton_when_no_existing_test, which does assertIsNotNone before the Path() call. Fixed: added assertIsNotNone(entry.created_test_path) for symmetry and to make the None-narrowing visible to static type checkers.",
-    "[production] P1: Module declared logger = logging.getLogger(__name__) but emitted zero log records — an automation utility that walks REQs and writes files should provide actionable observability so the M06b orchestrator (and operators) can see which REQs were found, created, or skipped without re-deriving from the returned plan. Added logger.info() emissions at all three TestPlanEntry branch points (found/created/skipped) carrying req_id and resolved path; also factored str(target.resolve()) into target_str so the path is computed exactly once per non-found verdict instead of twice."
-  ],
-  "production_readiness": {
-    "artifact_type": "library",
-    "security": "ok — REQ id strictly validated via REQ-\\d+ fullmatch; tests_dir glob restricted to test_compliance_*.py; write goes through write_atomic_text (M05 atomic + per-path-lock semantics); no secrets, no SQL, no shell.",
-    "error_resilience": "ok — OSError/UnicodeDecodeError propagate by design; atomic_io handles Windows ERROR_SHARING_VIOLATION retries upstream; no swallowed exceptions.",
-    "testing": "ok — no time.sleep, no network, no subprocess; tests use tempfile.TemporaryDirectory; assertions verify exact values (golden-string byte-equality + path equality).",
-    "code_quality": "ok — zero TODO/FIXME/HACK markers; follows CLAUDE.md conventions (from __future__ import annotations, @dataclass(kw_only=True, frozen=True), PEP 604 unions, ruff clean, ruff format clean)."
-  }
+    "[ultrathink] FIXED — Task 10 originally provided two versions of advance_node_state, the first calling status.with_node(...).__class__(...) which discards with_node's result and rebuilds. Implementer reading sequentially could apply both. Removed the buggy version; only the clean replace()-based form remains.",
+    "[ultrathink] FIXED — LifecyclePolicy had no to_dict() method; spec acceptance 'schema validates + round-trips' was asymmetric (load-only). Added to_dict() emitting on-disk schema shape with field order preserved.",
+    "[ultrathink] FIXED — No policy file round-trip test. Added test_file_round_trip_via_to_dict in Task 4 that writes loaded.to_dict() back as JSON and confirms reload yields an equal LifecyclePolicy.",
+    "[ultrathink] FIXED — load_lifecycle_status didn't validate that nodes[map_key].node_id == map_key; hand-edited corruption (impostor node_id) would slip through. Added expected_key check and test_node_id_field_must_match_map_key.",
+    "[ultrathink] FIXED — Missing byte-equal status round-trip determinism test. Added test_byte_equal_round_trip_for_diff_determinism asserting write→read→write yields identical bytes for diff review reliability.",
+    "[ultrathink] FIXED — Missing empty-policy edge case for scheduler. Added test_empty_policy_returns_empty_tuple covering topo_sort and select_runnable on zero-node input.",
+    "[ultrathink] FIXED — Missing purity test for select_runnable. Added test_inputs_not_mutated + test_two_calls_return_byte_equal_tuples to pin the pure-functional contract.",
+    "[ultrathink] FIXED — select_runnable silently skips policy nodes absent from status.nodes; contract was undocumented. Updated docstring to make 'runner bootstraps PENDING records' contract explicit, added test_node_in_policy_but_missing_from_status_is_silently_skipped pinning the behavior.",
+    "[ultrathink] FIXED — Unused 'field' import in lifecycle_policy.py and lifecycle_status.py stubs would trip ruff F401. Trimmed stub imports to actually-used symbols (dataclass, replace).",
+    "[ultrathink] DEFERRED — validate_lifecycle_policy doesn't check that every input_artifact id resolves to some node's output_artifact. Spec is silent on external vs node-produced artifacts; M02 design call. Documented as known gap.",
+    "[ultrathink] DEFERRED — Entry-mode references don't enforce that target node's modes list includes the corresponding entry mode (e.g., entry.greenfield -> node.modes must contain 'greenfield'). Defer to M04 entry-router milestone.",
+    "[ultrathink] MINOR — NodeState wire form 'awaiting_approval' (underscore) vs spec text 'awaiting-approval' (dash). Plan acknowledges in Task 18; documented as wire-form contract.",
+    "[ultrathink] MINOR — StatusLoadError name stretches to cover transition rejections in advance_node_state. Cleaner alternative (StatusError parent) deferred to keep the rename out of M01.",
+    "[ultrathink] MINOR — load_lifecycle_policy uses except (TypeError, ValueError) then re-raises via isinstance(PolicyLoadError) check; works but reads awkwardly.",
+    "[ultrathink] MINOR — Bridge fixture is the only substantive scheduler fixture; spec says 'fixtures' (plural). Inline test cases compensate but a parallel-roots fixture would tighten coverage.",
+    "[ultrathink] MINOR — write_lifecycle_status passes OSError from mkdir/parent unwritable straight through (not wrapped in StatusLoadError). Operators want raw OSError detail; acceptable trade-off.",
+    "[ultrathink] MINOR — iso_now() has second resolution; two state changes within a second produce identical updated_at strings. Loses sub-second ordering but acceptable.",
+    "[ultrathink] MINOR — topo_sort cycle-detection branch is defensive-only (validate_lifecycle_policy already rejects cycles at load). Doc string explains the dual-check rationale.",
+    "[ultrathink] MINOR — LifecycleStatus uses dict[str, NodeRecord] (no frozen-dict primitive in stdlib). Callers could mutate the dict directly; copy-on-write methods substitute.",
+    "[ultrathink] MINOR — Phase parse error messages are generic (wrapped via f'policy parse failed: {exc}'). Underlying exception detail is preserved via __cause__ chain."
+  ]
 }
