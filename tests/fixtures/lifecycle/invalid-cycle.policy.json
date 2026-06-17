@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "nodes": {
+    "A-one": {
+      "track": "bmm",
+      "phase": 1,
+      "skill": "bmad-noop",
+      "validator_skill": null,
+      "deps": ["A-two"],
+      "input_artifacts": [],
+      "output_artifact": "docs/a.md",
+      "verifier": "structural",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "analyst",
+      "interactive": false
+    },
+    "A-two": {
+      "track": "bmm",
+      "phase": 1,
+      "skill": "bmad-noop",
+      "validator_skill": null,
+      "deps": ["A-one"],
+      "input_artifacts": [],
+      "output_artifact": "docs/b.md",
+      "verifier": "structural",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "analyst",
+      "interactive": false
+    }
+  },
+  "entry": {"greenfield": ["A-one"], "brownfield": []}
+}

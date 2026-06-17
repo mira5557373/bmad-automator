@@ -164,3 +164,59 @@ class PolicyClosedWorldTests(unittest.TestCase):
         with self.assertRaises(self.PolicyError) as ctx:
             self.load_policy(_json.dumps(raw))
         self.assertIn("B2-prd", str(ctx.exception))
+
+
+class PolicyCycleDetectionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import PolicyError, load_policy
+
+        self.PolicyError = PolicyError
+        self.load_policy = load_policy
+
+    def test_two_node_cycle_detected(self) -> None:
+        text = (FIXTURE_DIR / "invalid-cycle.policy.json").read_text(encoding="utf-8")
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(text)
+        msg = str(ctx.exception).lower()
+        self.assertIn("cycle", msg)
+
+    def test_three_node_cycle_detected(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        raw["nodes"]["B1-brief"]["deps"] = ["B3-epics"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("cycle", str(ctx.exception).lower())
+
+    def test_dag_with_diamond_passes(self) -> None:
+        import json as _json
+
+        policy = {
+            "version": 1,
+            "nodes": {
+                name: {
+                    "track": "bmm",
+                    "phase": 1,
+                    "skill": "bmad-noop",
+                    "validator_skill": None,
+                    "deps": deps,
+                    "input_artifacts": [],
+                    "output_artifact": f"docs/{name}.md",
+                    "verifier": "structural",
+                    "gate": "auto",
+                    "modes": ["greenfield"],
+                    "agent_role": "analyst",
+                    "interactive": False,
+                }
+                for name, deps in [
+                    ("B1", []),
+                    ("B2", ["B1"]),
+                    ("B3", ["B1"]),
+                    ("B4", ["B2", "B3"]),
+                ]
+            },
+            "entry": {"greenfield": ["B1"], "brownfield": []},
+        }
+        self.load_policy(_json.dumps(policy))

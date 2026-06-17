@@ -122,8 +122,42 @@ def load_policy(json_text: str) -> Policy:
     )
 
     _validate_closed_world(nodes, entry)
+    _validate_acyclic(nodes)
 
     return Policy(version=version, nodes=nodes, entry=entry)
+
+
+def _validate_acyclic(nodes: dict[str, NodeDef]) -> None:
+    """Kahn's algorithm: build in-degree counts, peel off zero-in-degree
+    nodes; if any nodes remain, those nodes participate in a cycle.
+
+    The error message lists the residual nodes in sorted order so the
+    operator can pinpoint the offending cycle quickly.
+    """
+
+    in_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
+    for node in nodes.values():
+        in_degree[node.id] = len(node.deps)
+
+    queue: list[str] = sorted(n for n, d in in_degree.items() if d == 0)
+    visited: set[str] = set()
+    while queue:
+        node_id = queue.pop(0)
+        if node_id in visited:
+            continue
+        visited.add(node_id)
+        for candidate in nodes.values():
+            if node_id in candidate.deps and candidate.id not in visited:
+                in_degree[candidate.id] -= 1
+                if in_degree[candidate.id] == 0:
+                    queue.append(candidate.id)
+                    queue.sort()
+
+    residual = sorted(set(nodes.keys()) - visited)
+    if residual:
+        raise PolicyError(
+            f"policy contains a cycle through nodes: {residual!r}"
+        )
 
 
 def _validate_closed_world(
