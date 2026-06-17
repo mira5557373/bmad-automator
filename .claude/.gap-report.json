@@ -1,29 +1,105 @@
 {
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 11,
-  "deferred_gaps": 8,
-  "total_gaps_found": 28,
-  "gaps_fixed_this_pass": 9,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
   "milestone": "w0-m01-data-model-scheduler",
-  "phase": "A (Plan + Ultrathink)",
-  "plan_path": "docs/superpowers/plans/2026-06-17-w0-m01-data-model-scheduler.md",
+  "phase": "C",
+  "baseline_commit": "09a96885c77fe3ce53649132a4b8b1bd31e8fcdb",
+  "reviewed_files": [
+    "skills/bmad-story-automator/src/story_automator/core/lifecycle_policy.py",
+    "skills/bmad-story-automator/src/story_automator/core/lifecycle_scheduler.py",
+    "skills/bmad-story-automator/src/story_automator/core/lifecycle_status.py",
+    "tests/test_lifecycle_policy.py",
+    "tests/test_lifecycle_scheduler.py",
+    "tests/test_lifecycle_status.py",
+    "tests/test_lifecycle_acceptance.py",
+    "tests/fixtures/lifecycle/*.policy.json",
+    "docs/superpowers/specs/lifecycle/build-spec-full.md",
+    "docs/changelog/260617.md"
+  ],
   "gap_summaries": [
-    "[ultrathink] CRITICAL: new_run_status seeded every node PENDING regardless of mode — out-of-mode nodes should be SKIPPED so status counts and downstream invariants stay honest. FIXED inline in Task 7 (new_run_status now marks node SKIPPED iff status.mode not in node.modes; added test_new_run_status_marks_out_of_mode_nodes_skipped).",
-    "[ultrathink] CRITICAL: runnable_nodes took mode= as a separate parameter while RunStatus already records status.mode — two-source-of-truth footgun where a test or caller could pass an inconsistent mode and silently mis-schedule. FIXED inline in Tasks 10-13 (runnable_nodes now derives mode from status.mode; all test call sites updated; topological_order still takes mode explicitly because it is a policy-shape function independent of any run).",
-    "[ultrathink] CRITICAL: status_from_dict accepted any string for mode on reload, meaning a hand-edited or corrupted status file with mode=midfield would silently corrupt scheduler behavior. FIXED inline in Task 7 (status_from_dict validates mode against _VALID_MODES and raises ValueError on mismatch; new_run_status applies the same check on construction; added test_new_run_status_rejects_unknown_mode).",
-    "[ultrathink] ARCHITECTURAL: scheduler does not enforce state-transition legality — a phase-runner that marks a gated node COMPLETE without going through AWAITING_APPROVAL would not be stopped by W0-M01. INTENTIONAL design (the scheduler is a pure read of what-is-runnable-next, not a state-machine guardian); the constraint belongs to W0-M02 phase-runner and W0-M03 approval-gate. DOCUMENTED as Design Decision #9 in the plan header so reviewers do not mistake omission for oversight.",
-    "[ultrathink] IMPORTANT: no test for json.JSONDecodeError to PolicyError translation. FIXED inline in Task 3 (added test_invalid_json_input_raises_policy_error + test_top_level_non_object_raises).",
-    "[ultrathink] IMPORTANT: Task 9 placed `import json` at the bottom of tests/test_lifecycle_status.py with a noqa-E402 hack. FIXED inline in Task 7 (imports consolidated at the top of the file when Task 7 first edits it; bottom-of-file import + noqa removed).",
-    "[ultrathink] IMPORTANT: _validate_acyclic loop carried a misleading comment (dep is guaranteed to be in nodes) in a loop that did not use the dep variable, plus an O(deps) increment instead of a single len(deps) assignment. FIXED inline in Task 5 (refactored to in_degree[node.id] = len(node.deps) with an accurate comment about where the closed-world invariant is actually used).",
-    "[ultrathink] IMPORTANT: Design Decision #6 originally claimed a default artifact_exists implementation exists; no such default is provided in the code (the parameter is required). FIXED inline (Design Decision #6 now says the caller — phase-runner in W0-M02 — constructs the appropriate callable; no default).",
-    "[ultrathink] IMPORTANT: no test for empty active-set scheduling (mode filter eliminates all nodes). FIXED inline in Task 10 (added test_topo_order_empty_active_set_returns_empty_list).",
-    "[ultrathink] MINOR (deliberately deferred, kept as-is): version:int accepts 0/negative; gate_decision is str|None without enum; ArtifactRecord.sha256 defaults to empty string; save_status output is not byte-stable across re-runs (only structurally equal); track/agent_role/verifier/validator_skill fields are free-form (extensible by design); interactive is permissive-truthy via bool(); full-both-modes.policy.json was listed in File Structure but no task consumes it (Note 8 documents this honestly); _VALID_MODES duplicated across lifecycle_policy.py and lifecycle_scheduler.py (acceptable — 1-line each). 11 total minor items kept as-is.",
-    "[ultrathink] DEFERRED (explicit non-goals of W0-M01, documented in the plan Scope section): phase-runner (W0-M02), verifier registry (W0-M02), approval-gate primitive (W0-M03), entry-mode router CLI (W0-M04), core/lifecycle_events.py (W0-M02), CLI status command (W0-M03/M04), multi-component policies (W10), WDS track integration (W9). 8 total deferred items."
+    {
+      "tag": "post-impl",
+      "id": "G1-duplicate-deps",
+      "title": "Duplicate deps cause false-cycle detection / stuck scheduler",
+      "where": "lifecycle_policy._validate_closed_world + _validate_acyclic; mirrored in lifecycle_scheduler.topological_order",
+      "details": "A node whose deps list contained the same id twice (e.g. ['B1','B1']) accumulated in-degree of 2 but the topo loop decremented once per pop, so the node never reached zero in-degree. Result: false-positive cycle report at load time, and (had the policy somehow loaded) a stuck scheduler. Fixed by rejecting duplicate deps in _validate_closed_world with a clear error naming both the offending node and the duplicated dep.",
+      "fix": "lifecycle_policy.py: seen-set check in _validate_closed_world. Test: PolicyHardeningTests.test_duplicate_dep_rejected."
+    },
+    {
+      "tag": "post-impl",
+      "id": "G2-bool-as-int",
+      "title": "phase / version accepted bool because bool is a subclass of int",
+      "where": "lifecycle_policy._parse_node (phase) + load_policy (version)",
+      "details": "isinstance(True, int) is True in Python, so a policy with 'phase': true or 'version': true passed type-validation and was coerced to phase=1/version=1 downstream. Fixed by adding an explicit bool guard before the int isinstance check for both the required() helper (when expected_type is int) and for the top-level version validator.",
+      "fix": "lifecycle_policy.py: bool short-circuit in required(); explicit bool guard on version. Tests: PolicyHardeningTests.test_phase_bool_rejected_despite_int_subclass, test_version_bool_rejected."
+    },
+    {
+      "tag": "post-impl",
+      "id": "G3-status-missing-field-error-type",
+      "title": "load_status raised bare KeyError on missing required top-level fields",
+      "where": "lifecycle_status.status_from_dict",
+      "details": "Missing 'mode' / 'run_id' / 'started_at' / 'policy_hash' surfaced as KeyError, indistinguishable from a programmer error and not catchable by the (existing) ValueError contract documented for unknown NodeState values. Added explicit pre-check that raises ValueError naming the missing field. Same treatment applied to ArtifactRecord required fields.",
+      "fix": "lifecycle_status.py: required_field pre-loop in status_from_dict. Test: StatusSaveLoadRoundTripTests.test_status_missing_top_level_field_raises_value_error."
+    },
+    {
+      "tag": "post-impl",
+      "id": "G4-entry-mode-mismatch",
+      "title": "Entry-mode router accepted nodes whose modes excluded the entry mode",
+      "where": "lifecycle_policy._validate_closed_world",
+      "details": "entry.greenfield could reference a node whose modes=['brownfield'] (and vice versa); the scheduler would then have no entry point in that mode and produce an empty runnable set silently. Added a closed-world check that the referenced node's modes list includes the entry mode key.",
+      "fix": "lifecycle_policy.py: mode-membership check in the entry-validation loop. Test: PolicyHardeningTests.test_entry_mode_mismatch_rejected."
+    },
+    {
+      "tag": "production",
+      "id": "G5-unknown-node-fields",
+      "title": "Unknown / typo'd node fields silently accepted",
+      "where": "lifecycle_policy._parse_node",
+      "details": "A misspelled field like 'gat' instead of 'gate' was silently dropped (the loader only read known names); the node then carried the schema default for the real field and behaved unexpectedly at gate time. Added a closed-vocabulary check against a frozen set of allowed field names, raising PolicyError with the offending key(s) and the allowed list.",
+      "fix": "lifecycle_policy.py: _KNOWN_NODE_FIELDS frozenset + unknown-key check at the top of _parse_node. Test: PolicyHardeningTests.test_unknown_node_field_rejected."
+    },
+    {
+      "tag": "production",
+      "id": "G6-version-range",
+      "title": "policy.version accepted zero / negative integers",
+      "where": "lifecycle_policy.load_policy",
+      "details": "version was type-checked but not range-checked; 0, -1, or any int passed. Tightened to require version >= 1 so an obviously-broken doc fails up front rather than at consumer-version dispatch later.",
+      "fix": "lifecycle_policy.py: explicit < 1 check after the bool/int guard. Test: PolicyHardeningTests.test_version_zero_or_negative_rejected."
+    },
+    {
+      "tag": "production",
+      "id": "G7-save-status-key-sort",
+      "title": "save_status emitted insertion-ordered JSON",
+      "where": "lifecycle_status.save_status",
+      "details": "json.dumps without sort_keys produced output whose top-level + nested key order depended on the order status_to_dict happened to populate the dicts. Two saves of an equivalent status could byte-differ, hurting audit-log diffs. Added sort_keys=True to align with the existing canonical_policy_json convention and asserted byte-equality of two successive saves.",
+      "fix": "lifecycle_status.py: sort_keys=True in save_status. Test: StatusSaveLoadRoundTripTests.test_save_status_output_is_key_sorted."
+    },
+    {
+      "tag": "production",
+      "id": "G8-empty-run-id-or-started-at",
+      "title": "new_run_status accepted empty run_id / started_at",
+      "where": "lifecycle_status.new_run_status",
+      "details": "Empty strings propagated into telemetry / file names / resume keys, where they break correlation but surface no clean error. Rejected at the constructor with a typed ValueError.",
+      "fix": "lifecycle_status.py: isinstance + non-empty guards in new_run_status. Tests: StatusSaveLoadRoundTripTests.test_new_run_status_rejects_empty_run_id, test_new_run_status_rejects_empty_started_at."
+    },
+    {
+      "tag": "production",
+      "id": "G9-policy-status-drift",
+      "title": "Scheduler silently ignored / KeyError'd on policy-status drift",
+      "where": "lifecycle_scheduler.runnable_nodes",
+      "details": "When a node in the active policy set was absent from status.nodes (hand-edited or stale-against-policy status file), the scheduler either skipped via .get()-returns-None (for the node itself) or raised a bare KeyError (for a missing dep). Both modes hide a real bug. Replaced with explicit SchedulerError naming the offending node and the drift class.",
+      "fix": "lifecycle_scheduler.py: explicit None / missing-dep checks with SchedulerError. Test: ConcurrencyCapTests.test_policy_status_drift_raises_scheduler_error."
+    }
+  ],
+  "test_results": {
+    "lifecycle_tests_before_fixes": "61 tests pass",
+    "lifecycle_tests_after_fixes": "72 tests pass (11 new tests for the 9 gaps)",
+    "ruff_check_skills_tests": "clean (zero violations)",
+    "wsl_canonical_suite": "1554 tests pass, 2 skipped (sw-verify.sh on Ubuntu-26.04)",
+    "windows_native_suite": "1554 tests run; 6 failures + 4 errors are pre-existing Windows-portability issues in test_agent_config_model / test_runtime_policy / test_stop_hooks / test_state_policy_metadata (called out in the W0-M01 milestone changelog QA Notes as 'unrelated to W0-M01') — none touch the lifecycle modules."
+  },
+  "scope_notes": [
+    "Reviewed files = git diff --name-only 09a96885c77fe3ce53649132a4b8b1bd31e8fcdb HEAD = 3 implementation modules + 4 test files + 6 policy fixtures + 1 spec footnote + 1 changelog entry.",
+    "No changes were made to docs/changelog/260617.md or docs/superpowers/specs/lifecycle/build-spec-full.md — the M11 vocabulary-gate Gate-5 EXPECTED list already drifts vs the existing W0-M01 entry at line 32 (a pre-existing condition not in this Phase-C scope), and adding further dated headings would compound that drift.",
+    "No telemetry_events.py changes (guardrail).",
+    "No new third-party imports (guardrail).",
+    "All four lifecycle modules still well under the 500-LOC soft limit (policy 348, status 261, scheduler 144)."
   ]
 }
