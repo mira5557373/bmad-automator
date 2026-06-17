@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "nodes": {
+    "B1-brief": {
+      "track": "bmm",
+      "phase": 1,
+      "skill": "bmad-product-brief",
+      "validator_skill": null,
+      "deps": [],
+      "input_artifacts": [],
+      "output_artifact": "docs/product-brief.md",
+      "verifier": "structural",
+      "gate": "human",
+      "modes": ["greenfield"],
+      "agent_role": "analyst",
+      "interactive": true
+    },
+    "B2-prd": {
+      "track": "bmm",
+      "phase": 2,
+      "skill": "bmad-create-prd",
+      "validator_skill": "bmad-validate-prd",
+      "deps": ["B1-brief"],
+      "input_artifacts": ["docs/product-brief.md"],
+      "output_artifact": "docs/prd.md",
+      "verifier": "prd_valid",
+      "gate": "human",
+      "modes": ["greenfield"],
+      "agent_role": "pm",
+      "interactive": true
+    },
+    "B3-arch": {
+      "track": "bmm",
+      "phase": 3,
+      "skill": "bmad-create-architecture",
+      "validator_skill": null,
+      "deps": ["B2-prd"],
+      "input_artifacts": ["docs/prd.md"],
+      "output_artifact": "docs/architecture.md",
+      "verifier": "structural",
+      "gate": "human",
+      "modes": ["greenfield"],
+      "agent_role": "architect",
+      "interactive": false
+    },
+    "B3-epics": {
+      "track": "bmm",
+      "phase": 3,
+      "skill": "bmad-create-epics-and-stories",
+      "validator_skill": "bmad-check-implementation-readiness",
+      "deps": ["B3-arch"],
+      "input_artifacts": ["docs/prd.md", "docs/architecture.md"],
+      "output_artifact": "epics/",
+      "verifier": "epics_created",
+      "gate": "human",
+      "modes": ["greenfield"],
+      "agent_role": "pm",
+      "interactive": false
+    }
+  },
+  "entry": {
+    "greenfield": ["B1-brief"],
+    "brownfield": []
+  }
+}
