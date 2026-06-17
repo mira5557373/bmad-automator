@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "nodes": {
+    "N1-first": {
+      "track": "bmm",
+      "phase": 1,
+      "skill": "bmad-product-brief",
+      "validator_skill": null,
+      "deps": [],
+      "input_artifacts": [],
+      "output_artifact": "docs/n1.md",
+      "verifier": "artifact_exists",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "analyst",
+      "interactive": false
+    },
+    "N2-second": {
+      "track": "bmm",
+      "phase": 2,
+      "skill": "bmad-create-prd",
+      "validator_skill": null,
+      "deps": ["N1-first"],
+      "input_artifacts": ["docs/n1.md"],
+      "output_artifact": "docs/n2.md",
+      "verifier": "artifact_exists",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "pm",
+      "interactive": false
+    }
+  },
+  "entry": {
+    "greenfield": ["N1-first"],
+    "brownfield": []
+  }
+}
