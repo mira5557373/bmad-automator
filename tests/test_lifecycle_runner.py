@@ -352,6 +352,44 @@ class Phase4DelegationTests(unittest.TestCase):
                 monitor_session=lambda *a, **k: 0,
             )
 
+    def test_phase4_without_delegate_does_not_leave_node_running(self) -> None:
+        """Regression: RunnerError raised because sprint_delegate is None
+        must NOT leave the node in RUNNING on disk. Without precondition
+        checks BEFORE the RUNNING transition, the status file would persist
+        a RUNNING state and the next runner invocation would skip the node
+        because RUNNING is not a runnable state."""
+        from story_automator.core.lifecycle_runner import (
+            RunnerError,
+            run_next_node,
+        )
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            load_status,
+        )
+
+        with self.assertRaises(RunnerError):
+            run_next_node(
+                self.policy,
+                self.status,
+                project_root=str(self.root),
+                status_path=self.status_path,
+                spawn_agent=lambda *a, **k: ("", 0),
+                monitor_session=lambda *a, **k: 0,
+            )
+        on_disk = load_status(self.status_path)
+        self.assertEqual(
+            on_disk.nodes["B4-sprint"].state,
+            NodeState.PENDING,
+            "B4-sprint must remain PENDING when the runner aborts on a "
+            "precondition error; persisting RUNNING here would leave the "
+            "node stuck because RUNNING is never reschedulable.",
+        )
+        self.assertEqual(
+            on_disk.nodes["B4-sprint"].attempts,
+            0,
+            "attempts must not be incremented when the runner refuses to start the node.",
+        )
+
     def test_phase4_delegate_returning_false_transitions_to_failed(self) -> None:
         from story_automator.core.lifecycle_runner import run_next_node
         from story_automator.core.lifecycle_status import (
@@ -639,6 +677,30 @@ class TelemetryEmissionTests(unittest.TestCase):
         )
         self.assertEqual(result.final_state, "awaiting_approval")
 
+    def test_emit_failure_with_non_oserror_does_not_crash_runner(self) -> None:
+        """Regression: a flaky emitter that raises e.g. TypeError or
+        RuntimeError (anything Exception-shaped) must NOT abort the run.
+        Before the fix, ``_emit_safe`` only caught ``OSError`` and any
+        other exception escaped, breaking the runner's state-transition
+        contract."""
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        class TypeErrorEmitter:
+            def emit(self, event):
+                raise TypeError("oops, malformed event field")
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+            emitter=TypeErrorEmitter(),
+        )
+        self.assertEqual(result.final_state, "awaiting_approval")
+
 
 class RunResultDurationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -683,6 +745,41 @@ class RunResultDurationTests(unittest.TestCase):
             clock=lambda: next(ticks),
         )
         self.assertAlmostEqual(result.duration_s, 42.0, places=3)
+
+
+class SessionNameSanitizationTests(unittest.TestCase):
+    def test_disallowed_chars_replaced_with_dash(self) -> None:
+        """Regression: tmux session names cannot contain ``.``, ``:``, or
+        whitespace. The policy loader only enforces non-empty node ids, so
+        the runner must sanitize them before building the session name —
+        otherwise a node id like ``P1.2/foo bar`` would yield ``lifecycle-
+        P1.2-foo bar``, which tmux rejects with an opaque ``bad name`` or
+        ``duplicate session`` error far from the root cause."""
+        from story_automator.core.lifecycle_policy import NodeDef
+        from story_automator.core.lifecycle_runner import _session_name_for_node
+
+        node = NodeDef(
+            id="P1.2/foo bar:baz",
+            track="bmm",
+            phase=1,
+            skill="bmad-x",
+            validator_skill=None,
+            deps=[],
+            input_artifacts=[],
+            output_artifact="docs/x.md",
+            verifier="artifact_exists",
+            gate="auto",
+            modes=["greenfield"],
+            agent_role="analyst",
+            interactive=False,
+        )
+        session = _session_name_for_node(node, run_id="run-abcdef012345")
+        self.assertNotIn(".", session)
+        self.assertNotIn(":", session)
+        self.assertNotIn(" ", session)
+        self.assertNotIn("/", session)
+        self.assertTrue(session.startswith("lifecycle-P1-2-foo-bar-baz"))
+        self.assertLessEqual(len(session), 160)
 
 
 class FailedNodeReentryTests(unittest.TestCase):

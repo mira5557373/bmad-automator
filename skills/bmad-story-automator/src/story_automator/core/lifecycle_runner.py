@@ -12,12 +12,19 @@ emitter, clock — so unit tests run without tmux, Claude, or the network.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from story_automator.core.common import iso_now
+from story_automator.core.lifecycle_events import (
+    LifecyclePhaseCompleted,
+    LifecyclePhaseFailed,
+    LifecyclePhaseStarted,
+)
 from story_automator.core.lifecycle_policy import NodeDef, Policy
 from story_automator.core.lifecycle_scheduler import runnable_nodes
 from story_automator.core.lifecycle_status import (
@@ -25,6 +32,7 @@ from story_automator.core.lifecycle_status import (
     RunStatus,
     save_status,
 )
+from story_automator.core.run_identity import current_run_id
 
 __all__ = [
     "RunResult",
@@ -84,8 +92,18 @@ def _transition_node(
     save_status(status_path, status)
 
 
+_TMUX_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
 def _session_name_for_node(node: NodeDef, run_id: str) -> str:
-    safe_node = node.id.replace("/", "-")
+    """Build a tmux-safe session name for ``node``.
+
+    tmux rejects ``.``, ``:``, and whitespace in session names; the policy
+    loader only enforces that node ids are non-empty strings, so any node
+    id outside ``[A-Za-z0-9_-]`` must be sanitized here or the spawn will
+    fail with an opaque "duplicate session" or "bad name" error.
+    """
+    safe_node = _TMUX_NAME_UNSAFE.sub("-", node.id)
     base = f"lifecycle-{safe_node}"
     if run_id:
         base += f"-{run_id[-12:]}"
@@ -109,23 +127,30 @@ def _default_verifier_dispatch(
 
 
 def _emit_safe(emitter: Any, event: Any) -> None:
-    """Best-effort emit. A flaky sink must never break a run."""
+    """Best-effort emit. A flaky sink must never break a run.
+
+    Catches ``Exception`` (not just ``OSError``) because the emitter is an
+    injected boundary — a malformed dataclass field (``TypeError``), an
+    invalid JSON serialization (``ValueError``), or any other emitter-side
+    bug must never abort the runner's state-transition path. ``BaseException``
+    is intentionally not caught so ``KeyboardInterrupt`` / ``SystemExit``
+    still propagate.
+    """
     if emitter is None:
         return
     try:
         emitter.emit(event)
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 — emit boundary; see docstring
         logger.warning(
-            "lifecycle telemetry emit failed for %s: %s",
+            "lifecycle telemetry emit failed for %s: %s: %s",
             type(event).__name__,
+            type(exc).__name__,
             exc,
         )
 
 
 def _duration(started_at: str, completed_at: str) -> float:
     """Best-effort ISO-8601 timestamp delta in seconds."""
-    from datetime import datetime
-
     try:
         a = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
         b = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
@@ -173,6 +198,15 @@ def run_next_node(
     node_id = candidates[0]
     node = policy.nodes[node_id]
 
+    # Precondition checks BEFORE persisting RUNNING — a raise here must not
+    # leave a node stuck in RUNNING on disk with no live process.
+    if _is_sprint_delegate_node(node) and sprint_delegate is None:
+        raise RunnerError(
+            f"node {node.id!r} (track=bmm phase=4) requires a "
+            f"`sprint_delegate` callable; the production CLI wires "
+            f"this in W0-M04. Pass a stub in tests."
+        )
+
     status.nodes[node_id].attempts += 1
     started_at = clock()
     _transition_node(
@@ -182,13 +216,6 @@ def run_next_node(
         NodeState.RUNNING,
         started_at=started_at,
     )
-
-    from story_automator.core.lifecycle_events import (
-        LifecyclePhaseCompleted,
-        LifecyclePhaseFailed,
-        LifecyclePhaseStarted,
-    )
-    from story_automator.core.run_identity import current_run_id
 
     run_id = current_run_id(project_root)
 
@@ -271,12 +298,9 @@ def run_next_node(
 
     # --- phase-4 sprint-delegate branch ---
     if _is_sprint_delegate_node(node):
-        if sprint_delegate is None:
-            raise RunnerError(
-                f"node {node.id!r} (track=bmm phase=4) requires a "
-                f"`sprint_delegate` callable; the production CLI wires "
-                f"this in W0-M04. Pass a stub in tests."
-            )
+        # sprint_delegate-is-None precondition is enforced before the
+        # RUNNING transition above; reaching here implies it is non-None.
+        assert sprint_delegate is not None
         try:
             delegate_result = sprint_delegate(
                 node=node,
@@ -291,9 +315,10 @@ def run_next_node(
                 f"delegate_raised: {type(exc).__name__}: {exc}",
             )
         if not isinstance(delegate_result, dict):
-            raise RunnerError(
-                f"sprint_delegate for {node.id!r} returned "
-                f"{type(delegate_result).__name__}, expected dict"
+            return _fail(
+                "delegate_invalid_result",
+                "DelegateInvalidResult",
+                f"sprint_delegate returned {type(delegate_result).__name__}, expected dict",
             )
         if bool(delegate_result.get("verified")):
             if node.gate == "human":
@@ -360,9 +385,11 @@ def run_next_node(
             f"verifier_raised: {type(exc).__name__}: {exc}",
         )
     if not isinstance(verdict, dict):
-        raise RunnerError(
+        return _fail(
+            "verifier_invalid_result",
+            "VerifierInvalidResult",
             f"verifier_dispatch for {node.verifier!r} returned "
-            f"{type(verdict).__name__}, expected dict"
+            f"{type(verdict).__name__}, expected dict",
         )
 
     if not bool(verdict.get("verified")):

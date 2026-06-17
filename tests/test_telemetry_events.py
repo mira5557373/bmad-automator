@@ -902,9 +902,15 @@ class ConcreteEventRoundTripTests(unittest.TestCase):
 
 
 class RegistryCompletenessTests(unittest.TestCase):
-    """REQ-06: after module import Event._REGISTRY contains exactly 13
-    entries keyed by the concrete classes' EVENT_TYPE strings; UnknownEvent
-    must NOT be present.
+    """REQ-06: after module import Event._REGISTRY contains the M01 telemetry
+    events keyed by their EVENT_TYPE strings; UnknownEvent must NOT be present.
+
+    M01 originally asserted "exactly 13 entries". W0-M02 introduced three
+    lifecycle macro-events in a sibling module (``core/lifecycle_events.py``)
+    that auto-register through the same ``__init_subclass__`` hook, so the
+    invariant tightened: the M01 set must be a SUBSET of the registry, and
+    every M02+ extension must be tracked here so a missing sibling-module
+    import (which would silently leave its events un-dispatchable) is caught.
 
     Uses a module-level filter that excludes leading-underscore keys so a
     leaked ``_temp_*`` sentinel from a test that aborted before
@@ -930,12 +936,51 @@ class RegistryCompletenessTests(unittest.TestCase):
         }
     )
 
-    def test_registry_contains_exactly_thirteen_production_entries(self) -> None:
+    # Sibling-module event types that auto-register into Event._REGISTRY when
+    # their owning modules are imported (e.g. by test discovery). Listed
+    # explicitly so a regression that removes a sibling import is caught.
+    LIFECYCLE_M02_EVENT_TYPES = frozenset(
+        {
+            "lifecycle_phase_started",
+            "lifecycle_phase_completed",
+            "lifecycle_phase_failed",
+        }
+    )
+
+    def test_registry_contains_m01_production_entries(self) -> None:
         from story_automator.core.telemetry_events import Event
 
         production = {k for k in Event._REGISTRY if not k.startswith("_")}
-        self.assertEqual(len(production), 13)
-        self.assertEqual(production, self.EXPECTED_EVENT_TYPES)
+        self.assertTrue(
+            self.EXPECTED_EVENT_TYPES.issubset(production),
+            f"M01 events missing from registry: {sorted(self.EXPECTED_EVENT_TYPES - production)!r}",
+        )
+
+    def test_registry_contains_lifecycle_m02_entries_when_module_imported(self) -> None:
+        from story_automator.core import lifecycle_events  # noqa: F401
+        from story_automator.core.telemetry_events import Event
+
+        production = {k for k in Event._REGISTRY if not k.startswith("_")}
+        self.assertTrue(
+            self.LIFECYCLE_M02_EVENT_TYPES.issubset(production),
+            f"W0-M02 lifecycle events missing from registry: "
+            f"{sorted(self.LIFECYCLE_M02_EVENT_TYPES - production)!r}",
+        )
+
+    def test_registry_has_no_unexpected_production_entries(self) -> None:
+        from story_automator.core.telemetry_events import Event
+
+        production = {k for k in Event._REGISTRY if not k.startswith("_")}
+        allowed = self.EXPECTED_EVENT_TYPES | self.LIFECYCLE_M02_EVENT_TYPES
+        unexpected = production - allowed
+        self.assertEqual(
+            unexpected,
+            set(),
+            f"unexpected production event_types in registry: "
+            f"{sorted(unexpected)!r} — add to EXPECTED_EVENT_TYPES or "
+            f"LIFECYCLE_M02_EVENT_TYPES when introducing a new milestone "
+            f"event family.",
+        )
 
     def test_unknown_event_is_not_a_registered_value(self) -> None:
         from story_automator.core.telemetry_events import Event, UnknownEvent
@@ -1431,9 +1476,7 @@ class ImportAllowlistTests(unittest.TestCase):
 
         absolute, _ = self._module_imports()
         stdlib_names = (
-            sys.stdlib_module_names
-            if hasattr(sys, "stdlib_module_names")
-            else frozenset()
+            sys.stdlib_module_names if hasattr(sys, "stdlib_module_names") else frozenset()
         )
         # Defensive fallback for Python < 3.10 (project requires 3.11+ so
         # this branch never executes in practice; the fallback exists so
@@ -1607,9 +1650,7 @@ class NoMutableDefaultsTests(unittest.TestCase):
 
     EXEMPT_NAMES = frozenset({"_REGISTRY"})
 
-    MUTABLE_FACTORY_NAMES = frozenset(
-        {"list", "dict", "set", "List", "Dict", "Set", "bytearray"}
-    )
+    MUTABLE_FACTORY_NAMES = frozenset({"list", "dict", "set", "List", "Dict", "Set", "bytearray"})
 
     def _module_source_path(self):
         """Anchor on ``__file__`` so the test is cwd-independent."""
