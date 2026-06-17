@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from story_automator.core.lifecycle_policy import NodeDef, Policy
-from story_automator.core.lifecycle_status import RunStatus
+from story_automator.core.lifecycle_status import NodeState, RunStatus
 
 __all__ = ["SchedulerError", "runnable_nodes", "topological_order"]
 
@@ -88,7 +88,46 @@ def runnable_nodes(
     artifact_exists: Callable[[str], bool],
     max_concurrency: int = 1,
 ) -> list[str]:
-    """Return runnable nodes. Mode is read from ``status.mode``. Full
-    implementation lands in Task 11."""
+    """Return up to ``max_concurrency`` runnable nodes for the run.
 
-    raise NotImplementedError
+    Run mode is read from ``status.mode`` — single source of truth. A node
+    is runnable when:
+      1. it's in-mode (its ``modes`` includes ``status.mode``),
+      2. its status is PENDING,
+      3. every (in-mode) dep is COMPLETE,
+      4. every ``input_artifact`` returns True from ``artifact_exists``.
+
+    Result order is the topological order from ``topological_order``
+    (deterministic, lex-tie-broken). Capped at ``max_concurrency``.
+    The scheduler does NOT mutate ``status`` — that's the phase-runner's
+    job in W0-M02.
+    """
+
+    if max_concurrency < 1:
+        raise SchedulerError(
+            f"max_concurrency must be >= 1, got {max_concurrency!r}"
+        )
+
+    mode = status.mode
+    active = _active_nodes(policy, mode)
+    order = topological_order(policy, mode=mode)
+
+    runnable: list[str] = []
+    for node_id in order:
+        if len(runnable) >= max_concurrency:
+            break
+        node = active[node_id]
+        run = status.nodes.get(node_id)
+        if run is None or run.state != NodeState.PENDING:
+            continue
+        if not all(
+            status.nodes[dep].state == NodeState.COMPLETE
+            for dep in node.deps
+            if dep in active
+        ):
+            continue
+        if not all(artifact_exists(path) for path in node.input_artifacts):
+            continue
+        runnable.append(node_id)
+
+    return runnable

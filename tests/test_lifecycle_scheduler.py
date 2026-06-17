@@ -129,3 +129,104 @@ class TopologicalOrderTests(unittest.TestCase):
         from story_automator.core.lifecycle_scheduler import topological_order
 
         self.assertEqual(topological_order(self.policy, mode="brownfield"), [])
+
+
+class RunnableNodesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import new_run_status
+
+        self.policy = load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-7",
+            mode="greenfield",
+            started_at="2026-06-17T10:00:00Z",
+        )
+
+    def test_initial_state_only_entry_node_is_runnable(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _path: False,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, ["B1-brief"])
+
+    def test_node_blocked_until_deps_complete(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState
+
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _path: True,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, ["B1-brief"])
+
+        self.status.nodes["B1-brief"].state = NodeState.COMPLETE
+        out2 = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda path: path == "docs/product-brief.md",
+            max_concurrency=10,
+        )
+        self.assertEqual(out2, ["B2-prd"])
+
+    def test_node_blocked_when_input_artifact_missing(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState
+
+        self.status.nodes["B1-brief"].state = NodeState.COMPLETE
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _path: False,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, [])
+
+    def test_complete_and_failed_nodes_never_returned(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState
+
+        self.status.nodes["B1-brief"].state = NodeState.COMPLETE
+        self.status.nodes["B2-prd"].state = NodeState.FAILED
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, [])
+
+    def test_running_node_is_not_returned_again(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState
+
+        self.status.nodes["B1-brief"].state = NodeState.RUNNING
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, [])
+
+    def test_awaiting_approval_blocks_downstream(self) -> None:
+        from story_automator.core.lifecycle_scheduler import runnable_nodes
+        from story_automator.core.lifecycle_status import NodeState
+
+        self.status.nodes["B1-brief"].state = NodeState.AWAITING_APPROVAL
+        out = runnable_nodes(
+            self.policy,
+            self.status,
+            artifact_exists=lambda _p: True,
+            max_concurrency=10,
+        )
+        self.assertEqual(out, [])
