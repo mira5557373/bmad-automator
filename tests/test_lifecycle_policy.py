@@ -130,3 +130,37 @@ class PolicyEnumValidationTests(unittest.TestCase):
         with self.assertRaises(self.PolicyError) as ctx:
             self.load_policy("[]")
         self.assertIn("object", str(ctx.exception))
+
+
+class PolicyClosedWorldTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import PolicyError, load_policy
+
+        self.PolicyError = PolicyError
+        self.load_policy = load_policy
+
+    def test_dep_referencing_unknown_node_raises(self) -> None:
+        text = (FIXTURE_DIR / "invalid-missing-dep.policy.json").read_text(encoding="utf-8")
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(text)
+        msg = str(ctx.exception)
+        self.assertIn("B1-brief", msg)
+        self.assertIn("B0-ghost", msg)
+
+    def test_entry_referencing_unknown_node_raises(self) -> None:
+        text = (FIXTURE_DIR / "invalid-entry-ref.policy.json").read_text(encoding="utf-8")
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(text)
+        msg = str(ctx.exception)
+        self.assertIn("entry", msg)
+        self.assertIn("ZZ-not-a-node", msg)
+
+    def test_self_dep_raises(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        raw["nodes"]["B2-prd"]["deps"] = ["B2-prd"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("B2-prd", str(ctx.exception))

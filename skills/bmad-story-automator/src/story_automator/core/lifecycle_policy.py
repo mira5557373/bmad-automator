@@ -121,7 +121,41 @@ def load_policy(json_text: str) -> Policy:
         ),
     )
 
+    _validate_closed_world(nodes, entry)
+
     return Policy(version=version, nodes=nodes, entry=entry)
+
+
+def _validate_closed_world(
+    nodes: dict[str, NodeDef], entry: EntryMap
+) -> None:
+    """Every dep id and entry id must reference a defined node; a node
+    may not depend on itself.
+
+    Self-deps cause a trivial 1-node cycle the topo-sort would also catch,
+    but flagging them here gives a clearer error message than the cycle-
+    detection path (which surfaces them as "cycle through {B2-prd}").
+    """
+
+    known = set(nodes.keys())
+    for node_id, node in nodes.items():
+        for dep in node.deps:
+            if dep == node_id:
+                raise PolicyError(f"node {node_id!r} cannot depend on itself")
+            if dep not in known:
+                raise PolicyError(
+                    f"node {node_id!r} dep {dep!r} is not a defined node"
+                )
+
+    for mode_name, mode_entry in (
+        ("greenfield", entry.greenfield),
+        ("brownfield", entry.brownfield),
+    ):
+        for entry_id in mode_entry:
+            if entry_id not in known:
+                raise PolicyError(
+                    f"entry.{mode_name} references unknown node {entry_id!r}"
+                )
 
 
 def _parse_node(node_id: str, raw: Any) -> NodeDef:
