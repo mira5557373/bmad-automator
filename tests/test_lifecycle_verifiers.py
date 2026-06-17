@@ -128,5 +128,97 @@ class ArtifactExistsVerifierTests(unittest.TestCase):
         self.assertEqual(result["reason"], "artifact_empty")
 
 
+class StructuralCompleteVerifierTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def test_well_formed_md_passes(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        artifact = self.root / "docs" / "prd.md"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text(
+            "---\n"
+            'title: "PRD"\n'
+            "status: complete\n"
+            "---\n# PRD\n",
+            encoding="utf-8",
+        )
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="structural_complete",
+            output_artifact="docs/prd.md",
+        )
+        result = run_lifecycle_verifier(
+            "structural_complete", node=node, project_root=str(self.root)
+        )
+        self.assertTrue(result["verified"])
+
+    def test_missing_artifact_fails(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="structural_complete",
+            output_artifact="docs/missing.md",
+        )
+        result = run_lifecycle_verifier(
+            "structural_complete", node=node, project_root=str(self.root)
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "artifact_missing")
+
+    def test_no_frontmatter_fails_for_md(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        artifact = self.root / "docs" / "prd.md"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("# PRD\nno frontmatter here\n", encoding="utf-8")
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="structural_complete",
+            output_artifact="docs/prd.md",
+        )
+        result = run_lifecycle_verifier(
+            "structural_complete", node=node, project_root=str(self.root)
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "frontmatter_missing")
+
+    def test_directory_artifact_passes_when_non_empty(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        epics = self.root / "epics"
+        epics.mkdir()
+        (epics / "epic-1.md").write_text("# Epic 1\n", encoding="utf-8")
+        node = _make_node(
+            node_id="B3-epics",
+            verifier="structural_complete",
+            output_artifact="epics/",
+        )
+        result = run_lifecycle_verifier(
+            "structural_complete", node=node, project_root=str(self.root)
+        )
+        self.assertTrue(result["verified"])
+
+    def test_non_md_file_passes_on_existence_only(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        artifact = self.root / "build" / "release.tar.gz"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"\x1f\x8b\x08\x00not-actually-gzip")
+        node = _make_node(
+            node_id="release",
+            verifier="structural_complete",
+            output_artifact="build/release.tar.gz",
+        )
+        result = run_lifecycle_verifier(
+            "structural_complete", node=node, project_root=str(self.root)
+        )
+        self.assertTrue(result["verified"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ __all__ = [
     "VerifierFn",
     "artifact_exists",
     "run_lifecycle_verifier",
+    "structural_complete",
 ]
 
 
@@ -66,8 +67,41 @@ def artifact_exists(
     return payload
 
 
+def structural_complete(
+    *,
+    node: NodeDef,
+    project_root: str,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Artifact exists + (for ``.md`` outputs) has parseable frontmatter."""
+    base = artifact_exists(node=node, project_root=project_root)
+    base["verifier"] = "structural_complete"
+    if not base["verified"]:
+        return base
+    full = Path(project_root) / node.output_artifact
+    if node.output_artifact.endswith("/"):
+        return base
+    if full.suffix.lower() != ".md":
+        return base
+    from story_automator.core.frontmatter import parse_simple_frontmatter
+
+    text = full.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        base["verified"] = False
+        base["reason"] = "frontmatter_missing"
+        return base
+    fields = parse_simple_frontmatter(text)
+    if not fields:
+        base["verified"] = False
+        base["reason"] = "frontmatter_unparseable"
+        return base
+    base["frontmatter_keys"] = sorted(fields.keys())
+    return base
+
+
 LIFECYCLE_VERIFIERS: dict[str, VerifierFn] = {
     "artifact_exists": artifact_exists,
+    "structural_complete": structural_complete,
 }
 
 
