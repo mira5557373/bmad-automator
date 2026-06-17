@@ -1,33 +1,90 @@
 {
   "milestone": "w0-m02-phase-runner-verifiers",
-  "phase": "A",
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 0,
-  "deferred_gaps": 3,
-  "total_gaps_found": 10,
-  "gaps_fixed_this_pass": 7,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
-  "gap_summaries": [
-    "[ultrathink][critical][fixed] test_running_node_refuses_re_entry asserted RunnerError but W0-M01 scheduler already filters non-PENDING nodes - the pre-condition guard was unreachable. Rewrote the test to assert result is None (the scheduler-filter behavior) and removed the dead defensive guard from run_next_node. Aligns with design decision Sec 5 ('runner does not enforce state-transition legality').",
-    "[ultrathink][critical][fixed] Task 10 left the FAILED-path emit sites and error_class mapping implicit, with 8 distinct FAILED branches across Tasks 7/8/9. High risk of the implementer missing an emit site and shipping a partially-correlated telemetry stream. Added an explicit (branch, reason, error_class) table in Task 10 enumerating all 8 FAILED paths plus the 1 Started and 2 Completed sites; total emit sites now spelled out (1 + 2 + 8).",
-    "[ultrathink][critical][fixed] NodeRun.attempts was never incremented; LifecyclePhaseFailed.attempt=status.nodes[node_id].attempts would always read 0. Added attempts += 1 in run_next_node immediately before the RUNNING transition (Task 7), so a failed node's emit carries attempt=1 and a future failure-governance milestone (Wave 8 Sec 38) can layer retry/escalation on the same counter without schema changes.",
-    "[ultrathink][important][fixed] Task 10 test bodies referenced list[Any] annotations without importing Any. Added 'from typing import Any' at the top of tests/test_lifecycle_runner.py in Task 6 so all subsequent telemetry tests resolve cleanly.",
-    "[ultrathink][important][fixed] monitor_rc semantics ambiguous - commands.tmux.cmd_monitor_session always returns rc=0 in normal flow (terminal state surfaces via JSON stdout, not return code), so the monitor_nonzero FAILED branch in Task 7 would never fire in production wiring. Added an inline comment documenting the contract: monitor_rc != 0 only fires on monitor_session itself raising or a custom monitor surfacing rc; 'session crashed but rc=0' is decided downstream by the verifier (artifact_exists returning verified=False -> verifier-rejected FAILED).",
-    "[ultrathink][important][fixed] Task 12 acceptance test fake_spawn computed a dead node_id variable from fragile string parsing that was never used - the for-loop below did the actual match. Removed the dead computation; kept the clean substring-match.",
-    "[ultrathink][important][fixed] Task 10 placement of LifecyclePhaseStarted emit was ambiguous re: the phase-4 branch inserted by Task 8. The Started event MUST fire for both delegate and spawn paths (Task 12 phase-4 acceptance asserts this). Reworded Task 10 Step 3 to make the ordering explicit: 'after RUNNING transition and attempts increment, after run_id read, BEFORE the phase-4 branch'.",
-    "[ultrathink][deferred] Coverage --source argument accepts both filesystem paths and dotted module names; W0-M01 used the filesystem-path form and landed cleanly, so kept the same form for W0-M02 to minimize CI drift. Recordkeeping only.",
-    "[ultrathink][deferred] _session_name_for_node uses a shape different from the existing core.tmux_runtime.generate_session_name (step/epic/story_id/cycle tuple vs node/run_id). W0-M04 production wiring will own the adapter that maps node fields to the existing tmux session-name convention; for W0-M02 the runner-internal name is sufficient because every test stubs the spawn boundary.",
-    "[ultrathink][deferred] last_error field stored verbatim from monitor / spawn / delegate output - no length cap. A pathological multi-megabyte stderr would bloat the status file. Non-issue for Sec 2 acceptance fixtures; revisit if observability tests exercise large outputs."
+  "branch": "sw-parallel/w0-m02-phase-runner-verifiers",
+  "base_commit": "3965c205fb9720a2f17dbc57e8d2f8b6ea07c88e",
+  "review_date": "2026-06-17",
+  "verification": {
+    "command": "wsl.exe -d Ubuntu-26.04 -- bash -lc \"exec ~/sw-verify.sh\"",
+    "tests_ran": 1610,
+    "tests_failed": 0,
+    "tests_skipped": 2,
+    "ruff_check": "All checks passed!",
+    "python_smoke": "ok"
+  },
+  "gaps": [
+    {
+      "id": "P1-REGISTRY-TEST-BREAK",
+      "tag": "post-impl",
+      "severity": "critical",
+      "type": "correctness",
+      "file": "tests/test_telemetry_events.py",
+      "symbol": "RegistryCompletenessTests.test_registry_contains_exactly_thirteen_production_entries",
+      "summary": "Adding 3 new LifecyclePhase events to the shared Event._REGISTRY broke an M01 test that asserted exactly 13 entries. The full sw-verify.sh suite failed (1605 ran, 1 failure).",
+      "fix": "Replaced the exact-count assertion with three subset checks: M01 events must be present, M02 lifecycle events must be present when lifecycle_events.py is imported, and no unexpected entries are allowed. Future milestones must extend EXPECTED_EVENT_TYPES / LIFECYCLE_M02_EVENT_TYPES when adding new event families."
+    },
+    {
+      "id": "P2-STUCK-RUNNING-ON-RUNNER-ERROR",
+      "tag": "post-impl",
+      "severity": "high",
+      "type": "correctness",
+      "file": "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+      "symbol": "run_next_node",
+      "summary": "When a phase-4 sprint-delegate node is dispatched but `sprint_delegate` is None, the runner persisted NodeState.RUNNING to disk and emitted LifecyclePhaseStarted before raising RunnerError. The node was then stuck in RUNNING (never reschedulable) with no live process.",
+      "fix": "Moved the sprint_delegate-is-None precondition check to BEFORE the RUNNING transition (and before incrementing attempts). RunnerError now raises while the node is still PENDING. Added regression test `test_phase4_without_delegate_does_not_leave_node_running`."
+    },
+    {
+      "id": "P3-NARROW-EMIT-CATCH",
+      "tag": "post-impl",
+      "severity": "medium",
+      "type": "correctness",
+      "file": "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+      "symbol": "_emit_safe",
+      "summary": "Docstring claimed `A flaky sink must never break a run`, but only OSError was caught. A TypeError from a malformed dataclass, ValueError from JSON serialization, or any other emitter-side bug would abort the runner's state-transition contract.",
+      "fix": "Broadened the catch to Exception (intentionally not BaseException, so KeyboardInterrupt/SystemExit still propagate). Log line now includes exception type for diagnosability. Added regression test `test_emit_failure_with_non_oserror_does_not_crash_runner`."
+    },
+    {
+      "id": "P4-NON-DICT-VERDICT-LEAVES-PARTIAL-STATE",
+      "tag": "post-impl",
+      "severity": "medium",
+      "type": "correctness",
+      "file": "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+      "symbol": "run_next_node",
+      "summary": "When sprint_delegate or verifier_dispatch returned a non-dict value, the runner raised RunnerError mid-run. Status file remained at RUNNING with LifecyclePhaseStarted emitted and no matching Failed event.",
+      "fix": "Converted both branches to graceful `_fail()` paths with distinct error_class strings (`DelegateInvalidResult`, `VerifierInvalidResult`). Status file transitions to FAILED with a descriptive last_error; LifecyclePhaseFailed is emitted normally; the run can continue."
+    },
+    {
+      "id": "Pr1-TMUX-NAME-SANITIZATION",
+      "tag": "production",
+      "severity": "medium",
+      "type": "hardening",
+      "file": "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+      "symbol": "_session_name_for_node",
+      "summary": "Only `/` was replaced with `-`. tmux session names also reject `.`, `:`, and whitespace. The policy loader only enforces non-empty node IDs, so any node ID outside `[A-Za-z0-9_-]` would crash the spawn with an opaque tmux error far from the root cause.",
+      "fix": "Sanitization now uses a regex (`[^A-Za-z0-9_-]` → `-`) covering all tmux-unsafe characters. Added regression test `SessionNameSanitizationTests.test_disallowed_chars_replaced_with_dash`."
+    },
+    {
+      "id": "Pr2-LAZY-IMPORT-NON-DETERMINISTIC-REGISTRATION",
+      "tag": "production",
+      "severity": "medium",
+      "type": "hardening",
+      "file": "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+      "symbol": "run_next_node",
+      "summary": "`lifecycle_events` and `run_identity` were imported inside `run_next_node`, so the auto-registration of LifecyclePhase{Started,Completed,Failed} did not happen until the first invocation. If something imported the runner module but never invoked it, a JSONL parser would route lifecycle event lines to UnknownEvent.",
+      "fix": "Hoisted both imports to module top, plus the lazy `from datetime import datetime` in `_duration`. Registration is now deterministic at module load."
+    }
   ],
-  "scope_notes": [
-    "Phase A is plan-only - no production code or tests committed in this phase, so 'tests_green: true' reflects that the existing W0-M01 suite remains untouched and 'lint_clean: true' reflects that no source files were modified.",
-    "Plan file: docs/superpowers/plans/2026-06-17-w0-m02-phase-runner-verifiers.md (14 tasks, TDD-structured, mirrors W0-M01 task-card style).",
-    "Acceptance criteria from build-spec-full.md Sec 2 (Wave 0) all mapped to specific tasks: spawn+monitor -> Task 7; verifier registry -> Tasks 3-5; phase-4 delegate -> Task 8; new lifecycle_events.py -> Tasks 1-2; end-to-end acceptance mirrors test_orchestration_loop.py -> Task 12.",
-    "Hard guardrails enforced by construction: core/telemetry_events.py never edited (events.py imports Event, subclasses it); core/success_verifiers.py never edited (new lifecycle_verifiers.py is a sibling); no new third-party imports (audit step in Task 13)."
-  ]
+  "files_changed_in_fixes": [
+    "skills/bmad-story-automator/src/story_automator/core/lifecycle_runner.py",
+    "tests/test_lifecycle_runner.py",
+    "tests/test_telemetry_events.py"
+  ],
+  "tests_added": [
+    "tests/test_lifecycle_runner.py::Phase4DelegationTests::test_phase4_without_delegate_does_not_leave_node_running",
+    "tests/test_lifecycle_runner.py::TelemetryEmissionTests::test_emit_failure_with_non_oserror_does_not_crash_runner",
+    "tests/test_lifecycle_runner.py::SessionNameSanitizationTests::test_disallowed_chars_replaced_with_dash",
+    "tests/test_telemetry_events.py::RegistryCompletenessTests::test_registry_contains_m01_production_entries",
+    "tests/test_telemetry_events.py::RegistryCompletenessTests::test_registry_contains_lifecycle_m02_entries_when_module_imported",
+    "tests/test_telemetry_events.py::RegistryCompletenessTests::test_registry_has_no_unexpected_production_entries"
+  ],
+  "deferred": []
 }
