@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "nodes": {
+    "B0-document-project": {
+      "track": "bmm",
+      "phase": 0,
+      "skill": "bmad-document-project",
+      "validator_skill": null,
+      "deps": [],
+      "input_artifacts": [],
+      "output_artifact": "docs/project-context.md",
+      "verifier": "structural",
+      "gate": "auto",
+      "modes": ["brownfield"],
+      "agent_role": "analyst",
+      "interactive": false
+    },
+    "B2-prd": {
+      "track": "bmm",
+      "phase": 2,
+      "skill": "bmad-create-prd",
+      "validator_skill": "bmad-validate-prd",
+      "deps": ["B0-document-project"],
+      "input_artifacts": ["docs/project-context.md"],
+      "output_artifact": "docs/prd.md",
+      "verifier": "prd_valid",
+      "gate": "human",
+      "modes": ["brownfield"],
+      "agent_role": "pm",
+      "interactive": true
+    },
+    "B3-arch": {
+      "track": "bmm",
+      "phase": 3,
+      "skill": "bmad-create-architecture",
+      "validator_skill": null,
+      "deps": ["B2-prd"],
+      "input_artifacts": ["docs/prd.md"],
+      "output_artifact": "docs/architecture.md",
+      "verifier": "structural",
+      "gate": "human",
+      "modes": ["brownfield"],
+      "agent_role": "architect",
+      "interactive": false
+    }
+  },
+  "entry": {"greenfield": [], "brownfield": ["B0-document-project"]}
+}
