@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import tempfile  # noqa: F401  (used in later test classes)
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -153,3 +153,95 @@ class StatusDataModelTests(unittest.TestCase):
             new_run_status(
                 policy, run_id="r", mode="midfield", started_at="2026-06-17T10:00:00Z"
             )
+
+
+class StatusSaveLoadRoundTripTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def _load_policy(self):
+        from story_automator.core.lifecycle_policy import load_policy
+
+        return load_policy(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+
+    def test_save_then_load_is_identity(self) -> None:
+        from story_automator.core.lifecycle_status import (
+            load_status,
+            new_run_status,
+            save_status,
+            status_to_dict,
+        )
+
+        policy = self._load_policy()
+        original = new_run_status(
+            policy, run_id="r-1", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, original)
+        loaded = load_status(target, expected_policy=policy)
+
+        self.assertEqual(status_to_dict(loaded), status_to_dict(original))
+
+    def test_save_uses_atomic_io_no_orphan_tmp_files(self) -> None:
+        from story_automator.core.lifecycle_status import (
+            new_run_status,
+            save_status,
+        )
+
+        policy = self._load_policy()
+        status = new_run_status(
+            policy, run_id="r-2", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, status)
+        save_status(target, status)
+        save_status(target, status)
+
+        siblings = sorted(p.name for p in self.dir.iterdir())
+        self.assertEqual(siblings, ["lifecycle-status.json"])
+
+    def test_load_with_mismatched_policy_hash_raises(self) -> None:
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            PolicyMismatch,
+            load_status,
+            new_run_status,
+            save_status,
+        )
+
+        policy_a = self._load_policy()
+        status = new_run_status(
+            policy_a, run_id="r-3", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, status)
+
+        raw = json.loads(
+            (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        )
+        raw["nodes"]["B2-prd"]["skill"] = "bmad-create-prd-v2"
+        policy_b = load_policy(json.dumps(raw))
+
+        with self.assertRaises(PolicyMismatch):
+            load_status(target, expected_policy=policy_b)
+
+    def test_load_without_expected_policy_skips_hash_check(self) -> None:
+        from story_automator.core.lifecycle_status import (
+            load_status,
+            new_run_status,
+            save_status,
+        )
+
+        policy = self._load_policy()
+        status = new_run_status(
+            policy, run_id="r-4", mode="greenfield", started_at="2026-06-17T10:00:00Z"
+        )
+        target = self.dir / "lifecycle-status.json"
+        save_status(target, status)
+
+        loaded = load_status(target)
+        self.assertEqual(loaded.run_id, "r-4")
