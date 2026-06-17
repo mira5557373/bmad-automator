@@ -660,5 +660,94 @@ class TelemetryEmissionTests(unittest.TestCase):
         self.assertEqual(result.final_state, "awaiting_approval")
 
 
+class RunResultDurationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.status_path = self.root / "lifecycle-status.json"
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            new_run_status,
+            save_status,
+        )
+
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "lifecycle"
+            / "greenfield-minimal.policy.json"
+        )
+        self.policy = load_policy(fixture.read_text(encoding="utf-8"))
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-dur",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        save_status(self.status_path, self.status)
+
+    def test_duration_uses_injected_clock(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        ticks = iter(["2026-06-17T00:00:00Z", "2026-06-17T00:00:42Z"])
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+            clock=lambda: next(ticks),
+        )
+        self.assertAlmostEqual(result.duration_s, 42.0, places=3)
+
+
+class FailedNodeReentryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.status_path = self.root / "lifecycle-status.json"
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            new_run_status,
+            save_status,
+        )
+
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "lifecycle"
+            / "greenfield-minimal.policy.json"
+        )
+        self.policy = load_policy(fixture.read_text(encoding="utf-8"))
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-fr",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        self.status.nodes["B1-brief"].state = NodeState.FAILED
+        save_status(self.status_path, self.status)
+
+    def test_failed_node_is_not_runnable_without_reset(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            verifier_dispatch=lambda name, **kw: {"verified": True},
+        )
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()
