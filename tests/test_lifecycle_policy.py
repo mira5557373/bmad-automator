@@ -65,3 +65,68 @@ class LoadPolicyHappyPathTests(unittest.TestCase):
     def test_version_captured(self) -> None:
         policy = self.load_policy(self.json_text)
         self.assertEqual(policy.version, 1)
+
+
+class PolicyEnumValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from story_automator.core.lifecycle_policy import PolicyError, load_policy
+
+        self.PolicyError = PolicyError
+        self.load_policy = load_policy
+
+    def test_invalid_gate_value_raises(self) -> None:
+        text = (FIXTURE_DIR / "invalid-bad-enum.policy.json").read_text(encoding="utf-8")
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(text)
+        self.assertIn("gate", str(ctx.exception))
+        self.assertIn("B1-brief", str(ctx.exception))
+
+    def test_invalid_mode_value_raises(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        raw["nodes"]["B1-brief"]["modes"] = ["greenfeld"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("modes", str(ctx.exception))
+
+    def test_empty_modes_list_raises(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        raw["nodes"]["B1-brief"]["modes"] = []
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("modes", str(ctx.exception))
+
+    def test_missing_required_field_raises(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        del raw["nodes"]["B2-prd"]["skill"]
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("skill", str(ctx.exception))
+
+    def test_non_int_phase_raises(self) -> None:
+        import json as _json
+
+        text = (FIXTURE_DIR / "greenfield-minimal.policy.json").read_text(encoding="utf-8")
+        raw = _json.loads(text)
+        raw["nodes"]["B2-prd"]["phase"] = "two"
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy(_json.dumps(raw))
+        self.assertIn("phase", str(ctx.exception))
+
+    def test_invalid_json_input_raises_policy_error(self) -> None:
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy("{not: valid, json}")
+        self.assertIn("JSON", str(ctx.exception))
+
+    def test_top_level_non_object_raises(self) -> None:
+        with self.assertRaises(self.PolicyError) as ctx:
+            self.load_policy("[]")
+        self.assertIn("object", str(ctx.exception))

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "nodes": {
+    "B1-brief": {
+      "track": "bmm",
+      "phase": 1,
+      "skill": "bmad-product-brief",
+      "validator_skill": null,
+      "deps": [],
+      "input_artifacts": [],
+      "output_artifact": "docs/product-brief.md",
+      "verifier": "structural",
+      "gate": "manual",
+      "modes": ["greenfield"],
+      "agent_role": "analyst",
+      "interactive": true
+    }
+  },
+  "entry": {"greenfield": ["B1-brief"], "brownfield": []}
+}

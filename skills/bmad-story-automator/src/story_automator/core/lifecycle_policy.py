@@ -158,9 +158,22 @@ def _parse_node(node_id: str, raw: Any) -> NodeDef:
     output_artifact = required("output_artifact", str)
     verifier = required("verifier", str)
     gate = required("gate", str)
+    if gate not in _VALID_GATES:
+        raise PolicyError(
+            f"node {node_id!r} field 'gate' must be one of {sorted(_VALID_GATES)!r}, "
+            f"got {gate!r}"
+        )
     modes = _parse_str_list(
         raw.get("modes", []), where=f"node {node_id!r} field 'modes'"
     )
+    if not modes:
+        raise PolicyError(f"node {node_id!r} field 'modes' must be non-empty")
+    bad_modes = [m for m in modes if m not in _VALID_MODES]
+    if bad_modes:
+        raise PolicyError(
+            f"node {node_id!r} field 'modes' contains invalid values "
+            f"{bad_modes!r}; must be subset of {sorted(_VALID_MODES)!r}"
+        )
     agent_role = required("agent_role", str)
     interactive = bool(raw.get("interactive", False))
 
