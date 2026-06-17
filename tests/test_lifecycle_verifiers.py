@@ -220,5 +220,101 @@ class StructuralCompleteVerifierTests(unittest.TestCase):
         self.assertTrue(result["verified"])
 
 
+class ValidatorSkillVerifierTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def test_calls_injected_dispatch_when_validator_skill_set(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        artifact = self.root / "docs" / "prd.md"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text(
+            "---\nstatus: complete\n---\n# PRD\n", encoding="utf-8"
+        )
+
+        calls: list = []
+
+        def stub_dispatch(*, validator_skill: str, node, project_root):
+            calls.append((validator_skill, node.id, project_root))
+            return {"verified": True, "validator": validator_skill}
+
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="validator_skill",
+            output_artifact="docs/prd.md",
+            validator_skill="bmad-validate-prd",
+        )
+        result = run_lifecycle_verifier(
+            "validator_skill",
+            node=node,
+            project_root=str(self.root),
+            validator_dispatch=stub_dispatch,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["validator"], "bmad-validate-prd")
+        self.assertEqual(
+            calls, [("bmad-validate-prd", "B2-prd", str(self.root))]
+        )
+
+    def test_missing_validator_skill_field_fails(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="validator_skill",
+            output_artifact="docs/prd.md",
+            validator_skill=None,
+        )
+        result = run_lifecycle_verifier(
+            "validator_skill",
+            node=node,
+            project_root=str(self.root),
+            validator_dispatch=lambda **_: {"verified": True},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "validator_skill_not_configured")
+
+    def test_dispatch_callable_required(self) -> None:
+        from story_automator.core.lifecycle_verifiers import (
+            VerifierError,
+            run_lifecycle_verifier,
+        )
+
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="validator_skill",
+            output_artifact="docs/prd.md",
+            validator_skill="bmad-validate-prd",
+        )
+        with self.assertRaises(VerifierError):
+            run_lifecycle_verifier(
+                "validator_skill", node=node, project_root=str(self.root)
+            )
+
+    def test_dispatch_returning_verified_false_propagates(self) -> None:
+        from story_automator.core.lifecycle_verifiers import run_lifecycle_verifier
+
+        def reject_dispatch(*, validator_skill, node, project_root):
+            return {"verified": False, "reason": "validator_said_no"}
+
+        node = _make_node(
+            node_id="B2-prd",
+            verifier="validator_skill",
+            output_artifact="docs/prd.md",
+            validator_skill="bmad-validate-prd",
+        )
+        result = run_lifecycle_verifier(
+            "validator_skill",
+            node=node,
+            project_root=str(self.root),
+            validator_dispatch=reject_dispatch,
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "validator_said_no")
+
+
 if __name__ == "__main__":
     unittest.main()

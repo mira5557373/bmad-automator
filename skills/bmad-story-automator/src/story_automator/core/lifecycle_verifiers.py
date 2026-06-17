@@ -22,6 +22,7 @@ __all__ = [
     "artifact_exists",
     "run_lifecycle_verifier",
     "structural_complete",
+    "validator_skill",
 ]
 
 
@@ -99,9 +100,43 @@ def structural_complete(
     return base
 
 
+def validator_skill(
+    *,
+    node: NodeDef,
+    project_root: str,
+    validator_dispatch: Callable[..., dict[str, Any]] | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Defer to ``node.validator_skill`` via the injected dispatch callable."""
+    if not node.validator_skill:
+        return {
+            "verified": False,
+            "reason": "validator_skill_not_configured",
+            "verifier": "validator_skill",
+        }
+    if validator_dispatch is None:
+        raise VerifierError(
+            f"verifier 'validator_skill' for node {node.id!r} needs a "
+            f"`validator_dispatch` callable; pass one from the runner"
+        )
+    result = validator_dispatch(
+        validator_skill=node.validator_skill,
+        node=node,
+        project_root=project_root,
+    )
+    if not isinstance(result, dict):
+        raise VerifierError(
+            f"validator_dispatch for {node.validator_skill!r} returned "
+            f"{type(result).__name__}, expected dict"
+        )
+    result.setdefault("verifier", "validator_skill")
+    return result
+
+
 LIFECYCLE_VERIFIERS: dict[str, VerifierFn] = {
     "artifact_exists": artifact_exists,
     "structural_complete": structural_complete,
+    "validator_skill": validator_skill,
 }
 
 
