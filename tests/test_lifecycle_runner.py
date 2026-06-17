@@ -279,5 +279,115 @@ class SpawnPathTests(unittest.TestCase):
         self.assertIn("spawn", on_disk.nodes["B1-brief"].last_error)
 
 
+class Phase4DelegationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.status_path = self.root / "lifecycle-status.json"
+        (self.root / "epics").mkdir()
+        (self.root / "epics" / "epic-1.md").write_text(
+            "# E1\n", encoding="utf-8"
+        )
+
+        from story_automator.core.lifecycle_policy import load_policy
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            new_run_status,
+            save_status,
+        )
+
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "lifecycle"
+            / "m02-phase4-delegate.policy.json"
+        )
+        self.policy = load_policy(fixture.read_text(encoding="utf-8"))
+        self.status = new_run_status(
+            self.policy,
+            run_id="r-p4",
+            mode="greenfield",
+            started_at="2026-06-17T00:00:00Z",
+        )
+        self.status.nodes["B3-epics"].state = NodeState.COMPLETE
+        save_status(self.status_path, self.status)
+
+    def test_phase4_dispatches_to_sprint_delegate_not_spawn(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+
+        spawn_calls: list = []
+        delegate_calls: list = []
+
+        def stub_spawn(*a, **k):
+            spawn_calls.append(a)
+            return ("", 0)
+
+        def stub_delegate(*, node, project_root, status, run_id):
+            delegate_calls.append((node.id, project_root))
+            (Path(project_root) / "sprint-status.yaml").write_text(
+                "stories: []\n", encoding="utf-8"
+            )
+            return {"verified": True}
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=stub_spawn,
+            monitor_session=lambda *a, **k: 0,
+            sprint_delegate=stub_delegate,
+        )
+
+        self.assertEqual(result.node_id, "B4-sprint")
+        self.assertEqual(result.final_state, "complete")
+        self.assertEqual(len(delegate_calls), 1)
+        self.assertEqual(delegate_calls[0][0], "B4-sprint")
+        self.assertEqual(spawn_calls, [])
+
+    def test_phase4_without_delegate_fails_loud(self) -> None:
+        from story_automator.core.lifecycle_runner import (
+            RunnerError,
+            run_next_node,
+        )
+
+        with self.assertRaises(RunnerError):
+            run_next_node(
+                self.policy,
+                self.status,
+                project_root=str(self.root),
+                status_path=self.status_path,
+                spawn_agent=lambda *a, **k: ("", 0),
+                monitor_session=lambda *a, **k: 0,
+            )
+
+    def test_phase4_delegate_returning_false_transitions_to_failed(self) -> None:
+        from story_automator.core.lifecycle_runner import run_next_node
+        from story_automator.core.lifecycle_status import (
+            NodeState,
+            load_status,
+        )
+
+        def rejecting_delegate(*, node, project_root, status, run_id):
+            return {"verified": False, "reason": "p0_gate_failed"}
+
+        result = run_next_node(
+            self.policy,
+            self.status,
+            project_root=str(self.root),
+            status_path=self.status_path,
+            spawn_agent=lambda *a, **k: ("", 0),
+            monitor_session=lambda *a, **k: 0,
+            sprint_delegate=rejecting_delegate,
+        )
+        self.assertEqual(result.final_state, "failed")
+        on_disk = load_status(self.status_path)
+        self.assertEqual(on_disk.nodes["B4-sprint"].state, NodeState.FAILED)
+        self.assertIn(
+            "p0_gate_failed", on_disk.nodes["B4-sprint"].last_error
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

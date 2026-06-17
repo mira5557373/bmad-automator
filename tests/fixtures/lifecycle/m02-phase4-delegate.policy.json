@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "nodes": {
+    "B3-epics": {
+      "track": "bmm",
+      "phase": 3,
+      "skill": "bmad-create-epics-and-stories",
+      "validator_skill": null,
+      "deps": [],
+      "input_artifacts": [],
+      "output_artifact": "epics/",
+      "verifier": "artifact_exists",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "pm",
+      "interactive": false
+    },
+    "B4-sprint": {
+      "track": "bmm",
+      "phase": 4,
+      "skill": "bmad-story-automator",
+      "validator_skill": null,
+      "deps": ["B3-epics"],
+      "input_artifacts": ["epics/"],
+      "output_artifact": "sprint-status.yaml",
+      "verifier": "artifact_exists",
+      "gate": "auto",
+      "modes": ["greenfield"],
+      "agent_role": "dev",
+      "interactive": false
+    }
+  },
+  "entry": {
+    "greenfield": ["B3-epics"],
+    "brownfield": []
+  }
+}
