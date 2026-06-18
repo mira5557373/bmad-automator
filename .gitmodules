@@ -1,0 +1,18 @@
+[submodule "external/BMAD-METHOD"]
+	path = external/BMAD-METHOD
+	url = https://github.com/bmad-code-org/BMAD-METHOD
+[submodule "external/bmad-automator-upstream"]
+	path = external/bmad-automator-upstream
+	url = https://github.com/bmad-code-org/bmad-automator
+[submodule "external/superpower-workflow"]
+	path = external/superpower-workflow
+	url = https://github.com/mira5557373/superpower-workflow
+[submodule "external/bmad-method-sample-data"]
+	path = external/bmad-method-sample-data
+	url = https://github.com/bmad-code-org/bmad-method-sample-data
+[submodule "external/bmad-method-wds-expansion"]
+	path = external/bmad-method-wds-expansion
+	url = https://github.com/bmad-code-org/bmad-method-wds-expansion
+[submodule "external/bmad-method-test-architecture-enterprise"]
+	path = external/bmad-method-test-architecture-enterprise
+	url = https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise
