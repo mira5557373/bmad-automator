@@ -988,15 +988,31 @@ def _claude_completion_marker_present(capture: str) -> bool:
     to past-tense (-ed). This function detects that switch by matching past-tense
     verbs followed by ``for Xm`` after a line start or the ``✻`` spinner glyph,
     rejecting both in-progress forms and generic text like "tests passed for 3m".
+
+    A ``✻``-prefixed match is always a real spinner line and is accepted as-is.
+    A bare line-start match (no glyph) is accepted only when the duration ENDS
+    the line: a real completion line is exactly ``<Verb> for <Xm Ys>`` with
+    nothing after it, whereas ordinary agent output continues — e.g. "Tested
+    for 3m 12s. Now starting next task." This trailing-content check kills that
+    false-positive premature finish without guessing at the (large, evolving)
+    spinner vocabulary, so a genuine completion verb is never missed.
     """
     if not capture:
         return False
-    return bool(
-        re.search(
-            r"(?im)(?:^|✻\s+)(?:\w+ed|Done)\s+for\s+\d+m(?:\s+\d+s)?\b",
-            capture,
-        )
-    )
+    for match in re.finditer(
+        r"(?im)(?P<glyph>✻\s+)?(?:\w+ed|Done)\s+for\s+\d+m(?:\s+\d+s)?(?P<tail>[^\n]*)",
+        capture,
+    ):
+        if match.group("glyph"):
+            return True
+        # Glyph-less path: require the verb at a line start (mirrors the old
+        # ``^`` anchor) and nothing but whitespace after the duration.
+        start = match.start()
+        if start != 0 and capture[start - 1] != "\n":
+            continue
+        if match.group("tail").strip() == "":
+            return True
+    return False
 
 
 def _legacy_session_status(

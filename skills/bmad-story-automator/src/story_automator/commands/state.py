@@ -69,6 +69,12 @@ def cmd_build_state_doc(args: list[str]) -> int:
     except json.JSONDecodeError:
         write_json({"ok": False, "error": "missing_config"})
         return 1
+    if not isinstance(config, dict):
+        # A valid-JSON but non-object config (e.g. a bare string/array from
+        # an unexpanded shell var) would crash every config.get() below with
+        # AttributeError; surface the structured error instead.
+        write_json({"ok": False, "error": "missing_config"})
+        return 1
     ensure_dir(output_folder)
     _cleanup_legacy_state_build_marker(Path(output_folder))
     now = now_utc_z()

@@ -113,6 +113,9 @@ def run_cmd(*args: str, timeout: int = DEFAULT_COMMAND_TIMEOUT, env: dict[str, s
         list(args),
         capture_output=True,
         text=True,
+        # Lenient decode so a non-UTF-8 byte in child output cannot raise
+        # UnicodeDecodeError and break the JSON error contract.
+        errors="replace",
         timeout=timeout,
         env=proc_env,
         cwd=str(cwd) if cwd else None,
@@ -134,7 +137,10 @@ def filter_input_box(text: str) -> str:
     lines = text.splitlines()
     start_re = re.compile(r"^\s*[╭┌]")
     end_re = re.compile(r"^\s*[╰└]")
-    box_re = re.compile(r"^\s*[│|]")
+    # Only the box-drawing vertical (U+2502) — NOT the ASCII pipe — so a
+    # markdown table row ("| col | col |") is never swallowed if an orphan
+    # box-start glyph leaves ``in_box`` stuck True.
+    box_re = re.compile(r"^\s*│")
     in_box = False
     kept: list[str] = []
     for line in lines:

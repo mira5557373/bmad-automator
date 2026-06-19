@@ -82,8 +82,19 @@ def find_frontmatter_value_case(path: str | Path, key: str) -> str:
 def extract_last_action(path: str | Path) -> str:
     lines = trim_lines(read_text(path))
     for index, line in enumerate(lines):
-        if line.startswith("## Action Log") and index + 2 < len(lines):
-            return lines[index + 2].strip().lstrip("* ").strip()
+        if not line.startswith("## Action Log"):
+            continue
+        # Scan every line under the header and return the LAST non-blank
+        # one, stopping at the next section header. The previous +2 offset
+        # returned the FIRST action (and crashed-to-"" on a one-entry log).
+        last = ""
+        for body in lines[index + 1:]:
+            stripped = body.strip()
+            if stripped.startswith("## "):
+                break
+            if stripped:
+                last = stripped.lstrip("*-").strip()
+        return last
     return ""
 
 
@@ -117,8 +128,28 @@ def read_story_range_from_state(path: str | Path) -> list[str]:
 def update_simple_frontmatter(path: str | Path, updates: dict[str, str]) -> list[str]:
     path = Path(path)
     lines = trim_lines(read_text(path))
+    # Bound the rewrite to the frontmatter region so a body line that
+    # happens to start with "<key>:" (e.g. prose like "status: blocked on
+    # X") is never clobbered. Fenced files update between the opening and
+    # closing "---"; fence-less files update the leading key:value block up
+    # to the first blank line (the conventional body separator).
+    start = 0
+    end = len(lines)
+    if lines and lines[0].strip() == "---":
+        start = 1
+        end = len(lines)
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                end = i
+                break
+    else:
+        for i, line in enumerate(lines):
+            if line.strip() == "":
+                end = i
+                break
     updated: list[str] = []
-    for idx, line in enumerate(lines):
+    for idx in range(start, end):
+        line = lines[idx]
         for key, value in updates.items():
             if line.startswith(f"{key}:"):
                 lines[idx] = f"{key}: {value}"
@@ -129,12 +160,25 @@ def update_simple_frontmatter(path: str | Path, updates: dict[str, str]) -> list
 
 
 def extract_json_block(text: str) -> str:
-    match = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
-    if match:
-        return match.group(1)
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
+    # Prefer a fenced ```json block, then fall back to the first complete
+    # JSON object embedded anywhere in the text. ``raw_decode`` finds the
+    # end of a balanced object, so this tolerates trailing prose and nested
+    # braces — both of which a non-greedy ``\{.*?\}`` regex mishandles.
+    candidates: list[str] = []
+    fence = re.search(r"```json\s*(.+?)```", text, flags=re.DOTALL)
+    if fence:
+        candidates.append(fence.group(1))
+    candidates.append(text)
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        start = candidate.find("{")
+        if start == -1:
+            continue
+        try:
+            _obj, end = decoder.raw_decode(candidate, start)
+        except ValueError:
+            continue
+        return candidate[start:end]
     return ""
 
 

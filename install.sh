@@ -66,9 +66,14 @@ prune_backups() {
 backup_if_exists() {
   local path="$1"
   if [ -e "$path" ]; then
-    local backup="${path}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    # Declare and assign separately so a date(1) failure surfaces under
+    # set -e instead of being masked by the `local` builtin's exit status
+    # (shellcheck SC2155); quote the strip RHS so a TARGET_ROOT with glob
+    # chars is treated literally (SC2295).
+    local backup
+    backup="${path}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
     mv "$path" "$backup"
-    echo "Backup: ${backup#$TARGET_ROOT/}"
+    echo "Backup: ${backup#"$TARGET_ROOT"/}"
     prune_backups "$path"
   fi
 }
@@ -110,7 +115,7 @@ remove_obsolete_command_shim_if_legacy() {
   fi
   if wrapper_points_to_legacy_target "$shim"; then
     rm -f "$shim"
-    echo "Removed obsolete command shim: ${shim#$TARGET_ROOT/}"
+    echo "Removed obsolete command shim: ${shim#"$TARGET_ROOT"/}"
   fi
 }
 

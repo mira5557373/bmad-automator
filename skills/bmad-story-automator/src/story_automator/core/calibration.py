@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .common import iso_now
-from .telemetry_events import StoryCompleted, StoryFailed, parse_event
+from .telemetry_events import StoryCompleted, StoryFailed, StoryStarted, parse_event
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -71,6 +71,29 @@ def _iter_event_lines(path: Path) -> Iterator[str]:
             yield line
 
 
+def _bump_bucket(
+    buckets: dict[tuple[str, str], list],
+    key: tuple[str, str],
+    *,
+    completed: bool,
+    timestamp: object,
+) -> None:
+    """Record one completion/failure under ``key`` in ``buckets``."""
+
+    bucket = buckets.setdefault(key, [0, 0, ""])
+    if completed:
+        bucket[0] += 1
+    else:
+        bucket[1] += 1
+    # Guard the order comparison: dataclasses do not enforce field
+    # annotations and parse_event does cls(**payload), so a numeric or
+    # null timestamp can slip through. A bare `>` against the "" seed
+    # would raise TypeError ('int' > 'str'). Only strings participate
+    # in last-seen tracking; ISO lexicographic ordering is preserved.
+    if isinstance(timestamp, str) and timestamp > bucket[2]:
+        bucket[2] = timestamp
+
+
 def _accumulate_buckets(
     lines: Iterable[str],
 ) -> tuple[int, dict[tuple[str, str], list]]:
@@ -83,36 +106,63 @@ def _accumulate_buckets(
     `total_scanned`. Unknown event types parse successfully (they
     become `UnknownEvent`) and DO increment `total_scanned` but do not
     contribute to any bucket.
+
+    Bucket keys are ``(model_id, task_kind)``. M01 ``StoryCompleted`` /
+    ``StoryFailed`` events do not carry those fields, so when they are
+    absent the key is recovered by correlating the completion back to its
+    ``StoryStarted`` event (same ``run_id`` + ``story_key``) and using
+    ``(model, complexity)``. Without this correlation the table is
+    permanently empty on real ledgers, silently defaulting every M03 cost
+    estimate and M08 drift baseline to the 0.5 unseen-pair fallback. The
+    direct-attribute path is retained so a future schema (or a test shim)
+    that does emit ``model_id``/``task_kind`` keeps working unchanged.
     """
 
     total_scanned = 0
     buckets: dict[tuple[str, str], list] = {}
+    correlation: dict[tuple[str, str], tuple[str, str]] = {}
+    pending: list[tuple[bool, str, str, object]] = []
     for line in lines:
         try:
             event = parse_event(line)
         except (ValueError, json.JSONDecodeError, TypeError):
             continue
         total_scanned += 1
+        if isinstance(event, StoryStarted):
+            run_id = getattr(event, "run_id", None)
+            story_key = getattr(event, "story_key", None)
+            model = getattr(event, "model", None)
+            complexity = getattr(event, "complexity", None)
+            if (
+                isinstance(run_id, str)
+                and isinstance(story_key, str)
+                and isinstance(model, str)
+                and isinstance(complexity, str)
+            ):
+                correlation[(run_id, story_key)] = (model, complexity)
+            continue
         if not isinstance(event, (StoryCompleted, StoryFailed)):
             continue
+        completed = isinstance(event, StoryCompleted)
         model_id = getattr(event, "model_id", None)
         task_kind = getattr(event, "task_kind", None)
-        if not isinstance(model_id, str) or not isinstance(task_kind, str):
+        if isinstance(model_id, str) and isinstance(task_kind, str):
+            _bump_bucket(
+                buckets, (model_id, task_kind), completed=completed, timestamp=event.timestamp
+            )
             continue
-        key = (model_id, task_kind)
-        bucket = buckets.setdefault(key, [0, 0, ""])
-        if isinstance(event, StoryCompleted):
-            bucket[0] += 1
-        else:
-            bucket[1] += 1
-        # Guard the order comparison: dataclasses do not enforce field
-        # annotations and parse_event does cls(**payload), so a numeric or
-        # null timestamp can slip through. A bare `>` against the "" seed
-        # would raise TypeError ('int' > 'str'). Only strings participate
-        # in last-seen tracking; ISO lexicographic ordering is preserved.
-        ts = event.timestamp
-        if isinstance(ts, str) and ts > bucket[2]:
-            bucket[2] = ts
+        # No direct model_id/task_kind — defer until the full StoryStarted
+        # correlation map is known (a started event can appear after its
+        # completion in a merged or out-of-order ledger).
+        run_id = getattr(event, "run_id", None)
+        story_key = getattr(event, "story_key", None)
+        if isinstance(run_id, str) and isinstance(story_key, str):
+            pending.append((completed, run_id, story_key, event.timestamp))
+    for completed, run_id, story_key, timestamp in pending:
+        key = correlation.get((run_id, story_key))
+        if key is None:
+            continue
+        _bump_bucket(buckets, key, completed=completed, timestamp=timestamp)
     return total_scanned, buckets
 
 

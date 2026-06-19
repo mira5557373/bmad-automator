@@ -756,20 +756,36 @@ class ClassifyEscalationTests(unittest.TestCase):
         )
 
         event = self._make_event()
-        # Spec REQ-11 names a ``trigger`` field; M01 has ``trigger_id``
-        # (int) and ``severity``/``message`` (strings) only. Inject the
-        # spec field on the otherwise-mutable dataclass instance.
-        event.trigger = "policy:pii_leak"  # type: ignore[attr-defined]
+        # M01 ``EscalationTriggered`` ships ``trigger_id`` (int) plus
+        # ``severity``/``message`` (strings) — there is no ``trigger``
+        # field. The policy signal is carried in ``message`` via the
+        # ``policy:`` namespace prefix.
+        event.message = "policy:pii_leak"  # type: ignore[attr-defined]
         result = classify(event)
         self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
         self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
         self.assertEqual(result.confidence, Confidence.HIGH)
 
-    def test_non_policy_trigger_stays_review_rejected(self) -> None:
+    def test_policy_severity_upgrades_to_policy_violation_high(self) -> None:
+        from story_automator.core.failure_triage import (
+            Confidence,
+            FailureClass,
+            classify,
+        )
+
+        event = self._make_event()
+        # The other producer convention: ``severity == "policy"``.
+        event.severity = "policy"  # type: ignore[attr-defined]
+        result = classify(event)
+        self.assertEqual(result.primary, FailureClass.POLICY_VIOLATION)
+        self.assertIn(FailureClass.REVIEW_REJECTED, result.implies)
+        self.assertEqual(result.confidence, Confidence.HIGH)
+
+    def test_non_policy_message_stays_review_rejected(self) -> None:
         from story_automator.core.failure_triage import FailureClass, classify
 
         event = self._make_event()
-        event.trigger = "review:manual"  # type: ignore[attr-defined]
+        event.message = "review:manual"  # type: ignore[attr-defined]
         result = classify(event)
         self.assertEqual(result.primary, FailureClass.REVIEW_REJECTED)
 

@@ -528,6 +528,14 @@ class StatePolicyMetadataTests(unittest.TestCase):
 
 
 class patch_env:
+    # Agent-selection vars the build-cmd path reads. They must be controlled
+    # by the test, not inherited from the runner: e.g. the Claude Code harness
+    # exports AI_AGENT, which (correctly) suppresses the legacy AI_COMMAND
+    # override and would otherwise make these tests pass or fail depending on
+    # where they run. Neutralize them by default; a test layers its own values
+    # via ``extra``.
+    _NEUTRALIZED = ("AI_AGENT", "AI_COMMAND")
+
     def __init__(self, project_root: Path, extra: dict[str, str] | None = None) -> None:
         self.project_root = str(project_root)
         self.extra = extra or {}
@@ -538,6 +546,10 @@ class patch_env:
 
         self.previous["PROJECT_ROOT"] = os.environ.get("PROJECT_ROOT")
         os.environ["PROJECT_ROOT"] = self.project_root
+        for key in self._NEUTRALIZED:
+            if key not in self.extra:
+                self.previous[key] = os.environ.get(key)
+                os.environ.pop(key, None)
         for key, value in self.extra.items():
             self.previous[key] = os.environ.get(key)
             os.environ[key] = value

@@ -26,6 +26,24 @@ The hash-chained audit log records state mutations. Verify it with:
 - `audit_key_missing` — no `BMAD_AUDIT_KEY` in the environment; export the run's
   key and re-run.
 
+### Rotating the audit key / starting a fresh chain
+
+The audit chain is signed with `BMAD_AUDIT_KEY`; a new key cannot verify a log
+written with the old one (that is the point). To rotate the key or start a clean
+chain after a confirmed break:
+
+```bash
+# 1. Stop the orchestrator (no run should be appending to the log).
+# 2. Archive the existing log out of the way.
+mv _bmad/audit/audit.jsonl "_bmad/audit/audit-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+# 3. Export a fresh key and re-run; the new chain starts empty.
+export BMAD_AUDIT_KEY="$(openssl rand -hex 32)"
+```
+
+The archived log stays verifiable with the *old* key (keep it if you need the
+history). Full key-lifecycle management is otherwise deferred — see
+[SECURITY.md](../SECURITY.md).
+
 ## A crashed orchestrator is blocking the agent
 
 If the orchestrator process died but the stop hook keeps blocking, the active
@@ -63,6 +81,36 @@ loop will not freeze for the full command timeout. Inspect and reclaim:
 A duplicate spawn for a session name that already exists is refused
 (`session ... already exists`) rather than clobbering the live session's
 artifacts.
+
+## A child agent crashed mid-run
+
+Distinct from a *wedged* session (which hangs): the child `claude`/`codex`
+process exited (CLI error, OOM, segfault) and its tmux session is gone while the
+story is still marked active. Symptoms: the monitor reports the session as
+crashed/missing, no tmux session matches the active story, and the heartbeat
+stops advancing.
+
+```bash
+"$scripts" list-sessions --slug "$slug"          # is the story's session gone?
+"$scripts" tmux-status-check "$session"          # crashed / not_found?
+tmux capture-pane -t "$session" -p | tail -n 100 # last output (if pane survives)
+```
+
+Decide by who is still alive:
+
+- **Orchestrator alive** — let it drive recovery: failure triage classifies the
+  crash (`CRASH`) and adaptive retry (M07/M08) re-spawns, up to the retry
+  ceiling. No manual action needed.
+- **Orchestrator also dead** — clear the stale marker (see *A crashed
+  orchestrator is blocking the agent*), then resume from the latest
+  orchestration-state document; the crashed story re-runs from its last
+  committed action.
+- **Unrecoverable** (repeated crash on the same story) — mark the story
+  `DEFERRED` in the state document and move on; inspect the captured pane and
+  agent CLI logs before retrying.
+
+Run `"$scripts" doctor` first if crashes are immediate on spawn — a missing
+agent CLI, exhausted disk, or low file-descriptor limit shows up there.
 
 ## Resuming after an interruption
 

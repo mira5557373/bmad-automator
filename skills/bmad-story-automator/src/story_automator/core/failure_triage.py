@@ -304,15 +304,25 @@ def _classify_escalation(event: EscalationTriggered) -> Classification:
     """Map an ``EscalationTriggered`` event onto a classification.
 
     Default is ``REVIEW_REJECTED`` / ``MEDIUM`` — most escalations are
-    routed to a human reviewer. When the ``trigger`` field (spec REQ-11
-    names it; M01 ships ``trigger_id`` / ``severity`` / ``message`` only)
-    begins with the ``policy:`` namespace prefix, upgrade the verdict to
+    routed to a human reviewer. When the escalation is policy-shaped —
+    its ``message`` begins with the ``policy:`` namespace prefix, or its
+    ``severity`` is ``policy`` — upgrade the verdict to
     ``POLICY_VIOLATION`` / ``HIGH`` with ``REVIEW_REJECTED`` implied so
     downstream M08 retry policy can refuse to retry policy escalations.
+
+    The M01 ``EscalationTriggered`` dataclass ships ``trigger_id`` (int),
+    ``severity`` (str) and ``message`` (str) — there is no ``trigger``
+    field, so the policy signal is read off ``message``/``severity``
+    (the spec's REQ-11 ``trigger`` is honoured via ``getattr`` for any
+    future producer that adds it).
     """
     event_id = getattr(event, "event_id", None)
-    trigger = getattr(event, "trigger", "") or ""
-    if trigger.startswith("policy:"):
+    message = getattr(event, "message", "") or ""
+    severity = getattr(event, "severity", "") or ""
+    # Honour a future ``trigger`` field if a producer ever adds it, but
+    # fall back to the fields M01 actually emits today.
+    trigger = getattr(event, "trigger", "") or message
+    if trigger.startswith("policy:") or severity.strip().lower() == "policy":
         return Classification(
             primary=FailureClass.POLICY_VIOLATION,
             implies=(FailureClass.REVIEW_REJECTED,),

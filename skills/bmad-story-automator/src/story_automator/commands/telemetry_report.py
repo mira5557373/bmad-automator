@@ -11,6 +11,7 @@ even on a corrupt line or an I/O error.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ..core.common import print_json
@@ -52,6 +53,34 @@ def _attempts_list(reader: TelemetryReader) -> list[dict[str, object]]:
     ]
 
 
+def _read_tail_events(events_path: str, count: int) -> list[dict[str, object]]:
+    """Return the last ``count`` events as parsed objects (read-only).
+
+    Reads the raw JSONL leniently so a single malformed tail line during a
+    live run surfaces as a ``{"_corrupt": true}`` placeholder rather than
+    aborting the whole view — the opposite of the aggregations, which fail
+    loud on corruption per REQ-07.
+    """
+    path = Path(events_path)
+    if not path.is_file():
+        return []
+    lines = [
+        line
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if line.strip()
+    ]
+    recent = lines[-count:] if count > 0 else []
+    events: list[dict[str, object]] = []
+    for line in recent:
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            events.append({"_corrupt": True, "raw": line[:500]})
+            continue
+        events.append(parsed if isinstance(parsed, dict) else {"_corrupt": True, "raw": line[:500]})
+    return events
+
+
 def cmd_telemetry_report(args: list[str]) -> int:
     """Entry point for ``story-automator telemetry-report``.
 
@@ -61,8 +90,29 @@ def cmd_telemetry_report(args: list[str]) -> int:
         --report {cost_by_epic,attempts_by_story,retro_inputs,all}
                           (default ``all``)
         --epic <name>     required only when --report is retro_inputs
+        --tail <N>        skip the rollups and stream the last N raw events
+                          (live-debug view; read-only, never aborts on a
+                          corrupt tail line)
     """
     params = _flag_map(args)
+
+    if "tail" in params:
+        events_path = params.get("events") or _default_events_path()
+        raw_tail = params.get("tail") or ""
+        if not raw_tail.lstrip("-").isdigit():
+            print_json({"ok": False, "error": "invalid_tail", "tail": raw_tail})
+            return 1
+        count = max(int(raw_tail), 0)
+        print_json(
+            {
+                "ok": True,
+                "report": "tail",
+                "events": events_path,
+                "tail": count,
+                "recent": _read_tail_events(events_path, count),
+            }
+        )
+        return 0
 
     report = params.get("report") or "all"
     if report not in _VALID_REPORTS:

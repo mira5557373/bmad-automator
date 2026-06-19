@@ -36,6 +36,10 @@ def load_presets_file(path: str | Path) -> dict[str, Any]:
     if not file_exists(preset_path):
         return {"version": "1.0.0", "presets": []}
     data = json.loads(read_text(preset_path))
+    if not isinstance(data, dict):
+        # A non-object presets file would crash ``setdefault`` below; treat
+        # it as an empty (default) presets document.
+        return {"version": "1.0.0", "presets": []}
     data.setdefault("version", "1.0.0")
     data.setdefault("presets", [])
     return data
@@ -48,6 +52,11 @@ def save_presets_file(path: str | Path, data: dict[str, Any]) -> None:
 
 def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     data = json.loads(raw)
+    # A non-dict top-level value (e.g. a JSON string/array/number) would
+    # crash every ``data.get(...)`` below with AttributeError; degrade to an
+    # all-defaults config instead.
+    if not isinstance(data, dict):
+        data = {}
     config = AgentConfigResolved()
     config.default_primary = data.get("defaultPrimary") or data.get("primary") or "auto"
     if "defaultFallback" in data:
@@ -63,7 +72,12 @@ def parse_agent_config_json(raw: str) -> AgentConfigResolved:
     retro_task = _parse_task_entry(data.get("retro"))
     if retro_task is not None:
         config.per_task.setdefault("retro", retro_task)
-    for level, value in (data.get("complexityOverrides") or {}).items():
+    complexity_overrides = data.get("complexityOverrides")
+    if not isinstance(complexity_overrides, dict):
+        # A truthy non-dict (string/list/number) would crash ``.items()``;
+        # mirror the per-task defence in ``_parse_task_map``.
+        complexity_overrides = {}
+    for level, value in complexity_overrides.items():
         config.complexity_overrides[level] = _parse_task_map(value)
     for level in ("low", "medium", "high"):
         if level not in config.complexity_overrides and level in data:
@@ -181,12 +195,27 @@ def _resolve_fallback_agent(raw: Any) -> str:
 
 
 def extract_json_block(text: str) -> str:
-    match = re.search(r"(?s)```json\s*(\{.*?\})\s*```", text)
-    if match:
-        return match.group(1)
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
+    # Prefer a fenced ```json block, then fall back to the first complete
+    # JSON object embedded anywhere in the text. ``raw_decode`` finds the
+    # end of a balanced object, so this tolerates trailing prose and nested
+    # braces — both of which a non-greedy ``\{.*?\}`` regex mishandles
+    # (the previous form returned "" on an agents file with prose after the
+    # object, surfacing as a spurious ``agents_json_missing``).
+    candidates: list[str] = []
+    fence = re.search(r"(?s)```json\s*(.+?)```", text)
+    if fence:
+        candidates.append(fence.group(1))
+    candidates.append(text)
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        start = candidate.find("{")
+        if start == -1:
+            continue
+        try:
+            _obj, end = decoder.raw_decode(candidate, start)
+        except ValueError:
+            continue
+        return candidate[start:end]
     return ""
 
 

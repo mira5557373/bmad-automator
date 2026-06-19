@@ -106,9 +106,17 @@ to source state unless noted.
   testing), derives a single `pass` / `warn` / `block` decision, and writes the
   five-key result to `.claude/trust-verify-output/result.json`. Exit code:
   `0` on pass/warn, `2` on block (so the step can halt), `1` on input error.
-- `telemetry-report [--events <jsonl>] [--epic <id>] [--report <kind>]` —
+- `telemetry-report [--events <jsonl>] [--epic <id>] [--report <kind>] [--tail <N>]` —
   aggregates the M02 telemetry stream into rollups (cost-by-epic,
-  retry-attempts-by-story, per-epic retro inputs).
+  retry-attempts-by-story, per-epic retro inputs). `--tail <N>` instead streams
+  the last `N` raw events (a live-debug view that tolerates a corrupt tail line
+  rather than aborting); the rollups still fail loud on corruption.
+- `doctor [--human]` — operator preflight: checks the Python version, the
+  `filelock`/`psutil` dependencies, `tmux`/`claude`/`codex`/`git` on `PATH`, free
+  disk, `BMAD_AUDIT_KEY` length, bundled-config JSON validity, and the
+  file-descriptor limit. Read-only; exits non-zero only on a hard `fail`
+  (missing dependency or no agent CLI). `--human` adds a readable summary on
+  stderr.
 - `calibration [--events <jsonl>] [--model <id>] [--task <kind>] [--report]` —
   prints the M08 per-`(model_id, task_kind)` success-rate table. A missing
   ledger is not an error (empty table, `ok:true`).
@@ -205,10 +213,31 @@ a stable snake_case token. Common codes:
 | `audit_key_missing` | `audit-verify` found no `BMAD_AUDIT_KEY` in the environment. |
 | `invalid_gate` | `ceiling-check` was given a `--gate` outside `init`/`story_start`/`retry_start`. |
 | `corrupt_telemetry` / `invalid_event` | A telemetry line/event could not be parsed. |
+| `invalid_report` / `invalid_tail` | `telemetry-report` got an unknown `--report` value or a non-numeric `--tail`. |
+| `io_error` | A read/write failed with an OS-level error (the `detail` field carries it). |
+| `missing_config` / `missing_template_or_output` | `build-state-doc` got no/empty/non-object config JSON, or a missing template/output folder. |
+| `missing_args` / `missing_required_args` / `missing_subcommand` / `unknown_subcommand` | A command was invoked without its required flags or with an unknown subcommand. |
+| `missing_slug` / `missing_epic` / `missing_epic_or_story` / `missing_events` / `missing_gate` | A specific required flag was absent for the named command. |
+| `epic_file_not_found` / `rules_file_not_found` / `spec_file_not_found` / `gaps_file_not_found` / `diff_file_not_found` | A required input file did not resolve. |
+| `gaps_unreadable` / `diff_unreadable` | A `--gaps`/`--diff` path exists but could not be read (e.g. a directory or permission error). |
+| `agents_file_not_found` / `agents_json_missing` / `story_not_found` / `task_not_found` / `preset_not_found` | An agents-plan lookup found no file, no embedded JSON, or no matching story/task/preset. |
+| `tmux_not_found` | `tmux` is not on `PATH` (run `doctor` to confirm the environment). |
+| `repo_not_found` / `no_changes` / `git_status_failed` / `git_add_failed` / `commit_failed` | A `commit-story` git step could not complete. |
+| `run_already_active` / `run_lock_busy` | A run lock is held by a live owner; another run is in progress. |
+| `policy_snapshot_failed` | The effective runtime policy could not be snapshotted (the `reason` field carries why). |
+| `no_stories_found` / `no_incomplete_state` / `state_not_found` / `sprint_not_found` | A state/sprint lookup matched nothing. |
+| `layer2_failed` / `layer3_failed` | A `trust_verify` spec-compliance / feature-test layer could not run on the given input. |
 
 This vocabulary is additive: new codes may be introduced, but existing codes
-keep their meaning. A `version` command and `--version`/`-v` flag report the
-runtime version for compatibility checks.
+keep their meaning. The table above covers the operationally common codes; for
+an exhaustive, always-current list, grep the source:
+
+```bash
+grep -rhoE '"error":\s*"[a-z_]+"' skills/bmad-story-automator/src | sort -u
+```
+
+A `version` command and `--version`/`-v` flag report the runtime version for
+compatibility checks. Run `doctor` for a one-shot environment preflight.
 
 ## Read Next
 

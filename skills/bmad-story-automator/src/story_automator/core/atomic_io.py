@@ -336,9 +336,16 @@ def is_stale(
       matching the recorded ``start_time`` — otherwise the PID was recycled
       by an unrelated process and the original owner is gone.
     """
-    age = (now if now is not None else time.time()) - parse_iso_seconds(
-        identity.heartbeat_iso
-    )
+    try:
+        heartbeat_seconds = parse_iso_seconds(identity.heartbeat_iso)
+    except ValueError:
+        # An unparseable heartbeat (e.g. a "+00:00" offset instead of the
+        # "Z" form iso_now() emits, or a partially-written lock) must not
+        # crash lock liveness. Treat it as fresh — a live owner is still
+        # refreshing it on the canonical format; a truly dead owner ages out
+        # once a well-formed heartbeat stops arriving.
+        return False
+    age = (now if now is not None else time.time()) - heartbeat_seconds
     if age <= _STALE_HEARTBEAT_WINDOW_S:
         return False
     if identity.hostname != socket.gethostname():

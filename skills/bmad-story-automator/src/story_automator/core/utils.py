@@ -109,6 +109,10 @@ def run_cmd(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # Decode child output leniently: a non-UTF-8 byte (e.g. a git
+            # status line with a latin-1 filename under a C locale) must not
+            # raise UnicodeDecodeError and break the JSON error contract.
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -167,7 +171,10 @@ def filter_input_box(text: str) -> str:
         if re.match(r"^\s*[╰└]", line):
             in_box = False
             continue
-        if in_box and re.match(r"^\s*[│|]", line):
+        # Only the box-drawing vertical (U+2502) — NOT the ASCII pipe — so a
+        # markdown table row is never swallowed if an orphan box-start glyph
+        # leaves ``in_box`` stuck True.
+        if in_box and re.match(r"^\s*│", line):
             continue
         output.append(line)
     return "\n".join(output)

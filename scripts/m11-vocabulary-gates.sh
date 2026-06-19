@@ -60,7 +60,8 @@ docs/changelog/260517.md:3
 docs/changelog/260519.md:3
 docs/changelog/260615.md:3
 docs/changelog/260616.md:3
-docs/changelog/260617.md:3"
+docs/changelog/260617.md:3
+docs/changelog/260619.md:3"
 
 ACTUAL=$(for F in docs/changelog/*.md; do
   LINES=$(grep -nE '^##+ [0-9]{6}' "$F" | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
@@ -95,7 +96,7 @@ if git rev-parse --verify --quiet "$BASE" >/dev/null; then
   # retraction convention can land its worked example without falsely tripping
   # prose-immutability. Deletions (^-) under docs/changelog/*.md remain
   # forbidden, preserving the original M11 intent.
-  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' ':!docs/changelog/260617.md' \
+  NON_HEADING=$(git diff -U0 "$BASE"...HEAD -- 'docs/changelog/*.md' ':!docs/changelog/AUDIT.md' ':!docs/changelog/260615.md' ':!docs/changelog/260616.md' ':!docs/changelog/260617.md' ':!docs/changelog/260619.md' \
     | grep -E '^[+-][^+-]' \
     | grep -vE '^[+-]## [0-9]{6}' \
     | grep -vE '^\+### Retractions[[:space:]]*$' \

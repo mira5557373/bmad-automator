@@ -15,6 +15,7 @@ from .commands.basic import (
     cmd_stop_hook,
 )
 from .commands.ceiling_check import cmd_ceiling_check
+from .commands.doctor import cmd_doctor
 from .commands.trust_verify import cmd_trust_verify
 from .commands.telemetry_report import cmd_telemetry_report
 from .commands.calibration_cmd import cmd_calibration
@@ -103,6 +104,7 @@ def _command_registry() -> dict[str, Command]:
     """
     return {
         "version": _cmd_version,
+        "doctor": cmd_doctor,
         "derive-project-slug": cmd_derive_project_slug,
         "ensure-marker-gitignore": cmd_ensure_marker_gitignore,
         "ensure-stop-hook": cmd_ensure_stop_hook,
