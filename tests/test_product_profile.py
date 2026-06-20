@@ -421,5 +421,69 @@ class EffectiveProfileTests(BundledProfileTests):
             self.assertEqual(profile["id"], "default")
 
 
+class AccessorTests(BundledProfileTests):
+    def test_required_for_priority_p0(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            required_for_priority,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        req = required_for_priority(profile, "P0")
+        self.assertEqual(req["coverage_pct"], 100)
+        self.assertIn("e2e", req["levels"])
+
+    def test_required_for_priority_unknown_raises(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+            required_for_priority,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        with self.assertRaisesRegex(ProfileError, "unknown priority: P9"):
+            required_for_priority(profile, "P9")
+
+    def test_required_for_priority_returns_copy(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            required_for_priority,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        req = required_for_priority(profile, "P0")
+        req["levels"].append("mutated")
+        again = required_for_priority(profile, "P0")
+        self.assertNotIn("mutated", again["levels"])
+
+    def test_toolchain_for_unknown_language_returns_empty(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            toolchain_for,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(toolchain_for(profile, "rust"), [])
+
+    def test_rule_for_missing_category_returns_empty(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            rule_for,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(rule_for(profile, "performance"), {})
+
+    def test_rule_for_present_category(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            rule_for,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        rule = rule_for(profile, "security")
+        self.assertEqual(rule["sast_max_high"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

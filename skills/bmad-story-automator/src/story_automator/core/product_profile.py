@@ -342,3 +342,26 @@ def _deep_merge(base: Any, override: Any) -> Any:
     if isinstance(override, list):
         return list(override)
     return override
+
+
+def required_for_priority(
+    profile: dict[str, Any], priority: str
+) -> dict[str, Any]:
+    if priority not in VALID_PRIORITIES:
+        raise ProfileError(f"unknown priority: {priority}")
+    entry = (profile.get("matrix") or {}).get(priority) or {}
+    return {
+        "coverage_pct": int(entry.get("coverage_pct", 0)),
+        "levels": list(entry.get("levels") or []),
+    }
+
+
+def toolchain_for(
+    profile: dict[str, Any], language: str
+) -> list[dict[str, Any]]:
+    entries = (profile.get("toolchain") or {}).get(language) or []
+    return [dict(entry) for entry in entries]
+
+
+def rule_for(profile: dict[str, Any], category: str) -> dict[str, Any]:
+    return dict((profile.get("rules") or {}).get(category) or {})
