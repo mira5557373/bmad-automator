@@ -95,5 +95,105 @@ class LoadBundledProfileTests(BundledProfileTests):
         self.assertEqual(DEFAULT_TIMEOUT_FALLBACK, 120)
 
 
+class ProfileShapeTests(BundledProfileTests):
+    def test_unknown_top_level_key_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "x", "bogus": True,
+             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": [], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, "unknown top-level profile keys: bogus"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_version_must_be_positive_int(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": "1.0", "id": "x",
+             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": [], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, "profile.version must be a positive integer"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_id_must_be_non_empty_string(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "",
+             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": [], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, "profile.id must be a non-empty string"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_matrix_must_include_all_priorities(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "x",
+             "matrix": {"P0": {"coverage_pct": 100, "levels": []}},
+             "categories": {"code": [], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, "matrix priorities must include all of"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_coverage_pct_out_of_range_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "x",
+             "matrix": {p: {"coverage_pct": 101, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": [], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, r"matrix\.P0\.coverage_pct must be int 0\.\.100"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_unknown_code_category_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "x",
+             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": ["nope"], "system": []}}
+        )
+        with self.assertRaisesRegex(ProfileError, "unknown code categories: nope"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_unknown_system_category_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        self._write_bundled(
+            {"version": 1, "id": "x",
+             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+             "categories": {"code": [], "system": ["nope"]}}
+        )
+        with self.assertRaisesRegex(ProfileError, "unknown system categories: nope"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+
 if __name__ == "__main__":
     unittest.main()

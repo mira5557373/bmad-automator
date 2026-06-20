@@ -64,6 +64,79 @@ _PROFILES_DIR = "data/profiles"
 _PROFILE_ID_ENV = "STORY_AUTOMATOR_PROFILE"
 
 
+def _validate_profile_shape(profile: dict[str, Any]) -> None:
+    unknown_keys = sorted(set(profile) - VALID_TOP_LEVEL_KEYS)
+    if unknown_keys:
+        raise ProfileError(
+            f"unknown top-level profile keys: {', '.join(unknown_keys)}"
+        )
+    _validate_version_and_id(profile)
+    _validate_matrix(profile.get("matrix"))
+    _validate_categories(profile.get("categories"))
+
+
+def _validate_version_and_id(profile: dict[str, Any]) -> None:
+    version = profile.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise ProfileError("profile.version must be a positive integer")
+    pid = profile.get("id")
+    if not isinstance(pid, str) or not pid.strip():
+        raise ProfileError("profile.id must be a non-empty string")
+
+
+def _validate_matrix(matrix: Any) -> None:
+    if not isinstance(matrix, dict):
+        raise ProfileError("matrix must be an object")
+    missing = sorted(VALID_PRIORITIES - set(matrix))
+    if missing:
+        raise ProfileError(
+            f"matrix priorities must include all of "
+            f"{sorted(VALID_PRIORITIES)}; missing: {missing}"
+        )
+    unknown = sorted(set(matrix) - VALID_PRIORITIES)
+    if unknown:
+        raise ProfileError(f"unknown matrix priorities: {', '.join(unknown)}")
+    for prio, value in matrix.items():
+        if not isinstance(value, dict):
+            raise ProfileError(f"matrix.{prio} must be an object")
+        coverage = value.get("coverage_pct")
+        if (
+            not isinstance(coverage, int)
+            or isinstance(coverage, bool)
+            or coverage < 0
+            or coverage > 100
+        ):
+            raise ProfileError(
+                f"matrix.{prio}.coverage_pct must be int 0..100"
+            )
+        levels = value.get("levels")
+        if not isinstance(levels, list) or not all(
+            isinstance(item, str) for item in levels
+        ):
+            raise ProfileError(
+                f"matrix.{prio}.levels must be a string array"
+            )
+
+
+def _validate_categories(categories: Any) -> None:
+    if not isinstance(categories, dict):
+        raise ProfileError("categories must be an object")
+    for tier, allowed in (
+        ("code", VALID_CODE_CATEGORIES),
+        ("system", VALID_SYSTEM_CATEGORIES),
+    ):
+        items = categories.get(tier, [])
+        if not isinstance(items, list) or not all(
+            isinstance(item, str) for item in items
+        ):
+            raise ProfileError(f"categories.{tier} must be a string array")
+        unknown = sorted(set(items) - allowed)
+        if unknown:
+            raise ProfileError(
+                f"unknown {tier} categories: {', '.join(unknown)}"
+            )
+
+
 def load_bundled_profile(
     profile_id: str = "default",
     project_root: str | None = None,
@@ -76,7 +149,9 @@ def load_bundled_profile(
         raise ProfileError(
             f"unknown bundled profile {profile_id!r}; available: {available}"
         )
-    return _read_json(path)
+    profile = _read_json(path)
+    _validate_profile_shape(profile)
+    return profile
 
 
 def _bundle_root(project_root: str | None) -> Path:
