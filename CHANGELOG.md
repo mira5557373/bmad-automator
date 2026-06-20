@@ -1,5 +1,15 @@
 ### Features
 
+- feat(gate): add gate-in-progress marker for crash-safety (29aae16)
+- feat(gate): add gate file reuse validation per §9.2 (244b4d9)
+- feat(gate): add gate file persistence with schema version guard (5162157)
+- feat(gate): add evidence bundle loading with schema version guard (3ea786a)
+- feat(gate): add evidence record persistence (7809cf3)
+- feat(gate): add deterministic evidence bundle hash (184b66a)
+- feat(gate): add evidence migration shim and evidence_io module (d18ad89)
+- feat(gate): add LLM confidence verdict logic (c771b71)
+- feat(gate): add schema version guard for forward-compat (e739ec6)
+- feat(gate): add LLM evidence record factory with confidence and rationale (6faf80f)
 - feat(gate): add gate schema, rules, adjudicator, and profile bridge (3eb2aab)
 - feat(doctor): preflight active-profile toolchain on PATH (f07b72c)
 - feat(profile): add msme-erp profile (Profile #1) (f0ba597)
@@ -208,6 +218,7 @@
 
 ### Bug Fixes
 
+- fix(gate): tighten validation and add invariant/cost/NA verdict rules (aa61291)
 - fix(profile): deep-copy accessors + validate profile_id path (467769f)
 - fix(robustness,ops): resolve single-user-relevant findings from the 2026-06-19 audit (7ddd022)
 - fix(robustness): close recoverable-input crashes found in the deep-review pass (aeecbe1)
@@ -296,6 +307,9 @@
 
 ### Documentation
 
+- docs(gate): write Phase C gap report for foundation-m2-evidence-schemas (901fdf4)
+- docs(plan): Foundation M2 Evidence Schemas implementation plan (cf7cbe6)
+- docs: update generated documentation (8f0cd7c)
 - docs(changelog): Foundation M1 Product Profile [FULL] (a08cfa0)
 - docs(plan): Foundation M1 Product Profile TDD implementation plan (42393b3)
 - docs(audit): track 71-finding production-readiness audit reference (f6f52bd)
@@ -414,6 +428,7 @@
 
 ### Tests
 
+- test(gate): add round-trip determinism and pipeline integration tests (1f1ad5a)
 - test(integration): end-to-end orchestration-loop + real-tmux validation (6f2dc3a)
 - test(m06b): assert step-03ab Failure modes section (REQ-09) (6947209)
 - test(m06b): assert step-03ab What it does section (REQ-08) (9b2aa83)
