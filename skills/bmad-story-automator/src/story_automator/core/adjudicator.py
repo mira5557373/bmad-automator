@@ -23,6 +23,7 @@ from .product_profile import (
     DEFAULT_TIMEOUT_FALLBACK,
     DEFAULT_TIMEOUTS,
 )
+from .trust_boundary import assert_host_context
 
 
 def resolve_timeout(profile: dict[str, Any], category: str) -> int:
@@ -50,6 +51,7 @@ def run_collector_with_timeout(
            findings: ['TIMEOUT: <tool> exceeded <N>s']}.
     §6.4: adjudicator treats timeout as error for aggregation (fail-closed).
     """
+    assert_host_context("run_collector_with_timeout")
     if not cmd:
         return make_evidence_record(
             collector=collector,

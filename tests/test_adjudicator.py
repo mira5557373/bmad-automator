@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
+from unittest.mock import patch
 
 from story_automator.core.adjudicator import (
     resolve_timeout,
@@ -11,6 +13,7 @@ from story_automator.core.product_profile import (
     DEFAULT_TIMEOUT_FALLBACK,
     DEFAULT_TIMEOUTS,
 )
+from story_automator.core.trust_boundary import TrustBoundaryError
 
 
 class ResolveTimeoutTests(unittest.TestCase):
@@ -109,6 +112,31 @@ class RunCollectorTests(unittest.TestCase):
             timeout_s=10,
         )
         self.assertEqual(record["schema_version"], 1)
+
+
+class CollectorTrustBoundaryTests(unittest.TestCase):
+    def test_raises_in_child_session(self) -> None:
+        with patch.dict("os.environ", {"STORY_AUTOMATOR_CHILD": "true"}):
+            with self.assertRaises(TrustBoundaryError):
+                run_collector_with_timeout(
+                    [sys.executable, "-c", "print('ok')"],
+                    collector="test",
+                    tool="python",
+                    category="correctness",
+                    timeout_s=10,
+                )
+
+    def test_runs_normally_on_host(self) -> None:
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("STORY_AUTOMATOR_CHILD", None)
+            record = run_collector_with_timeout(
+                [sys.executable, "-c", "print('ok')"],
+                collector="test",
+                tool="python",
+                category="correctness",
+                timeout_s=10,
+            )
+            self.assertEqual(record["status"], "ok")
 
 
 if __name__ == "__main__":
