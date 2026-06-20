@@ -758,5 +758,90 @@ class MsmeErpProfileTests(BundledProfileTests):
         self.assertEqual(dg, "DG-3")
 
 
+class ProfileCustomizeFactsTests(BundledProfileTests):
+    def test_facts_include_profile_identity(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_customize_facts
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        facts = profile_customize_facts(profile)
+        self.assertEqual(facts["profile_id"], "default")
+        self.assertEqual(facts["profile_version"], 1)
+        self.assertEqual(len(facts["profile_hash"]), 8)
+
+    def test_facts_include_forbidden_adrs(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_customize_facts
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        facts = profile_customize_facts(profile)
+        self.assertIn("ADR-0083", facts["forbidden_adrs"])
+        self.assertIn("DG-2", facts["forbidden_adrs"])
+        self.assertIn("forbidden_patterns", facts)
+
+    def test_facts_include_gate_rules(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_customize_facts
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        facts = profile_customize_facts(profile)
+        self.assertIn("gate_rules", facts)
+        self.assertIn("security", facts["gate_rules"])
+
+    def test_facts_include_invariants_registry(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_customize_facts
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        facts = profile_customize_facts(profile)
+        self.assertEqual(
+            facts["invariants_registry"],
+            "data/profiles/msme-erp.invariants.yaml",
+        )
+
+    def test_facts_include_categories_na(self) -> None:
+        from story_automator.core.profile_bridge import profile_customize_facts
+
+        profile = {
+            "id": "test", "version": 1,
+            "categories_na": ["accessibility", "performance"],
+        }
+        facts = profile_customize_facts(profile)
+        self.assertEqual(facts["categories_na"], ["accessibility", "performance"])
+
+
+class ProfileActivationBlocksTests(BundledProfileTests):
+    def test_prepend_includes_profile_id(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_activation_blocks
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        blocks = profile_activation_blocks(profile)
+        self.assertIn("default", blocks["prepend"])
+        self.assertIn("Product Profile", blocks["prepend"])
+
+    def test_prepend_includes_blocked_adrs(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_activation_blocks
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        blocks = profile_activation_blocks(profile)
+        self.assertIn("ADR-0083", blocks["prepend"])
+
+    def test_append_is_empty_by_default(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.profile_bridge import profile_activation_blocks
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        blocks = profile_activation_blocks(profile)
+        self.assertEqual(blocks["append"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

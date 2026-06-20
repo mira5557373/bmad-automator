@@ -1,95 +1,76 @@
 {
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 3,
-  "deferred_gaps": 1,
-  "total_gaps_found": 9,
-  "gaps_fixed_this_pass": 7,
-  "tests_green": "n/a (plan review, not implementation)",
-  "lint_clean": "n/a (plan review, not implementation)",
-  "converged": true,
+  "milestone": "foundation-m1-product-profile",
+  "reviewed_at": "2026-06-20",
+  "base_commit": "42393b3b15d241559bc37b7cb28026bb01be88e5",
+  "reviews_run": ["post-impl-review", "production-readiness-review"],
+  "gap_counts": {
+    "critical": 0,
+    "important": 0,
+    "minor": 0
+  },
   "gap_summaries": [
     {
-      "id": "G01",
-      "severity": "critical",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 10: Doctor test uses nonexistent methods (self._run_doctor, self.project_root). test_doctor.py uses module-level _run(args) and has no temp-dir setup. Entire test code block was incompatible with the existing harness.",
-      "fix": "Rewrote Task 10 tests to use existing _run([]) pattern, _EXPECTED_CHECKS set, and DoctorCommandTests class methods."
+      "tag": "[post-impl]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/adjudicator.py",
+      "description": "_kill_process_tree extracted pid from TimeoutExpired.args which contains (cmd, timeout) not a process; switched to Popen-based pid access",
+      "status": "fixed"
     },
     {
-      "id": "G02",
-      "severity": "critical",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 10: Doctor output structure mismatch. Plan expected result[\"profile\"][\"profile_id\"] but actual output is {\"ok\": bool, \"checks\": [...], \"summary\": {...}} using _check() dicts. No \"profile\" top-level key exists.",
-      "fix": "Replaced _profile_preflight with _check_profile() following the _check(name, status, detail) pattern. Profile data appears as a check entry in the checks list."
+      "tag": "[post-impl]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/product_profile.py",
+      "description": "profile_customize_facts and profile_activation_blocks pushed product_profile.py to 536 LOC (over 500 soft limit); extracted to profile_bridge.py",
+      "status": "fixed"
     },
     {
-      "id": "G03",
-      "severity": "important",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 8: Tests didn't specify which class to add methods to. test_runtime_policy.py has RuntimePolicyTests with _write_override and load_effective_policy in scope; plan said 'append' without naming the target class.",
-      "fix": "Added explicit instruction: 'Append the following 4 methods to the existing RuntimePolicyTests class'."
+      "tag": "[production]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/adjudicator.py",
+      "description": "OSError from proc.communicate() would leak zombie process; added OSError handler with _safe_kill cleanup",
+      "status": "fixed"
     },
     {
-      "id": "G04",
-      "severity": "important",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 8: _validate_policy_shape insertion point 'after _validate_security_shape' is at line 316, but lines 317-356 contain snapshot/runtime/workflow/steps validation. Adding profile/gate checks mid-function is misleading.",
-      "fix": "Changed to 'at the end of _validate_policy_shape (after the for-loop over steps, around line 356)'."
-    },
-    {
-      "id": "G05",
-      "severity": "important",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 10: _profile_preflight(project_root) takes project_root parameter but cmd_doctor(args) doesn't have one. Doctor uses its own _project_root() helper at line 31.",
-      "fix": "_check_profile() now calls load_effective_profile(_project_root()) using doctor's own helper."
-    },
-    {
-      "id": "G06",
-      "severity": "important",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 10: Plan imported command_exists from utils.py but doctor.py uses shutil.which directly for all binary checks. Inconsistent with established pattern.",
-      "fix": "_check_profile() uses shutil.which(name) directly, matching _check_tmux, _check_agents, _check_git."
-    },
-    {
-      "id": "G07",
-      "severity": "important",
-      "status": "fixed",
-      "tag": "[ultrathink]",
-      "description": "Task 10: _EXPECTED_CHECKS in test_doctor.py didn't include 'profile'. Adding _check_profile() to doctor without updating _EXPECTED_CHECKS would fail test_emits_valid_json_with_all_checks.",
-      "fix": "Added 'profile' to _EXPECTED_CHECKS set."
-    },
-    {
-      "id": "G08",
-      "severity": "minor",
-      "status": "open",
-      "tag": "[ultrathink]",
-      "description": "Task 9: MSME-ERP profile uses 'typescript' as toolchain key but spec §5 shows 'ts'. Toolchain keys are opaque identifiers so both work, but downstream consumers must match the chosen convention.",
-      "note": "Keeping 'typescript' as it's more explicit. The spec YAML is shorthand. Profile conventions are being established by this milestone."
-    },
-    {
-      "id": "G09",
-      "severity": "minor",
-      "status": "open",
-      "tag": "[ultrathink]",
-      "description": "Task 4 Step 1: 'Add import os' instruction is prose not a code block. An implementer could miss it among the test code.",
-      "note": "Low risk since the test will fail with NameError: name 'os' is not defined, making the fix obvious."
-    },
-    {
-      "id": "G10",
-      "severity": "minor",
-      "status": "open",
-      "tag": "[ultrathink]",
-      "description": "Task 10 test_profile_check_present is a minimal smoke test. No test for the missing-tool warn path because it requires a temp project root with override file + PROJECT_ROOT env var mock, which is more complex than the existing doctor test harness supports.",
-      "note": "Deferred to implementation — implementer can add a more thorough test with PROJECT_ROOT mocking if needed. The missing-tool path is exercised by the MSME-ERP profile in CI where tools are absent."
+      "tag": "[production]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/adjudicator.py",
+      "description": "Empty cmd list would cause IndexError on cmd[0] in error path; added empty-cmd guard",
+      "status": "fixed"
     }
+  ],
+  "tests_green": true,
+  "lint_clean": true,
+  "test_count": 1645,
+  "files_reviewed": [
+    "skills/bmad-story-automator/src/story_automator/core/gate_schema.py",
+    "skills/bmad-story-automator/src/story_automator/core/gate_rules.py",
+    "skills/bmad-story-automator/src/story_automator/core/adjudicator.py",
+    "skills/bmad-story-automator/src/story_automator/core/profile_bridge.py",
+    "skills/bmad-story-automator/src/story_automator/core/product_profile.py",
+    "skills/bmad-story-automator/data/profiles/msme-erp.invariants.yaml",
+    "skills/bmad-story-automator/data/profiles/default.json",
+    "skills/bmad-story-automator/data/profiles/msme-erp.json",
+    "skills/bmad-story-automator/src/story_automator/commands/doctor.py",
+    "skills/bmad-story-automator/src/story_automator/core/runtime_policy.py",
+    "tests/test_gate_schema.py",
+    "tests/test_gate_rules.py",
+    "tests/test_adjudicator.py",
+    "tests/test_product_profile.py",
+    "tests/test_doctor.py",
+    "tests/test_runtime_policy.py"
+  ],
+  "spec_requirements_implemented": [
+    "§5: Profile invariants reach generation agents via BMAD customize.toml 3-layer merge + persistent_facts + activation prepend/append (profile_bridge.py)",
+    "§6.4: Timeout enforcement via subprocess.Popen(timeout=...) + psutil SIGKILL on expiry (adjudicator.py)",
+    "§6.4: Timed-out collector emits {status: timeout, findings: ['TIMEOUT: <tool> exceeded <N>s']} (gate_schema.py make_timeout_evidence)",
+    "§6.4: Adjudicator treats timeout as error for aggregation (fail-closed) (gate_rules.py verdict_for_collector_status)",
+    "§6.4: Evidence record schema (gate_schema.py validate_evidence_record)",
+    "§6.4: Gate file schema (gate_schema.py validate_gate_file)",
+    "§6.4: Waiver schema (gate_schema.py validate_waiver)",
+    "§6.4: Waiver validation: expires_at - issued_at <= MAX_WAIVER_TTL (gate_rules.py _check_ttl)",
+    "§6.4: Waiver validation: failing_categories must exactly match gate's failing categories (gate_rules.py _check_categories)",
+    "§6.4: Waiver validation: signature deterministically computed over canonical-JSON (gate_schema.py compute_waiver_signature)",
+    "§6.4: Waiver validation: profile_hash must equal gate file's profile.hash (gate_rules.py _check_profile_hash)",
+    "§6.4: Adjudicator re-checks expires_at on every gate-file reuse (gate_rules.py is_waiver_expired)",
+    "§6.4: Invariant registry (invariants.yaml) with per-DG/ADR entries (msme-erp.invariants.yaml + gate_schema.py validate_invariant_entry)",
+    "§14: GateDecision/GateRendered ride UnknownEvent forward-compat (documented in adjudicator.py docstring)",
+    "§14: 500-LOC split: adjudicator.py (118) / gate_rules.py (176) / gate_schema.py (268)",
+    "§14: Artifacts under _bmad/gate/{risk,evidence,verdicts}/ (gate_schema.py gate_artifact_dir)"
   ]
 }

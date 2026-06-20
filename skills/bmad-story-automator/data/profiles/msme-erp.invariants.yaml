@@ -1,0 +1,40 @@
+# Invariant registry for the MSME-ERP product profile.
+# Each entry maps a Design Guideline (DG) or Architecture Decision Record (ADR)
+# to a checkable (or human-reviewed) invariant.
+# Precedence: ADRs > corrections > vision (§6.4).
+
+- id: DG-12
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg12_envelope_emitted.yml
+  severity: FAIL
+
+- id: DG-13
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg13_no_direct_httpx_odoo.yml
+  severity: FAIL
+
+- id: DG-14
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg14_no_sudo_tenant_binding.yml
+  severity: FAIL
+
+- id: DG-25
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg25_governance_triple.yml
+  severity: FAIL
+
+- id: DG-34
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg34_no_direct_llm.yml
+  severity: FAIL
+
+- id: DG-4-L1
+  checkable: yes
+  check_type: semgrep
+  rule_file: semgrep/dg4_residency_client.yml
+  severity: FAIL
