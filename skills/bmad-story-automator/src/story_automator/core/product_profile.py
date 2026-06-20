@@ -277,6 +277,8 @@ def load_bundled_profile(
 ) -> dict[str, Any]:
     bundle_root = _bundle_root(project_root)
     profiles_dir = bundle_root / _PROFILES_DIR
+    if "/" in profile_id or os.sep in profile_id:
+        raise ProfileError(f"invalid profile id: {profile_id!r}")
     path = profiles_dir / f"{profile_id}.json"
     if not path.is_file():
         available = sorted(p.stem for p in profiles_dir.glob("*.json"))
@@ -361,11 +363,11 @@ def toolchain_for(
     profile: dict[str, Any], language: str
 ) -> list[dict[str, Any]]:
     entries = (profile.get("toolchain") or {}).get(language) or []
-    return [dict(entry) for entry in entries]
+    return [json.loads(json.dumps(entry)) for entry in entries]
 
 
 def rule_for(profile: dict[str, Any], category: str) -> dict[str, Any]:
-    return dict((profile.get("rules") or {}).get(category) or {})
+    return json.loads(json.dumps((profile.get("rules") or {}).get(category) or {}))
 
 
 def is_story_blocked(

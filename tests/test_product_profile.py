@@ -71,6 +71,15 @@ class LoadBundledProfileTests(BundledProfileTests):
                 "nonexistent", project_root=str(self.project_root)
             )
 
+    def test_profile_id_path_traversal_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_bundled_profile,
+        )
+
+        with self.assertRaisesRegex(ProfileError, "invalid profile id"):
+            load_bundled_profile("../../../etc/passwd", project_root=str(self.project_root))
+
     def test_valid_constants_exist(self) -> None:
         from story_automator.core.product_profile import (
             DEFAULT_TIMEOUT_FALLBACK,
@@ -483,6 +492,22 @@ class AccessorTests(BundledProfileTests):
         profile = load_bundled_profile(project_root=str(self.project_root))
         rule = rule_for(profile, "security")
         self.assertEqual(rule["sast_max_high"], 0)
+
+    def test_toolchain_for_returns_deep_copy(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            toolchain_for,
+        )
+
+        # Write a profile with nested toolchain data
+        bundled = json.loads(self._bundled_path().read_text(encoding="utf-8"))
+        bundled["toolchain"] = {"python": [{"name": "ruff", "required": True, "opts": {"fix": True}}]}
+        self._write_bundled(bundled)
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        tools = toolchain_for(profile, "python")
+        tools[0]["opts"]["fix"] = False
+        again = toolchain_for(profile, "python")
+        self.assertTrue(again[0]["opts"]["fix"])
 
 
 class ForbiddenUntilTests(BundledProfileTests):
