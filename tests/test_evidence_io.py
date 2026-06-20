@@ -12,6 +12,7 @@ from story_automator.core.gate_schema import (
 )
 from story_automator.core.evidence_io import (
     can_reuse_gate_file,
+    clear_gate_marker,
     compute_evidence_bundle_hash,
     evidence_filename,
     evidence_migrate,
@@ -19,6 +20,8 @@ from story_automator.core.evidence_io import (
     persist_evidence_record,
     persist_gate_file,
     load_gate_file,
+    read_gate_marker,
+    write_gate_marker,
 )
 
 
@@ -407,6 +410,51 @@ class CanReuseGateFileTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("profile", reason)
+
+
+class GateMarkerLifecycleTests(unittest.TestCase):
+    def test_write_creates_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_gate_marker(tmp, "gate-500", "sha123")
+            self.assertTrue(path.is_file())
+
+    def test_read_returns_marker_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gate_marker(tmp, "gate-501", "sha456")
+            marker = read_gate_marker(tmp)
+            self.assertIsNotNone(marker)
+            self.assertEqual(marker["gate_id"], "gate-501")
+            self.assertEqual(marker["commit_sha"], "sha456")
+            self.assertIn("started_at", marker)
+
+    def test_read_returns_none_when_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = read_gate_marker(tmp)
+            self.assertIsNone(marker)
+
+    def test_clear_removes_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gate_marker(tmp, "gate-502", "sha789")
+            clear_gate_marker(tmp)
+            self.assertIsNone(read_gate_marker(tmp))
+
+    def test_clear_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            clear_gate_marker(tmp)
+            self.assertIsNone(read_gate_marker(tmp))
+
+    def test_marker_file_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_gate_marker(tmp, "gate-503", "shaabc")
+            self.assertEqual(path.name, "gate-in-progress.json")
+            self.assertIn("gate", str(path.parent))
+
+    def test_marker_overwrites_previous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gate_marker(tmp, "gate-old", "sha-old")
+            write_gate_marker(tmp, "gate-new", "sha-new")
+            marker = read_gate_marker(tmp)
+            self.assertEqual(marker["gate_id"], "gate-new")
 
 
 if __name__ == "__main__":

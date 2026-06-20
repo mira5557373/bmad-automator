@@ -23,7 +23,7 @@ from .gate_schema import (
     validate_gate_file,
     validate_schema_version,
 )
-from .utils import ensure_dir, write_atomic
+from .utils import ensure_dir, iso_now, write_atomic
 
 
 def _validate_gate_id(gate_id: str) -> None:
@@ -208,3 +208,52 @@ def can_reuse_gate_file(
             f"current={factory_version!r}"
         )
     return True, ""
+
+
+_GATE_MARKER_NAME = "gate-in-progress.json"
+
+
+def _gate_marker_path(project_root: str | Path) -> Path:
+    return Path(project_root) / "_bmad" / "gate" / _GATE_MARKER_NAME
+
+
+def write_gate_marker(
+    project_root: str | Path,
+    gate_id: str,
+    commit_sha: str,
+) -> Path:
+    """§9.2: atomic marker before collector loop starts."""
+    marker = {
+        "gate_id": gate_id,
+        "commit_sha": commit_sha,
+        "started_at": iso_now(),
+    }
+    path = _gate_marker_path(project_root)
+    ensure_dir(path.parent)
+    write_atomic(path, canonical_json(marker) + "\n")
+    return path
+
+
+def read_gate_marker(
+    project_root: str | Path,
+) -> dict[str, Any] | None:
+    """Read gate-in-progress marker; returns None if absent."""
+    path = _gate_marker_path(project_root)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def clear_gate_marker(project_root: str | Path) -> None:
+    """§9.2: remove marker after verdict is written (or on crash recovery)."""
+    path = _gate_marker_path(project_root)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
