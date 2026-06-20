@@ -7,6 +7,7 @@ from story_automator.core.gate_schema import (
     make_evidence_record,
 )
 from story_automator.core.evidence_io import (
+    compute_evidence_bundle_hash,
     evidence_migrate,
 )
 
@@ -66,6 +67,49 @@ class EvidenceMigrateTests(unittest.TestCase):
         self.assertEqual(migrated["confidence"], 7)
         self.assertEqual(migrated["rationale"], "Good coverage")
         self.assertFalse(migrated["deterministic"])
+
+
+class ComputeEvidenceBundleHashTests(unittest.TestCase):
+    def _record(self, category: str, collector: str, tool: str) -> dict:
+        return make_evidence_record(
+            collector=collector, tool=tool, category=category, status="ok",
+        )
+
+    def test_deterministic_same_input(self) -> None:
+        records = [
+            self._record("correctness", "test-runner", "pytest"),
+            self._record("security", "scanner", "semgrep"),
+        ]
+        hash1 = compute_evidence_bundle_hash(records)
+        hash2 = compute_evidence_bundle_hash(records)
+        self.assertEqual(hash1, hash2)
+
+    def test_order_independent(self) -> None:
+        r1 = self._record("correctness", "test-runner", "pytest")
+        r2 = self._record("security", "scanner", "semgrep")
+        hash_ab = compute_evidence_bundle_hash([r1, r2])
+        hash_ba = compute_evidence_bundle_hash([r2, r1])
+        self.assertEqual(hash_ab, hash_ba)
+
+    def test_returns_16_char_hex(self) -> None:
+        records = [self._record("correctness", "runner", "pytest")]
+        result = compute_evidence_bundle_hash(records)
+        self.assertEqual(len(result), 16)
+        int(result, 16)
+
+    def test_empty_list_returns_deterministic_hash(self) -> None:
+        h1 = compute_evidence_bundle_hash([])
+        h2 = compute_evidence_bundle_hash([])
+        self.assertEqual(h1, h2)
+        self.assertEqual(len(h1), 16)
+
+    def test_different_records_different_hash(self) -> None:
+        r1 = [self._record("correctness", "runner", "pytest")]
+        r2 = [self._record("security", "scanner", "semgrep")]
+        self.assertNotEqual(
+            compute_evidence_bundle_hash(r1),
+            compute_evidence_bundle_hash(r2),
+        )
 
 
 if __name__ == "__main__":

@@ -9,12 +9,14 @@ Artifact layout: _bmad/gate/{risk,evidence,verdicts}/
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
 from .gate_schema import (
     EVIDENCE_SCHEMA_VERSION,
     GateSchemaError,
+    canonical_json,
 )
 
 
@@ -51,3 +53,21 @@ def evidence_migrate(
             f"cannot downgrade evidence from v{current} to v{target_version}"
         )
     return json.loads(json.dumps(record))
+
+
+def compute_evidence_bundle_hash(records: list[dict[str, Any]]) -> str:
+    """§18: deterministic hash over the full evidence bundle.
+
+    Sorts by (category, collector, tool) so order of collection
+    does not affect the hash. Returns 16-char hex prefix.
+    """
+    sorted_records = sorted(
+        records,
+        key=lambda r: (
+            r.get("category", ""),
+            r.get("collector", ""),
+            r.get("tool", ""),
+        ),
+    )
+    payload = "[" + ",".join(canonical_json(r) for r in sorted_records) + "]"
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
