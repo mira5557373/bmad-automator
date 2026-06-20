@@ -227,5 +227,35 @@ class ResolveHostEvidenceDirTests(unittest.TestCase):
         self.assertTrue(result.is_absolute())
 
 
+class TmuxRuntimeCrossCheckTests(unittest.TestCase):
+    """Verify sandbox_tmux_env_args produces flags covering all vars
+    that tmux_runtime historically stripped inline."""
+
+    HISTORICALLY_STRIPPED = {"BMAD_AUDIT_KEY", "CLAUDECODE", "BASH_ENV"}
+    HISTORICALLY_FORCED = {"STORY_AUTOMATOR_CHILD": "true"}
+
+    def test_stripped_vars_cover_historical(self) -> None:
+        self.assertTrue(
+            self.HISTORICALLY_STRIPPED.issubset(CHILD_STRIPPED_VARS),
+            f"missing from CHILD_STRIPPED_VARS: "
+            f"{self.HISTORICALLY_STRIPPED - CHILD_STRIPPED_VARS}",
+        )
+
+    def test_forced_vars_cover_historical(self) -> None:
+        for var, val in self.HISTORICALLY_FORCED.items():
+            self.assertEqual(
+                CHILD_FORCED_VARS.get(var), val,
+                f"CHILD_FORCED_VARS[{var!r}] should be {val!r}",
+            )
+
+    def test_tmux_args_contain_all_historical_vars(self) -> None:
+        args = sandbox_tmux_env_args(agent="claude")
+        flat = " ".join(args)
+        for var in self.HISTORICALLY_STRIPPED:
+            self.assertIn(f"{var}=", flat)
+        self.assertIn("STORY_AUTOMATOR_CHILD=true", flat)
+        self.assertIn("AI_AGENT=claude", flat)
+
+
 if __name__ == "__main__":
     unittest.main()

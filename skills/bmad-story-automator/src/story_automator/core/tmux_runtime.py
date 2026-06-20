@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .trust_boundary import sandbox_tmux_env_args
 from .utils import (
     atomic_write,
     command_exists,
@@ -618,20 +619,11 @@ def _spawn_runner(
         str(DEFAULT_HEIGHT),
         "-c",
         str(root),
-        "-e",
-        "STORY_AUTOMATOR_CHILD=true",
-        "-e",
-        f"AI_AGENT={selected_agent}",
-        "-e",
-        "CLAUDECODE=",
-        "-e",
-        "BASH_ENV=",
+        *sandbox_tmux_env_args(agent=selected_agent),
         # Never expose the audit HMAC signing key to the child agent's shell.
         # tmux -e VAR= sets it empty in the pane; load_key_from_env treats empty
         # as absent, so the child cannot forge/verify audit records while the
         # parent's os.environ is untouched.
-        "-e",
-        "BMAD_AUDIT_KEY=",
         *PLACEHOLDER_COMMAND,
     )
     if create_code != 0:
@@ -726,16 +718,9 @@ def _spawn_legacy(
         str(DEFAULT_HEIGHT),
         "-c",
         root,
-        "-e",
-        "STORY_AUTOMATOR_CHILD=true",
-        "-e",
-        f"AI_AGENT={selected_agent}",
-        "-e",
-        "CLAUDECODE=",
+        *sandbox_tmux_env_args(agent=selected_agent),
         # Never expose the audit HMAC signing key to the child agent's shell
         # (see _spawn_runner): empty value reads as absent in load_key_from_env.
-        "-e",
-        "BMAD_AUDIT_KEY=",
     )
     if code != 0:
         return (output, code)
