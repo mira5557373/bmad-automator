@@ -1,5 +1,13 @@
 ### Features
 
+- feat(gate): add trust boundary guard to evidence I/O (781b45b)
+- feat(gate): add trust boundary guard to adjudicator (c693810)
+- feat(gate): add gate audit emitter (4ea9880)
+- feat(gate): add gate audit event types (656b44c)
+- feat(gate): add collector checkout — fresh worktree at SHA (27de646)
+- feat(gate): add evidence path isolation enforcement (700dc5f)
+- feat(gate): add child sandbox env formalization (56c8ee0)
+- feat(gate): add trust boundary core — host context guard (4173ad0)
 - feat(gate): add gate-in-progress marker for crash-safety (29aae16)
 - feat(gate): add gate file reuse validation per §9.2 (244b4d9)
 - feat(gate): add gate file persistence with schema version guard (5162157)
@@ -218,6 +226,7 @@
 
 ### Bug Fixes
 
+- fix(gate): enforce sandbox_env ordering so extras cannot override security vars (19d0568)
 - fix(gate): tighten validation and add invariant/cost/NA verdict rules (aa61291)
 - fix(profile): deep-copy accessors + validate profile_id path (467769f)
 - fix(robustness,ops): resolve single-user-relevant findings from the 2026-06-19 audit (7ddd022)
@@ -292,6 +301,7 @@
 
 ### Refactoring
 
+- refactor(gate): consolidate tmux child env setup via sandbox_tmux_env_args (70c40f2)
 - refactor(budget-ceilings): further compact evaluator tests under 500 LOC (4501367)
 - refactor(budget-ceilings): compact evaluator tests via hoisted helpers (b58dec1)
 - refactor(m09): extract shared __future__ check helper to satisfy LOC ceiling (ffd54eb)
@@ -307,6 +317,9 @@
 
 ### Documentation
 
+- docs(gate): write Phase C gap report for foundation-m3-factory-self-trust (0722266)
+- docs(gate): write Phase A plan + gap report for foundation-m3-factory-self-trust (51ec73f)
+- docs: update generated documentation (7aa7571)
 - docs(gate): write Phase C gap report for foundation-m2-evidence-schemas (901fdf4)
 - docs(plan): Foundation M2 Evidence Schemas implementation plan (cf7cbe6)
 - docs: update generated documentation (8f0cd7c)
@@ -428,6 +441,8 @@
 
 ### Tests
 
+- test(gate): add trust pipeline round-trip integration tests (a2376ee)
+- test(gate): add Blind Hunter enforcement integration tests (439e2c2)
 - test(gate): add round-trip determinism and pipeline integration tests (1f1ad5a)
 - test(integration): end-to-end orchestration-loop + real-tmux validation (6f2dc3a)
 - test(m06b): assert step-03ab Failure modes section (REQ-09) (6947209)
