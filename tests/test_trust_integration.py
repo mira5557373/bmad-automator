@@ -8,12 +8,19 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from story_automator.core.adjudicator import run_collector_with_timeout
+from story_automator.core.collector_checkout import collector_checkout
 from story_automator.core.evidence_io import (
+    can_reuse_gate_file,
+    compute_evidence_bundle_hash,
     load_evidence_bundle,
+    load_gate_file,
     persist_evidence_record,
     persist_gate_file,
     write_gate_marker,
@@ -23,6 +30,10 @@ from story_automator.core.gate_audit import (
     GateBoundaryViolation,
     GateStartedAudit,
     emit_gate_audit,
+)
+from story_automator.core.gate_rules import (
+    aggregate_verdicts,
+    verdict_for_collector_status,
 )
 from story_automator.core.gate_schema import (
     make_evidence_record,
@@ -189,6 +200,148 @@ class GateAuditChainTests(unittest.TestCase):
             record = json.loads(line)
             self.assertEqual(record["event"], "GateBoundaryViolation")
             self.assertIn("tag", record)
+
+
+def _init_test_repo(path: pathlib.Path) -> str:
+    subprocess.run(["git", "init", str(path)], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"],
+        capture_output=True, check=True,
+    )
+    (path / "src.py").write_text("x = 1\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init"],
+        capture_output=True, check=True,
+    )
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip()
+
+
+class TrustPipelineRoundTripTests(unittest.TestCase):
+    """Full flow: host asserts context → fresh checkout → collect →
+    evidence persist → bundle hash → gate file → audit event."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-pipeline-")
+        self.project_root = pathlib.Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.sha = _init_test_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_full_pipeline_pass(self) -> None:
+        host_env = dict(os.environ)
+        host_env.pop("STORY_AUTOMATOR_CHILD", None)
+        with patch.dict(os.environ, host_env, clear=True):
+            with collector_checkout(self.project_root, self.sha) as checkout:
+                record = run_collector_with_timeout(
+                    [sys.executable, "-c", "print('ok')"],
+                    collector="test",
+                    tool="python",
+                    category="correctness",
+                    timeout_s=10,
+                    cwd=str(checkout),
+                )
+                self.assertEqual(record["status"], "ok")
+            path = persist_evidence_record(
+                self.project_root, "gate-001", record,
+            )
+            self.assertTrue(path.exists())
+            records = load_evidence_bundle(self.project_root, "gate-001")
+            self.assertEqual(len(records), 1)
+            bundle_hash = compute_evidence_bundle_hash(records)
+            self.assertEqual(len(bundle_hash), 16)
+            verdicts = {
+                "correctness": verdict_for_collector_status(record["status"])
+            }
+            overall = aggregate_verdicts(verdicts)
+            self.assertEqual(overall, "PASS")
+            gate = make_gate_file(
+                gate_id="gate-001",
+                target={"kind": "story", "id": "1.1"},
+                commit_sha=self.sha,
+                profile={"id": "default", "version": 1, "hash": "prof-hash"},
+                factory_version="0.1.0",
+                categories={"correctness": {"verdict": "PASS"}},
+                overall=overall,
+                evidence_bundle_hash=bundle_hash,
+            )
+            persist_gate_file(self.project_root, gate)
+            loaded = load_gate_file(self.project_root, "gate-001")
+            self.assertEqual(loaded["overall"], "PASS")
+            self.assertEqual(loaded["evidence_bundle_hash"], bundle_hash)
+
+    def test_full_pipeline_fail_closed(self) -> None:
+        host_env = dict(os.environ)
+        host_env.pop("STORY_AUTOMATOR_CHILD", None)
+        with patch.dict(os.environ, host_env, clear=True):
+            record = run_collector_with_timeout(
+                [sys.executable, "-c", "import sys; sys.exit(1)"],
+                collector="test",
+                tool="failing-tool",
+                category="security",
+                timeout_s=10,
+            )
+            self.assertEqual(record["status"], "violation")
+            verdict = verdict_for_collector_status(record["status"])
+            self.assertEqual(verdict, "FAIL")
+            overall = aggregate_verdicts({"security": verdict})
+            self.assertEqual(overall, "FAIL")
+
+    def test_evidence_bundle_hash_deterministic(self) -> None:
+        r1 = make_evidence_record(
+            collector="a", tool="t1", category="c1", status="ok",
+        )
+        r2 = make_evidence_record(
+            collector="b", tool="t2", category="c2", status="ok",
+        )
+        hash_a = compute_evidence_bundle_hash([r1, r2])
+        hash_b = compute_evidence_bundle_hash([r2, r1])
+        self.assertEqual(hash_a, hash_b)
+
+    def test_gate_file_reuse_requires_matching_sha(self) -> None:
+        gate = make_gate_file(
+            gate_id="gate-002",
+            target={"kind": "story", "id": "1.1"},
+            commit_sha="sha-old",
+            profile={"id": "default", "version": 1, "hash": "h1"},
+            factory_version="0.1.0",
+            categories={"correctness": {"verdict": "PASS"}},
+            overall="PASS",
+        )
+        ok, reason = can_reuse_gate_file(
+            gate, commit_sha="sha-new", profile_hash="h1", factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("commit_sha mismatch", reason)
+
+    def test_collector_checkout_at_sha(self) -> None:
+        (self.project_root / "src.py").write_text("x = 2\n")
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "add", "."],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "commit", "-m", "v2"],
+            capture_output=True, check=True,
+        )
+        with collector_checkout(self.project_root, self.sha) as checkout:
+            content = (checkout / "src.py").read_text()
+            self.assertEqual(content, "x = 1\n")
 
 
 if __name__ == "__main__":
