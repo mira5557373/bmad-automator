@@ -609,6 +609,94 @@ Wire it into `_validate_profile_shape` immediately after `_validate_categories(.
 ```python
     _validate_categories(profile.get("categories"))
     _validate_toolchain(profile.get("toolchain"))
+    _validate_snapshot(profile.get("snapshot"))
+    _validate_seed_template(profile.get("seed_template"))
+    _validate_invariants(profile.get("invariants"))
+```
+
+…and add these three peer validators in the same module:
+
+```python
+def _validate_snapshot(snapshot: Any) -> None:
+    if snapshot is None:
+        return
+    if not isinstance(snapshot, dict):
+        raise ProfileError("snapshot must be an object")
+    rel = snapshot.get("relativeDir")
+    if rel is None:
+        raise ProfileError("snapshot.relativeDir must be a non-empty string")
+    if not isinstance(rel, str) or not rel.strip():
+        raise ProfileError("snapshot.relativeDir must be a non-empty string")
+
+
+def _validate_seed_template(seed: Any) -> None:
+    if seed is None:
+        return
+    if not isinstance(seed, dict):
+        raise ProfileError("seed_template must be an object")
+    ref = seed.get("ref")
+    url = seed.get("url")
+    if ref is not None and not isinstance(ref, str):
+        raise ProfileError("seed_template.ref must be a string")
+    if url is not None and not isinstance(url, str):
+        raise ProfileError("seed_template.url must be a string")
+    # Empty-string ref/url is acceptable for the default profile; the post-M19
+    # seed-template milestone fills the real ref into msme-erp.json.
+
+
+def _validate_invariants(invariants: Any) -> None:
+    if invariants is None:
+        return
+    if not isinstance(invariants, dict):
+        raise ProfileError("invariants must be an object")
+    registry_file = invariants.get("registry_file")
+    if registry_file is not None and not isinstance(registry_file, str):
+        # File existence is intentionally NOT checked here; that's M17.
+        raise ProfileError("invariants.registry_file must be a string")
+```
+
+Add these unit tests to `tests/test_product_profile.py` alongside the existing `ProfileShapeTests`:
+
+```python
+    def test_snapshot_block_must_be_object(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "snapshot": []})
+        with self.assertRaisesRegex(ProfileError, "snapshot must be an object"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_snapshot_relative_dir_required(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "snapshot": {"relativeDir": ""}})
+        with self.assertRaisesRegex(ProfileError, "snapshot.relativeDir must be a non-empty string"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_seed_template_ref_must_be_string(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "seed_template": {"ref": 42}})
+        with self.assertRaisesRegex(ProfileError, "seed_template.ref must be a string"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_invariants_block_must_be_object(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "invariants": 42})
+        with self.assertRaisesRegex(ProfileError, "invariants must be an object"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_invariants_registry_file_must_be_string(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "invariants": {"registry_file": None}})
+        with self.assertRaisesRegex(ProfileError, "invariants.registry_file must be a string"):
+            load_bundled_profile(str(self.project_root))
 ```
 
 - [ ] **Step 4: Run tests to verify all pass**

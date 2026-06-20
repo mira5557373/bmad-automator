@@ -54,13 +54,21 @@ A versioned, layered bundle (loads like `runtime_policy`: bundled → project �
 
 ```yaml
 id: msme-erp
-seed_template: golden-template@1.x        # cloned to seed every new product
+seed_template: { ref: msme-erp-golden-template@1.x }   # FACTORY-OWNED bundle (not TEA-provided);
+                                                       # delivered by a post-M19 seed-template milestone.
+                                                       # TEA fragments (network-first.md, selector-resilience.md,
+                                                       # data-factories.md, pact-*.md, network-recorder.md) are
+                                                       # the reference implementations the bundle instantiates.
 toolchain: { python: [ruff,mypy,pytest,...], ts: [biome,vitest,playwright], iac: [opentofu,trivy,...] }
 matrix:    { P0:{coverage_pct:100, levels:[unit,integration,contract,e2e]}, P1:{coverage_pct:90,...} }
 categories: { code: [...], system: [...] }   # see §6
 rules:     { security:{sast_max_high:0, deps_max_critical:0}, license:{forbidden:[BSL,SSPL], boundary:{agpl:[odoo-pod]}} }
+cost_tier: { sku_id: "msme-starter", arpu_monthly: 0, max_pod_cost_per_tenant: 0 }   # placeholder until DG-2;
+                                                                                     # zero values + DG-2 in forbidden_until
+                                                                                     # cap cost_to_serve at CONCERNS, not FAIL.
 invariants: registry: invariants.yaml         # the DG/ADR → check mapping (§6.4)
-forbidden_until: { "ADR-0083": ["E*.envelope-*"] }   # block stories depending on open ADRs
+forbidden_until: { "ADR-0083": ["E*.envelope-*"],
+                   "DG-2":     ["*.cost-to-serve"] }   # block stories depending on open ADRs / undefined DGs
 ```
 
 The Profile's invariants reach the generation agents via BMAD's **`customize.toml` 3-layer merge + `persistent_facts` + activation prepend/append** — no fork of BMAD.
@@ -88,9 +96,9 @@ Risk Generator (TEA `*risk`) emits a structured risk profile (`Probability×Impa
 | performance | bundle/Lighthouse budgets met; no static N+1/unbounded | Lighthouse-CI, bundlesize, perf lints |
 | accessibility | axe 0 serious/critical on changed UI | @axe-core/playwright |
 | observability | OTel traces/metrics/logs wired; `/healthz`+`/readyz`; SLO declared | otel-wiring, probe check |
-| invariants (DG/ADR) | checkable DG/ADR rules pass (DG-12/13/14/34, residency…) | invariant registry → semgrep/conftest |
-| agentic *(if touched)* | evals ≥ thr; guardrail coverage; constitution compiles+sound; per-tool pack-v1.2 fields; AIBOM updated; envelope emitted | DeepEval/Promptfoo/RAGAS, OPA compile, pack-schema validate, AIBOM diff |
-| **docs** | docs site builds; API docs generated; runbook present | docusaurus build, presence checks |
+| invariants (DG/ADR) | checkable DG/ADR rules pass (incl. **DG-12** envelope emitted, **DG-13** no direct `httpx` to Odoo, **DG-14** no SUDO + agent-bound `res.users`, **DG-34** no direct LLM calls, residency client present) | invariant registry → semgrep/conftest |
+| agentic *(if touched)* | (a) **pack-schema v1.2**: per tool envelope fields `{risk_tier, reversibility_class, time_lock, autonomy}` present + valid (JSON-schema or semgrep at collect time); (b) **AIBOM diff**: every new/changed tool has a CycloneDX-1.6 + SPDX-AI-3.0 entry (FAIL if missing); (c) **OPA constitution**: `opa compile` exit=0 AND `opa test` green when test rules exist; (d) evals ≥ threshold; (e) guardrail coverage; (f) per-action SGE envelope emitted with governance triple `agent_version + opa_bundle_hash + constitution_version` (DG-25) | DeepEval/Promptfoo/RAGAS, `opa compile`/`opa test`, pack-schema validator, AIBOM differ |
+| **docs** | docs site builds; API docs generated; **runbook present** (`docs/operations/gate-troubleshooting.md` referenced as a gate-checked artifact — see §11.1) | docusaurus build, presence checks |
 | process/DoD | ADR Production-Readiness section present; ACs↔tasks↔tests traced; File List complete | adr-prod-readiness, trace parser |
 
 ### 6.3 Verdict aggregation (deterministic)
@@ -108,7 +116,16 @@ else                                            → PASS
 ### 6.4 Schemas (compact)
 - **Evidence record** (the only thing the Adjudicator reads — never raw tool output): `{collector,tool,tool_version,category,tier,status(ok|violation|error),metrics,findings,raw_output_ref,exit_code,duration_ms,deterministic}`. LLM evidence uses the same shape + `confidence`+`rationale`; confidence `<5` forces CONCERNS/needs-human (TEA confidence gate). LLM evidence is *persisted*, so adjudication stays replayable even though generation isn't.
 - **Gate file** (persisted, auditable): `gate_id(UUIDv7), target{kind,id,epic}, tier, commit_sha, scanner_data_snapshot, profile{id,version,hash}, risk_profile_ref, categories{verdict,required,actual,evidence,rationale}, overall, waivers[], evidence_bundle_hash`. Hash-chained into the existing audit log.
-- **Invariant registry** (`invariants.yaml`): per DG/ADR `{id, checkable:yes|no, check_type:semgrep|conftest|presence|human, rule_ref}`; encodes `ADRs > corrections > vision` precedence; the non-checkable ones become LLM-reviewer/human checklist items.
+- **Invariant registry** (`invariants.yaml`): per DG/ADR `{id, checkable:yes|no, check_type:semgrep|conftest|presence|human, rule_file, severity}`; encodes `ADRs > corrections > vision` precedence; non-checkable ones become LLM-reviewer/human checklist items. Concrete entries for MSME:
+  - `{id: DG-12, checkable: yes, check_type: semgrep, rule_file: semgrep/dg12_envelope_emitted.yml,    severity: FAIL}`
+  - `{id: DG-13, checkable: yes, check_type: semgrep, rule_file: semgrep/dg13_no_direct_httpx_odoo.yml, severity: FAIL}`
+  - `{id: DG-14, checkable: yes, check_type: semgrep, rule_file: semgrep/dg14_no_sudo_tenant_binding.yml, severity: FAIL}` — matches `sudo()` / `with_user()` / `env(user=...)` in `msme_odoo_adapter` lacking explicit `(tenant, agent_id)` context filter
+  - `{id: DG-25, checkable: yes, check_type: semgrep, rule_file: semgrep/dg25_governance_triple.yml,    severity: FAIL}` — envelope construction must include all three triple fields
+  - `{id: DG-34, checkable: yes, check_type: semgrep, rule_file: semgrep/dg34_no_direct_llm.yml,        severity: FAIL}`
+  - Residency: `{id: DG-4-L1, checkable: yes, check_type: semgrep, rule_file: semgrep/dg4_residency_client.yml, severity: FAIL}`
+  M18's `agentic`/`invariants` rule functions treat any FAIL-severity invariant violation as a **hard FAIL** with no CONCERNS path.
+
+- **`cost_tier`** (per-profile): `{sku_id: str, arpu_monthly: number, max_pod_cost_per_tenant: number}`. The MSME profile ships with zeros + `DG-2` in `forbidden_until` so the system-altitude `cost_to_serve` collector renders CONCERNS (not FAIL) until DG-2 SKU is defined; once defined, the cost rule becomes `k6_mean_pod_resources × regional_price ≤ max_pod_cost_per_tenant`.
 
 ## 7. Evidence integrity & trust boundary (the property that makes "ungameable" true)
 
@@ -144,7 +161,7 @@ STORY LOOP (each step = fresh tmux child):
             PASS→commit+done · CONCERNS→commit+mitigation-debt+done · FAIL→Remediator · WAIVED→operator-only
             exhausted/risk-9 persists → PARK+escalate, advance to next DAG-independent story (no deadlock)
 ```
-`code-review` becomes an **evidence source** for the gate; the gate is the single authority for `review → done`.
+`code-review` becomes an **evidence source** for the gate; the gate is the single authority for `review → done`. The factory creates stories directly in `backlog` / `ready-for-dev`; legacy stories already in the BMAD-v4 `drafted` state are auto-mapped to `ready-for-dev` by `bmad-sprint-status`, so the gate accepts entry from any recognized state.
 
 ### 9.2 Control flow
 - **Resumable**: gate file keyed to `commit_sha`; reused if SHA unchanged, re-run otherwise.
@@ -174,11 +191,23 @@ Plus progressive-delivery/rollback evidence (Argo Rollouts blue-green/canary). E
 - Leverages `project-context.md` (conformance), `customize.toml`/`persistent_facts`/activation hooks (invariant injection), Implementation-Readiness Check (epic gate), `correct-course` (re-plan), `checkpoint-preview` (HITL).
 - **Graceful degradation**: if TEA is absent, native collectors still run; traceability falls back to GWT title parsing.
 
+### 11.1 Operator runbook (gate-checked)
+
+`docs/operations/gate-troubleshooting.md` (owned by M19) is a first-class artifact the gate's `docs` category verifies present and non-empty. Required sections:
+
+1. **Verdict interpretation decision tree** — per-category PASS/CONCERNS/FAIL with the next action.
+2. **Remediation-loop exhaustion flow** — `review_max_cycles` exceeded → PARK + escalate; `state.run_id` checkpoint; how to resume.
+3. **Partial-FAIL playbook** — when to spawn per-category remediation stories vs blanket re-run.
+4. **Profile-drift re-gate procedure** — re-evaluate when `profile.hash` or any pinned toolchain version changes; explicit gate-file invalidation rules.
+5. **Operator takeover checklist** — pause orchestrator, manual `sprint-status` edit, state-document patch, `--resume`; safe writes that don't violate BMAD edit-authorization.
+
+Linked from `docs/SECURITY.md`. Mentioned at every FAIL/PARK telemetry event for fast operator handoff.
+
 ## 12. TEA compatibility
 
 - Composes TEA outputs (`gate-decision.json`, `e2e-trace-summary.json`) as evidence rather than re-implementing them.
-- Adopts TEA's risk model (P×I 1–9 → P0–P3 → coverage 100/90/50/20), gate states (PASS/CONCERNS/FAIL/WAIVED), test-quality scoring, burn-in, NFR-evidence categories, and the mandatory "consult fragments + verify against authoritative docs" + Confidence-gate preambles for Generators.
-- **Threshold caveat**: exact numeric defaults (coverage %, test-review weights, burn-in N) are **profile-config to confirm against the live TEA knowledge fragments during planning**.
+- Adopts TEA's risk model (P×I 1–9 → P0–P3 → coverage thresholds: **P0 = 100% required; P1 = 90% target / 80% minimum; overall ≥ 80% for PASS; P1 80–89% → CONCERNS; < 80% → FAIL**), gate states (PASS/CONCERNS/FAIL/WAIVED), test-quality scoring, burn-in, NFR-evidence categories, and the mandatory "consult fragments + verify against authoritative docs" + Confidence-gate preambles for Generators.
+- **Threshold caveat**: exact numeric defaults (coverage %, test-review weights, burn-in N) are **profile-config to re-verify against the live TEA knowledge fragments during M19 planning**.
 
 ## 13. Hard Rule 6 → gate mapping (compatibility proof)
 
@@ -206,24 +235,28 @@ Every criterion is covered, none orphaned: (a) reliability·system · (b) resili
 |---|---|---|---|
 | M15 | Product Profile | schema + layered loader; policy shape-validator learns `profile`/`gate` keys | — |
 | M16 | Factory Self-Trust | evidence-integrity trust boundary + sandbox child + audit P0s | — |
-| M17 | Evidence Collectors | polyglot, kill-switched, normalized-evidence emitters | M15 |
-| M18 | Adjudicator | pure verdict engine + schemas + gate file + new events | M15,M17 |
-| **★ M19** | **Orchestrator Wiring** | step map + verdict control-flow + park-and-continue + BMAD write-back → working code-altitude gate end-to-end | M16,M18 |
+| M17 | Evidence Collectors | polyglot, kill-switched, normalized-evidence emitters — **incl. invariant-DG semgrep runner, pack-schema-v1.2 validator, AIBOM differ, OPA-constitution `opa compile`/`opa test`** | M15 |
+| M18 | Adjudicator | pure verdict engine + schemas + gate file + new `GateDecision`/`GateRendered` events (this milestone owns the `telemetry_events.py` delta); `agentic` rule requires pack-schema ok + AIBOM entries present + OPA constitution compiles+tests + evals ≥ threshold; any FAIL-severity invariant violation = hard FAIL (no CONCERNS) | M15,M17 |
+| **★ M19** | **Orchestrator Wiring** | step map + verdict control-flow + park-and-continue + BMAD write-back → working code-altitude gate end-to-end; registers `production_ready_gate` in `VALID_VERIFIERS` + `VERIFIERS` (mirrors `review_completion`, fail-closed when gate file absent); ships `docs/operations/gate-troubleshooting.md` (§11.1) | M16,M18 |
 | M20 | Risk-scored Readiness | Implementation-Readiness + `validate-create-story` + TEA risk/test-design + `forbidden_until` | M19 |
 | M21 | Test-first + Burn-in + Mutation + DoD | atdd-red verify + burn-in + mutation + DoD verifier | M19 |
-| M22 | System-altitude Gate | ephemeral-env harness + 5 system collectors + progressive-delivery | M19 |
+| M22 | System-altitude Gate | ephemeral-env harness + 5 system collectors + progressive-delivery; `cost_to_serve` collector reads `cost_tier.max_pod_cost_per_tenant` (CONCERNS while DG-2 in `forbidden_until`) | M19 |
 | M23 | Learning Loop | gate telemetry → retrospective + calibration/drift → auto-tune profile | M19 |
+| M24 (TBD, post-keystone) | **Golden Seed-Template Bundle** | factory-owned (not TEA-provided) bundle (`msme-erp-golden-template@1.x`) pre-wiring Pact contract tests, network-first interception, selector-resilience, data-factories (auto-cleanup), HAR recorder, OTel/SLO/`/healthz`+`/readyz` endpoints — *instantiating* TEA reference fragments (`pact-consumer-framework-setup.md`, `network-first.md`, `selector-resilience.md`, `data-factories.md`, `network-recorder.md`) | M15 |
 
-**M15→M19 is the keystone**: a trustworthy, BMAD-native, deterministic code-altitude production-readiness gate.
+**M15→M19 is the keystone**: a trustworthy, BMAD-native, deterministic code-altitude production-readiness gate. M24 (seed-template bundle) is the post-keystone follow-up that converts "production-ready from day one" from a property the factory *verifies* into one it *seeds*.
 
 ## 17. Risks & open questions
 
 - **Cost/latency of the full collector matrix per story** → mitigated by diff-scoping + budget ceilings + epic-gate full matrix; monitor and tune.
 - **Ephemeral full-stack env (M22) is heavy** → tiered envs; most epics use minimal env.
-- **TEA numeric thresholds** → confirm against live fragments in planning.
-- **cost-to-serve < ARPU** depends on DG-2 SKU (placeholder) → CONCERNS until defined.
-- **Profile drift** → gate files stamp `profile.hash`; define a re-gate policy.
+- **TEA numeric thresholds** → re-verify against live fragments during M19 planning.
+- **cost-to-serve < ARPU** depends on DG-2 SKU (placeholder) → MSME profile ships zeros + DG-2 in `forbidden_until` so `cost_to_serve` renders CONCERNS, not FAIL, until DG-2 lands.
+- **Profile drift** → gate files stamp `profile.hash` + scanner-data snapshot; re-gate triggers on hash change or pinned-toolchain version change (rules in §11.1 runbook §(d)).
+- **Seed-template bundle (M24, post-keystone)** → factory-owned `msme-erp-golden-template@1.x`; TBD timing — must land before the factory can claim "production-ready from the first commit" for net-new products (today the gate only *verifies* what generators produce).
 
 ## 18. Validation provenance
 
 Reviewed adversarially across BMAD-compat, TEA-compat, factory-integration-feasibility (against `skills/bmad-story-automator/src/story_automator/`), and best-in-market completeness. Fixes folded in: evidence-integrity trust boundary, fail-closed, requirements-traceability vs line-coverage split, test_quality + burn-in + mutation, compliance/performance/accessibility/supply_chain/api_compat/migrations/docs categories, boundary-aware license, richer agentic category, invariant registry, diff-scoping + budget-awareness, BMAD-native remediation + write-back, BMAD hooks (project-context/customize/readiness/correct-course), TEA product-quality patterns, and the repo-guardrail compatibility notes.
+
+**Second adversarial pass (2026-06-20, 6 lenses × 79 agents, pipeline-and-verify):** added (1) concrete invariant-registry entries for DG-12/13/14/25/34 + residency, with DG-14 semgrep semantics; (2) operational criteria for the `agentic` category (pack-schema v1.2, AIBOM diff, OPA constitution compile+test) wired into M17 collectors + M18 rule function (FAIL-severity invariants = hard FAIL, no CONCERNS); (3) `cost_tier` block on Profile + DG-2 in `forbidden_until` so cost_to_serve degrades to CONCERNS until DG-2 SKU lands; (4) corrected TEA coverage thresholds (P0 100% / P1 90% target / 80% min / overall ≥ 80% PASS); (5) gate-checked operator runbook (§11.1) covering verdict interpretation, exhaustion, partial-FAIL, profile drift, takeover; (6) BMAD legacy `drafted`-state mapping note; (7) `production_ready_gate` verifier explicitly slotted for M19 (mirrors `review_completion`, fail-closed on missing gate file); (8) clarified seed_template is factory-owned (not TEA-provided) and added M24 post-keystone milestone to actually build it.
