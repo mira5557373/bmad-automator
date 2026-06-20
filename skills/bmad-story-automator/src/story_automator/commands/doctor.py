@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from ..core.common import print_json, run_cmd
+from ..core.product_profile import ProfileError, load_effective_profile
 
 
 def _bundle_data_dir() -> Path:
@@ -142,6 +143,29 @@ def _check_file_descriptors() -> dict[str, str]:
     return _check("file_descriptors", "ok", f"RLIMIT_NOFILE soft limit {soft}")
 
 
+def _check_profile() -> dict[str, str]:
+    try:
+        profile = load_effective_profile(_project_root())
+    except ProfileError as exc:
+        return _check("profile", "warn", f"profile load failed: {exc}")
+    profile_id = profile.get("id", "unknown")
+    missing: list[str] = []
+    toolchain = profile.get("toolchain") or {}
+    for language in sorted(toolchain):
+        for entry in toolchain.get(language) or []:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name", "")
+            if entry.get("required", True) and name and shutil.which(name) is None:
+                missing.append(name)
+    if missing:
+        return _check(
+            "profile", "warn",
+            f"profile '{profile_id}' loaded; missing required tools: {', '.join(missing)}"
+        )
+    return _check("profile", "ok", f"profile '{profile_id}' loaded; toolchain OK")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Entry point for ``story-automator doctor``.
 
@@ -162,6 +186,7 @@ def cmd_doctor(args: list[str]) -> int:
         _check_disk(),
         _check_audit_key(),
         _check_config_files(),
+        _check_profile(),
         _check_file_descriptors(),
     ]
     counts = {

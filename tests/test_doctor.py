@@ -11,7 +11,7 @@ from story_automator.commands.doctor import cmd_doctor
 
 _EXPECTED_CHECKS = {
     "python", "dependencies", "tmux", "agents", "git", "disk",
-    "audit_key", "config", "file_descriptors",
+    "audit_key", "config", "file_descriptors", "profile",
 }
 
 
@@ -57,6 +57,14 @@ class DoctorCommandTests(unittest.TestCase):
             code = cmd_doctor(["--help"])
         self.assertEqual(code, 0)
         self.assertIn("doctor", out.getvalue())
+
+    def test_profile_check_present(self) -> None:
+        _code, payload, _ = _run([])
+        profile_check = next(
+            c for c in payload["checks"] if c["name"] == "profile"
+        )
+        self.assertIn(profile_check["status"], ("ok", "warn"))
+        self.assertIn("profile", profile_check["detail"].lower())
 
     def test_registered_in_cli_dispatch(self) -> None:
         from story_automator.cli import main
