@@ -27,6 +27,7 @@ VALID_INVARIANT_CHECK_TYPES = frozenset({
     "semgrep", "conftest", "presence", "human",
 })
 VALID_INVARIANT_SEVERITIES = frozenset({"FAIL", "CONCERNS"})
+VALID_CONFIDENCE_RANGE = range(1, 11)  # 1–10 inclusive
 
 GATE_ARTIFACT_SUBDIRS = ("risk", "evidence", "verdicts")
 
@@ -107,6 +108,49 @@ def make_timeout_evidence(
         exit_code=-1,
         deterministic=True,
     )
+
+
+def make_llm_evidence_record(
+    *,
+    collector: str,
+    tool: str,
+    tool_version: str = "",
+    category: str,
+    tier: str = "code",
+    status: str,
+    metrics: dict[str, Any] | None = None,
+    findings: list[str] | None = None,
+    raw_output_ref: str = "",
+    exit_code: int = 0,
+    duration_ms: int = 0,
+    confidence: int,
+    rationale: str,
+) -> dict[str, Any]:
+    if not isinstance(confidence, int) or isinstance(confidence, bool):
+        raise GateSchemaError("evidence.confidence must be an integer")
+    if confidence not in VALID_CONFIDENCE_RANGE:
+        raise GateSchemaError(
+            f"evidence.confidence must be 1..10; got {confidence}"
+        )
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise GateSchemaError("evidence.rationale must be a non-empty string")
+    record = make_evidence_record(
+        collector=collector,
+        tool=tool,
+        tool_version=tool_version,
+        category=category,
+        tier=tier,
+        status=status,
+        metrics=metrics,
+        findings=findings,
+        raw_output_ref=raw_output_ref,
+        exit_code=exit_code,
+        duration_ms=duration_ms,
+        deterministic=False,
+    )
+    record["confidence"] = confidence
+    record["rationale"] = rationale
+    return record
 
 
 def make_gate_file(

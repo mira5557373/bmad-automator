@@ -18,6 +18,7 @@ from story_automator.core.gate_schema import (
     gate_artifact_dir,
     make_evidence_record,
     make_gate_file,
+    make_llm_evidence_record,
     make_timeout_evidence,
     make_waiver,
     validate_evidence_record,
@@ -307,6 +308,68 @@ class ValidateInvariantEntryTests(unittest.TestCase):
                 "rule_file": "x.yml",
                 "severity": "FAIL",
             })
+
+
+class MakeLlmEvidenceRecordTests(unittest.TestCase):
+    def test_creates_record_with_confidence_and_rationale(self) -> None:
+        record = make_llm_evidence_record(
+            collector="llm-reviewer",
+            tool="claude",
+            category="test_quality",
+            status="ok",
+            confidence=8,
+            rationale="Tests cover all edge cases",
+        )
+        self.assertEqual(record["schema_version"], EVIDENCE_SCHEMA_VERSION)
+        self.assertEqual(record["confidence"], 8)
+        self.assertEqual(record["rationale"], "Tests cover all edge cases")
+        self.assertFalse(record["deterministic"])
+
+    def test_deterministic_always_false(self) -> None:
+        record = make_llm_evidence_record(
+            collector="llm-reviewer",
+            tool="claude",
+            category="security",
+            status="ok",
+            confidence=9,
+            rationale="No vulnerabilities found",
+        )
+        self.assertFalse(record["deterministic"])
+
+    def test_confidence_below_range_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "confidence"):
+            make_llm_evidence_record(
+                collector="x", tool="x", category="x",
+                status="ok", confidence=0, rationale="test",
+            )
+
+    def test_confidence_above_range_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "confidence"):
+            make_llm_evidence_record(
+                collector="x", tool="x", category="x",
+                status="ok", confidence=11, rationale="test",
+            )
+
+    def test_empty_rationale_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "rationale"):
+            make_llm_evidence_record(
+                collector="x", tool="x", category="x",
+                status="ok", confidence=5, rationale="",
+            )
+
+    def test_confidence_boundary_1_accepted(self) -> None:
+        record = make_llm_evidence_record(
+            collector="x", tool="x", category="x",
+            status="ok", confidence=1, rationale="low confidence",
+        )
+        self.assertEqual(record["confidence"], 1)
+
+    def test_confidence_boundary_10_accepted(self) -> None:
+        record = make_llm_evidence_record(
+            collector="x", tool="x", category="x",
+            status="ok", confidence=10, rationale="high confidence",
+        )
+        self.assertEqual(record["confidence"], 10)
 
 
 if __name__ == "__main__":
