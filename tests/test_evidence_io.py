@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from story_automator.core.gate_schema import (
     GateSchemaError,
@@ -24,6 +26,7 @@ from story_automator.core.evidence_io import (
     read_gate_marker,
     write_gate_marker,
 )
+from story_automator.core.trust_boundary import TrustBoundaryError
 
 
 class EvidenceMigrateTests(unittest.TestCase):
@@ -581,6 +584,72 @@ class EvidenceToGatePipelineTests(unittest.TestCase):
                 factory_version="0.3.0",
             )
             self.assertTrue(ok)
+
+
+class EvidenceIOTrustBoundaryTests(unittest.TestCase):
+    def _v1_record(self) -> dict:
+        return make_evidence_record(
+            collector="test-collector",
+            tool="pytest",
+            category="correctness",
+            status="ok",
+        )
+
+    def test_persist_evidence_raises_in_child(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {"STORY_AUTOMATOR_CHILD": "true"}):
+                with self.assertRaises(TrustBoundaryError):
+                    persist_evidence_record(td, "gate-001", self._v1_record())
+
+    def test_persist_gate_file_raises_in_child(self) -> None:
+        gate = make_gate_file(
+            gate_id="gate-001",
+            target={"kind": "story", "id": "1.1"},
+            commit_sha="abc123",
+            profile={"id": "default", "version": 1, "hash": "h1"},
+            factory_version="0.1.0",
+            categories={"correctness": {"verdict": "PASS"}},
+            overall="PASS",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {"STORY_AUTOMATOR_CHILD": "true"}):
+                with self.assertRaises(TrustBoundaryError):
+                    persist_gate_file(td, gate)
+
+    def test_write_gate_marker_raises_in_child(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {"STORY_AUTOMATOR_CHILD": "true"}):
+                with self.assertRaises(TrustBoundaryError):
+                    write_gate_marker(td, "gate-001", "abc123")
+
+    def test_clear_gate_marker_raises_in_child(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            env = dict(os.environ)
+            env.pop("STORY_AUTOMATOR_CHILD", None)
+            with patch.dict(os.environ, env, clear=True):
+                write_gate_marker(td, "gate-001", "abc123")
+            with patch.dict(os.environ, {"STORY_AUTOMATOR_CHILD": "true"}):
+                with self.assertRaises(TrustBoundaryError):
+                    clear_gate_marker(td)
+
+    def test_persist_evidence_works_on_host(self) -> None:
+        env = dict(os.environ)
+        env.pop("STORY_AUTOMATOR_CHILD", None)
+        with patch.dict(os.environ, env, clear=True):
+            with tempfile.TemporaryDirectory() as td:
+                path = persist_evidence_record(td, "gate-001", self._v1_record())
+                self.assertTrue(path.exists())
+
+    def test_read_functions_work_in_child(self) -> None:
+        """Read-only functions must NOT be guarded — child may read evidence."""
+        with tempfile.TemporaryDirectory() as td:
+            env = dict(os.environ)
+            env.pop("STORY_AUTOMATOR_CHILD", None)
+            with patch.dict(os.environ, env, clear=True):
+                persist_evidence_record(td, "gate-001", self._v1_record())
+            with patch.dict(os.environ, {"STORY_AUTOMATOR_CHILD": "true"}):
+                records = load_evidence_bundle(td, "gate-001")
+                self.assertEqual(len(records), 1)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from .gate_schema import (
     validate_evidence_record,
     validate_gate_file,
 )
+from .trust_boundary import assert_host_context
 from .utils import ensure_dir, iso_now, write_atomic
 
 _SAFE_GATE_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -103,6 +104,7 @@ def persist_evidence_record(
     record: dict[str, Any],
 ) -> Path:
     """Write a validated evidence record to _bmad/gate/evidence/<gate_id>/."""
+    assert_host_context("persist_evidence_record")
     _validate_gate_id(gate_id)
     validate_evidence_record(record)
     evidence_dir = Path(project_root) / "_bmad" / "gate" / "evidence" / gate_id
@@ -157,6 +159,7 @@ def persist_gate_file(
     gate_file: dict[str, Any],
 ) -> Path:
     """Write a validated gate file to _bmad/gate/verdicts/<gate_id>.json."""
+    assert_host_context("persist_gate_file")
     validate_gate_file(gate_file)
     gate_id = gate_file["gate_id"]
     _validate_gate_id(gate_id)
@@ -235,6 +238,7 @@ def write_gate_marker(
     commit_sha: str,
 ) -> Path:
     """§9.2: atomic marker before collector loop starts."""
+    assert_host_context("write_gate_marker")
     marker = {
         "gate_id": gate_id,
         "commit_sha": commit_sha,
@@ -264,6 +268,7 @@ def read_gate_marker(
 
 def clear_gate_marker(project_root: str | Path) -> None:
     """§9.2: remove marker after verdict is written (or on crash recovery)."""
+    assert_host_context("clear_gate_marker")
     path = _gate_marker_path(project_root)
     try:
         path.unlink()
