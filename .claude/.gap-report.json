@@ -1,36 +1,95 @@
 {
-  "pass": 2,
+  "pass": 1,
   "critical_gaps": 0,
   "architectural_gaps": 0,
   "important_gaps": 0,
-  "minor_gaps": 0,
-  "deferred_gaps": 0,
-  "total_gaps_found": 3,
-  "gaps_fixed_this_pass": 3,
-  "tests_green": true,
-  "lint_clean": true,
+  "minor_gaps": 3,
+  "deferred_gaps": 1,
+  "total_gaps_found": 9,
+  "gaps_fixed_this_pass": 7,
+  "tests_green": "n/a (plan review, not implementation)",
+  "lint_clean": "n/a (plan review, not implementation)",
   "converged": true,
-  "milestone": "m06a-m3-feature-tester",
-  "scope": {
-    "base_commit": "3b5bfa98e6c624ad6081c79f5db0e8890e92a956",
-    "files_reviewed": [
-      "skills/bmad-story-automator/src/story_automator/core/feature_tester.py",
-      "tests/test_feature_tester.py"
-    ],
-    "test_results": "tests.test_feature_tester: 53/53 OK",
-    "lint_results": "ruff check + ruff format --check clean",
-    "full_suite_note": "Repository-wide test failures (psutil/filelock-dependent tests in test_atomic_io etc.) are pre-existing environment issues unrelated to this milestone — same failure count before and after these changes."
-  },
   "gap_summaries": [
-    "[post-impl] M1: _find_existing_test docstring claimed 'file-read errors propagate naturally as OSError', but path.read_text(encoding='utf-8') can also raise UnicodeDecodeError (subclass of ValueError, NOT OSError) on a non-UTF-8 file. Fixed: docstring now lists both OSError and UnicodeDecodeError as propagable.",
-    "[post-impl] M2: PlanFeatureTestsDryRunTests.test_dry_run_does_not_write_file constructed Path(entry.created_test_path) without first asserting it is not None — inconsistent with the parallel test_creates_skeleton_when_no_existing_test, which does assertIsNotNone before the Path() call. Fixed: added assertIsNotNone(entry.created_test_path) for symmetry and to make the None-narrowing visible to static type checkers.",
-    "[production] P1: Module declared logger = logging.getLogger(__name__) but emitted zero log records — an automation utility that walks REQs and writes files should provide actionable observability so the M06b orchestrator (and operators) can see which REQs were found, created, or skipped without re-deriving from the returned plan. Added logger.info() emissions at all three TestPlanEntry branch points (found/created/skipped) carrying req_id and resolved path; also factored str(target.resolve()) into target_str so the path is computed exactly once per non-found verdict instead of twice."
-  ],
-  "production_readiness": {
-    "artifact_type": "library",
-    "security": "ok — REQ id strictly validated via REQ-\\d+ fullmatch; tests_dir glob restricted to test_compliance_*.py; write goes through write_atomic_text (M05 atomic + per-path-lock semantics); no secrets, no SQL, no shell.",
-    "error_resilience": "ok — OSError/UnicodeDecodeError propagate by design; atomic_io handles Windows ERROR_SHARING_VIOLATION retries upstream; no swallowed exceptions.",
-    "testing": "ok — no time.sleep, no network, no subprocess; tests use tempfile.TemporaryDirectory; assertions verify exact values (golden-string byte-equality + path equality).",
-    "code_quality": "ok — zero TODO/FIXME/HACK markers; follows CLAUDE.md conventions (from __future__ import annotations, @dataclass(kw_only=True, frozen=True), PEP 604 unions, ruff clean, ruff format clean)."
-  }
+    {
+      "id": "G01",
+      "severity": "critical",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 10: Doctor test uses nonexistent methods (self._run_doctor, self.project_root). test_doctor.py uses module-level _run(args) and has no temp-dir setup. Entire test code block was incompatible with the existing harness.",
+      "fix": "Rewrote Task 10 tests to use existing _run([]) pattern, _EXPECTED_CHECKS set, and DoctorCommandTests class methods."
+    },
+    {
+      "id": "G02",
+      "severity": "critical",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 10: Doctor output structure mismatch. Plan expected result[\"profile\"][\"profile_id\"] but actual output is {\"ok\": bool, \"checks\": [...], \"summary\": {...}} using _check() dicts. No \"profile\" top-level key exists.",
+      "fix": "Replaced _profile_preflight with _check_profile() following the _check(name, status, detail) pattern. Profile data appears as a check entry in the checks list."
+    },
+    {
+      "id": "G03",
+      "severity": "important",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 8: Tests didn't specify which class to add methods to. test_runtime_policy.py has RuntimePolicyTests with _write_override and load_effective_policy in scope; plan said 'append' without naming the target class.",
+      "fix": "Added explicit instruction: 'Append the following 4 methods to the existing RuntimePolicyTests class'."
+    },
+    {
+      "id": "G04",
+      "severity": "important",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 8: _validate_policy_shape insertion point 'after _validate_security_shape' is at line 316, but lines 317-356 contain snapshot/runtime/workflow/steps validation. Adding profile/gate checks mid-function is misleading.",
+      "fix": "Changed to 'at the end of _validate_policy_shape (after the for-loop over steps, around line 356)'."
+    },
+    {
+      "id": "G05",
+      "severity": "important",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 10: _profile_preflight(project_root) takes project_root parameter but cmd_doctor(args) doesn't have one. Doctor uses its own _project_root() helper at line 31.",
+      "fix": "_check_profile() now calls load_effective_profile(_project_root()) using doctor's own helper."
+    },
+    {
+      "id": "G06",
+      "severity": "important",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 10: Plan imported command_exists from utils.py but doctor.py uses shutil.which directly for all binary checks. Inconsistent with established pattern.",
+      "fix": "_check_profile() uses shutil.which(name) directly, matching _check_tmux, _check_agents, _check_git."
+    },
+    {
+      "id": "G07",
+      "severity": "important",
+      "status": "fixed",
+      "tag": "[ultrathink]",
+      "description": "Task 10: _EXPECTED_CHECKS in test_doctor.py didn't include 'profile'. Adding _check_profile() to doctor without updating _EXPECTED_CHECKS would fail test_emits_valid_json_with_all_checks.",
+      "fix": "Added 'profile' to _EXPECTED_CHECKS set."
+    },
+    {
+      "id": "G08",
+      "severity": "minor",
+      "status": "open",
+      "tag": "[ultrathink]",
+      "description": "Task 9: MSME-ERP profile uses 'typescript' as toolchain key but spec §5 shows 'ts'. Toolchain keys are opaque identifiers so both work, but downstream consumers must match the chosen convention.",
+      "note": "Keeping 'typescript' as it's more explicit. The spec YAML is shorthand. Profile conventions are being established by this milestone."
+    },
+    {
+      "id": "G09",
+      "severity": "minor",
+      "status": "open",
+      "tag": "[ultrathink]",
+      "description": "Task 4 Step 1: 'Add import os' instruction is prose not a code block. An implementer could miss it among the test code.",
+      "note": "Low risk since the test will fail with NameError: name 'os' is not defined, making the fix obvious."
+    },
+    {
+      "id": "G10",
+      "severity": "minor",
+      "status": "open",
+      "tag": "[ultrathink]",
+      "description": "Task 10 test_profile_check_present is a minimal smoke test. No test for the missing-tool warn path because it requires a temp project root with override file + PROJECT_ROOT env var mock, which is more complex than the existing doctor test harness supports.",
+      "note": "Deferred to implementation — implementer can add a more thorough test with PROJECT_ROOT mocking if needed. The missing-tool path is exercised by the MSME-ERP profile in CI where tools are absent."
+    }
+  ]
 }
