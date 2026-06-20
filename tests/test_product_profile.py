@@ -485,5 +485,63 @@ class AccessorTests(BundledProfileTests):
         self.assertEqual(rule["sast_max_high"], 0)
 
 
+class ForbiddenUntilTests(BundledProfileTests):
+    def _write_forbidden(self, mapping: dict) -> None:
+        bundled = json.loads(self._bundled_path().read_text(encoding="utf-8"))
+        bundled["forbidden_until"] = mapping
+        self._write_bundled(bundled)
+
+    def test_no_forbidden_means_unblocked(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(is_story_blocked(profile, "E1.S1"), (False, ""))
+
+    def test_glob_pattern_blocks_matching_story(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        self._write_forbidden({"ADR-0083": ["E*.envelope-*"]})
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(
+            is_story_blocked(profile, "E1.envelope-sign"), (True, "ADR-0083")
+        )
+        self.assertEqual(
+            is_story_blocked(profile, "E1.ledger-write"), (False, "")
+        )
+
+    def test_multiple_blockers_returns_first_sorted(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        self._write_forbidden({
+            "DG-3": ["E*.envelope-*"],
+            "ADR-0083": ["E*.envelope-*"],
+        })
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        blocked, adr = is_story_blocked(profile, "E1.envelope-sign")
+        self.assertTrue(blocked)
+        self.assertEqual(adr, "ADR-0083")
+
+    def test_dg2_blocks_cost_to_serve(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        self._write_forbidden({"DG-2": ["*.cost-to-serve"]})
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(
+            is_story_blocked(profile, "E5.cost-to-serve"), (True, "DG-2")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

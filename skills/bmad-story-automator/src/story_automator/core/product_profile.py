@@ -13,6 +13,7 @@ Paths:
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -365,3 +366,14 @@ def toolchain_for(
 
 def rule_for(profile: dict[str, Any], category: str) -> dict[str, Any]:
     return dict((profile.get("rules") or {}).get(category) or {})
+
+
+def is_story_blocked(
+    profile: dict[str, Any], story_id: str
+) -> tuple[bool, str]:
+    mapping = profile.get("forbidden_until") or {}
+    for adr in sorted(mapping):
+        for pattern in mapping[adr]:
+            if fnmatch.fnmatchcase(story_id, pattern):
+                return True, adr
+    return False, ""
