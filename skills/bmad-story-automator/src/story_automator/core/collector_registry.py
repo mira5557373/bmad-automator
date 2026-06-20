@@ -6,6 +6,8 @@ in a subsequent task.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from .collector_config import CollectorConfig
 
 __all__ = [
@@ -45,3 +47,35 @@ class CollectorRegistry:
             self._by_id.values(),
             key=lambda c: (c.category, c.collector_id),
         )
+
+    def is_kill_switched(
+        self, config: CollectorConfig, profile: dict[str, Any]
+    ) -> bool:
+        """Check if a collector's tool is disabled in profile rules."""
+        rules = (profile.get("rules") or {}).get(config.category) or {}
+        disabled_tools = rules.get("disabled_tools") or []
+        return config.tool in disabled_tools
+
+    def applicable(
+        self, profile: dict[str, Any]
+    ) -> list[CollectorConfig]:
+        """Return collectors whose category is active and not kill-switched.
+
+        Active = listed in profile.categories (any tier) AND NOT in
+        profile.categories_na.  Kill-switched = tool listed in
+        profile.rules.<category>.disabled_tools.
+        """
+        active: set[str] = set()
+        for tier_cats in (profile.get("categories") or {}).values():
+            if isinstance(tier_cats, list):
+                active.update(tier_cats)
+        na = set(profile.get("categories_na") or [])
+        active -= na
+        result: list[CollectorConfig] = []
+        for config in self._by_id.values():
+            if config.category not in active:
+                continue
+            if self.is_kill_switched(config, profile):
+                continue
+            result.append(config)
+        return sorted(result, key=lambda c: (c.category, c.collector_id))
