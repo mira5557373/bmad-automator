@@ -543,5 +543,101 @@ class ForbiddenUntilTests(BundledProfileTests):
         )
 
 
+class ProfileHashTests(BundledProfileTests):
+    def test_hash_is_deterministic(self) -> None:
+        from story_automator.core.product_profile import (
+            compute_profile_hash,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        self.assertEqual(
+            compute_profile_hash(profile), compute_profile_hash(profile)
+        )
+
+    def test_hash_changes_on_modification(self) -> None:
+        from story_automator.core.product_profile import (
+            compute_profile_hash,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        h1 = compute_profile_hash(profile)
+        profile["id"] = "modified"
+        h2 = compute_profile_hash(profile)
+        self.assertNotEqual(h1, h2)
+
+    def test_hash_is_8_char_hex(self) -> None:
+        from story_automator.core.product_profile import (
+            compute_profile_hash,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(project_root=str(self.project_root))
+        h = compute_profile_hash(profile)
+        self.assertEqual(len(h), 8)
+        int(h, 16)  # must be valid hex
+
+
+class ProfileSnapshotTests(BundledProfileTests):
+    def test_snapshot_is_deterministic(self) -> None:
+        from story_automator.core.product_profile import (
+            snapshot_effective_profile,
+        )
+
+        first = snapshot_effective_profile(str(self.project_root))
+        second = snapshot_effective_profile(str(self.project_root))
+        self.assertEqual(
+            first["profileSnapshotHash"], second["profileSnapshotHash"]
+        )
+
+    def test_snapshot_file_lives_under_project_root(self) -> None:
+        from story_automator.core.product_profile import (
+            snapshot_effective_profile,
+        )
+
+        snap = snapshot_effective_profile(str(self.project_root))
+        snap_path = self.project_root / snap["profileSnapshotFile"]
+        self.assertTrue(snap_path.is_file())
+
+    def test_snapshot_includes_profile_hash(self) -> None:
+        from story_automator.core.product_profile import (
+            snapshot_effective_profile,
+        )
+
+        snap = snapshot_effective_profile(str(self.project_root))
+        self.assertIn("profileHash", snap)
+        self.assertEqual(len(snap["profileHash"]), 8)
+
+    def test_snapshot_escape_rejected(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            snapshot_effective_profile,
+        )
+
+        bundled = json.loads(
+            self._bundled_path().read_text(encoding="utf-8")
+        )
+        bundled["snapshot"]["relativeDir"] = "../outside"
+        self._write_bundled(bundled)
+        with self.assertRaisesRegex(ProfileError, "escapes allowed root"):
+            snapshot_effective_profile(str(self.project_root))
+
+    def test_load_snapshot_detects_hash_mismatch(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_profile_snapshot,
+            snapshot_effective_profile,
+        )
+
+        snap = snapshot_effective_profile(str(self.project_root))
+        with self.assertRaisesRegex(ProfileError, "profile snapshot hash mismatch"):
+            load_profile_snapshot(
+                snap["profileSnapshotFile"],
+                project_root=str(self.project_root),
+                expected_hash="deadbeef",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

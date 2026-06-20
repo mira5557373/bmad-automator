@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .runtime_layout import bundled_story_skill_root
-from .utils import get_project_root, read_text
+from .utils import ensure_dir, get_project_root, iso_now, md5_hex8, read_text, write_atomic
 
 
 class ProfileError(ValueError):
@@ -377,3 +377,93 @@ def is_story_blocked(
             if fnmatch.fnmatchcase(story_id, pattern):
                 return True, adr
     return False, ""
+
+
+def compute_profile_hash(profile: dict[str, Any]) -> str:
+    canonical = json.dumps(profile, sort_keys=True, separators=(",", ":"))
+    return md5_hex8(canonical)
+
+
+def snapshot_effective_profile(
+    project_root: str | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root or get_project_root()).resolve()
+    profile = load_effective_profile(str(root))
+    snapshot_dir = _resolve_snapshot_dir(profile, root)
+    ensure_dir(snapshot_dir)
+    stable_json = _stable_profile_json(profile)
+    snapshot_hash = md5_hex8(stable_json)
+    stamp = (
+        iso_now()
+        .replace("-", "")
+        .replace(":", "")
+        .replace("T", "-")
+        .replace("Z", "")
+    )
+    snapshot_path = snapshot_dir / f"{stamp}-{snapshot_hash}.json"
+    write_atomic(snapshot_path, stable_json)
+    return {
+        "profile": profile,
+        "profileVersion": profile.get("version", 1),
+        "profileSnapshotHash": snapshot_hash,
+        "profileSnapshotFile": _display_path(snapshot_path, root),
+        "profileHash": compute_profile_hash(profile),
+    }
+
+
+def load_profile_snapshot(
+    snapshot_file: str,
+    *,
+    project_root: str | None = None,
+    expected_hash: str = "",
+) -> dict[str, Any]:
+    root = Path(project_root or get_project_root()).resolve()
+    path = Path(snapshot_file)
+    if not path.is_absolute():
+        path = root / path
+    path = _ensure_within(path, root, "profile snapshot")
+    if not path.is_file():
+        raise ProfileError(f"profile snapshot missing: {path}")
+    raw = read_text(path)
+    actual_hash = md5_hex8(raw)
+    if expected_hash and actual_hash != expected_hash:
+        raise ProfileError(
+            f"profile snapshot hash mismatch: "
+            f"expected {expected_hash}, got {actual_hash}"
+        )
+    profile = json.loads(raw)
+    _validate_profile_shape(profile)
+    return profile
+
+
+def _resolve_snapshot_dir(
+    profile: dict[str, Any], project_root: Path
+) -> Path:
+    snapshot = profile.get("snapshot") or {}
+    relative_dir = str(snapshot.get("relativeDir") or "").strip()
+    if not relative_dir:
+        raise ProfileError("snapshot.relativeDir missing")
+    raw = Path(relative_dir)
+    candidate = raw if raw.is_absolute() else project_root / raw
+    return _ensure_within(candidate, project_root.resolve(), "snapshot.relativeDir")
+
+
+def _stable_profile_json(profile: dict[str, Any]) -> str:
+    return json.dumps(profile, indent=2, sort_keys=True) + "\n"
+
+
+def _display_path(path: Path, project_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        return str(path.resolve())
+
+
+def _ensure_within(path: Path, root: Path, label: str) -> Path:
+    resolved = path.resolve()
+    root_resolved = root.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ProfileError(f"{label} escapes allowed root: {path}") from exc
+    return resolved
