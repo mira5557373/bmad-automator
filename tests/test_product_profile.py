@@ -639,5 +639,99 @@ class ProfileSnapshotTests(BundledProfileTests):
             )
 
 
+class MsmeErpProfileTests(BundledProfileTests):
+    def test_msme_erp_loads_and_validates(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        self.assertEqual(profile["id"], "msme-erp")
+        self.assertEqual(profile["version"], 1)
+
+    def test_msme_erp_p0_full_coverage(self) -> None:
+        from story_automator.core.product_profile import (
+            load_bundled_profile,
+            required_for_priority,
+        )
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        req = required_for_priority(profile, "P0")
+        self.assertEqual(req["coverage_pct"], 100)
+        self.assertIn("e2e", req["levels"])
+
+    def test_msme_erp_forbidden_until_adr0083(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        blocked, adr = is_story_blocked(profile, "E1.envelope-sign")
+        self.assertTrue(blocked)
+        self.assertEqual(adr, "ADR-0083")
+
+    def test_msme_erp_forbidden_until_dg2(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        blocked, dg = is_story_blocked(profile, "E5.cost-to-serve")
+        self.assertTrue(blocked)
+        self.assertEqual(dg, "DG-2")
+
+    def test_msme_erp_cost_tier_zero_placeholders(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        self.assertEqual(profile["cost_tier"]["arpu_monthly"], 0)
+        self.assertEqual(profile["cost_tier"]["max_pod_cost_per_tenant"], 0)
+
+    def test_msme_erp_timeouts_match_spec(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        self.assertEqual(profile["timeouts"]["security"], 300)
+        self.assertEqual(profile["timeouts"]["performance"], 600)
+        self.assertEqual(profile["timeouts"]["accessibility"], 180)
+        self.assertEqual(profile["timeouts"]["test_quality"], 900)
+        self.assertEqual(profile["timeouts"]["correctness"], 1800)
+
+    def test_msme_erp_full_code_categories(self) -> None:
+        from story_automator.core.product_profile import load_bundled_profile
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        code_cats = profile["categories"]["code"]
+        for required in ("correctness", "security", "agentic", "docs", "process"):
+            self.assertIn(required, code_cats)
+
+    def test_msme_erp_dg3_blocks_ca_channel(self) -> None:
+        from story_automator.core.product_profile import (
+            is_story_blocked,
+            load_bundled_profile,
+        )
+
+        profile = load_bundled_profile(
+            "msme-erp", project_root=str(self.project_root)
+        )
+        blocked, dg = is_story_blocked(profile, "E3.ca-channel-premium")
+        self.assertTrue(blocked)
+        self.assertEqual(dg, "DG-3")
+
+
 if __name__ == "__main__":
     unittest.main()

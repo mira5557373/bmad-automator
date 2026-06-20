@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "id": "msme-erp",
+  "snapshot": {
+    "relativeDir": "_bmad-output/story-automator/profile-snapshots"
+  },
+  "seed_template": {
+    "ref": "msme-erp-golden-template@1.0.0",
+    "url": ""
+  },
+  "toolchain": {
+    "python": [
+      {"name": "ruff",    "version_min": "0.5.0",  "required": true},
+      {"name": "mypy",    "version_min": "1.10.0", "required": true},
+      {"name": "pytest",  "version_min": "8.0.0",  "required": true},
+      {"name": "alembic", "version_min": "1.13.0", "required": true}
+    ],
+    "typescript": [
+      {"name": "biome",      "version_min": "1.8.0",  "required": true},
+      {"name": "vitest",     "version_min": "1.0.0",  "required": true},
+      {"name": "playwright", "version_min": "1.40.0", "required": true},
+      {"name": "knip",       "version_min": "5.0.0",  "required": false}
+    ],
+    "iac": [
+      {"name": "opentofu",    "version_min": "1.8.0",  "required": true},
+      {"name": "kubeconform", "version_min": "0.6.0",  "required": false},
+      {"name": "conftest",    "version_min": "0.50.0", "required": false},
+      {"name": "trivy",       "version_min": "0.50.0",  "required": true}
+    ],
+    "security": [
+      {"name": "semgrep",     "version_min": "1.50.0", "required": true},
+      {"name": "osv-scanner", "version_min": "1.7.0",  "required": true},
+      {"name": "gitleaks",    "version_min": "8.18.0", "required": true},
+      {"name": "syft",        "version_min": "1.0.0",  "required": true},
+      {"name": "cosign",      "version_min": "2.2.0",  "required": false}
+    ]
+  },
+  "matrix": {
+    "P0": {"coverage_pct": 100, "levels": ["unit", "integration", "contract", "e2e"]},
+    "P1": {"coverage_pct": 90,  "levels": ["unit", "integration", "api"]},
+    "P2": {"coverage_pct": 50,  "levels": ["unit", "api_happy_path"]},
+    "P3": {"coverage_pct": 20,  "levels": ["smoke"]}
+  },
+  "categories": {
+    "code": [
+      "correctness", "traceability", "test_quality", "mutation",
+      "static", "security", "compliance", "license", "supply_chain",
+      "api_compat", "migrations", "performance", "accessibility",
+      "observability", "invariants", "agentic", "docs", "process"
+    ],
+    "system": [
+      "reliability", "resilience", "durable_hitl",
+      "blast_radius", "cost_to_serve"
+    ]
+  },
+  "categories_na": [],
+  "rules": {
+    "security":      {"sast_max_high": 0, "deps_max_critical": 0, "secrets_max": 0},
+    "license":       {"forbidden": ["BSL", "SSPL"], "boundary": {"AGPL-3.0": ["odoo-pod"]}},
+    "test_quality":  {"min_score": 70, "burn_in_runs": 5, "max_flaky": 0},
+    "accessibility": {"max_serious": 0, "max_critical": 0},
+    "performance":   {"max_lighthouse_regression_pct": 5},
+    "supply_chain":  {"require_sbom": true, "require_provenance": true, "require_cosign": false}
+  },
+  "invariants": {
+    "registry_file": "data/profiles/msme-erp.invariants.yaml"
+  },
+  "cost_tier": {
+    "sku_id": "",
+    "arpu_monthly": 0,
+    "max_pod_cost_per_tenant": 0
+  },
+  "timeouts": {
+    "security":      300,
+    "performance":   600,
+    "accessibility": 180,
+    "test_quality":  900,
+    "correctness":   1800
+  },
+  "forbidden_until": {
+    "ADR-0083": ["E*.envelope-*"],
+    "DG-2":     ["*.cost-to-serve"],
+    "DG-3":     ["E*.ca-channel-*"]
+  }
+}
