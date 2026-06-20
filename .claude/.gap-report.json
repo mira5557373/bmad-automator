@@ -1,95 +1,50 @@
 {
   "milestone": "foundation-m3-factory-self-trust",
-  "plan_path": "docs/superpowers/plans/2026-06-20-foundation-m3-factory-self-trust.md",
-  "spec_path": "docs/superpowers/specs/2026-06-20-production-ready-factory-design.md",
   "analysis_date": "2026-06-20",
-  "spec_sections_reviewed": ["§7", "§8 module 6", "§9.2", "§14", "§16 M16", "§18"],
-  "gaps_found": 3,
-  "gaps_fixed_inline": 3,
-  "gaps": [
+  "review_phases": ["post-impl", "production-readiness"],
+  "files_reviewed": [
+    "skills/bmad-story-automator/src/story_automator/core/trust_boundary.py",
+    "skills/bmad-story-automator/src/story_automator/core/adjudicator.py",
+    "skills/bmad-story-automator/src/story_automator/core/collector_checkout.py",
+    "skills/bmad-story-automator/src/story_automator/core/evidence_io.py",
+    "skills/bmad-story-automator/src/story_automator/core/gate_audit.py",
+    "skills/bmad-story-automator/src/story_automator/core/tmux_runtime.py",
+    "tests/test_trust_boundary.py",
+    "tests/test_adjudicator.py",
+    "tests/test_collector_checkout.py",
+    "tests/test_evidence_io.py",
+    "tests/test_gate_audit.py",
+    "tests/test_trust_integration.py"
+  ],
+  "gap_summaries": [
     {
       "id": "GAP-001",
-      "severity": "critical",
+      "severity": "important",
+      "tag": "[post-impl]",
       "status": "fixed",
-      "title": "Missing os import in Task 7 adjudicator tests",
-      "description": "test_adjudicator.py only imports sys and unittest; the plan's Task 7 appended tests reference os.environ.pop() and unittest.mock.patch but these were not imported. Test would fail with NameError.",
-      "fix": "Added explicit instruction to prepend 'import os' and 'from unittest.mock import patch' to the existing imports in test_adjudicator.py."
-    },
-    {
-      "id": "GAP-002",
-      "severity": "critical",
-      "status": "fixed",
-      "title": "Missing os/patch imports in Task 8 evidence_io tests",
-      "description": "test_evidence_io.py imports tempfile, json, unittest, Path, and evidence_io/gate_schema functions but not os or unittest.mock.patch. Task 8 appended tests need both.",
-      "fix": "Added explicit instruction to prepend 'import os' and 'from unittest.mock import patch' to the existing imports in test_evidence_io.py."
-    },
-    {
-      "id": "GAP-003",
-      "severity": "moderate",
-      "status": "fixed",
-      "title": "clear_gate_marker not guarded by assert_host_context",
-      "description": "Task 8 guards write_gate_marker, persist_evidence_record, and persist_gate_file, but clear_gate_marker (a destructive write — deletes the crash-safety marker) was not guarded. Per spec §9.2, only the orchestrator host should clear markers during crash recovery. Inconsistent with all other write operations being guarded.",
-      "fix": "Added clear_gate_marker guard to Task 8 implementation steps and a test_clear_gate_marker_raises_in_child test case."
+      "title": "sandbox_env extras can override CHILD_FORCED_VARS and re-introduce CHILD_STRIPPED_VARS",
+      "file": "skills/bmad-story-automator/src/story_automator/core/trust_boundary.py",
+      "description": "sandbox_env applied extras AFTER stripping security vars and forcing the child flag, so extras={\"STORY_AUTOMATOR_CHILD\": \"false\"} could disable the trust boundary, and extras={\"BMAD_AUDIT_KEY\": \"x\"} could re-expose the audit signing key to the child. Reordered to apply extras before strip+force so security invariants always win.",
+      "fix_commit": "19d0568"
     }
   ],
-  "coverage_notes": [
-    {
-      "spec_requirement": "§7 — collectors run on orchestrator host, never by generation child",
-      "plan_tasks": ["Task 1", "Task 4", "Task 7"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§7 — evidence + gate files written outside child's tmux working tree",
-      "plan_tasks": ["Task 3", "Task 8"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§7 — evidence hash-chained into audit",
-      "plan_tasks": ["Task 5", "Task 6"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§7 — child's self-reports are unverified hints (Blind Hunter)",
-      "plan_tasks": ["Task 10"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§7 — fail-closed on collector error/timeout",
-      "plan_tasks": ["Task 11"],
-      "status": "covered (already implemented in adjudicator.py from M2)"
-    },
-    {
-      "spec_requirement": "§7 — fresh checkout @SHA for collectors",
-      "plan_tasks": ["Task 4", "Task 11"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§8 module 6 — sandbox the generation child (env var stripping)",
-      "plan_tasks": ["Task 2", "Task 9"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§8 module 6 — audit P0s for gate operations",
-      "plan_tasks": ["Task 5", "Task 6"],
-      "status": "covered"
-    },
-    {
-      "spec_requirement": "§16 M16 — no dependencies on other milestones",
-      "plan_tasks": ["all"],
-      "status": "verified — plan uses only existing M1/M2 APIs"
-    }
-  ],
-  "behavioral_changes": [
-    {
-      "file": "tmux_runtime.py (_spawn_legacy)",
-      "change": "_spawn_legacy will now strip BASH_ENV= via sandbox_tmux_env_args, which it did not previously strip inline",
-      "impact": "More secure — tightens the child sandbox. No regression risk since BASH_ENV stripping is already applied by _spawn_runner."
-    }
-  ],
-  "deferred_to_later_milestones": [
-    "GateDecision + GateRendered telemetry events (M18 owns telemetry_events.py delta)",
-    "GateProfileDrift audit event for profile hash mismatch (M19)",
-    "production_ready_gate verifier registration (M19)",
-    "CLI commands: gate status, gate resume, gate invalidate (M19)"
-  ]
+  "production_readiness": {
+    "security": "pass — no secrets in code/logs, file paths sanitized, trust boundary guards on all write ops",
+    "error_resilience": "pass — all subprocess/file I/O calls handle errors, best-effort cleanup on failure paths",
+    "testing": "pass — 1831 tests green, no test-level sleeps, no network calls, strong assertions throughout",
+    "code_quality": "pass — no TODO/FIXME/HACK, follows CLAUDE.md conventions, no circular imports",
+    "package_hygiene": "pass — no new dependencies, all modules importable, __all__ exports defined"
+  },
+  "verification": {
+    "tests": "1831 passed, 2 skipped",
+    "lint": "ruff check — all checks passed",
+    "npm_verify": "test:python, pack:dry-run, test:cli, test:smoke — all passed"
+  },
+  "convergence": {
+    "critical_gaps": 0,
+    "important_gaps": 0,
+    "tests_green": true,
+    "lint_clean": true,
+    "converged": true
+  }
 }
