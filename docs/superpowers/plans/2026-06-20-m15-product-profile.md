@@ -127,12 +127,15 @@ Write `skills/bmad-story-automator/data/profiles/default.json`:
     "code": ["correctness", "static", "security", "license", "observability", "invariants", "process"],
     "system": ["reliability", "resilience", "durable_hitl", "blast_radius", "cost_to_serve"]
   },
+  "categories_na": [],
   "rules": {
     "security": {"sast_max_high": 0, "deps_max_critical": 0, "secrets_max": 0},
     "license": {"forbidden": [], "boundary": {}},
     "test_quality": {"min_score": 70, "burn_in_runs": 5, "max_flaky": 0}
   },
   "invariants": {"registry_file": ""},
+  "cost_tier": {"sku_id": "", "arpu_monthly": 0, "max_pod_cost_per_tenant": 0},
+  "timeouts": {},
   "forbidden_until": {}
 }
 ```
@@ -160,9 +163,12 @@ VALID_TOP_LEVEL_KEYS = {
     "toolchain",
     "matrix",
     "categories",
+    "categories_na",
     "rules",
     "invariants",
     "forbidden_until",
+    "cost_tier",
+    "timeouts",
 }
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
 VALID_CODE_CATEGORIES = {
@@ -199,12 +205,37 @@ def _read_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(read_text(path))
     except FileNotFoundError as exc:
-        raise ProfileError(f"profile file missing: {path}") from exc
+        raise ProfileError(
+            f"profile file missing: {path} "
+            f"(expected at {OVERRIDE_PATH} for project overrides, "
+            f"or {DEFAULT_PROFILE_PATH} bundled with the skill)"
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise ProfileError(f"profile json invalid: {path}") from exc
+        raise ProfileError(f"profile json invalid: {path}: {exc.msg} (line {exc.lineno})") from exc
     if not isinstance(payload, dict):
         raise ProfileError(f"profile json must be an object: {path}")
     return payload
+```
+
+Add this module docstring to the very top of `core/product_profile.py` (before the imports):
+
+```python
+"""Product Profile subsystem.
+
+Loads, validates, and snapshots the per-product profile that specializes
+the general factory (gate rubric, toolchain, matrix, rules, invariants).
+
+Layered resolution (matches runtime_policy):
+    bundled default  ->  project override  ->  env overrides
+
+Paths and env vars:
+    bundled default: <skills_root>/bmad-story-automator/data/profiles/default.json
+    project override: <project_root>/_bmad/bmm/story-automator.profile.json
+    explicit selection (future): STORY_AUTOMATOR_PROFILE env var
+
+See docs/superpowers/specs/2026-06-20-production-ready-factory-design.md
+sections 5 and 6 for the canonical schema.
+"""
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -653,6 +684,100 @@ def _validate_invariants(invariants: Any) -> None:
     if registry_file is not None and not isinstance(registry_file, str):
         # File existence is intentionally NOT checked here; that's M17.
         raise ProfileError("invariants.registry_file must be a string")
+
+
+_COST_TIER_NUMERIC = {"arpu_monthly", "max_pod_cost_per_tenant"}
+
+
+def _validate_cost_tier(cost_tier: Any) -> None:
+    if cost_tier is None:
+        return
+    if not isinstance(cost_tier, dict):
+        raise ProfileError("cost_tier must be an object")
+    sku_id = cost_tier.get("sku_id")
+    if sku_id is not None and not isinstance(sku_id, str):
+        raise ProfileError("cost_tier.sku_id must be a string")
+    for key in _COST_TIER_NUMERIC:
+        value = cost_tier.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ProfileError(f"cost_tier.{key} must be a non-negative number")
+
+
+def _validate_categories_na(categories_na: Any) -> None:
+    if categories_na is None:
+        return
+    if not isinstance(categories_na, list) or not all(isinstance(item, str) for item in categories_na):
+        raise ProfileError("categories_na must be a string array")
+    unknown = sorted(set(categories_na) - VALID_CODE_CATEGORIES - VALID_SYSTEM_CATEGORIES)
+    if unknown:
+        raise ProfileError(f"unknown categories_na entries: {', '.join(unknown)}")
+
+
+def _validate_timeouts(timeouts: Any) -> None:
+    if timeouts is None:
+        return
+    if not isinstance(timeouts, dict):
+        raise ProfileError("timeouts must be an object")
+    for category, seconds in timeouts.items():
+        if category not in VALID_CODE_CATEGORIES and category not in VALID_SYSTEM_CATEGORIES:
+            raise ProfileError(f"unknown category in timeouts: {category}")
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+            raise ProfileError(f"timeouts.{category} must be a positive integer")
+```
+
+Wire all three new peer validators into `_validate_profile_shape` alongside the others:
+
+```python
+    _validate_invariants(profile.get("invariants"))
+    _validate_cost_tier(profile.get("cost_tier"))
+    _validate_categories_na(profile.get("categories_na"))
+    _validate_timeouts(profile.get("timeouts"))
+```
+
+Add tests:
+
+```python
+    def test_cost_tier_must_be_object(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "cost_tier": []})
+        with self.assertRaisesRegex(ProfileError, "cost_tier must be an object"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_cost_tier_arpu_must_be_number(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "cost_tier": {"sku_id": "x", "arpu_monthly": "free"}})
+        with self.assertRaisesRegex(ProfileError, "cost_tier.arpu_monthly must be a non-negative number"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_categories_na_must_be_string_array(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "categories_na": "performance"})
+        with self.assertRaisesRegex(ProfileError, "categories_na must be a string array"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_categories_na_unknown_entry_rejected(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "categories_na": ["bogus"]})
+        with self.assertRaisesRegex(ProfileError, "unknown categories_na entries: bogus"):
+            load_bundled_profile(str(self.project_root))
+
+    def test_timeouts_must_be_positive_integer(self) -> None:
+        self._write_bundled({"version": 1, "id": "x",
+                             "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0","P1","P2","P3")},
+                             "categories": {"code": [], "system": []},
+                             "timeouts": {"security": 0}})
+        with self.assertRaisesRegex(ProfileError, "timeouts.security must be a positive integer"):
+            load_bundled_profile(str(self.project_root))
 ```
 
 Add these unit tests to `tests/test_product_profile.py` alongside the existing `ProfileShapeTests`:
@@ -1470,6 +1595,15 @@ class MsmeErpProfileTests(BundledProfileTests):
         blocked, adr = is_story_blocked(profile, "E1.envelope-sign")
         self.assertTrue(blocked)
         self.assertEqual(adr, "ADR-0083")
+        # DG-2 (undefined SKU) blocks cost-to-serve stories so the system
+        # gate's cost_to_serve collector renders CONCERNS, not FAIL
+        blocked, dg = is_story_blocked(profile, "E5.cost-to-serve")
+        self.assertTrue(blocked)
+        self.assertEqual(dg, "DG-2")
+        # cost_tier ships with zero placeholders until DG-2 lands
+        self.assertEqual(profile["cost_tier"]["arpu_monthly"], 0)
+        # per-category timeouts ship with TEA-aligned defaults
+        self.assertEqual(profile["timeouts"]["test_quality"], 900)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1537,6 +1671,7 @@ Write `skills/bmad-story-automator/data/profiles/msme-erp.json`:
       "blast_radius", "cost_to_serve"
     ]
   },
+  "categories_na": [],
   "rules": {
     "security":      {"sast_max_high": 0, "deps_max_critical": 0, "secrets_max": 0},
     "license":       {"forbidden": ["BSL", "SSPL"], "boundary": {"AGPL-3.0": ["odoo-pod"]}},
@@ -1548,8 +1683,21 @@ Write `skills/bmad-story-automator/data/profiles/msme-erp.json`:
   "invariants": {
     "registry_file": "data/profiles/msme-erp.invariants.yaml"
   },
+  "cost_tier": {
+    "sku_id": "",
+    "arpu_monthly": 0,
+    "max_pod_cost_per_tenant": 0
+  },
+  "timeouts": {
+    "security":      300,
+    "performance":   600,
+    "accessibility": 180,
+    "test_quality":  900,
+    "correctness":   1800
+  },
   "forbidden_until": {
     "ADR-0083": ["E*.envelope-*"],
+    "DG-2":     ["*.cost-to-serve"],
     "DG-3":     ["E*.ca-channel-*"]
   }
 }

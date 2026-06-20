@@ -86,7 +86,7 @@ Risk Generator (TEA `*risk`) emits a structured risk profile (`Probability×Impa
 | traceability | P0 ACs 100% / P1 ≥90% mapped to tests | TEA `e2e-trace-summary.json` (fallback: GWT title parse) |
 | test_quality | TEA `test-review` ≥ band; 0 flaky over burn-in N×; no hard-waits | TEA test-review, burn-in runner |
 | **mutation** | mutation score ≥ threshold on changed code (sampled/budgeted) | mutmut / Stryker |
-| static/type | tsc=0, mypy=0, ruff/Biome=0, deadcode ≤ budget | tsc, mypy, ruff, Biome, knip |
+| **static** | static-analysis + type-checking: tsc=0, mypy=0, ruff/Biome=0, deadcode ≤ budget | tsc, mypy, ruff, Biome, knip |
 | security | SAST 0 high+, deps 0 critical-unwaived, 0 secrets | semgrep, trivy, osv, gitleaks |
 | compliance | DPDPA PII-redaction + residency client + audit-envelope + consent-receipt present & correct | compliance rulepack (semgrep/conftest) |
 | license (HR-2) | 0 forbidden licenses + boundary-aware (AGPL only in Odoo pod) | syft-license + boundary lint |
@@ -104,18 +104,25 @@ Risk Generator (TEA `*risk`) emits a structured risk profile (`Probability×Impa
 ### 6.3 Verdict aggregation (deterministic)
 ```
 required = risk_to_requirements(risk_profile, profile.matrix)
+# NA path: if a category is declared in profile.categories_na for the active profile,
+#   that category's verdict is NA with rationale "profile-declared N/A" and is
+#   excluded from aggregation. Keeps the rubric "ungameable" by forcing operators
+#   to declare opt-outs at profile level (versioned, hashed) rather than per-story waiver.
 per category: verdict = profile.rules[cat](evidence, required)   # PASS/CONCERNS/FAIL/NA
-collector status == error → fail-closed (never silent PASS)
+collector status in {error,timeout} → fail-closed (never silent PASS)
 if any risk.score==9 and no mitigation        → FAIL
 elif any category == FAIL                       → FAIL
 elif any category == CONCERNS                   → CONCERNS   # proceeds + logged mitigation debt
 else                                            → PASS
-# WAIVED: only a signed, unexpired operator waiver covering the exact failing categories
+# WAIVED: only a signed, unexpired operator waiver (§6.4 waiver schema) covering the
+#   EXACT failing categories of THIS gate file; waiver.expires_at is re-checked
+#   against current time on EVERY gate-file reuse (closes the expiry-race).
 ```
 
 ### 6.4 Schemas (compact)
-- **Evidence record** (the only thing the Adjudicator reads — never raw tool output): `{collector,tool,tool_version,category,tier,status(ok|violation|error),metrics,findings,raw_output_ref,exit_code,duration_ms,deterministic}`. LLM evidence uses the same shape + `confidence`+`rationale`; confidence `<5` forces CONCERNS/needs-human (TEA confidence gate). LLM evidence is *persisted*, so adjudication stays replayable even though generation isn't.
-- **Gate file** (persisted, auditable): `gate_id(UUIDv7), target{kind,id,epic}, tier, commit_sha, scanner_data_snapshot, profile{id,version,hash}, risk_profile_ref, categories{verdict,required,actual,evidence,rationale}, overall, waivers[], evidence_bundle_hash`. Hash-chained into the existing audit log.
+- **Evidence record** (the only thing the Adjudicator reads — never raw tool output): `{schema_version, collector, tool, tool_version, category, tier, status(ok|violation|error|timeout), metrics, findings, raw_output_ref, exit_code, duration_ms, deterministic}`. `schema_version` is mandatory and enables forward-compat (M18 emits v1; future schemas migrate via a small `evidence_migrate(record, target_version)` shim). LLM evidence uses the same shape + `confidence`+`rationale`; confidence `<5` forces CONCERNS/needs-human (TEA confidence gate). LLM evidence is *persisted*, so adjudication stays replayable even though generation isn't.
+- **Gate file** (persisted, auditable): `gate_id(UUIDv7), schema_version, target{kind,id,epic}, tier, commit_sha, scanner_data_snapshot, profile{id,version,hash}, factory_version, risk_profile_ref, categories{verdict,required,actual,evidence,rationale}, overall, waivers[], evidence_bundle_hash`. Hash-chained into the existing audit log. `factory_version` lets future replayers detect version skew; `profile.hash` drives drift-invalidation (§9.2).
+- **Waiver schema** (each entry of `gate_file.waivers[]`): `{waiver_id: UUIDv7, operator_id: str, issued_at: ISO8601, expires_at: ISO8601, failing_categories: non-empty[str], reason: str, signature: str, profile_hash: str}`. Validation rules: (a) `expires_at - issued_at ≤ MAX_WAIVER_TTL` (profile-config, default 30 days); (b) `failing_categories` must exactly match the gate file's failing categories — no wildcards, no broader scope; (c) `signature` deterministically computed over the canonical-JSON of the other fields, verified before the waiver is honored; (d) `profile_hash` must equal the gate file's `profile.hash` (waiver doesn't survive a profile change); (e) the Adjudicator **re-checks `expires_at` against current time on every gate-file reuse**, not just at issue time. SOP documented in §11.1 runbook entry (b).
 - **Invariant registry** (`invariants.yaml`): per DG/ADR `{id, checkable:yes|no, check_type:semgrep|conftest|presence|human, rule_file, severity}`; encodes `ADRs > corrections > vision` precedence; non-checkable ones become LLM-reviewer/human checklist items. Concrete entries for MSME:
   - `{id: DG-12, checkable: yes, check_type: semgrep, rule_file: semgrep/dg12_envelope_emitted.yml,    severity: FAIL}`
   - `{id: DG-13, checkable: yes, check_type: semgrep, rule_file: semgrep/dg13_no_direct_httpx_odoo.yml, severity: FAIL}`
@@ -127,13 +134,17 @@ else                                            → PASS
 
 - **`cost_tier`** (per-profile): `{sku_id: str, arpu_monthly: number, max_pod_cost_per_tenant: number}`. The MSME profile ships with zeros + `DG-2` in `forbidden_until` so the system-altitude `cost_to_serve` collector renders CONCERNS (not FAIL) until DG-2 SKU is defined; once defined, the cost rule becomes `k6_mean_pod_resources × regional_price ≤ max_pod_cost_per_tenant`.
 
+- **Per-category timeout** (per-profile, optional): `profile.timeouts: { security: 300, performance: 600, …}` (seconds). Defaults: security 300, performance 600, accessibility 180, test_quality 900 (burn-in dominates), correctness 1800 (whole-suite), all others 120. Adjudicator-host enforces via `subprocess.run(timeout=…)` + `psutil` SIGKILL on expiry. A timed-out collector emits `{status: timeout, findings: ["TIMEOUT: <tool> exceeded <N>s"]}`; adjudicator treats `timeout` as `error` for aggregation (§6.3 fail-closed).
+
+- **NA opt-out** (per-profile, optional): `profile.categories_na: ["accessibility", "performance"]` (list of categories that don't apply, e.g. accessibility/performance for a CLI tool). Adjudicator emits per-category verdict `NA` with rationale `"profile-declared N/A"` and excludes from aggregation. Versioned + hashed at profile level so `categories_na` cannot be silently widened to bypass the gate.
+
 ## 7. Evidence integrity & trust boundary (the property that makes "ungameable" true)
 
 - Collectors run **in the product's container, on a fresh checkout @SHA, invoked by the orchestrator host** — **never** by the generation child (which runs `--dangerously-skip-permissions` and otherwise could forge a PASS; closes audit F-010/F-011 for the gate's purposes).
 - Evidence + gate files are written outside the child's tmux working tree and hash-chained into audit.
 - The child's self-reports are **unverified hints, never evidence** (BMAD "Blind Hunter" principle).
-- **Fail-closed**: a collector that errors ⇒ CONCERNS (non-critical) or block (required category unevaluable) — mirrors the product's ClamAV "do not fail-open" rule.
-- **Replay vs re-evaluation**: gate file records the scanner-data snapshot. Same inputs → same verdict (audit); new CVE/rule data → re-eval may legitimately differ.
+- **Fail-closed**: a collector that errors or times out ⇒ CONCERNS (non-critical) or block (required category unevaluable) — mirrors the product's ClamAV "do not fail-open" rule. Timeouts enforced by `subprocess.run(timeout=…)` + `psutil` SIGKILL using `profile.timeouts` (see §6.4).
+- **Replay vs re-evaluation**: gate file records the scanner-data snapshot + `factory_version` + `profile.hash`. Same inputs → same verdict (audit); new CVE/rule data → re-eval may legitimately differ.
 
 ## 8. Capability modules
 
@@ -164,10 +175,11 @@ STORY LOOP (each step = fresh tmux child):
 `code-review` becomes an **evidence source** for the gate; the gate is the single authority for `review → done`. The factory creates stories directly in `backlog` / `ready-for-dev`; legacy stories already in the BMAD-v4 `drafted` state are auto-mapped to `ready-for-dev` by `bmad-sprint-status`, so the gate accepts entry from any recognized state.
 
 ### 9.2 Control flow
-- **Resumable**: gate file keyed to `commit_sha`; reused if SHA unchanged, re-run otherwise.
+- **Resumable**: gate file is reused only if **all three** match: `commit_sha` unchanged AND `gate_file.profile.hash == current_profile.hash` AND `gate_file.factory_version == current_factory_version`. On any mismatch, force re-evaluation and emit a `GateProfileDrift` audit event naming the old/new hashes (M18). Runbook §11.1(d) covers the operator's manual-invalidation procedure.
+- **Atomic-gate write semantics** (crash-safe): the orchestrator writes a transient `gate-in-progress.json` marker atomically *before* the collector loop starts; the final `gate.json` verdict file is written atomically *only after* all collectors complete. On orchestrator restart, if the marker exists but verdict does not, the orchestrator is **fail-closed**: delete the partial evidence bundle, remove the marker, and re-run the gate from scratch. Manual recovery for stuck markers is in runbook §11.1(b).
 - **CONCERNS** emits a tracked **mitigation-debt** annotation (cleared by operator/retro); profile may mark some categories' CONCERNS as blocking (e.g. security).
 - **FAIL → Remediator** reuses `review_max_cycles`/`crash_max_retries`; writes `[AI-Review]` tasks → fresh `dev-story` via `review_continuation`, honoring dev-story **edit-authorization** (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, `baseline_commit`).
-- **PARK + continue**: on exhaustion/persistent risk-9 → park + escalate (telemetry+audit) and advance to the next independent story via the epic DAG; optionally invoke `bmad-correct-course` to re-plan. The run never deadlocks on a sleeping operator.
+- **PARK + continue**: on exhaustion/persistent risk-9 → park + escalate (telemetry+audit) and advance to the next independent story via the epic DAG; optionally invoke `bmad-correct-course` to re-plan. The run never deadlocks on a sleeping operator. PARKED stories are listed via `story-automator gate status --state=parked` (CLI shipped with M19); resume via `story-automator gate resume <run_id>`.
 - **Human takeover**: all writes are BMAD-native (sprint-status + story file), so `bmad-help` stays consistent if a human steps in. The factory drives the gate; `bmad-help` is not relied upon for the gate step.
 
 ## 10. System-altitude gate (per-epic / release — milestone M22)
@@ -193,15 +205,19 @@ Plus progressive-delivery/rollback evidence (Argo Rollouts blue-green/canary). E
 
 ### 11.1 Operator runbook (gate-checked)
 
-`docs/operations/gate-troubleshooting.md` (owned by M19) is a first-class artifact the gate's `docs` category verifies present and non-empty. Required sections:
+`docs/operations/gate-troubleshooting.md` (owned by M19) is a first-class artifact the gate's `docs` category verifies present and non-empty. Required sections (each ships with executable jq/CLI recipes, not prose only):
 
-1. **Verdict interpretation decision tree** — per-category PASS/CONCERNS/FAIL with the next action.
-2. **Remediation-loop exhaustion flow** — `review_max_cycles` exceeded → PARK + escalate; `state.run_id` checkpoint; how to resume.
-3. **Partial-FAIL playbook** — when to spawn per-category remediation stories vs blanket re-run.
-4. **Profile-drift re-gate procedure** — re-evaluate when `profile.hash` or any pinned toolchain version changes; explicit gate-file invalidation rules.
-5. **Operator takeover checklist** — pause orchestrator, manual `sprint-status` edit, state-document patch, `--resume`; safe writes that don't violate BMAD edit-authorization.
+1. **First-run profile discovery** — bundled vs project-override (`_bmad/bmm/story-automator.profile.json`) vs env-var precedence; example healthy `story-automator doctor` output; recovery steps if the profile is malformed (the `ProfileError` message names the expected bundled path).
+2. **Verdict interpretation decision tree** — per-category PASS/CONCERNS/FAIL/NA with the next action; how `categories_na` opt-outs show up.
+3. **PARK + remediation exhaustion flow** — `review_max_cycles` exceeded → PARK; how to find PARKED stories (`story-automator gate status --state=parked` plus the underlying jq recipe over `_bmad/gate/parked.json`); resume via `story-automator gate resume <run_id>`; when to invoke `bmad-correct-course` instead.
+4. **Partial-FAIL playbook** — when to spawn per-category remediation stories vs blanket re-run.
+5. **Profile-drift re-gate procedure** — re-evaluate when `profile.hash`, any pinned toolchain version, or `factory_version` changes; explicit gate-file invalidation rules + the `story-automator gate invalidate <story|epic>` command.
+6. **Waiver SOP** — how to issue a WAIVE (mandatory fields, signing process, max TTL from `MAX_WAIVER_TTL`), how the Adjudicator re-checks expiry on every gate reuse, audit-trail location.
+7. **Atomic-gate crash recovery** — when `gate-in-progress.json` exists without a verdict file, how to manually clear it (verify orchestrator is not still running, then `rm` the marker + partial evidence directory).
+8. **Operator takeover checklist** — pause orchestrator, manual `sprint-status` edit, state-document patch, resume; safe writes that don't violate BMAD edit-authorization.
+9. **Repeated-timeout handling** — when a collector times out across multiple runs, how to raise `profile.timeouts.<category>` (project override) or kill-switch the collector entirely.
 
-Linked from `docs/SECURITY.md`. Mentioned at every FAIL/PARK telemetry event for fast operator handoff.
+Linked from `docs/SECURITY.md`. Mentioned at every FAIL/PARK/Timeout telemetry event for fast operator handoff.
 
 ## 12. TEA compatibility
 
@@ -237,7 +253,7 @@ Every criterion is covered, none orphaned: (a) reliability·system · (b) resili
 | M16 | Factory Self-Trust | evidence-integrity trust boundary + sandbox child + audit P0s | — |
 | M17 | Evidence Collectors | polyglot, kill-switched, normalized-evidence emitters — **incl. invariant-DG semgrep runner, pack-schema-v1.2 validator, AIBOM differ, OPA-constitution `opa compile`/`opa test`** | M15 |
 | M18 | Adjudicator | pure verdict engine + schemas + gate file + new `GateDecision`/`GateRendered` events (this milestone owns the `telemetry_events.py` delta); `agentic` rule requires pack-schema ok + AIBOM entries present + OPA constitution compiles+tests + evals ≥ threshold; any FAIL-severity invariant violation = hard FAIL (no CONCERNS) | M15,M17 |
-| **★ M19** | **Orchestrator Wiring** | step map + verdict control-flow + park-and-continue + BMAD write-back → working code-altitude gate end-to-end; registers `production_ready_gate` in `VALID_VERIFIERS` + `VERIFIERS` (mirrors `review_completion`, fail-closed when gate file absent); ships `docs/operations/gate-troubleshooting.md` (§11.1) | M16,M18 |
+| **★ M19** | **Orchestrator Wiring** | step map + verdict control-flow + park-and-continue + BMAD write-back → working code-altitude gate end-to-end; registers `production_ready_gate` in `VALID_VERIFIERS` + `VERIFIERS` (mirrors `review_completion`, fail-closed when gate file absent); implements **atomic-gate crash semantics** (transient marker → verdict-on-completion) + **profile-hash/factory-version invalidation** on reuse; ships **CLI** (`story-automator gate status [--state=parked]`, `gate resume <run_id>`, `gate invalidate <story|epic>`) + `docs/operations/gate-troubleshooting.md` (§11.1) with executable jq/CLI recipes | M16,M18 |
 | M20 | Risk-scored Readiness | Implementation-Readiness + `validate-create-story` + TEA risk/test-design + `forbidden_until` | M19 |
 | M21 | Test-first + Burn-in + Mutation + DoD | atdd-red verify + burn-in + mutation + DoD verifier | M19 |
 | M22 | System-altitude Gate | ephemeral-env harness + 5 system collectors + progressive-delivery; `cost_to_serve` collector reads `cost_tier.max_pod_cost_per_tenant` (CONCERNS while DG-2 in `forbidden_until`) | M19 |
@@ -254,9 +270,14 @@ Every criterion is covered, none orphaned: (a) reliability·system · (b) resili
 - **cost-to-serve < ARPU** depends on DG-2 SKU (placeholder) → MSME profile ships zeros + DG-2 in `forbidden_until` so `cost_to_serve` renders CONCERNS, not FAIL, until DG-2 lands.
 - **Profile drift** → gate files stamp `profile.hash` + scanner-data snapshot; re-gate triggers on hash change or pinned-toolchain version change (rules in §11.1 runbook §(d)).
 - **Seed-template bundle (M24, post-keystone)** → factory-owned `msme-erp-golden-template@1.x`; TBD timing — must land before the factory can claim "production-ready from the first commit" for net-new products (today the gate only *verifies* what generators produce).
+- **DG-3 placeholder** → `msme-erp.json`'s `"DG-3": ["E*.ca-channel-*"]` entry blocks CA-channel commercial-mechanic stories until DG-3 is fully specified. DG-3 is **intentionally not in §6.4's invariant registry** because the underlying mechanism is frozen pending ICAI clearance; the `forbidden_until` block alone is sufficient (no semgrep rule required since the stories themselves are blocked). When DG-3 closes, a registry entry lands in the same milestone that removes the blocker.
+- **Profile semver vs hash invalidation** → keystone uses hash-based invalidation (any field change forces re-eval; conservative). Splitting `profile.version` into `profile_breaking_version` + `profile_feature_version` is deferred to **M23 (Learning Loop)** when auto-tuning starts and incremental-feature changes need to skip re-runs.
+- **Automated CVE-triggered re-evaluation** → keystone supports *manual* re-eval via `story-automator gate invalidate` (M19) + scanner-data snapshot in gate file; automated watcher (`factory re-evaluate --trigger=cve`) is deferred to **post-M23**.
 
 ## 18. Validation provenance
 
 Reviewed adversarially across BMAD-compat, TEA-compat, factory-integration-feasibility (against `skills/bmad-story-automator/src/story_automator/`), and best-in-market completeness. Fixes folded in: evidence-integrity trust boundary, fail-closed, requirements-traceability vs line-coverage split, test_quality + burn-in + mutation, compliance/performance/accessibility/supply_chain/api_compat/migrations/docs categories, boundary-aware license, richer agentic category, invariant registry, diff-scoping + budget-awareness, BMAD-native remediation + write-back, BMAD hooks (project-context/customize/readiness/correct-course), TEA product-quality patterns, and the repo-guardrail compatibility notes.
 
 **Second adversarial pass (2026-06-20, 6 lenses × 79 agents, pipeline-and-verify):** added (1) concrete invariant-registry entries for DG-12/13/14/25/34 + residency, with DG-14 semgrep semantics; (2) operational criteria for the `agentic` category (pack-schema v1.2, AIBOM diff, OPA constitution compile+test) wired into M17 collectors + M18 rule function (FAIL-severity invariants = hard FAIL, no CONCERNS); (3) `cost_tier` block on Profile + DG-2 in `forbidden_until` so cost_to_serve degrades to CONCERNS until DG-2 SKU lands; (4) corrected TEA coverage thresholds (P0 100% / P1 90% target / 80% min / overall ≥ 80% PASS); (5) gate-checked operator runbook (§11.1) covering verdict interpretation, exhaustion, partial-FAIL, profile drift, takeover; (6) BMAD legacy `drafted`-state mapping note; (7) `production_ready_gate` verifier explicitly slotted for M19 (mirrors `review_completion`, fail-closed on missing gate file); (8) clarified seed_template is factory-owned (not TEA-provided) and added M24 post-keystone milestone to actually build it.
+
+**Third adversarial pass (2026-06-20, 4 lenses × 45 agents — coherence, runtime failure modes, operator scenarios, threat-model + schema evolution):** added (1) `cost_tier` and `DG-2: ["*.cost-to-serve"]` to the M15 plan (default + msme-erp profiles) so the cost_to_serve degradation path works from day one; (2) explicit `categories_na` opt-out path (versioned + hashed at profile level so it can't be silently widened); (3) waiver schema (UUIDv7 + operator_id + issued/expires_at + failing_categories + signature + profile_hash) with MAX_WAIVER_TTL bound and Adjudicator re-check of `expires_at` on every gate-file reuse; (4) per-category `profile.timeouts` with `subprocess.run(timeout=…)` + `psutil` SIGKILL enforcement; evidence `status` gains `timeout`; (5) atomic-gate write semantics (transient marker → verdict-on-completion → fail-closed restart) closing the orchestrator-crash window; (6) gate-file reuse now requires `commit_sha` AND `profile.hash` AND `factory_version` to all match, emitting `GateProfileDrift` audit event on mismatch; (7) `schema_version` + `factory_version` on evidence records and gate files for forward-compat replay; (8) §16 M19 row commits the operator CLI (`gate status`, `gate resume`, `gate invalidate`) shipped with the runbook; (9) §11.1 runbook expanded to 9 sections each with executable jq/CLI recipes (added First-run profile discovery, Waiver SOP, Atomic-gate crash recovery, Repeated-timeout handling); (10) docs-edit: `static/type` → `static` for parity with profile/code identifiers; (11) §17 records DG-3 placeholder rationale, profile semver→hash invalidation tradeoff, and automated CVE-triggered re-evaluation deferral to post-M23.
