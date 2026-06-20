@@ -19,6 +19,7 @@ from .gate_schema import (
     GateSchemaError,
     canonical_json,
     validate_evidence_record,
+    validate_schema_version,
 )
 from .utils import ensure_dir, write_atomic
 
@@ -107,3 +108,36 @@ def persist_evidence_record(
     target = evidence_dir / filename
     write_atomic(target, canonical_json(record) + "\n")
     return target
+
+
+def load_evidence_bundle(
+    project_root: str | Path,
+    gate_id: str,
+) -> list[dict[str, Any]]:
+    """Load all evidence records for a gate, sorted deterministically."""
+    _validate_gate_id(gate_id)
+    evidence_dir = Path(project_root) / "_bmad" / "gate" / "evidence" / gate_id
+    if not evidence_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(evidence_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise GateSchemaError(
+                f"invalid JSON in evidence file {path.name}: {exc}"
+            ) from exc
+        if not isinstance(data, dict):
+            raise GateSchemaError(
+                f"evidence file {path.name} must contain an object"
+            )
+        validate_schema_version(data, EVIDENCE_SCHEMA_VERSION, "evidence")
+        records.append(data)
+    records.sort(
+        key=lambda r: (
+            r.get("category", ""),
+            r.get("collector", ""),
+            r.get("tool", ""),
+        ),
+    )
+    return records

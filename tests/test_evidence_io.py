@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from pathlib import Path
 
 from story_automator.core.gate_schema import (
     GateSchemaError,
@@ -12,6 +13,7 @@ from story_automator.core.evidence_io import (
     compute_evidence_bundle_hash,
     evidence_filename,
     evidence_migrate,
+    load_evidence_bundle,
     persist_evidence_record,
 )
 
@@ -184,6 +186,74 @@ class PersistEvidenceRecordTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(GateSchemaError, "gate_id"):
                 persist_evidence_record(tmp, "", record)
+
+
+class LoadEvidenceBundleTests(unittest.TestCase):
+    def test_loads_persisted_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            r1 = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            r2 = make_evidence_record(
+                collector="scanner", tool="semgrep",
+                category="security", status="ok",
+            )
+            persist_evidence_record(tmp, "gate-010", r1)
+            persist_evidence_record(tmp, "gate-010", r2)
+            bundle = load_evidence_bundle(tmp, "gate-010")
+            self.assertEqual(len(bundle), 2)
+            categories = {r["category"] for r in bundle}
+            self.assertEqual(categories, {"correctness", "security"})
+
+    def test_empty_dir_returns_empty_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = load_evidence_bundle(tmp, "nonexistent-gate")
+            self.assertEqual(bundle, [])
+
+    def test_sorted_by_category_collector_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            r_sec = make_evidence_record(
+                collector="scanner", tool="semgrep",
+                category="security", status="ok",
+            )
+            r_cor = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            persist_evidence_record(tmp, "gate-011", r_sec)
+            persist_evidence_record(tmp, "gate-011", r_cor)
+            bundle = load_evidence_bundle(tmp, "gate-011")
+            self.assertEqual(bundle[0]["category"], "correctness")
+            self.assertEqual(bundle[1]["category"], "security")
+
+    def test_rejects_future_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            record["schema_version"] = 999
+            evidence_dir = (
+                Path(tmp) / "_bmad" / "gate" / "evidence" / "gate-012"
+            )
+            evidence_dir.mkdir(parents=True)
+            target = evidence_dir / "correctness--runner--pytest.json"
+            target.write_text(json.dumps(record), encoding="utf-8")
+            with self.assertRaisesRegex(GateSchemaError, "schema_version"):
+                load_evidence_bundle(tmp, "gate-012")
+
+    def test_rejects_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence_dir = (
+                Path(tmp) / "_bmad" / "gate" / "evidence" / "gate-013"
+            )
+            evidence_dir.mkdir(parents=True)
+            (evidence_dir / "bad.json").write_text(
+                "not valid json", encoding="utf-8",
+            )
+            with self.assertRaisesRegex(GateSchemaError, "invalid JSON"):
+                load_evidence_bundle(tmp, "gate-013")
 
 
 if __name__ == "__main__":
