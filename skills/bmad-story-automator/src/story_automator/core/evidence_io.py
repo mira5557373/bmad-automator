@@ -1,0 +1,53 @@
+"""Evidence I/O, migration, and gate lifecycle helpers (§6.4, §9.2, §18).
+
+Handles persistence of evidence records and gate files to
+_bmad/gate/{evidence,verdicts}/, evidence bundle hashing,
+schema migration shims, gate reuse validation, and
+gate-in-progress crash-safety markers.
+
+Artifact layout: _bmad/gate/{risk,evidence,verdicts}/
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from .gate_schema import (
+    EVIDENCE_SCHEMA_VERSION,
+    GateSchemaError,
+)
+
+
+def _validate_gate_id(gate_id: str) -> None:
+    """Reject gate_ids that could escape the artifact directory."""
+    if not gate_id or not isinstance(gate_id, str):
+        raise GateSchemaError("gate_id must be a non-empty string")
+    if "/" in gate_id or "\\" in gate_id or ".." in gate_id:
+        raise GateSchemaError(
+            f"gate_id contains invalid path characters: {gate_id!r}"
+        )
+
+
+def evidence_migrate(
+    record: dict[str, Any],
+    target_version: int = EVIDENCE_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    """§6.4/§18: migrate evidence record to target schema version.
+
+    v1 is the only known version; returns a deep copy.
+    Future versions add elif branches here.
+    """
+    current = record.get("schema_version")
+    if not isinstance(current, int) or isinstance(current, bool) or current < 1:
+        raise GateSchemaError(
+            "evidence.schema_version must be a positive integer"
+        )
+    if target_version < 1 or target_version > EVIDENCE_SCHEMA_VERSION:
+        raise GateSchemaError(
+            f"unknown target evidence schema version: {target_version}"
+        )
+    if current > target_version:
+        raise GateSchemaError(
+            f"cannot downgrade evidence from v{current} to v{target_version}"
+        )
+    return json.loads(json.dumps(record))
