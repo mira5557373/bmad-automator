@@ -122,6 +122,16 @@ class SandboxEnvTests(unittest.TestCase):
             env = sandbox_env(extras={"MY_VAR": "val"})
             self.assertEqual(env["MY_VAR"], "val")
 
+    def test_extras_cannot_override_forced_vars(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env(extras={"STORY_AUTOMATOR_CHILD": "false"})
+            self.assertEqual(env["STORY_AUTOMATOR_CHILD"], "true")
+
+    def test_extras_cannot_reintroduce_stripped_vars(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env(extras={"BMAD_AUDIT_KEY": "injected"})
+            self.assertNotIn("BMAD_AUDIT_KEY", env)
+
     def test_strips_all_defined_vars(self) -> None:
         fake_env = {var: "should_strip" for var in CHILD_STRIPPED_VARS}
         with patch.dict(os.environ, fake_env, clear=True):

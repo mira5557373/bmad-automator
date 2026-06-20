@@ -79,13 +79,13 @@ def sandbox_env(
     and optionally sets the AI_AGENT identifier.
     """
     env = dict(os.environ)
+    if extras:
+        env.update(extras)
     for var in CHILD_STRIPPED_VARS:
         env.pop(var, None)
     env.update(CHILD_FORCED_VARS)
     if agent:
         env["AI_AGENT"] = agent
-    if extras:
-        env.update(extras)
     return env
 
 
