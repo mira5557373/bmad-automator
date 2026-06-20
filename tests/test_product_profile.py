@@ -195,5 +195,144 @@ class ProfileShapeTests(BundledProfileTests):
             load_bundled_profile(project_root=str(self.project_root))
 
 
+class AncillaryValidationTests(BundledProfileTests):
+    """Tests for toolchain, rules, seed_template, invariants, snapshot validators."""
+
+    def _valid_base(self) -> dict:
+        return {
+            "version": 1, "id": "x",
+            "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+            "categories": {"code": [], "system": []},
+        }
+
+    def test_toolchain_entry_missing_name_rejected(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["toolchain"] = {"python": [{"version_min": "0.5.0"}]}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, r"toolchain\.python\[0\]\.name must be"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_toolchain_entry_bad_required_rejected(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["toolchain"] = {"python": [{"name": "ruff", "required": "yes"}]}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, r"toolchain\.python\[0\]\.required must be a bool"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_rules_entry_must_be_object(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["rules"] = {"security": "strict"}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, r"rules\.security must be an object"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_seed_template_ref_must_be_string(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["seed_template"] = {"ref": 42}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "seed_template.ref must be a string"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_invariants_registry_file_must_be_string(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["invariants"] = {"registry_file": 42}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "invariants.registry_file must be a string"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_snapshot_relative_dir_required(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["snapshot"] = {"relativeDir": ""}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "snapshot.relativeDir must be a non-empty string"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+
+class Sec64ValidationTests(BundledProfileTests):
+    """Tests for §6.4 fields: cost_tier, categories_na, timeouts, forbidden_until."""
+
+    def _valid_base(self) -> dict:
+        return {
+            "version": 1, "id": "x",
+            "matrix": {p: {"coverage_pct": 0, "levels": []} for p in ("P0", "P1", "P2", "P3")},
+            "categories": {"code": [], "system": []},
+        }
+
+    def test_cost_tier_must_be_object(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["cost_tier"] = []
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "cost_tier must be an object"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_cost_tier_arpu_must_be_non_negative_number(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["cost_tier"] = {"sku_id": "x", "arpu_monthly": -1}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "cost_tier.arpu_monthly must be a non-negative number"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_categories_na_must_be_string_array(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["categories_na"] = "performance"
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "categories_na must be a string array"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_categories_na_unknown_entry_rejected(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["categories_na"] = ["bogus"]
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "unknown categories_na entries: bogus"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_timeouts_unknown_category_rejected(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["timeouts"] = {"bogus_cat": 300}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "unknown category in timeouts: bogus_cat"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_timeouts_must_be_positive_integer(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["timeouts"] = {"security": 0}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, "timeouts.security must be a positive integer"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+    def test_forbidden_until_value_must_be_string_array(self) -> None:
+        from story_automator.core.product_profile import ProfileError, load_bundled_profile
+
+        base = self._valid_base()
+        base["forbidden_until"] = {"ADR-0083": "E*.envelope-*"}
+        self._write_bundled(base)
+        with self.assertRaisesRegex(ProfileError, r"forbidden_until\.ADR-0083 must be a string array"):
+            load_bundled_profile(project_root=str(self.project_root))
+
+
 if __name__ == "__main__":
     unittest.main()

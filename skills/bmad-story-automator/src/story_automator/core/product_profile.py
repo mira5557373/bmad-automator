@@ -73,6 +73,15 @@ def _validate_profile_shape(profile: dict[str, Any]) -> None:
     _validate_version_and_id(profile)
     _validate_matrix(profile.get("matrix"))
     _validate_categories(profile.get("categories"))
+    _validate_toolchain(profile.get("toolchain"))
+    _validate_rules(profile.get("rules"))
+    _validate_seed_template(profile.get("seed_template"))
+    _validate_invariants(profile.get("invariants"))
+    _validate_snapshot(profile.get("snapshot"))
+    _validate_cost_tier(profile.get("cost_tier"))
+    _validate_categories_na(profile.get("categories_na"))
+    _validate_timeouts(profile.get("timeouts"))
+    _validate_forbidden_until(profile.get("forbidden_until"))
 
 
 def _validate_version_and_id(profile: dict[str, Any]) -> None:
@@ -134,6 +143,128 @@ def _validate_categories(categories: Any) -> None:
         if unknown:
             raise ProfileError(
                 f"unknown {tier} categories: {', '.join(unknown)}"
+            )
+
+
+def _validate_toolchain(toolchain: Any) -> None:
+    if toolchain is None:
+        return
+    if not isinstance(toolchain, dict):
+        raise ProfileError("toolchain must be an object")
+    for language, entries in toolchain.items():
+        if not isinstance(entries, list):
+            raise ProfileError(f"toolchain.{language} must be an array")
+        for idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ProfileError(f"toolchain.{language}[{idx}] must be an object")
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                raise ProfileError(f"toolchain.{language}[{idx}].name must be a non-empty string")
+            if "version_min" in entry and not isinstance(entry["version_min"], str):
+                raise ProfileError(f"toolchain.{language}[{idx}].version_min must be a string")
+            if "required" in entry and not isinstance(entry["required"], bool):
+                raise ProfileError(f"toolchain.{language}[{idx}].required must be a bool")
+
+
+def _validate_rules(rules: Any) -> None:
+    if rules is None:
+        return
+    if not isinstance(rules, dict):
+        raise ProfileError("rules must be an object")
+    for category, body in rules.items():
+        if not isinstance(body, dict):
+            raise ProfileError(f"rules.{category} must be an object")
+
+
+def _validate_seed_template(seed: Any) -> None:
+    if seed is None:
+        return
+    if not isinstance(seed, dict):
+        raise ProfileError("seed_template must be an object")
+    if "ref" in seed and not isinstance(seed["ref"], str):
+        raise ProfileError("seed_template.ref must be a string")
+    if "url" in seed and not isinstance(seed["url"], str):
+        raise ProfileError("seed_template.url must be a string")
+
+
+def _validate_invariants(invariants: Any) -> None:
+    if invariants is None:
+        return
+    if not isinstance(invariants, dict):
+        raise ProfileError("invariants must be an object")
+    if "registry_file" in invariants and not isinstance(invariants["registry_file"], str):
+        raise ProfileError("invariants.registry_file must be a string")
+
+
+def _validate_snapshot(snapshot: Any) -> None:
+    if snapshot is None:
+        return
+    if not isinstance(snapshot, dict):
+        raise ProfileError("snapshot must be an object")
+    rel = snapshot.get("relativeDir")
+    if rel is not None and (not isinstance(rel, str) or not rel.strip()):
+        raise ProfileError("snapshot.relativeDir must be a non-empty string")
+
+
+_COST_TIER_NUMERIC = {"arpu_monthly", "max_pod_cost_per_tenant"}
+
+
+def _validate_cost_tier(cost_tier: Any) -> None:
+    if cost_tier is None:
+        return
+    if not isinstance(cost_tier, dict):
+        raise ProfileError("cost_tier must be an object")
+    if "sku_id" in cost_tier and not isinstance(cost_tier["sku_id"], str):
+        raise ProfileError("cost_tier.sku_id must be a string")
+    for key in _COST_TIER_NUMERIC:
+        value = cost_tier.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ProfileError(f"cost_tier.{key} must be a non-negative number")
+
+
+def _validate_categories_na(categories_na: Any) -> None:
+    if categories_na is None:
+        return
+    if not isinstance(categories_na, list) or not all(
+        isinstance(item, str) for item in categories_na
+    ):
+        raise ProfileError("categories_na must be a string array")
+    unknown = sorted(set(categories_na) - VALID_CODE_CATEGORIES - VALID_SYSTEM_CATEGORIES)
+    if unknown:
+        raise ProfileError(
+            f"unknown categories_na entries: {', '.join(unknown)}"
+        )
+
+
+def _validate_timeouts(timeouts: Any) -> None:
+    if timeouts is None:
+        return
+    if not isinstance(timeouts, dict):
+        raise ProfileError("timeouts must be an object")
+    for category, seconds in timeouts.items():
+        if category not in VALID_CODE_CATEGORIES and category not in VALID_SYSTEM_CATEGORIES:
+            raise ProfileError(f"unknown category in timeouts: {category}")
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+            raise ProfileError(
+                f"timeouts.{category} must be a positive integer"
+            )
+
+
+def _validate_forbidden_until(mapping: Any) -> None:
+    if mapping is None:
+        return
+    if not isinstance(mapping, dict):
+        raise ProfileError("forbidden_until must be an object")
+    for adr, patterns in mapping.items():
+        if not isinstance(adr, str) or not adr:
+            raise ProfileError("forbidden_until keys must be non-empty strings")
+        if not isinstance(patterns, list) or not all(
+            isinstance(p, str) and p for p in patterns
+        ):
+            raise ProfileError(
+                f"forbidden_until.{adr} must be a string array"
             )
 
 
