@@ -9,7 +9,10 @@ from story_automator.core.gate_rules import (
     is_waiver_expired,
     validate_waiver_for_gate,
     verdict_for_collector_status,
+    verdict_for_cost_tier,
+    verdict_for_invariant_severity,
     verdict_for_llm_confidence,
+    verdict_na,
 )
 from story_automator.core.gate_schema import (
     compute_waiver_signature,
@@ -184,6 +187,74 @@ class LlmConfidenceVerdictTests(unittest.TestCase):
 
     def test_maximum_10_passes(self) -> None:
         self.assertEqual(verdict_for_llm_confidence(10), "PASS")
+
+
+class InvariantSeverityVerdictTests(unittest.TestCase):
+    def test_no_violation_passes(self) -> None:
+        self.assertEqual(
+            verdict_for_invariant_severity("FAIL", has_violation=False), "PASS"
+        )
+
+    def test_fail_severity_with_violation_is_hard_fail(self) -> None:
+        self.assertEqual(
+            verdict_for_invariant_severity("FAIL", has_violation=True), "FAIL"
+        )
+
+    def test_concerns_severity_with_violation(self) -> None:
+        self.assertEqual(
+            verdict_for_invariant_severity("CONCERNS", has_violation=True),
+            "CONCERNS",
+        )
+
+    def test_concerns_severity_no_violation(self) -> None:
+        self.assertEqual(
+            verdict_for_invariant_severity("CONCERNS", has_violation=False),
+            "PASS",
+        )
+
+
+class CostTierVerdictTests(unittest.TestCase):
+    def test_dg2_in_forbidden_until_is_concerns(self) -> None:
+        self.assertEqual(
+            verdict_for_cost_tier(
+                {"sku_id": "msme-starter"},
+                {"DG-2": ["*.cost-to-serve"]},
+            ),
+            "CONCERNS",
+        )
+
+    def test_no_cost_tier_is_concerns(self) -> None:
+        self.assertEqual(verdict_for_cost_tier(None, None), "CONCERNS")
+
+    def test_empty_sku_id_is_concerns(self) -> None:
+        self.assertEqual(
+            verdict_for_cost_tier({"sku_id": ""}, None), "CONCERNS"
+        )
+
+    def test_valid_cost_tier_no_blocker_passes(self) -> None:
+        self.assertEqual(
+            verdict_for_cost_tier({"sku_id": "msme-pro"}, {}), "PASS"
+        )
+
+    def test_dg2_not_in_forbidden_with_valid_tier_passes(self) -> None:
+        self.assertEqual(
+            verdict_for_cost_tier(
+                {"sku_id": "msme-pro"},
+                {"DG-3": ["E*.ca-channel-*"]},
+            ),
+            "PASS",
+        )
+
+
+class VerdictNaTests(unittest.TestCase):
+    def test_default_rationale(self) -> None:
+        result = verdict_na()
+        self.assertEqual(result["verdict"], "NA")
+        self.assertEqual(result["rationale"], "profile-declared N/A")
+
+    def test_custom_rationale(self) -> None:
+        result = verdict_na("CLI tool — no UI")
+        self.assertEqual(result["rationale"], "CLI tool — no UI")
 
 
 if __name__ == "__main__":

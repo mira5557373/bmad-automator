@@ -41,6 +41,7 @@ def canonical_json(obj: Any) -> str:
 
 
 def compute_waiver_signature(waiver_fields: dict[str, Any]) -> str:
+    """Deterministic integrity check (not a cryptographic signature)."""
     signable = {
         k: v for k, v in waiver_fields.items() if k != "signature"
     }
@@ -215,6 +216,7 @@ def make_waiver(
 
 def validate_evidence_record(record: dict[str, Any]) -> None:
     _require_int(record, "schema_version", "evidence")
+    validate_schema_version(record, EVIDENCE_SCHEMA_VERSION, "evidence")
     _require_str(record, "collector", "evidence")
     _require_str(record, "tool", "evidence")
     _require_str(record, "category", "evidence")
@@ -231,11 +233,42 @@ def validate_evidence_record(record: dict[str, Any]) -> None:
         raise GateSchemaError("evidence.metrics must be a dict")
     if not isinstance(record.get("deterministic", True), bool):
         raise GateSchemaError("evidence.deterministic must be a bool")
+    tier = record.get("tier", "code")
+    if not isinstance(tier, str):
+        raise GateSchemaError("evidence.tier must be a string")
+    exit_code = record.get("exit_code", 0)
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise GateSchemaError("evidence.exit_code must be an integer")
+    duration_ms = record.get("duration_ms", 0)
+    if not isinstance(duration_ms, int) or isinstance(duration_ms, bool):
+        raise GateSchemaError("evidence.duration_ms must be an integer")
+    if duration_ms < 0:
+        raise GateSchemaError("evidence.duration_ms must be >= 0")
+    if not isinstance(record.get("tool_version", ""), str):
+        raise GateSchemaError("evidence.tool_version must be a string")
+    if not isinstance(record.get("raw_output_ref", ""), str):
+        raise GateSchemaError("evidence.raw_output_ref must be a string")
+    if not record.get("deterministic", True):
+        conf = record.get("confidence")
+        if conf is not None:
+            if not isinstance(conf, int) or isinstance(conf, bool):
+                raise GateSchemaError("evidence.confidence must be an integer")
+            if conf not in VALID_CONFIDENCE_RANGE:
+                raise GateSchemaError(
+                    f"evidence.confidence must be 1..10; got {conf}"
+                )
+        rat = record.get("rationale")
+        if rat is not None:
+            if not isinstance(rat, str) or not rat.strip():
+                raise GateSchemaError(
+                    "evidence.rationale must be a non-empty string"
+                )
 
 
 def validate_gate_file(gate: dict[str, Any]) -> None:
     _require_str(gate, "gate_id", "gate")
     _require_int(gate, "schema_version", "gate")
+    validate_schema_version(gate, GATE_SCHEMA_VERSION, "gate")
     if not isinstance(gate.get("target"), dict):
         raise GateSchemaError("gate.target must be an object")
     _require_str(gate, "commit_sha", "gate")

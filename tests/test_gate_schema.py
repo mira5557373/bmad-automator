@@ -373,6 +373,88 @@ class MakeLlmEvidenceRecordTests(unittest.TestCase):
         self.assertEqual(record["confidence"], 10)
 
 
+class ValidateEvidenceFieldTypesTests(unittest.TestCase):
+    def _valid_record(self) -> dict:
+        return {
+            "schema_version": 1,
+            "collector": "test",
+            "tool": "pytest",
+            "tool_version": "8.0",
+            "category": "correctness",
+            "tier": "code",
+            "status": "ok",
+            "findings": [],
+            "metrics": {},
+            "raw_output_ref": "",
+            "exit_code": 0,
+            "duration_ms": 100,
+            "deterministic": True,
+        }
+
+    def test_non_int_exit_code_raises(self) -> None:
+        record = self._valid_record()
+        record["exit_code"] = "banana"
+        with self.assertRaisesRegex(GateSchemaError, "evidence.exit_code"):
+            validate_evidence_record(record)
+
+    def test_bool_exit_code_raises(self) -> None:
+        record = self._valid_record()
+        record["exit_code"] = True
+        with self.assertRaisesRegex(GateSchemaError, "evidence.exit_code"):
+            validate_evidence_record(record)
+
+    def test_negative_duration_raises(self) -> None:
+        record = self._valid_record()
+        record["duration_ms"] = -1
+        with self.assertRaisesRegex(GateSchemaError, "evidence.duration_ms"):
+            validate_evidence_record(record)
+
+    def test_non_str_tier_raises(self) -> None:
+        record = self._valid_record()
+        record["tier"] = 42
+        with self.assertRaisesRegex(GateSchemaError, "evidence.tier"):
+            validate_evidence_record(record)
+
+    def test_non_str_tool_version_raises(self) -> None:
+        record = self._valid_record()
+        record["tool_version"] = 123
+        with self.assertRaisesRegex(GateSchemaError, "evidence.tool_version"):
+            validate_evidence_record(record)
+
+    def test_non_str_raw_output_ref_raises(self) -> None:
+        record = self._valid_record()
+        record["raw_output_ref"] = 999
+        with self.assertRaisesRegex(GateSchemaError, "evidence.raw_output_ref"):
+            validate_evidence_record(record)
+
+    def test_llm_evidence_bad_confidence_on_load_raises(self) -> None:
+        record = self._valid_record()
+        record["deterministic"] = False
+        record["confidence"] = "high"
+        with self.assertRaisesRegex(GateSchemaError, "evidence.confidence"):
+            validate_evidence_record(record)
+
+    def test_llm_evidence_out_of_range_confidence_raises(self) -> None:
+        record = self._valid_record()
+        record["deterministic"] = False
+        record["confidence"] = 99
+        with self.assertRaisesRegex(GateSchemaError, "evidence.confidence"):
+            validate_evidence_record(record)
+
+    def test_llm_evidence_empty_rationale_raises(self) -> None:
+        record = self._valid_record()
+        record["deterministic"] = False
+        record["rationale"] = ""
+        with self.assertRaisesRegex(GateSchemaError, "evidence.rationale"):
+            validate_evidence_record(record)
+
+    def test_future_schema_version_on_create_raises(self) -> None:
+        record = self._valid_record()
+        record["schema_version"] = 999
+        with self.assertRaisesRegex(GateSchemaError, "schema_version"):
+            validate_evidence_record(record)
+
+
 class ValidateSchemaVersionTests(unittest.TestCase):
     def test_current_version_passes(self) -> None:
         validate_schema_version({"schema_version": 1}, max_known=1, label="test")

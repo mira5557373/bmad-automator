@@ -11,26 +11,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .gate_schema import (
     EVIDENCE_SCHEMA_VERSION,
-    GATE_SCHEMA_VERSION,
     GateSchemaError,
     canonical_json,
     validate_evidence_record,
     validate_gate_file,
-    validate_schema_version,
 )
 from .utils import ensure_dir, iso_now, write_atomic
+
+_SAFE_GATE_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 def _validate_gate_id(gate_id: str) -> None:
     """Reject gate_ids that could escape the artifact directory."""
     if not gate_id or not isinstance(gate_id, str):
         raise GateSchemaError("gate_id must be a non-empty string")
-    if "/" in gate_id or "\\" in gate_id or ".." in gate_id:
+    if not _SAFE_GATE_ID.match(gate_id) or ".." in gate_id:
         raise GateSchemaError(
             f"gate_id contains invalid path characters: {gate_id!r}"
         )
@@ -80,8 +81,8 @@ def compute_evidence_bundle_hash(records: list[dict[str, Any]]) -> str:
 
 
 def _sanitize_path_component(s: str) -> str:
-    """Replace path separators with underscores."""
-    return s.replace("/", "_").replace("\\", "_")
+    """Replace path separators and traversal sequences with underscores."""
+    return s.replace("/", "_").replace("\\", "_").replace("..", "__")
 
 
 def evidence_filename(record: dict[str, Any]) -> str:
@@ -124,7 +125,13 @@ def load_evidence_bundle(
     records: list[dict[str, Any]] = []
     for path in sorted(evidence_dir.glob("*.json")):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise GateSchemaError(
+                f"cannot read evidence file {path.name}: {exc}"
+            ) from exc
+        try:
+            data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise GateSchemaError(
                 f"invalid JSON in evidence file {path.name}: {exc}"
@@ -133,7 +140,7 @@ def load_evidence_bundle(
             raise GateSchemaError(
                 f"evidence file {path.name} must contain an object"
             )
-        validate_schema_version(data, EVIDENCE_SCHEMA_VERSION, "evidence")
+        validate_evidence_record(data)
         records.append(data)
     records.sort(
         key=lambda r: (
@@ -170,14 +177,19 @@ def load_gate_file(
     if not path.is_file():
         raise GateSchemaError(f"gate file not found: {gate_id}")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GateSchemaError(
+            f"cannot read gate file {gate_id}: {exc}"
+        ) from exc
+    try:
+        data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise GateSchemaError(
             f"invalid JSON in gate file {gate_id}: {exc}"
         ) from exc
     if not isinstance(data, dict):
         raise GateSchemaError(f"gate file {gate_id} must contain an object")
-    validate_schema_version(data, GATE_SCHEMA_VERSION, "gate")
     validate_gate_file(data)
     return data
 

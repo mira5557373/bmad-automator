@@ -41,6 +41,39 @@ def verdict_for_llm_confidence(confidence: int) -> str:
     return "PASS"
 
 
+def verdict_for_invariant_severity(
+    severity: str,
+    has_violation: bool,
+) -> str:
+    """§6.4: FAIL-severity invariant violation is a hard FAIL."""
+    if not has_violation:
+        return "PASS"
+    if severity == "FAIL":
+        return "FAIL"
+    return "CONCERNS"
+
+
+def verdict_for_cost_tier(
+    cost_tier: dict[str, Any] | None,
+    forbidden_until: dict[str, Any] | None,
+) -> str:
+    """§6.4: cost_to_serve renders CONCERNS until DG-2 SKU is defined."""
+    if forbidden_until and "DG-2" in forbidden_until:
+        return "CONCERNS"
+    if cost_tier is None:
+        return "CONCERNS"
+    if not cost_tier.get("sku_id"):
+        return "CONCERNS"
+    return "PASS"
+
+
+def verdict_na(
+    rationale: str = "profile-declared N/A",
+) -> dict[str, str]:
+    """§6.4: emit per-category verdict NA with rationale."""
+    return {"verdict": "NA", "rationale": rationale}
+
+
 def aggregate_verdicts(
     category_verdicts: dict[str, str],
     *,

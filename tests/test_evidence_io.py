@@ -146,6 +146,15 @@ class EvidenceFilenameTests(unittest.TestCase):
         self.assertNotIn("/", name)
         self.assertTrue(name.endswith(".json"))
 
+    def test_sanitizes_dot_dot(self) -> None:
+        record = make_evidence_record(
+            collector="test", tool="pytest",
+            category="correctness", status="ok",
+        )
+        record["collector"] = "foo..bar"
+        name = evidence_filename(record)
+        self.assertNotIn("..", name)
+
 
 class PersistEvidenceRecordTests(unittest.TestCase):
     def test_writes_valid_json(self) -> None:
