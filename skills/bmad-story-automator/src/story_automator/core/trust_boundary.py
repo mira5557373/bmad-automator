@@ -8,6 +8,7 @@ hints, never evidence (Blind Hunter principle).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 __all__ = [
     "TrustBoundaryError",
@@ -18,6 +19,9 @@ __all__ = [
     "sandbox_env",
     "verify_sandbox_env",
     "sandbox_tmux_env_args",
+    "is_path_under",
+    "validate_evidence_path_isolation",
+    "resolve_host_evidence_dir",
 ]
 
 _CHILD_ENV_VAR = "STORY_AUTOMATOR_CHILD"
@@ -115,3 +119,35 @@ def sandbox_tmux_env_args(agent: str = "") -> list[str]:
     for var in sorted(CHILD_STRIPPED_VARS):
         args.extend(["-e", f"{var}="])
     return args
+
+
+def is_path_under(parent: Path, child: Path) -> bool:
+    """Return True if child path is inside (or equal to) parent, resolving symlinks."""
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def validate_evidence_path_isolation(
+    evidence_path: Path,
+    child_working_tree: Path,
+) -> tuple[bool, str]:
+    """Validate that evidence_path is NOT under the child's working tree.
+
+    §7: evidence + gate files must be written outside the child's tmux
+    working tree so the generation agent cannot tamper with them.
+    """
+    if is_path_under(child_working_tree, evidence_path):
+        return (
+            False,
+            f"evidence path {evidence_path} is under child working tree "
+            f"{child_working_tree}",
+        )
+    return (True, "")
+
+
+def resolve_host_evidence_dir(project_root: str | Path) -> Path:
+    """Return the canonical host-controlled gate artifact directory."""
+    return Path(project_root).resolve() / "_bmad" / "gate"

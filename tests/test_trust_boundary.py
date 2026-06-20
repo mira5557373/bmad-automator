@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.core.trust_boundary import (
@@ -10,8 +12,11 @@ from story_automator.core.trust_boundary import (
     TrustBoundaryError,
     assert_host_context,
     is_child_session,
+    is_path_under,
+    resolve_host_evidence_dir,
     sandbox_env,
     sandbox_tmux_env_args,
+    validate_evidence_path_isolation,
     verify_sandbox_env,
 )
 
@@ -170,6 +175,56 @@ class SandboxTmuxEnvArgsTests(unittest.TestCase):
         args = sandbox_tmux_env_args(agent="claude")
         for i in range(0, len(args), 2):
             self.assertEqual(args[i], "-e")
+
+
+class IsPathUnderTests(unittest.TestCase):
+    def test_child_under_parent(self) -> None:
+        self.assertTrue(is_path_under(Path("/a/b"), Path("/a/b/c/d")))
+
+    def test_child_is_parent(self) -> None:
+        self.assertTrue(is_path_under(Path("/a/b"), Path("/a/b")))
+
+    def test_child_not_under_parent(self) -> None:
+        self.assertFalse(is_path_under(Path("/a/b"), Path("/x/y")))
+
+    def test_traversal_attempt(self) -> None:
+        self.assertFalse(is_path_under(Path("/a/b"), Path("/a/b/../c")))
+
+    def test_real_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td) / "parent"
+            parent.mkdir()
+            child = parent / "sub" / "deep"
+            child.mkdir(parents=True)
+            self.assertTrue(is_path_under(parent, child))
+            self.assertFalse(is_path_under(child, parent))
+
+
+class ValidateEvidencePathIsolationTests(unittest.TestCase):
+    def test_isolated_path_passes(self) -> None:
+        ok, reason = validate_evidence_path_isolation(
+            Path("/host/evidence"), Path("/child/workdir")
+        )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_evidence_under_child_fails(self) -> None:
+        ok, reason = validate_evidence_path_isolation(
+            Path("/child/workdir/_bmad/gate"), Path("/child/workdir")
+        )
+        self.assertFalse(ok)
+        self.assertIn("under child working tree", reason)
+
+
+class ResolveHostEvidenceDirTests(unittest.TestCase):
+    def test_returns_bmad_gate_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            result = resolve_host_evidence_dir(td)
+            self.assertEqual(result, Path(td).resolve() / "_bmad" / "gate")
+
+    def test_returns_absolute_path(self) -> None:
+        result = resolve_host_evidence_dir("relative/path")
+        self.assertTrue(result.is_absolute())
 
 
 if __name__ == "__main__":
