@@ -50,3 +50,4 @@ htmlcov/
 .claude/commands/
 .claude/sw-run-stdout.log
 # sw init outputs
+.claude/sw-run.pid
