@@ -263,6 +263,28 @@ class RuntimePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(PolicyError, "state file unreadable"):
             load_runtime_policy(str(self.project_root), state_file=str(self.project_root))
 
+    def test_optional_profile_top_level_key_validates(self) -> None:
+        self._write_override(
+            {"profile": {"name": "default", "file": "data/profiles/default.json"}}
+        )
+        policy = load_effective_policy(str(self.project_root))
+        self.assertEqual(policy["profile"]["name"], "default")
+
+    def test_optional_gate_top_level_key_validates(self) -> None:
+        self._write_override({"gate": {"enabled": False}})
+        policy = load_effective_policy(str(self.project_root))
+        self.assertFalse(policy["gate"]["enabled"])
+
+    def test_profile_block_must_be_object(self) -> None:
+        self._write_override({"profile": []})
+        with self.assertRaisesRegex(PolicyError, "profile must be an object"):
+            load_effective_policy(str(self.project_root))
+
+    def test_gate_block_must_be_object(self) -> None:
+        self._write_override({"gate": "enabled"})
+        with self.assertRaisesRegex(PolicyError, "gate must be an object"):
+            load_effective_policy(str(self.project_root))
+
     def _install_bundle(self) -> None:
         source_skill = REPO_ROOT / "skills" / "bmad-story-automator"
         source_review = REPO_ROOT / "skills" / "bmad-story-automator-review"

@@ -16,6 +16,8 @@ VALID_TOP_LEVEL_KEYS = {
     "workflow",
     "steps",
     "security",
+    "profile",
+    "gate",
 }
 VALID_STEP_NAMES = {"create", "dev", "auto", "review", "retro"}
 VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete"}
@@ -353,6 +355,10 @@ def _validate_policy_shape(policy: dict[str, Any]) -> None:
         required = (assets.get("required")) or []
         if not isinstance(required, list) or any(item not in VALID_ASSET_NAMES for item in required):
             raise PolicyError(f"invalid required assets for {name}")
+    if "profile" in policy and not isinstance(policy["profile"], dict):
+        raise PolicyError("profile must be an object")
+    if "gate" in policy and not isinstance(policy["gate"], dict):
+        raise PolicyError("gate must be an object")
 
 
 def _resolve_policy_paths(policy: dict[str, Any], *, project_root: Path, bundle_root: Path) -> None:
