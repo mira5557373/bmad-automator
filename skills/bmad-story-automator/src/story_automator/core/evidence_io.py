@@ -180,3 +180,31 @@ def load_gate_file(
     validate_schema_version(data, GATE_SCHEMA_VERSION, "gate")
     validate_gate_file(data)
     return data
+
+
+def can_reuse_gate_file(
+    gate_file: dict[str, Any],
+    *,
+    commit_sha: str,
+    profile_hash: str,
+    factory_version: str,
+) -> tuple[bool, str]:
+    """§9.2: gate file reusable only if all three match."""
+    gate_sha = gate_file.get("commit_sha", "")
+    if gate_sha != commit_sha:
+        return False, (
+            f"commit_sha mismatch: gate={gate_sha!r}, current={commit_sha!r}"
+        )
+    gate_profile_hash = (gate_file.get("profile") or {}).get("hash", "")
+    if gate_profile_hash != profile_hash:
+        return False, (
+            f"profile.hash mismatch: gate={gate_profile_hash!r}, "
+            f"current={profile_hash!r}"
+        )
+    gate_fv = gate_file.get("factory_version", "")
+    if gate_fv != factory_version:
+        return False, (
+            f"factory_version mismatch: gate={gate_fv!r}, "
+            f"current={factory_version!r}"
+        )
+    return True, ""

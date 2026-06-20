@@ -11,6 +11,7 @@ from story_automator.core.gate_schema import (
     make_gate_file,
 )
 from story_automator.core.evidence_io import (
+    can_reuse_gate_file,
     compute_evidence_bundle_hash,
     evidence_filename,
     evidence_migrate,
@@ -329,6 +330,83 @@ class LoadGateFileTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(GateSchemaError, "schema_version"):
                 load_gate_file(tmp, "gate-300")
+
+
+class CanReuseGateFileTests(unittest.TestCase):
+    def _gate(self) -> dict:
+        return {
+            "gate_id": "gate-400",
+            "commit_sha": "abc123",
+            "profile": {"id": "default", "version": 1, "hash": "aabbccdd"},
+            "factory_version": "0.1.0",
+        }
+
+    def test_all_match_returns_true(self) -> None:
+        gate = self._gate()
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_commit_sha_mismatch(self) -> None:
+        gate = self._gate()
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="different",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("commit_sha", reason)
+
+    def test_profile_hash_mismatch(self) -> None:
+        gate = self._gate()
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="different",
+            factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("profile", reason)
+
+    def test_factory_version_mismatch(self) -> None:
+        gate = self._gate()
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.2.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("factory_version", reason)
+
+    def test_multiple_mismatches_reports_first(self) -> None:
+        gate = self._gate()
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="wrong",
+            profile_hash="wrong",
+            factory_version="wrong",
+        )
+        self.assertFalse(ok)
+        self.assertTrue(len(reason) > 0)
+
+    def test_missing_profile_hash_reports_mismatch(self) -> None:
+        gate = self._gate()
+        gate["profile"] = {"id": "x"}
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("profile", reason)
 
 
 if __name__ == "__main__":
