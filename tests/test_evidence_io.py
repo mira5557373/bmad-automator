@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 
 from story_automator.core.gate_schema import (
@@ -8,7 +10,9 @@ from story_automator.core.gate_schema import (
 )
 from story_automator.core.evidence_io import (
     compute_evidence_bundle_hash,
+    evidence_filename,
     evidence_migrate,
+    persist_evidence_record,
 )
 
 
@@ -110,6 +114,76 @@ class ComputeEvidenceBundleHashTests(unittest.TestCase):
             compute_evidence_bundle_hash(r1),
             compute_evidence_bundle_hash(r2),
         )
+
+
+class EvidenceFilenameTests(unittest.TestCase):
+    def test_simple_names(self) -> None:
+        record = make_evidence_record(
+            collector="test-runner", tool="pytest",
+            category="correctness", status="ok",
+        )
+        self.assertEqual(
+            evidence_filename(record),
+            "correctness--test-runner--pytest.json",
+        )
+
+    def test_sanitizes_slashes(self) -> None:
+        record = make_evidence_record(
+            collector="my/collector", tool="some/tool",
+            category="security", status="ok",
+        )
+        name = evidence_filename(record)
+        self.assertNotIn("/", name)
+        self.assertTrue(name.endswith(".json"))
+
+
+class PersistEvidenceRecordTests(unittest.TestCase):
+    def test_writes_valid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            path = persist_evidence_record(tmp, "gate-001", record)
+            self.assertTrue(path.is_file())
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(loaded["collector"], "runner")
+
+    def test_file_lives_under_gate_id_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            path = persist_evidence_record(tmp, "gate-002", record)
+            self.assertIn("gate-002", str(path))
+
+    def test_creates_parent_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            path = persist_evidence_record(tmp, "gate-003", record)
+            self.assertTrue(path.parent.is_dir())
+
+    def test_rejects_path_traversal_gate_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            with self.assertRaisesRegex(GateSchemaError, "invalid path"):
+                persist_evidence_record(tmp, "../../etc", record)
+
+    def test_rejects_empty_gate_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_evidence_record(
+                collector="runner", tool="pytest",
+                category="correctness", status="ok",
+            )
+            with self.assertRaisesRegex(GateSchemaError, "gate_id"):
+                persist_evidence_record(tmp, "", record)
 
 
 if __name__ == "__main__":

@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from .gate_schema import (
     EVIDENCE_SCHEMA_VERSION,
     GateSchemaError,
     canonical_json,
+    validate_evidence_record,
 )
+from .utils import ensure_dir, write_atomic
 
 
 def _validate_gate_id(gate_id: str) -> None:
@@ -71,3 +74,36 @@ def compute_evidence_bundle_hash(records: list[dict[str, Any]]) -> str:
     )
     payload = "[" + ",".join(canonical_json(r) for r in sorted_records) + "]"
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def _sanitize_path_component(s: str) -> str:
+    """Replace path separators with underscores."""
+    return s.replace("/", "_").replace("\\", "_")
+
+
+def evidence_filename(record: dict[str, Any]) -> str:
+    """Deterministic filename for an evidence record."""
+    category = record.get("category", "unknown")
+    collector = record.get("collector", "unknown")
+    tool = record.get("tool", "unknown")
+    return (
+        f"{_sanitize_path_component(category)}--"
+        f"{_sanitize_path_component(collector)}--"
+        f"{_sanitize_path_component(tool)}.json"
+    )
+
+
+def persist_evidence_record(
+    project_root: str | Path,
+    gate_id: str,
+    record: dict[str, Any],
+) -> Path:
+    """Write a validated evidence record to _bmad/gate/evidence/<gate_id>/."""
+    _validate_gate_id(gate_id)
+    validate_evidence_record(record)
+    evidence_dir = Path(project_root) / "_bmad" / "gate" / "evidence" / gate_id
+    ensure_dir(evidence_dir)
+    filename = evidence_filename(record)
+    target = evidence_dir / filename
+    write_atomic(target, canonical_json(record) + "\n")
+    return target
