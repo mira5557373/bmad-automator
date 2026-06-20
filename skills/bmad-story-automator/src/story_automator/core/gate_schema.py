@@ -297,6 +297,16 @@ def validate_invariant_entry(entry: dict[str, Any]) -> None:
         )
 
 
+def validate_schema_version(record: dict[str, Any], max_known: int, label: str) -> None:
+    version = record.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise GateSchemaError(f"{label}.schema_version must be an integer")
+    if version < 1:
+        raise GateSchemaError(f"{label}.schema_version must be >= 1; got {version}")
+    if version > max_known:
+        raise GateSchemaError(f"{label}.schema_version {version} exceeds max known version {max_known}; upgrade the factory")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 

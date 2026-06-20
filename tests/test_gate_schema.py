@@ -24,6 +24,7 @@ from story_automator.core.gate_schema import (
     validate_evidence_record,
     validate_gate_file,
     validate_invariant_entry,
+    validate_schema_version,
     validate_waiver,
 )
 
@@ -370,6 +371,36 @@ class MakeLlmEvidenceRecordTests(unittest.TestCase):
             status="ok", confidence=10, rationale="high confidence",
         )
         self.assertEqual(record["confidence"], 10)
+
+
+class ValidateSchemaVersionTests(unittest.TestCase):
+    def test_current_version_passes(self) -> None:
+        validate_schema_version({"schema_version": 1}, max_known=1, label="test")
+
+    def test_older_version_passes(self) -> None:
+        validate_schema_version({"schema_version": 1}, max_known=3, label="test")
+
+    def test_future_version_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "test.schema_version"):
+            validate_schema_version(
+                {"schema_version": 99}, max_known=1, label="test",
+            )
+
+    def test_zero_version_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "test.schema_version"):
+            validate_schema_version(
+                {"schema_version": 0}, max_known=1, label="test",
+            )
+
+    def test_missing_version_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "test.schema_version"):
+            validate_schema_version({}, max_known=1, label="test")
+
+    def test_non_int_version_raises(self) -> None:
+        with self.assertRaisesRegex(GateSchemaError, "test.schema_version"):
+            validate_schema_version(
+                {"schema_version": "1"}, max_known=1, label="test",
+            )
 
 
 if __name__ == "__main__":
