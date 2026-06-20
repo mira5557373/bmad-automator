@@ -1,23 +1,238 @@
 {
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 3,
-  "deferred_gaps": 1,
-  "total_gaps_found": 10,
-  "gaps_fixed_this_pass": 4,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
-  "gap_summaries": [
-    "[ultrathink] FIXED: load_gate_file missing validate_gate_file — deserialized gate files not fully validated on load; added validate_gate_file(data) after schema version check",
-    "[ultrathink] FIXED: gate_id path traversal — persist_evidence_record, load_evidence_bundle, persist_gate_file, load_gate_file all used gate_id directly in path construction without sanitization; added _validate_gate_id helper rejecting /, \\, ..",
-    "[ultrathink] FIXED: Missing LLM evidence migration test — evidence_migrate passthrough not tested with confidence/rationale fields; added test_llm_evidence_preserves_confidence_and_rationale",
-    "[ultrathink] FIXED: canonical_json import inconsistency — Task 5 used lazy import inside function body, Task 6 imported at top level; moved to top-level import in Task 4 scaffold",
-    "[ultrathink] MINOR: evidence_filename sanitizes / and \\ but not other OS-problematic chars (spaces, colons) — acceptable since gate categories/collectors use simple ASCII names",
-    "[ultrathink] MINOR: write_gate_marker accepts empty gate_id/commit_sha without validation — low risk since marker is internal orchestrator state, not user input",
-    "[ultrathink] MINOR: test file imports grow incrementally across tasks without showing consolidated final import block — implementer will naturally consolidate",
-    "[ultrathink] DEFERRED: audit log hash-chaining — milestone description mentions it but actual audit.jsonl integration belongs to adjudication-m9 / integration-m10 which own the audit write path"
-  ]
+  "milestone": "foundation-m2-evidence-schemas",
+  "spec": "docs/superpowers/specs/2026-06-20-production-ready-factory-design.md",
+  "plan": "docs/superpowers/plans/2026-06-20-foundation-m2-evidence-schemas.md",
+  "base_commit": "cf7cbe6c283f7fd8b19eb978d45d2814bdb666f9",
+  "review_commit": "aa61291",
+  "test_results": {
+    "total": 1734,
+    "passed": 1734,
+    "failed": 0,
+    "skipped": 2,
+    "m2_tests": 146
+  },
+  "loc": {
+    "evidence_io": 271,
+    "gate_schema": 355,
+    "gate_rules": 216,
+    "all_under_500": true
+  },
+  "ruff_clean": true,
+  "post_impl_findings": [
+    {
+      "id": "PI-1",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[post-impl] _validate_gate_id allows NUL/control chars",
+      "fix": "Restricted to [a-zA-Z0-9._-] allowlist via regex"
+    },
+    {
+      "id": "PI-2",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[post-impl] validate_evidence_record missing type checks for exit_code, duration_ms, tier, tool_version, raw_output_ref",
+      "fix": "Added type and range checks for all fields"
+    },
+    {
+      "id": "PI-3",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[post-impl] LLM evidence confidence/rationale not validated on disk load",
+      "fix": "validate_evidence_record now checks confidence/rationale when deterministic=False"
+    },
+    {
+      "id": "PI-4",
+      "severity": "LOW",
+      "status": "ACCEPTED",
+      "summary": "[post-impl] validate_gate_file does not validate optional string fields (evidence_bundle_hash, scanner_data_snapshot)",
+      "rationale": "Factory functions set defaults; deep validation added in M18 adjudicator"
+    },
+    {
+      "id": "PI-5",
+      "severity": "LOW",
+      "status": "ACCEPTED",
+      "summary": "[post-impl] _parse_iso does not handle naive datetimes",
+      "rationale": "All waiver timestamps are factory-generated with Z suffix; edge case surfaces clearly as TypeError"
+    }
+  ],
+  "production_findings": [
+    {
+      "id": "PR-1",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[production] Write path does not call validate_schema_version",
+      "fix": "validate_evidence_record and validate_gate_file now call validate_schema_version"
+    },
+    {
+      "id": "PR-2",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[production] evidence_filename does not sanitize '..' in components",
+      "fix": "_sanitize_path_component now replaces '..' with '__'"
+    },
+    {
+      "id": "PR-3",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "summary": "[production] load_evidence_bundle only validates schema_version, not full record",
+      "fix": "Now calls validate_evidence_record on each loaded record"
+    },
+    {
+      "id": "PR-4",
+      "severity": "LOW",
+      "status": "FIXED",
+      "summary": "[production] File reads do not catch OSError",
+      "fix": "Wrapped path.read_text in try/except OSError with clean error messages"
+    },
+    {
+      "id": "PR-5",
+      "severity": "LOW",
+      "status": "ACCEPTED",
+      "summary": "[production] _parse_iso does not handle +0000 offset format",
+      "rationale": "Python 3.11 fromisoformat handles +HH:MM; all factory timestamps use Z suffix"
+    },
+    {
+      "id": "PR-6",
+      "severity": "LOW",
+      "status": "FIXED",
+      "summary": "[production] compute_waiver_signature name implies cryptographic signature",
+      "fix": "Added docstring clarifying it is a deterministic integrity check"
+    },
+    {
+      "id": "PR-7",
+      "severity": "LOW",
+      "status": "ACCEPTED",
+      "summary": "[production] evidence_migrate does not re-validate after migration",
+      "rationale": "v1→v1 is passthrough; future migration branches should add validation"
+    }
+  ],
+  "spec_gaps": [
+    {
+      "id": "SG-1",
+      "spec_ref": "§6.4",
+      "status": "IMPLEMENTED",
+      "summary": "Invariant registry: concrete entries for MSME (DG-12, DG-13, DG-14, DG-25, DG-34, DG-4-L1) in invariants.yaml",
+      "location": "skills/bmad-story-automator/data/profiles/msme-erp.invariants.yaml",
+      "note": "Already present in M1 foundation — all 6 entries with FAIL severity"
+    },
+    {
+      "id": "SG-2",
+      "spec_ref": "§6.4",
+      "status": "IMPLEMENTED",
+      "summary": "Invariant registry: FAIL-severity invariant violation is a hard FAIL with no CONCERNS path",
+      "location": "skills/bmad-story-automator/src/story_automator/core/gate_rules.py:verdict_for_invariant_severity"
+    },
+    {
+      "id": "SG-3",
+      "spec_ref": "§6.4",
+      "status": "IMPLEMENTED",
+      "summary": "Invariant registry: encodes ADRs > corrections > vision precedence",
+      "location": "skills/bmad-story-automator/data/profiles/msme-erp.invariants.yaml",
+      "note": "Header comment documents precedence rule; all entries are DG-level (ADR-derived)"
+    },
+    {
+      "id": "SG-4",
+      "spec_ref": "§6.4",
+      "status": "IMPLEMENTED",
+      "summary": "cost_tier: cost_to_serve rule function renders CONCERNS (not FAIL) until DG-2 SKU is defined",
+      "location": "skills/bmad-story-automator/src/story_automator/core/gate_rules.py:verdict_for_cost_tier"
+    },
+    {
+      "id": "SG-5",
+      "spec_ref": "§6.4",
+      "status": "IMPLEMENTED",
+      "summary": "NA opt-out: Adjudicator emits per-category verdict NA with rationale 'profile-declared N/A'",
+      "location": "skills/bmad-story-automator/src/story_automator/core/gate_rules.py:verdict_na"
+    },
+    {
+      "id": "SG-6",
+      "spec_ref": "§6.4",
+      "status": "DEFERRED",
+      "deferred_to": "M18",
+      "summary": "Gate file hash-chained into the existing audit log",
+      "rationale": "Requires audit.py changes; audit.py is in the untouched-files list for M2"
+    },
+    {
+      "id": "SG-7",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M19",
+      "summary": "Performance: code-altitude gate runs per-story complete in ≤ 10 minutes wall-clock on diff-scoped happy path",
+      "rationale": "Requires full orchestration pipeline (M19) to measure"
+    },
+    {
+      "id": "SG-8",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M22",
+      "summary": "Performance: full-matrix epic gate ≤ 30 minutes",
+      "rationale": "Requires system-altitude gate (M22)"
+    },
+    {
+      "id": "SG-9",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M18",
+      "summary": "Observability: every gate emits a GateDecision telemetry event",
+      "rationale": "telemetry_events.py is off-limits per M2 plan; GateDecision lands in M18"
+    },
+    {
+      "id": "SG-10",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M18",
+      "summary": "Observability: every gate emits a GateRendered audit event hash-chained into existing HMAC audit log",
+      "rationale": "telemetry_events.py and audit.py are off-limits per M2 plan; lands in M18"
+    },
+    {
+      "id": "SG-11",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M19",
+      "summary": "Observability: CLI story-automator gate status lists in-flight + PARKED stories",
+      "rationale": "CLI ships with M19 orchestrator wiring"
+    },
+    {
+      "id": "SG-12",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M16",
+      "summary": "Security: collectors run in trust boundary the generation child cannot write to (§7)",
+      "rationale": "Trust boundary enforcement is M16 Factory Self-Trust milestone"
+    },
+    {
+      "id": "SG-13",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M18/M19",
+      "summary": "Auditability: every state mutation hash-chains into audit.jsonl",
+      "rationale": "Requires audit.py integration; off-limits in M2"
+    },
+    {
+      "id": "SG-14",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M18/M19",
+      "summary": "Auditability: audit-verify confirms integrity of gate audit entries",
+      "rationale": "Requires audit.py integration; off-limits in M2"
+    },
+    {
+      "id": "SG-15",
+      "spec_ref": "§18",
+      "status": "DEFERRED",
+      "deferred_to": "M18/M19",
+      "summary": "Auditability: tamper detection on the first broken link in gate audit chain",
+      "rationale": "Requires audit.py integration; off-limits in M2"
+    }
+  ],
+  "summary": {
+    "post_impl_fixed": 3,
+    "post_impl_accepted": 2,
+    "production_fixed": 4,
+    "production_accepted": 3,
+    "spec_gaps_implemented": 5,
+    "spec_gaps_deferred": 10,
+    "new_tests_added": 22,
+    "total_tests_passing": 1734
+  }
 }
