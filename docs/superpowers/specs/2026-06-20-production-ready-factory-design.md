@@ -258,7 +258,7 @@ Every criterion is covered, none orphaned: (a) reliability·system · (b) resili
 | M21 | Test-first + Burn-in + Mutation + DoD | atdd-red verify + burn-in + mutation + DoD verifier | M19 |
 | M22 | System-altitude Gate | ephemeral-env harness + 5 system collectors + progressive-delivery; `cost_to_serve` collector reads `cost_tier.max_pod_cost_per_tenant` (CONCERNS while DG-2 in `forbidden_until`) | M19 |
 | M23 | Learning Loop | gate telemetry → retrospective + calibration/drift → auto-tune profile | M19 |
-| M24 (TBD, post-keystone) | **Golden Seed-Template Bundle** | factory-owned (not TEA-provided) bundle (`msme-erp-golden-template@1.x`) pre-wiring Pact contract tests, network-first interception, selector-resilience, data-factories (auto-cleanup), HAR recorder, OTel/SLO/`/healthz`+`/readyz` endpoints — *instantiating* TEA reference fragments (`pact-consumer-framework-setup.md`, `network-first.md`, `selector-resilience.md`, `data-factories.md`, `network-recorder.md`) | M15 |
+| M24 (post-keystone) | **Golden Seed-Template Bundle** | factory-owned (not TEA-provided) bundle (`msme-erp-golden-template@1.x`) pre-wiring Pact contract tests, network-first interception, selector-resilience, data-factories (auto-cleanup), HAR recorder, OTel/SLO/`/healthz`+`/readyz` endpoints — *instantiating* TEA reference fragments (`pact-consumer-framework-setup.md`, `network-first.md`, `selector-resilience.md`, `data-factories.md`, `network-recorder.md`) | M15 |
 
 **M15→M19 is the keystone**: a trustworthy, BMAD-native, deterministic code-altitude production-readiness gate. M24 (seed-template bundle) is the post-keystone follow-up that converts "production-ready from day one" from a property the factory *verifies* into one it *seeds*.
 
@@ -269,12 +269,37 @@ Every criterion is covered, none orphaned: (a) reliability·system · (b) resili
 - **TEA numeric thresholds** → re-verify against live fragments during M19 planning.
 - **cost-to-serve < ARPU** depends on DG-2 SKU (placeholder) → MSME profile ships zeros + DG-2 in `forbidden_until` so `cost_to_serve` renders CONCERNS, not FAIL, until DG-2 lands.
 - **Profile drift** → gate files stamp `profile.hash` + scanner-data snapshot; re-gate triggers on hash change or pinned-toolchain version change (rules in §11.1 runbook §(d)).
-- **Seed-template bundle (M24, post-keystone)** → factory-owned `msme-erp-golden-template@1.x`; TBD timing — must land before the factory can claim "production-ready from the first commit" for net-new products (today the gate only *verifies* what generators produce).
+- **Seed-template bundle (M24, post-keystone)** → factory-owned `msme-erp-golden-template@1.x`; timing scheduled after M19; must land before the factory can claim "production-ready from the first commit" for net-new products (today the gate only *verifies* what generators produce).
 - **DG-3 placeholder** → `msme-erp.json`'s `"DG-3": ["E*.ca-channel-*"]` entry blocks CA-channel commercial-mechanic stories until DG-3 is fully specified. DG-3 is **intentionally not in §6.4's invariant registry** because the underlying mechanism is frozen pending ICAI clearance; the `forbidden_until` block alone is sufficient (no semgrep rule required since the stories themselves are blocked). When DG-3 closes, a registry entry lands in the same milestone that removes the blocker.
 - **Profile semver vs hash invalidation** → keystone uses hash-based invalidation (any field change forces re-eval; conservative). Splitting `profile.version` into `profile_breaking_version` + `profile_feature_version` is deferred to **M23 (Learning Loop)** when auto-tuning starts and incremental-feature changes need to skip re-runs.
 - **Automated CVE-triggered re-evaluation** → keystone supports *manual* re-eval via `story-automator gate invalidate` (M19) + scanner-data snapshot in gate file; automated watcher (`factory re-evaluate --trigger=cve`) is deferred to **post-M23**.
 
-## 18. Validation provenance
+## 18. Non-functional requirements
+
+- **Determinism**: every gate verdict is a pure function of `(risk_profile, evidence[], thresholds, scanner_data_snapshot)`; same inputs → same verdict, byte-identical (M10 golden-trace coverage).
+- **Performance**: code-altitude gate runs per-story complete in ≤ 10 minutes wall-clock on the diff-scoped happy path; full-matrix epic gate ≤ 30 minutes.
+- **Resilience**: orchestrator crash mid-gate is fail-closed-then-restart (§9.2 atomic-gate semantics); per-category timeouts enforced via `subprocess.run(timeout=…)` + `psutil` SIGKILL (§6.4).
+- **Observability**: every gate emits a `GateDecision` telemetry event and a `GateRendered` audit event hash-chained into the existing HMAC audit log; CLI `story-automator gate status` lists in-flight + PARKED stories.
+- **Security**: collectors run in the trust boundary the generation child cannot write to (§7); per-tenant DEK + crypto-shred plumbing left to the *product*; the factory itself stays single-trusted-operator (memory: [[singleuser-threat-model]]).
+- **Compatibility**: no new Python dependencies beyond stdlib + `filelock` + `psutil` (CLAUDE.md hard rule); cross-platform across Windows git-bash, WSL Ubuntu, Linux CI.
+- **Replayability**: gate files carry `schema_version` + `factory_version` + `profile.hash` so evidence and verdict can be replayed years later from cold storage.
+- **Forward-compatibility**: evidence schema versioned via `schema_version`; migration shim `evidence_migrate(record, target_version)` translates older records.
+- **Auditability**: every state mutation hash-chains into `audit.jsonl`; `audit-verify` confirms integrity; tamper detection on the first broken link.
+
+## 19. Out of scope
+
+- Multi-tenant operation of the **factory itself** (the factory is a single-trusted-operator tool; the *product* it builds is multi-tenant — different concern).
+- Real-time auto-merge of generated PRs (the operator merges; the factory pushes).
+- Automated CVE-triggered re-evaluation pipeline (manual `gate invalidate` only, in keystone scope; auto-watcher deferred post-M23).
+- Browser-based dashboard for gate verdicts (CLI is the keystone UX; sw's existing dashboard surfaces telemetry only).
+- Built-in language support beyond Python + TypeScript + IaC tooling (others reachable via profile `toolchain` declaration, not first-class collectors in the keystone).
+- Voice/conversational operator interfaces.
+- Cross-repo / cross-product gate aggregation (Profile per project; no monorepo-of-products mode).
+- Replacing BMAD's own retrospective skill; the factory consumes the retrospective output, doesn't author it.
+- A full integrated test runner orchestrator beyond TEA / Vitest / Playwright / Pytest invocation; testing strategy is the product's, the factory verifies it.
+- "Best-in-market" claims that depend on adoption metrics (those land post-M24 via real-world feedback, not in the keystone spec).
+
+## 20. Validation provenance
 
 Reviewed adversarially across BMAD-compat, TEA-compat, factory-integration-feasibility (against `skills/bmad-story-automator/src/story_automator/`), and best-in-market completeness. Fixes folded in: evidence-integrity trust boundary, fail-closed, requirements-traceability vs line-coverage split, test_quality + burn-in + mutation, compliance/performance/accessibility/supply_chain/api_compat/migrations/docs categories, boundary-aware license, richer agentic category, invariant registry, diff-scoping + budget-awareness, BMAD-native remediation + write-back, BMAD hooks (project-context/customize/readiness/correct-course), TEA product-quality patterns, and the repo-guardrail compatibility notes.
 
