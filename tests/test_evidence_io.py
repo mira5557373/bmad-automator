@@ -8,6 +8,7 @@ from pathlib import Path
 from story_automator.core.gate_schema import (
     GateSchemaError,
     make_evidence_record,
+    make_gate_file,
 )
 from story_automator.core.evidence_io import (
     compute_evidence_bundle_hash,
@@ -15,6 +16,8 @@ from story_automator.core.evidence_io import (
     evidence_migrate,
     load_evidence_bundle,
     persist_evidence_record,
+    persist_gate_file,
+    load_gate_file,
 )
 
 
@@ -254,6 +257,78 @@ class LoadEvidenceBundleTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(GateSchemaError, "invalid JSON"):
                 load_evidence_bundle(tmp, "gate-013")
+
+
+class PersistGateFileTests(unittest.TestCase):
+    def _valid_gate(self) -> dict:
+        return make_gate_file(
+            gate_id="gate-100",
+            target={"kind": "story", "id": "E1.S1"},
+            commit_sha="abc123def456",
+            profile={"id": "default", "version": 1, "hash": "aabbccdd"},
+            factory_version="0.1.0",
+            categories={"correctness": {"verdict": "PASS"}},
+            overall="PASS",
+        )
+
+    def test_writes_valid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = self._valid_gate()
+            path = persist_gate_file(tmp, gate)
+            self.assertTrue(path.is_file())
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(loaded["gate_id"], "gate-100")
+
+    def test_file_in_verdicts_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = self._valid_gate()
+            path = persist_gate_file(tmp, gate)
+            self.assertIn("verdicts", str(path))
+            self.assertEqual(path.name, "gate-100.json")
+
+
+class LoadGateFileTests(unittest.TestCase):
+    def test_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = make_gate_file(
+                gate_id="gate-200",
+                target={"kind": "story", "id": "E1.S2"},
+                commit_sha="deadbeef",
+                profile={"id": "default", "version": 1, "hash": "11223344"},
+                factory_version="0.2.0",
+                categories={"security": {"verdict": "FAIL"}},
+                overall="FAIL",
+            )
+            persist_gate_file(tmp, gate)
+            loaded = load_gate_file(tmp, "gate-200")
+            self.assertEqual(loaded["gate_id"], "gate-200")
+            self.assertEqual(loaded["overall"], "FAIL")
+
+    def test_missing_gate_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(GateSchemaError, "not found"):
+                load_gate_file(tmp, "nonexistent")
+
+    def test_rejects_future_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdicts_dir = Path(tmp) / "_bmad" / "gate" / "verdicts"
+            verdicts_dir.mkdir(parents=True)
+            bad_gate = {
+                "gate_id": "gate-300",
+                "schema_version": 999,
+                "target": {"kind": "story"},
+                "commit_sha": "abc",
+                "profile": {"id": "x"},
+                "factory_version": "0.1",
+                "categories": {},
+                "overall": "PASS",
+                "waivers": [],
+            }
+            (verdicts_dir / "gate-300.json").write_text(
+                json.dumps(bad_gate), encoding="utf-8",
+            )
+            with self.assertRaisesRegex(GateSchemaError, "schema_version"):
+                load_gate_file(tmp, "gate-300")
 
 
 if __name__ == "__main__":

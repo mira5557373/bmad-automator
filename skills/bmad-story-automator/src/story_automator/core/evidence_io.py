@@ -16,9 +16,11 @@ from typing import Any
 
 from .gate_schema import (
     EVIDENCE_SCHEMA_VERSION,
+    GATE_SCHEMA_VERSION,
     GateSchemaError,
     canonical_json,
     validate_evidence_record,
+    validate_gate_file,
     validate_schema_version,
 )
 from .utils import ensure_dir, write_atomic
@@ -141,3 +143,40 @@ def load_evidence_bundle(
         ),
     )
     return records
+
+
+def persist_gate_file(
+    project_root: str | Path,
+    gate_file: dict[str, Any],
+) -> Path:
+    """Write a validated gate file to _bmad/gate/verdicts/<gate_id>.json."""
+    validate_gate_file(gate_file)
+    gate_id = gate_file["gate_id"]
+    _validate_gate_id(gate_id)
+    verdicts_dir = Path(project_root) / "_bmad" / "gate" / "verdicts"
+    ensure_dir(verdicts_dir)
+    target = verdicts_dir / f"{gate_id}.json"
+    write_atomic(target, canonical_json(gate_file) + "\n")
+    return target
+
+
+def load_gate_file(
+    project_root: str | Path,
+    gate_id: str,
+) -> dict[str, Any]:
+    """Load a gate file from _bmad/gate/verdicts/<gate_id>.json."""
+    _validate_gate_id(gate_id)
+    path = Path(project_root) / "_bmad" / "gate" / "verdicts" / f"{gate_id}.json"
+    if not path.is_file():
+        raise GateSchemaError(f"gate file not found: {gate_id}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GateSchemaError(
+            f"invalid JSON in gate file {gate_id}: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise GateSchemaError(f"gate file {gate_id} must contain an object")
+    validate_schema_version(data, GATE_SCHEMA_VERSION, "gate")
+    validate_gate_file(data)
+    return data
