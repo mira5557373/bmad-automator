@@ -9,6 +9,7 @@ from story_automator.core.gate_schema import (
     GateSchemaError,
     make_evidence_record,
     make_gate_file,
+    make_llm_evidence_record,
 )
 from story_automator.core.evidence_io import (
     can_reuse_gate_file,
@@ -455,6 +456,122 @@ class GateMarkerLifecycleTests(unittest.TestCase):
             write_gate_marker(tmp, "gate-new", "sha-new")
             marker = read_gate_marker(tmp)
             self.assertEqual(marker["gate_id"], "gate-new")
+
+
+class RoundTripDeterminismTests(unittest.TestCase):
+    def test_evidence_round_trip_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            original = make_evidence_record(
+                collector="runner", tool="pytest", tool_version="8.2.0",
+                category="correctness", status="ok",
+                metrics={"line_coverage": 95.5},
+                findings=[], exit_code=0, duration_ms=1234,
+            )
+            persist_evidence_record(tmp, "rt-gate", original)
+            bundle = load_evidence_bundle(tmp, "rt-gate")
+            self.assertEqual(len(bundle), 1)
+            self.assertEqual(bundle[0], original)
+
+    def test_gate_file_round_trip_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            original = make_gate_file(
+                gate_id="rt-gate-2",
+                target={"kind": "story", "id": "E1.S1"},
+                commit_sha="abc123",
+                profile={"id": "default", "version": 1, "hash": "aabb"},
+                factory_version="0.1.0",
+                categories={
+                    "correctness": {"verdict": "PASS", "required": {}, "actual": {}},
+                    "security": {"verdict": "CONCERNS", "required": {}, "actual": {}},
+                },
+                overall="CONCERNS",
+                evidence_bundle_hash="1234567890abcdef",
+            )
+            persist_gate_file(tmp, original)
+            loaded = load_gate_file(tmp, "rt-gate-2")
+            self.assertEqual(loaded, original)
+
+    def test_bundle_hash_stable_across_persist_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                make_evidence_record(
+                    collector="runner", tool="pytest",
+                    category="correctness", status="ok",
+                ),
+                make_evidence_record(
+                    collector="scanner", tool="semgrep",
+                    category="security", status="violation",
+                    findings=["CVE-2026-0001"],
+                ),
+            ]
+            hash_before = compute_evidence_bundle_hash(records)
+            for r in records:
+                persist_evidence_record(tmp, "hash-gate", r)
+            loaded = load_evidence_bundle(tmp, "hash-gate")
+            hash_after = compute_evidence_bundle_hash(loaded)
+            self.assertEqual(hash_before, hash_after)
+
+    def test_llm_evidence_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            original = make_llm_evidence_record(
+                collector="llm-reviewer", tool="claude",
+                category="test_quality", status="ok",
+                confidence=7, rationale="Good coverage patterns",
+            )
+            persist_evidence_record(tmp, "llm-gate", original)
+            bundle = load_evidence_bundle(tmp, "llm-gate")
+            self.assertEqual(len(bundle), 1)
+            self.assertEqual(bundle[0]["confidence"], 7)
+            self.assertEqual(bundle[0]["rationale"], "Good coverage patterns")
+            self.assertFalse(bundle[0]["deterministic"])
+
+
+class EvidenceToGatePipelineTests(unittest.TestCase):
+    def test_full_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                make_evidence_record(
+                    collector="runner", tool="pytest",
+                    category="correctness", status="ok",
+                ),
+                make_evidence_record(
+                    collector="scanner", tool="semgrep",
+                    category="security", status="ok",
+                ),
+                make_llm_evidence_record(
+                    collector="llm-reviewer", tool="claude",
+                    category="test_quality", status="ok",
+                    confidence=8, rationale="Solid test design",
+                ),
+            ]
+            for r in records:
+                persist_evidence_record(tmp, "pipe-gate", r)
+            bundle = load_evidence_bundle(tmp, "pipe-gate")
+            bundle_hash = compute_evidence_bundle_hash(bundle)
+            gate = make_gate_file(
+                gate_id="pipe-gate",
+                target={"kind": "story", "id": "E2.S3"},
+                commit_sha="deadbeef",
+                profile={"id": "msme-erp", "version": 1, "hash": "eeff0011"},
+                factory_version="0.3.0",
+                categories={
+                    "correctness": {"verdict": "PASS"},
+                    "security": {"verdict": "PASS"},
+                    "test_quality": {"verdict": "PASS"},
+                },
+                overall="PASS",
+                evidence_bundle_hash=bundle_hash,
+            )
+            persist_gate_file(tmp, gate)
+            loaded_gate = load_gate_file(tmp, "pipe-gate")
+            self.assertEqual(loaded_gate["evidence_bundle_hash"], bundle_hash)
+            ok, _ = can_reuse_gate_file(
+                loaded_gate,
+                commit_sha="deadbeef",
+                profile_hash="eeff0011",
+                factory_version="0.3.0",
+            )
+            self.assertTrue(ok)
 
 
 if __name__ == "__main__":
