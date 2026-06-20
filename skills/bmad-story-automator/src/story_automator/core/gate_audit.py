@@ -7,12 +7,16 @@ Dedicated GateDecision/GateRendered telemetry events land in M18.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+import pathlib
+from typing import Any, Mapping
+
+from .audit import audit_for_policy
 
 __all__ = [
     "GateStartedAudit",
     "EvidenceCollectedAudit",
     "GateBoundaryViolation",
+    "emit_gate_audit",
 ]
 
 
@@ -68,3 +72,19 @@ class GateBoundaryViolation:
             "operation": self.operation,
             "context": self.context,
         }
+
+
+def emit_gate_audit(
+    policy: Mapping[str, Any],
+    audit_path: pathlib.Path,
+    event: GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation,
+) -> None:
+    """Emit a gate audit event through the HMAC audit chain.
+
+    No-op when audit is disabled in policy (zero I/O).  Follows
+    the same pattern as commands._audit_hooks._maybe_audit_event.
+    """
+    log = audit_for_policy(policy, audit_path)
+    if log is None:
+        return
+    log.append(event)

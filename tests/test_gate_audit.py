@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
+import os
+import pathlib
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from story_automator.core.audit import Event as AuditEventProtocol
 from story_automator.core.gate_audit import (
     EvidenceCollectedAudit,
     GateBoundaryViolation,
     GateStartedAudit,
+    emit_gate_audit,
 )
 
 
@@ -103,6 +109,61 @@ class GateBoundaryViolationTests(unittest.TestCase):
         d = event.to_dict()
         self.assertEqual(d["operation"], "run_collector")
         self.assertEqual(d["context"], "STORY_AUTOMATOR_CHILD=true")
+
+
+class EmitGateAuditTests(unittest.TestCase):
+    def _policy_with_audit(self) -> dict:
+        return {"security": {"audit_trail": True}}
+
+    def _policy_without_audit(self) -> dict:
+        return {"security": {"audit_trail": False}}
+
+    def test_emits_to_audit_log_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = pathlib.Path(td) / "audit.jsonl"
+            policy = self._policy_with_audit()
+            event = GateStartedAudit(gate_id="g1", commit_sha="abc", profile_hash="h1")
+            with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-secret"}):
+                emit_gate_audit(policy, audit_path, event)
+            self.assertTrue(audit_path.exists())
+            line = audit_path.read_text().strip()
+            record = json.loads(line)
+            self.assertEqual(record["event"], "GateStarted")
+            self.assertIn("gate_id", record["payload"])
+
+    def test_noop_when_audit_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = pathlib.Path(td) / "audit.jsonl"
+            policy = self._policy_without_audit()
+            event = GateStartedAudit(gate_id="g1", commit_sha="abc", profile_hash="h1")
+            emit_gate_audit(policy, audit_path, event)
+            self.assertFalse(audit_path.exists())
+
+    def test_emits_boundary_violation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = pathlib.Path(td) / "audit.jsonl"
+            policy = self._policy_with_audit()
+            event = GateBoundaryViolation(operation="persist", context="child")
+            with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-secret"}):
+                emit_gate_audit(policy, audit_path, event)
+            line = audit_path.read_text().strip()
+            record = json.loads(line)
+            self.assertEqual(record["event"], "GateBoundaryViolation")
+
+    def test_emits_evidence_collected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = pathlib.Path(td) / "audit.jsonl"
+            policy = self._policy_with_audit()
+            event = EvidenceCollectedAudit(
+                gate_id="g1", category="security", collector="c",
+                tool="semgrep", status="ok", duration_ms=100,
+            )
+            with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-secret"}):
+                emit_gate_audit(policy, audit_path, event)
+            line = audit_path.read_text().strip()
+            record = json.loads(line)
+            self.assertEqual(record["event"], "EvidenceCollected")
+            self.assertEqual(record["payload"]["status"], "ok")
 
 
 if __name__ == "__main__":
