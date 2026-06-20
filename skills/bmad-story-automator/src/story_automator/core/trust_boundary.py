@@ -13,6 +13,11 @@ __all__ = [
     "TrustBoundaryError",
     "is_child_session",
     "assert_host_context",
+    "CHILD_STRIPPED_VARS",
+    "CHILD_FORCED_VARS",
+    "sandbox_env",
+    "verify_sandbox_env",
+    "sandbox_tmux_env_args",
 ]
 
 _CHILD_ENV_VAR = "STORY_AUTOMATOR_CHILD"
@@ -46,3 +51,67 @@ def assert_host_context(
             f"trust boundary violation{label} — "
             f"operation requires host context but {_CHILD_ENV_VAR} is set"
         )
+
+
+CHILD_STRIPPED_VARS: frozenset[str] = frozenset({
+    "BMAD_AUDIT_KEY",
+    "CLAUDECODE",
+    "BASH_ENV",
+})
+
+CHILD_FORCED_VARS: dict[str, str] = {
+    "STORY_AUTOMATOR_CHILD": "true",
+}
+
+
+def sandbox_env(
+    *,
+    agent: str = "",
+    extras: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a sanitized env dict for a child generation session.
+
+    Strips security-sensitive vars, forces the child-session flag,
+    and optionally sets the AI_AGENT identifier.
+    """
+    env = dict(os.environ)
+    for var in CHILD_STRIPPED_VARS:
+        env.pop(var, None)
+    env.update(CHILD_FORCED_VARS)
+    if agent:
+        env["AI_AGENT"] = agent
+    if extras:
+        env.update(extras)
+    return env
+
+
+def verify_sandbox_env(env: dict[str, str]) -> tuple[bool, list[str]]:
+    """Validate that a child env meets sandbox requirements.
+
+    Returns (ok, list_of_violations).
+    """
+    violations: list[str] = []
+    for var in CHILD_STRIPPED_VARS:
+        if env.get(var, ""):
+            violations.append(f"security-sensitive var {var} not stripped")
+    for var, expected in CHILD_FORCED_VARS.items():
+        if env.get(var) != expected:
+            violations.append(f"required var {var}={expected!r} not set")
+    return (len(violations) == 0, violations)
+
+
+def sandbox_tmux_env_args(agent: str = "") -> list[str]:
+    """Return tmux ``-e`` flag pairs for a sandboxed child session.
+
+    Deterministic order: forced vars, then agent (if set), then
+    stripped vars (alphabetical).  Matches the env semantics of
+    ``tmux new-session -e KEY=VALUE``.
+    """
+    args: list[str] = []
+    for var in sorted(CHILD_FORCED_VARS):
+        args.extend(["-e", f"{var}={CHILD_FORCED_VARS[var]}"])
+    if agent:
+        args.extend(["-e", f"AI_AGENT={agent}"])
+    for var in sorted(CHILD_STRIPPED_VARS):
+        args.extend(["-e", f"{var}="])
+    return args

@@ -5,9 +5,14 @@ import unittest
 from unittest.mock import patch
 
 from story_automator.core.trust_boundary import (
+    CHILD_FORCED_VARS,
+    CHILD_STRIPPED_VARS,
     TrustBoundaryError,
     assert_host_context,
     is_child_session,
+    sandbox_env,
+    sandbox_tmux_env_args,
+    verify_sandbox_env,
 )
 
 
@@ -66,6 +71,105 @@ class AssertHostContextTests(unittest.TestCase):
 
     def test_error_is_runtime_error(self) -> None:
         self.assertTrue(issubclass(TrustBoundaryError, RuntimeError))
+
+
+class ChildSandboxConstantsTests(unittest.TestCase):
+    def test_stripped_vars_contains_audit_key(self) -> None:
+        self.assertIn("BMAD_AUDIT_KEY", CHILD_STRIPPED_VARS)
+
+    def test_stripped_vars_contains_claudecode(self) -> None:
+        self.assertIn("CLAUDECODE", CHILD_STRIPPED_VARS)
+
+    def test_stripped_vars_contains_bash_env(self) -> None:
+        self.assertIn("BASH_ENV", CHILD_STRIPPED_VARS)
+
+    def test_stripped_vars_is_frozenset(self) -> None:
+        self.assertIsInstance(CHILD_STRIPPED_VARS, frozenset)
+
+    def test_forced_vars_sets_child_flag(self) -> None:
+        self.assertEqual(CHILD_FORCED_VARS["STORY_AUTOMATOR_CHILD"], "true")
+
+
+class SandboxEnvTests(unittest.TestCase):
+    def test_strips_security_vars(self) -> None:
+        with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "secret", "PATH": "/usr/bin"}, clear=True):
+            env = sandbox_env()
+            self.assertNotIn("BMAD_AUDIT_KEY", env)
+            self.assertIn("PATH", env)
+
+    def test_forces_child_flag(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env()
+            self.assertEqual(env["STORY_AUTOMATOR_CHILD"], "true")
+
+    def test_sets_agent(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env(agent="claude")
+            self.assertEqual(env["AI_AGENT"], "claude")
+
+    def test_no_agent_when_empty(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env()
+            self.assertNotIn("AI_AGENT", env)
+
+    def test_extras_applied(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            env = sandbox_env(extras={"MY_VAR": "val"})
+            self.assertEqual(env["MY_VAR"], "val")
+
+    def test_strips_all_defined_vars(self) -> None:
+        fake_env = {var: "should_strip" for var in CHILD_STRIPPED_VARS}
+        with patch.dict(os.environ, fake_env, clear=True):
+            env = sandbox_env()
+            for var in CHILD_STRIPPED_VARS:
+                value = env.get(var, "")
+                self.assertEqual(value, "", f"{var} should be stripped but got {value!r}")
+
+
+class VerifySandboxEnvTests(unittest.TestCase):
+    def test_valid_env_passes(self) -> None:
+        env = {"STORY_AUTOMATOR_CHILD": "true", "PATH": "/usr/bin"}
+        ok, violations = verify_sandbox_env(env)
+        self.assertTrue(ok)
+        self.assertEqual(violations, [])
+
+    def test_audit_key_present_fails(self) -> None:
+        env = {"STORY_AUTOMATOR_CHILD": "true", "BMAD_AUDIT_KEY": "secret"}
+        ok, violations = verify_sandbox_env(env)
+        self.assertFalse(ok)
+        self.assertTrue(any("BMAD_AUDIT_KEY" in v for v in violations))
+
+    def test_missing_child_flag_fails(self) -> None:
+        env = {"PATH": "/usr/bin"}
+        ok, violations = verify_sandbox_env(env)
+        self.assertFalse(ok)
+        self.assertTrue(any("STORY_AUTOMATOR_CHILD" in v for v in violations))
+
+
+class SandboxTmuxEnvArgsTests(unittest.TestCase):
+    def test_contains_forced_vars(self) -> None:
+        args = sandbox_tmux_env_args()
+        self.assertIn("-e", args)
+        self.assertIn("STORY_AUTOMATOR_CHILD=true", args)
+
+    def test_contains_stripped_vars_as_empty(self) -> None:
+        args = sandbox_tmux_env_args()
+        for var in CHILD_STRIPPED_VARS:
+            self.assertIn(f"{var}=", args)
+
+    def test_contains_agent_when_specified(self) -> None:
+        args = sandbox_tmux_env_args(agent="claude")
+        self.assertIn("AI_AGENT=claude", args)
+
+    def test_no_agent_when_empty(self) -> None:
+        args = sandbox_tmux_env_args()
+        agent_args = [a for a in args if a.startswith("AI_AGENT=")]
+        self.assertEqual(agent_args, [])
+
+    def test_args_are_paired(self) -> None:
+        args = sandbox_tmux_env_args(agent="claude")
+        for i in range(0, len(args), 2):
+            self.assertEqual(args[i], "-e")
 
 
 if __name__ == "__main__":
