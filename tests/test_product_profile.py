@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -332,6 +333,92 @@ class Sec64ValidationTests(BundledProfileTests):
         self._write_bundled(base)
         with self.assertRaisesRegex(ProfileError, r"forbidden_until\.ADR-0083 must be a string array"):
             load_bundled_profile(project_root=str(self.project_root))
+
+
+class EffectiveProfileTests(BundledProfileTests):
+    def _write_override(self, payload: dict) -> None:
+        override_dir = self.project_root / "_bmad" / "bmm"
+        override_dir.mkdir(parents=True, exist_ok=True)
+        (override_dir / "story-automator.profile.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+    def test_no_override_returns_bundled(self) -> None:
+        from story_automator.core.product_profile import load_effective_profile
+
+        profile = load_effective_profile(str(self.project_root))
+        self.assertEqual(profile["id"], "default")
+
+    def test_override_deep_merges(self) -> None:
+        from story_automator.core.product_profile import load_effective_profile
+
+        self._write_override({
+            "id": "custom",
+            "rules": {"security": {"sast_max_high": 0, "deps_max_critical": 0, "secrets_max": 1}},
+        })
+        profile = load_effective_profile(str(self.project_root))
+        self.assertEqual(profile["id"], "custom")
+        self.assertEqual(profile["rules"]["security"]["secrets_max"], 1)
+        # Untouched default rule value still present
+        self.assertEqual(profile["rules"]["test_quality"]["min_score"], 70)
+
+    def test_override_array_replaces_not_appends(self) -> None:
+        from story_automator.core.product_profile import load_effective_profile
+
+        self._write_override({
+            "categories": {"code": ["security"], "system": ["resilience"]},
+        })
+        profile = load_effective_profile(str(self.project_root))
+        self.assertEqual(profile["categories"]["code"], ["security"])
+
+    def test_override_validation_failure_raises(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_effective_profile,
+        )
+
+        self._write_override({
+            "categories": {"code": ["nope"], "system": []},
+        })
+        with self.assertRaisesRegex(ProfileError, "unknown code categories: nope"):
+            load_effective_profile(str(self.project_root))
+
+    def test_malformed_override_json_raises(self) -> None:
+        from story_automator.core.product_profile import (
+            ProfileError,
+            load_effective_profile,
+        )
+
+        override_dir = self.project_root / "_bmad" / "bmm"
+        override_dir.mkdir(parents=True, exist_ok=True)
+        (override_dir / "story-automator.profile.json").write_text(
+            "{bad json", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ProfileError, "profile json invalid"):
+            load_effective_profile(str(self.project_root))
+
+    def test_env_var_selects_profile_id(self) -> None:
+        from unittest.mock import patch
+
+        from story_automator.core.product_profile import load_effective_profile
+
+        # Default profile has id "default"; env var cannot select
+        # msme-erp yet (data file created in Task 10). Test the
+        # mechanism: env var overrides the default profile_id.
+        with patch.dict(os.environ, {"STORY_AUTOMATOR_PROFILE": "default"}):
+            profile = load_effective_profile(str(self.project_root))
+            self.assertEqual(profile["id"], "default")
+
+    def test_explicit_profile_id_takes_precedence_over_env(self) -> None:
+        from unittest.mock import patch
+
+        from story_automator.core.product_profile import load_effective_profile
+
+        with patch.dict(os.environ, {"STORY_AUTOMATOR_PROFILE": "nonexistent"}):
+            profile = load_effective_profile(
+                str(self.project_root), profile_id="default"
+            )
+            self.assertEqual(profile["id"], "default")
 
 
 if __name__ == "__main__":

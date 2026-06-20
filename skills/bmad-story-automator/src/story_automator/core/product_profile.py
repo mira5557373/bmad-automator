@@ -14,6 +14,7 @@ Paths:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,7 @@ DEFAULT_TIMEOUT_FALLBACK = 120
 
 _PROFILES_DIR = "data/profiles"
 _PROFILE_ID_ENV = "STORY_AUTOMATOR_PROFILE"
+_OVERRIDE_PATH = Path("_bmad") / "bmm" / "story-automator.profile.json"
 
 
 def _validate_profile_shape(profile: dict[str, Any]) -> None:
@@ -305,3 +307,38 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ProfileError(f"profile json must be an object: {path}")
     return payload
+
+
+def load_effective_profile(
+    project_root: str | None = None,
+    *,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root or get_project_root()).resolve()
+    resolved_id = (
+        profile_id
+        or os.environ.get(_PROFILE_ID_ENV, "").strip()
+        or "default"
+    )
+    bundled = load_bundled_profile(resolved_id, project_root=str(root))
+    override_path = root / _OVERRIDE_PATH
+    if override_path.is_file():
+        override = _read_json(override_path)
+        merged = _deep_merge(bundled, override)
+    else:
+        merged = bundled
+    _validate_profile_shape(merged)
+    return merged
+
+
+def _deep_merge(base: Any, override: Any) -> Any:
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            merged[key] = (
+                _deep_merge(merged[key], value) if key in merged else value
+            )
+        return merged
+    if isinstance(override, list):
+        return list(override)
+    return override
