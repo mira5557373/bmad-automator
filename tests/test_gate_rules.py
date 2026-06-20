@@ -9,6 +9,7 @@ from story_automator.core.gate_rules import (
     is_waiver_expired,
     validate_waiver_for_gate,
     verdict_for_collector_status,
+    verdict_for_llm_confidence,
 )
 from story_automator.core.gate_schema import (
     compute_waiver_signature,
@@ -163,6 +164,26 @@ class ValidateWaiverForGateTests(unittest.TestCase):
         valid, reason = validate_waiver_for_gate(waiver, gate, now=now)
         self.assertFalse(valid)
         self.assertIn("profile_hash", reason)
+
+
+class LlmConfidenceVerdictTests(unittest.TestCase):
+    def test_high_confidence_passes(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(8), "PASS")
+
+    def test_low_confidence_concerns(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(3), "CONCERNS")
+
+    def test_boundary_5_passes(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(5), "PASS")
+
+    def test_boundary_4_concerns(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(4), "CONCERNS")
+
+    def test_minimum_1_concerns(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(1), "CONCERNS")
+
+    def test_maximum_10_passes(self) -> None:
+        self.assertEqual(verdict_for_llm_confidence(10), "PASS")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,13 @@ def verdict_for_collector_status(status: str) -> str:
     return "FAIL"
 
 
+def verdict_for_llm_confidence(confidence: int) -> str:
+    """§6.4: LLM confidence < 5 forces CONCERNS/needs-human."""
+    if confidence < 5:
+        return "CONCERNS"
+    return "PASS"
+
+
 def aggregate_verdicts(
     category_verdicts: dict[str, str],
     *,
