@@ -1,5 +1,16 @@
 ### Features
 
+- feat(gate): add gate readiness CLI command with risk file input (af52e03)
+- feat(gate): register readiness_gate verifier in VERIFIERS and VALID_VERIFIERS (22ac22d)
+- feat(gate): wire readiness gate into orchestrator with risk persistence and audit (a055284)
+- feat(gate): add GateReadinessCheck audit event (32b6cc4)
+- feat(gate): add readiness result persistence under _bmad/gate/readiness/ (22fef1c)
+- feat(gate): add check_readiness core with READY/BLOCKED/NEEDS_RISK verdicts (2c98aa3)
+- feat(gate): add story blocker resolution from forbidden_until (9fc41d4)
+- feat(gate): add risk profile to evidence record conversion (91d826b)
+- feat(gate): add risk profile persistence under _bmad/gate/risk/ (0c5240b)
+- feat(gate): add risk score to priority mapping with configurable thresholds (1502ba4)
+- feat(gate): add risk profile schema and validation (§6.1) (62e2ceb)
 - feat(gate): add remediation module with edit-authorization and review_continuation (23905d6)
 - feat(gate): add gate CLI commands and wire into orchestrator dispatch (07dd61a)
 - feat(gate): add run_production_gate lifecycle, verdict routing, and factory version resolution (2bd0990)
@@ -288,6 +299,7 @@
 
 ### Bug Fixes
 
+- fix(gate): add missing §8 M1 orchestration and §9.1 audit passthrough (80d8f8a)
 - fix(gate): use actual category name in generic rule rationale and add audit integration tests (6a2aaf0)
 - fix(collector): update hardcoded collector count in registry tests (28e75e0)
 - fix(collector): add invariants category and review fixes for collection-m6 (54d1804)
@@ -388,6 +400,10 @@
 
 ### Documentation
 
+- docs: add phase C gap report for extension-m12-risk-readiness (1b1d7ea)
+- docs: update CLAUDE.md with M12 risk-readiness module map (1d7c750)
+- docs(gate): add M12 risk-readiness implementation plan with gap analysis (0647c9f)
+- docs: update generated documentation (41ed709)
 - docs: update CLAUDE.md with M10 orchestrator wiring module map (21fd264)
 - docs(gate): add operator runbook with executable jq/CLI recipes (a8e2158)
 - docs(gate): add M10 orchestrator-wiring TDD plan with gap analysis (3312c46)
@@ -528,6 +544,8 @@
 
 ### Tests
 
+- test(gate): add edge case and boundary tests for risk profile and readiness gate (089102b)
+- test(gate): add readiness-to-production-gate bridge integration tests (501af78)
 - test(gate): add end-to-end integration and edge case tests for M10 orchestrator wiring (48d7843)
 - test(gate): add end-to-end round-trip and gate reuse validation tests (9939805)
 - test(gate): add edge case and determinism integration tests for verdict engine (cb3fbcb)
