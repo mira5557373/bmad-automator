@@ -93,6 +93,11 @@ class BumpProfileVersionTests(unittest.TestCase):
         bump_profile_version(profile, "feature")
         self.assertEqual(profile, original)
 
+    def test_invalid_change_type_rejected(self) -> None:
+        profile = copy.deepcopy(_BUMP_PROFILE)
+        with self.assertRaises(ValueError):
+            bump_profile_version(profile, "typo")
+
 
 _BASE_PROFILE = {
     "version": {"breaking": 1, "feature": 0},

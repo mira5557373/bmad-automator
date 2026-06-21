@@ -104,6 +104,16 @@ class RecordGateResultTests(unittest.TestCase):
         path = record_gate_result(self.tmp, gf, story_key="E1-001")
         self.assertIn("my-gate-42", path.name)
 
+    def test_rejects_path_traversal_gate_id(self) -> None:
+        gf = _make_gate_file(gate_id="../escape")
+        with self.assertRaises(ValueError):
+            record_gate_result(self.tmp, gf, story_key="E1-001")
+
+    def test_rejects_slash_in_gate_id(self) -> None:
+        gf = _make_gate_file(gate_id="foo/bar")
+        with self.assertRaises(ValueError):
+            record_gate_result(self.tmp, gf, story_key="E1-001")
+
 
 class LoadGateHistoryTests(unittest.TestCase):
     def setUp(self) -> None:

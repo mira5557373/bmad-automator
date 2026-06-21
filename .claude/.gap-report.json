@@ -1,99 +1,120 @@
 {
-  "pass": 1,
-  "critical_gaps": 4,
-  "architectural_gaps": 1,
-  "important_gaps": 2,
-  "minor_gaps": 2,
-  "deferred_gaps": 3,
-  "total_gaps_found": 12,
-  "gaps_fixed_this_pass": 4,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
+  "milestone": "extension-m15-learning-loop",
+  "reviewed_at": "2026-06-21",
+  "base_commit": "2e878a237ece82391dfd61cbd01307d57514a307",
+  "tests_passed": 2590,
+  "tests_skipped": 2,
+  "ruff_clean": true,
   "gap_summaries": [
     {
+      "id": "prod-1",
+      "tag": "[production]",
       "severity": "critical",
-      "location": "Task 16 / gate_orchestrator.py run_production_gate",
-      "description": "build_gate_file (verdict_engine.py) never stores breaking_hash in the gate file profile section. The breaking-hash reuse fallback reads gate_file.profile.breaking_hash, which would always be empty. Without enrichment in run_production_gate, the semver reuse path is dead code.",
-      "status": "fixed",
-      "fix": "Added run_production_gate enrichment step: after evaluate_gate returns, inject breaking_hash via compute_breaking_hash and re-persist the gate file for semver profiles."
+      "title": "Breaking-hash reuse bypasses factory_version check",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+      "line": 72,
+      "description": "The breaking-hash fallback in check_gate_reuse allowed gate reuse when only profile.hash differed but factory_version also changed. A gate from an older factory version could be reused with a newer version that has different adjudication logic.",
+      "fix": "Added factory_version equality check alongside breaking_hash comparison. Added test test_factory_version_change_blocks_breaking_hash_reuse.",
+      "status": "fixed"
     },
     {
-      "severity": "critical",
-      "location": "Task 5 / gate_metrics.py compute_gate_metrics",
-      "description": "Task 4 creates compute_gate_metrics with hardcoded flaky_categories=[] and timeout_categories=[]. Task 5 adds the detector functions but the prose instruction 'Update compute_gate_metrics to call these detectors' lacks code. An implementer could miss this, causing integration tests (Task 17) to fail because metrics.flaky_categories would always be empty.",
-      "status": "fixed",
-      "fix": "Added explicit code showing the updated return dict calling detect_flaky_categories(history) and detect_timeout_categories(history). Added two integration-level tests for compute_gate_metrics verifying the fields are populated."
+      "id": "prod-2",
+      "tag": "[production]",
+      "severity": "high",
+      "title": "gate_id not validated in gate_history filename construction",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_history.py",
+      "line": 73,
+      "description": "record_gate_result interpolated gate_id directly into a filename without validation, allowing path traversal via crafted gate_ids (e.g., '../escape').",
+      "fix": "Added _SAFE_GATE_ID regex validation matching evidence_io._validate_gate_id pattern. Added tests for path traversal and slash rejection.",
+      "status": "fixed"
     },
     {
-      "severity": "critical",
-      "location": "Task 15 / learning_loop.py run_learning_loop",
-      "description": "After apply_calibrations returns, the profile version is never bumped. The GateCalibrationAudit event would report identical old_version and new_version. Profile snapshots would not reflect that calibrations were applied.",
-      "status": "fixed",
-      "fix": "Added version bump after apply_calibrations: if any applied proposals have change_type='breaking', bump breaking; otherwise bump feature. Placed before the audit event emission so old_version/new_version reflect the actual change."
+      "id": "prod-3",
+      "tag": "[production]",
+      "severity": "high",
+      "title": "Bare except Exception swallows all learning-loop errors",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+      "line": 242,
+      "description": "The try/except around record_gate_for_learning in route_gate_verdict caught Exception, silently hiding programming bugs (TypeError, AttributeError) alongside expected OS errors.",
+      "fix": "Narrowed to except (OSError, ValueError) to still propagate programming errors while not blocking verdict routing on filesystem issues.",
+      "status": "fixed"
     },
     {
-      "severity": "critical",
-      "location": "Task 9 / tests/test_product_profile.py",
-      "description": "Tests reference _make_valid_profile() helper function that does not exist in the test file. All six VersionDictValidationTests would fail with NameError.",
-      "status": "fixed",
-      "fix": "Added _make_valid_profile() helper definition to the plan with all required profile fields, placed near the top of the test file before any test class."
+      "id": "prod-4",
+      "tag": "[production]",
+      "severity": "medium",
+      "title": "Duplicate burn-in proposals inflate calibration counts",
+      "file": "skills/bmad-story-automator/src/story_automator/core/profile_calibrator.py",
+      "line": 99,
+      "description": "propose_burnin_calibrations emitted one CalibrationProposal per flaky category, all targeting the same field (rules.test_quality.burn_in_runs). This inflated applied-count in audit events and retrospective summaries.",
+      "fix": "Emit a single proposal with all flaky categories listed in the rationale. Changed category to 'test_quality' since it targets a single field.",
+      "status": "fixed"
     },
     {
-      "severity": "architectural",
-      "location": "Task 16 / gate_orchestrator.py run_production_gate",
-      "description": "Breaking-hash enrichment requires a second persist_gate_file call after evaluate_gate, which already persists internally. This double-write is acceptable (gate evaluation is orders of magnitude more expensive) but creates a brief window where the on-disk file lacks breaking_hash.",
+      "id": "prod-5",
+      "tag": "[production]",
+      "severity": "medium",
+      "title": "_set_nested silently destroys non-dict intermediates",
+      "file": "skills/bmad-story-automator/src/story_automator/core/profile_calibrator.py",
+      "line": 150,
+      "description": "If an intermediate path segment existed but was not a dict (e.g., corrupted profile), _set_nested silently replaced it with an empty dict, destroying the existing value.",
+      "fix": "Raise ValueError when an intermediate exists but is not a dict. Added test test_non_dict_intermediate_raises.",
+      "status": "fixed"
+    },
+    {
+      "id": "post-impl-1",
+      "tag": "[post-impl]",
+      "severity": "low",
+      "title": "compute_category_trends not integrated into compute_gate_metrics",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_metrics.py",
+      "line": 55,
+      "description": "Plan Task 6 specified trends should be integrated via a 'category_trends' key in compute_gate_metrics return dict, but it was omitted.",
+      "fix": "Added 'category_trends': compute_category_trends(history) to the return dict.",
+      "status": "fixed"
+    },
+    {
+      "id": "post-impl-2",
+      "tag": "[post-impl]",
+      "severity": "low",
+      "title": "bump_profile_version does not validate change_type parameter",
+      "file": "skills/bmad-story-automator/src/story_automator/core/profile_versioning.py",
+      "line": 47,
+      "description": "Any string passed as change_type would silently do a feature bump via the else branch, masking typos.",
+      "fix": "Added ValueError guard for invalid change_type values. Added test test_invalid_change_type_rejected.",
+      "status": "fixed"
+    },
+    {
+      "id": "prod-6",
+      "tag": "[production]",
+      "severity": "medium",
+      "title": "check_gate_reuse relies on fragile string matching for reason classification",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+      "line": 72,
+      "description": "The condition 'profile.hash mismatch' in reason relies on exact wording from can_reuse_gate_file in evidence_io.py. If that message is reformatted, the breaking-hash fallback silently stops working.",
+      "fix_suggestion": "Refactor can_reuse_gate_file to return structured reason codes. Deferred: would require modifying evidence_io.py which is an m2 module not owned by this milestone.",
+      "status": "deferred"
+    },
+    {
+      "id": "prod-7",
+      "tag": "[production]",
+      "severity": "low",
+      "title": "load_gate_history has no size limit",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_history.py",
+      "line": 79,
+      "description": "No upper bound on records loaded. Mitigated by prune_gate_history capping at 1000 records, but no defensive limit if pruning is skipped.",
       "status": "accepted",
-      "fix": "Documented in the plan. Alternative (modifying verdict_engine.py) is blocked by the 'do not modify m1-m9' constraint."
+      "rationale": "Pruning to max_records=1000 bounds practical size. Adding a limit parameter adds complexity without clear benefit at current scale."
     },
     {
-      "severity": "important",
-      "location": "Task 16 / check_gate_reuse breaking-hash fallback",
-      "description": "The fallback uses string matching ('profile.hash mismatch' in reason) against can_reuse_gate_file's error message. If that message format changes, the fallback silently stops working.",
+      "id": "prod-8",
+      "tag": "[production]",
+      "severity": "low",
+      "title": "prune_gate_history preserves unparseable files unconditionally",
+      "file": "skills/bmad-story-automator/src/story_automator/core/gate_history.py",
+      "line": 147,
+      "description": "Corrupt JSON files are added to surviving list and never pruned, potentially accumulating over time.",
       "status": "accepted",
-      "fix": "The exact string is verified against evidence_io.py line 216. The coupling is acceptable because both modules are under the same project's control and the string is a stable part of the interface."
-    },
-    {
-      "severity": "important",
-      "location": "Task 15 / learning_loop.py",
-      "description": "run_learning_loop returns updated_profile but does not persist it. The operator must manually save the calibrated profile. This is by design (operator controls profile changes) but could surprise an integrator.",
-      "status": "accepted",
-      "fix": "Intentional: the learning loop proposes and applies in-memory; persistence is the caller's responsibility. The retrospective summary provides visibility into what changed."
-    },
-    {
-      "severity": "minor",
-      "location": "Task 10, Task 8",
-      "description": "Duplicate _BASE_PROFILE fixtures in test_profile_versioning.py and test_profile_calibrator.py. These could diverge over time if profile schema changes.",
-      "status": "accepted",
-      "fix": "Acceptable for test isolation. A shared test_fixtures.py module would add coupling between test files."
-    },
-    {
-      "severity": "minor",
-      "location": "Task 6",
-      "description": "compute_category_trends window test uses assertIn(trends.get('security'), ('improving', 'stable')) which accepts two outcomes.",
-      "status": "accepted",
-      "fix": "The test correctly accepts both because with only 3 PASS results, the first/second half comparison depends on the 10% tolerance threshold."
-    },
-    {
-      "severity": "deferred",
-      "location": "commands/gate_cmd.py",
-      "description": "No CLI command for running the learning loop or viewing gate history.",
-      "status": "deferred",
-      "fix": "CLI integration is a follow-up milestone. The learning loop is designed to be called programmatically from the orchestrator."
-    },
-    {
-      "severity": "deferred",
-      "location": "gate_history.py",
-      "description": "No concurrent-write protection for history records beyond write_atomic. Timestamp-based filename collision is possible if two gate evaluations complete in the same second with the same gate_id.",
-      "status": "deferred",
-      "fix": "Acceptable for single-user threat model (per project memory). The gate_id collision with same-second completion is extremely unlikely in practice."
-    },
-    {
-      "severity": "deferred",
-      "location": "gate_history.py / prune_gate_history",
-      "description": "No CLI command to invoke pruning. prune_gate_history is available as Python API only.",
-      "status": "deferred",
-      "fix": "CLI integration is a follow-up. Pruning could be wired into the learning loop itself as an optional step."
+      "rationale": "Conservative choice — deleting unreadable files could hide data corruption. Unparseable files are unlikely in practice since writes use write_atomic + canonical_json."
     }
   ]
 }

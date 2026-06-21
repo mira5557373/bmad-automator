@@ -224,6 +224,19 @@ class ApplyCalibrationsTests(unittest.TestCase):
         self.assertEqual(applied, [])
         self.assertEqual(deferred, [])
 
+    def test_non_dict_intermediate_raises(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        profile["rules"] = "not-a-dict"
+        proposal = CalibrationProposal(
+            category="correctness",
+            field_path="rules.test_quality.burn_in_runs",
+            old_value=5, new_value=7,
+            rationale="flaky", confidence=0.8,
+            change_type="feature",
+        )
+        with self.assertRaises(ValueError):
+            apply_calibrations(profile, [proposal])
+
 
 if __name__ == "__main__":
     unittest.main()

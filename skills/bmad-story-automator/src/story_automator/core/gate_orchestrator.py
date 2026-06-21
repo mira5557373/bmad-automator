@@ -75,7 +75,8 @@ def check_gate_reuse(
         if has_semver_profile(profile):
             current_bh = compute_breaking_hash(profile)
             old_bh = (gate_file.get("profile") or {}).get("breaking_hash", "")
-            if old_bh and current_bh == old_bh:
+            old_fv = gate_file.get("factory_version", "")
+            if old_bh and current_bh == old_bh and old_fv == factory_version:
                 return gate_file, ""
 
     if audit_policy is not None and audit_path is not None:
@@ -244,7 +245,7 @@ def route_gate_verdict(
             project_root, gate_file,
             story_key=story_key, remediation_cycle=remediation_cycle,
         )
-    except Exception:
+    except (OSError, ValueError):
         pass
 
     overall = gate_file.get("overall", "FAIL")

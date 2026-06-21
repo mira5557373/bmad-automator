@@ -555,6 +555,54 @@ class BreakingHashReuseTests(unittest.TestCase):
         )
         self.assertIsNotNone(gate_file, f"Expected reuse, got rejection: {reason}")
 
+    def test_factory_version_change_blocks_breaking_hash_reuse(self) -> None:
+        import copy
+        from story_automator.core.gate_orchestrator import check_gate_reuse
+        from story_automator.core.evidence_io import persist_gate_file
+        from story_automator.core.profile_versioning import compute_breaking_hash
+        from story_automator.core.product_profile import compute_profile_hash
+
+        profile_v1 = {
+            "version": {"breaking": 1, "feature": 0},
+            "id": "test",
+            "matrix": {"P0": {"coverage_pct": 100, "levels": ["u"]},
+                       "P1": {"coverage_pct": 90, "levels": ["u"]},
+                       "P2": {"coverage_pct": 50, "levels": ["u"]},
+                       "P3": {"coverage_pct": 20, "levels": ["s"]}},
+            "categories": {"code": [], "system": []},
+            "categories_na": [], "rules": {},
+            "timeouts": {"security": 300},
+            "cost_tier": {}, "forbidden_until": {},
+            "invariants": {}, "toolchain": {},
+            "seed_template": {},
+            "snapshot": {"relativeDir": "_bmad-output/story-automator/profile-snapshots"},
+        }
+        persist_gate_file(self.tmp, {
+            "gate_id": "g-001", "schema_version": 1,
+            "target": {"kind": "story", "id": "s1"},
+            "tier": "code", "commit_sha": "abc123",
+            "scanner_data_snapshot": "",
+            "profile": {
+                "id": "test", "version": {"breaking": 1, "feature": 0},
+                "hash": compute_profile_hash(profile_v1),
+                "breaking_hash": compute_breaking_hash(profile_v1),
+            },
+            "factory_version": "1.15.0",
+            "risk_profile_ref": "",
+            "categories": {"correctness": {"verdict": "PASS"}},
+            "overall": "PASS", "waivers": [],
+            "evidence_bundle_hash": "eebb",
+        })
+
+        profile_v2 = copy.deepcopy(profile_v1)
+        profile_v2["version"] = {"breaking": 1, "feature": 1}
+        profile_v2["timeouts"]["security"] = 600
+
+        gate_file, reason = check_gate_reuse(
+            self.tmp, "g-001", "abc123", profile_v2, "2.0.0",
+        )
+        self.assertIsNone(gate_file, "Expected rejection due to factory_version change")
+
 
 if __name__ == "__main__":
     unittest.main()

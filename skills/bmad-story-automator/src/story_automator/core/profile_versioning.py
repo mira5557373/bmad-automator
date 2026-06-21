@@ -53,6 +53,10 @@ def bump_profile_version(
     change_type="feature" bumps the feature version.
     change_type="breaking" bumps breaking and resets feature to 0.
     """
+    if change_type not in ("feature", "breaking"):
+        raise ValueError(
+            f"change_type must be 'feature' or 'breaking', got {change_type!r}"
+        )
     result = copy.deepcopy(profile)
     pv = parse_profile_version(result)
     if change_type == "breaking":

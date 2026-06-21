@@ -97,17 +97,17 @@ def propose_burnin_calibrations(
         return []
 
     return [CalibrationProposal(
-        category=cat,
+        category="test_quality",
         field_path="rules.test_quality.burn_in_runs",
         old_value=current_burnin,
         new_value=proposed,
         rationale=(
-            f"flaky category {cat} detected; "
+            f"flaky categories {', '.join(flaky_cats)} detected; "
             f"raising burn-in from {current_burnin} to {proposed}"
         ),
         confidence=0.8,
         change_type="breaking",
-    ) for cat in flaky_cats]
+    )]
 
 
 def propose_all_calibrations(
@@ -151,7 +151,11 @@ def _set_nested(obj: dict[str, Any], path: str, value: Any) -> None:
     """Set a value at a dotted path in a nested dict, creating intermediates."""
     parts = path.split(".")
     for part in parts[:-1]:
-        if part not in obj or not isinstance(obj[part], dict):
+        if part not in obj:
             obj[part] = {}
+        elif not isinstance(obj[part], dict):
+            raise ValueError(
+                f"cannot traverse non-dict at {part!r} in path {path!r}"
+            )
         obj = obj[part]
     obj[parts[-1]] = value

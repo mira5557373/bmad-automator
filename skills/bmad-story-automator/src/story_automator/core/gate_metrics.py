@@ -61,6 +61,7 @@ def compute_gate_metrics(
         "per_category": per_cat,
         "flaky_categories": detect_flaky_categories(history),
         "timeout_categories": detect_timeout_categories(history),
+        "category_trends": compute_category_trends(history),
     }
 
 

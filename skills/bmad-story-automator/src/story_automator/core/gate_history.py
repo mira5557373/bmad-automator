@@ -10,9 +10,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import re
+
 from .gate_schema import canonical_json
 from .trust_boundary import assert_host_context
 from .utils import ensure_dir, iso_now, write_atomic
+
+
+_SAFE_GATE_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 _HISTORY_DIR = Path("_bmad") / "gate" / "history"
@@ -70,6 +75,8 @@ def record_gate_result(
         .replace("T", "-").replace("Z", "")
     )
     gate_id = record["gate_id"]
+    if not gate_id or not _SAFE_GATE_ID.match(gate_id) or ".." in gate_id:
+        raise ValueError(f"gate_id contains invalid path characters: {gate_id!r}")
     filename = f"{timestamp}-{gate_id}.json"
     target = history_dir / filename
     write_atomic(target, canonical_json(record) + "\n")
