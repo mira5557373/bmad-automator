@@ -279,5 +279,140 @@ class FullPipelineTests(unittest.TestCase):
         self.assertIn("mypy", ids)
 
 
+class SecurityCategoryPipelineTests(unittest.TestCase):
+    """Pipeline tests with security, license, compliance, supply_chain categories."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-sec-integration-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.base_sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _security_profile(self) -> dict[str, Any]:
+        return {
+            "categories": {
+                "code": ["security", "license", "compliance", "supply_chain"],
+                "system": [],
+            },
+            "categories_na": [],
+            "rules": {
+                "security": {},
+                "license": {"forbidden": ["BSL-1.1"], "boundary": {}},
+                "compliance": {},
+                "supply_chain": {},
+            },
+            "timeouts": {},
+        }
+
+    def _security_registry(self) -> CollectorRegistry:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="semgrep-security",
+            tool="python3",
+            category="security",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="license-check-license",
+            tool="python3",
+            category="license",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="compliance-rules-compliance",
+            tool="python3",
+            category="compliance",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="sbom-supply_chain",
+            tool="python3",
+            category="supply_chain",
+            build_cmd=_ok_cmd,
+        ))
+        return reg
+
+    def test_all_security_categories_pass(self) -> None:
+        profile = self._security_profile()
+        reg = self._security_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-sec-pass", self.base_sha,
+                profile, reg,
+            )
+        self.assertEqual(len(outcomes), 4)
+        for outcome in outcomes:
+            self.assertEqual(outcome.evidence["status"], "ok")
+        records = load_evidence_bundle(self.project_root, "gate-sec-pass")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(aggregate_verdicts(verdicts), "PASS")
+
+    def test_security_fail_propagates(self) -> None:
+        profile = self._security_profile()
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="semgrep-security",
+            tool="python3",
+            category="security",
+            build_cmd=_fail_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="license-check-license",
+            tool="python3",
+            category="license",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            run_gate_collectors(
+                self.project_root, "gate-sec-fail", self.base_sha,
+                profile, reg,
+            )
+        records = load_evidence_bundle(self.project_root, "gate-sec-fail")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(verdicts["security"], "FAIL")
+        self.assertEqual(verdicts["license"], "PASS")
+        self.assertEqual(aggregate_verdicts(verdicts), "FAIL")
+
+    def test_kill_switch_security_tool(self) -> None:
+        profile = self._security_profile()
+        profile["rules"]["security"]["disabled_tools"] = ["python3"]
+        reg = self._security_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-sec-kill", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("security", run_cats)
+        self.assertIn("license", run_cats)
+
+    def test_categories_na_excludes_compliance(self) -> None:
+        profile = self._security_profile()
+        profile["categories_na"] = ["compliance"]
+        reg = self._security_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-sec-na", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("compliance", run_cats)
+        self.assertIn("security", run_cats)
+
+
 if __name__ == "__main__":
     unittest.main()
