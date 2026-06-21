@@ -199,6 +199,41 @@ class GateListActionTests(unittest.TestCase):
         self.assertEqual(len(output["verdicts"]), 1)
 
 
+class GateSummaryActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_summary_empty_project(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_dispatch(["summary"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(output["total_verdicts"], 0)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_summary_with_verdicts(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        for gid, verdict in [("g1", "PASS"), ("g2", "FAIL")]:
+            gate = make_gate_file(
+                gate_id=gid,
+                target={"kind": "story", "id": f"s-{gid}"},
+                commit_sha="abc",
+                profile={"id": "test", "version": 1, "hash": "aabb"},
+                factory_version="1.15.0",
+                categories={"c": {"verdict": verdict, "required": {}, "actual": {}, "rationale": "ok"}},
+                overall=verdict,
+            )
+            persist_gate_file(self.tmp, gate)
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            gate_dispatch(["summary"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(output["total_verdicts"], 2)
+        self.assertEqual(output["by_verdict"]["PASS"], 1)
+        self.assertEqual(output["by_verdict"]["FAIL"], 1)
+
+
 class GateDoctorActionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()

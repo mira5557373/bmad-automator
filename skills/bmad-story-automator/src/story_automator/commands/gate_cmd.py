@@ -11,6 +11,7 @@ from typing import Any
 from story_automator.core.evidence_io import read_gate_marker
 from story_automator.core.gate_ops import (
     gate_doctor as _gate_doctor_fn,
+    gate_summary as _gate_summary_fn,
     list_verdicts as _list_verdicts_fn,
 )
 from story_automator.core.gate_status import (
@@ -114,6 +115,13 @@ def gate_list_action(args: list[str]) -> int:
     return 0
 
 
+def gate_summary_action(args: list[str]) -> int:
+    project_root = _project_root()
+    summary = _gate_summary_fn(project_root)
+    print_json(summary)
+    return 0
+
+
 def gate_doctor_action(args: list[str]) -> int:
     project_root = _project_root()
     result = _gate_doctor_fn(project_root)
@@ -132,6 +140,7 @@ def gate_dispatch(args: list[str]) -> int:
         "invalidate": gate_invalidate_action,
         "doctor": gate_doctor_action,
         "list": gate_list_action,
+        "summary": gate_summary_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -149,3 +158,4 @@ def _gate_usage() -> None:
     print("  gate invalidate <story|epic>", file=sys.stderr)
     print("  gate doctor", file=sys.stderr)
     print("  gate list [--target=<id>] [--verdict=<PASS|FAIL|...>]", file=sys.stderr)
+    print("  gate summary", file=sys.stderr)
