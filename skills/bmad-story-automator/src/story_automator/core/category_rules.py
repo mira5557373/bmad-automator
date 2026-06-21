@@ -212,11 +212,104 @@ def generic_rule(
 
 CategoryRuleFn = Callable[[list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
 
+def reliability_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10/HR6(a): RTO/RPO within profile limits."""
+    status = worst_evidence_status(evidence)
+    rules = rule_for(profile, "reliability")
+    max_rto = int(rules.get("max_rto_seconds", 300))
+    max_rpo = int(rules.get("max_rpo_seconds", 60))
+    rto = float(_aggregate_metrics(evidence, "rto_seconds", 0))
+    rpo = float(_aggregate_metrics(evidence, "rpo_seconds", 0))
+    actual = {"rto_seconds": rto, "rpo_seconds": rpo, "status": status}
+    req = {"max_rto_seconds": max_rto, "max_rpo_seconds": max_rpo}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    violations: list[str] = []
+    if rto > max_rto:
+        violations.append(f"RTO {rto}s > max {max_rto}s")
+    if rpo > max_rpo:
+        violations.append(f"RPO {rpo}s > max {max_rpo}s")
+    if violations:
+        return _make_category_result("FAIL", req, actual, "; ".join(violations))
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "reliability checks passed")
+
+
+def resilience_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10/HR6(b): all chaos scenarios passed."""
+    status = worst_evidence_status(evidence)
+    total = int(_aggregate_metrics(evidence, "scenarios_total", 0))
+    passed = int(_aggregate_metrics(evidence, "scenarios_passed", 0))
+    actual = {"scenarios_total": total, "scenarios_passed": passed, "status": status}
+    req = {"all_scenarios_pass": True}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if total == 0:
+        return _make_category_result("FAIL", req, actual, "no resilience scenarios executed")
+    if passed < total:
+        failed = total - passed
+        return _make_category_result("FAIL", req, actual, f"{failed} scenario(s) failed out of {total}")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "all resilience scenarios passed")
+
+
+def blast_radius_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10/HR6(d): tenant SLO isolation under load."""
+    status = worst_evidence_status(evidence)
+    slo_breached = bool(_aggregate_metrics(evidence, "slo_breached", False))
+    actual = {"slo_breached": slo_breached, "status": status}
+    req = {"slo_breached": False}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if slo_breached:
+        return _make_category_result("FAIL", req, actual, "tenant SLO breached during load test")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "blast radius check passed")
+
+
+def durable_hitl_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10/HR6(c): Temporal signal survived pod kill."""
+    status = worst_evidence_status(evidence)
+    survived = bool(_aggregate_metrics(evidence, "signal_survived", False))
+    actual = {"signal_survived": survived, "status": status}
+    req = {"signal_survived": True}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if not survived:
+        return _make_category_result("FAIL", req, actual, "Temporal signal lost after pod kill")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "durable HITL check passed")
+
+
 CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "correctness": correctness_rule,
     "security": security_rule,
     "static": static_rule,
     "license": license_rule,
+    "reliability": reliability_rule,
+    "resilience": resilience_rule,
+    "blast_radius": blast_radius_rule,
+    "durable_hitl": durable_hitl_rule,
 }
 
 
