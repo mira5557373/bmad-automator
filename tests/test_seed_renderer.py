@@ -413,5 +413,74 @@ class ResilienceFactoryObservabilityTemplateTests(unittest.TestCase):
         self.assertIn("tst", out)
 
 
+class EndToEndIntegrationTests(unittest.TestCase):
+    """Full round-trip: load profile → resolve template → instantiate → verify."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._target = Path(self._tmp) / "project"
+        self._target.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_full_round_trip(self):
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.seed_template import seed_template_for_profile
+
+        profile = load_bundled_profile("msme-erp")
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        self.assertIsNotNone(manifest)
+
+        result = instantiate_template(
+            bundle_dir, manifest, self._target,
+            {"product_name": "TestERP", "service_prefix": "erp"},
+        )
+        self.assertEqual(len(result.written), 9)
+        self.assertEqual(result.skipped, [])
+        self.assertEqual(result.errors, [])
+
+    def test_round_trip_skip_existing(self):
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.seed_template import seed_template_for_profile
+
+        profile = load_bundled_profile("msme-erp")
+        manifest, bundle_dir = seed_template_for_profile(profile)
+
+        pre_existing = self._target / "tests" / "contracts" / "conftest.py"
+        pre_existing.parent.mkdir(parents=True)
+        pre_existing.write_text("existing", encoding="utf-8")
+
+        result = instantiate_template(
+            bundle_dir, manifest, self._target,
+            {"product_name": "TestERP", "service_prefix": "erp"},
+        )
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(len(result.written), 8)
+        self.assertEqual(pre_existing.read_text(encoding="utf-8"), "existing")
+
+    def test_default_profile_no_op(self):
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.seed_template import seed_template_for_profile
+
+        profile = load_bundled_profile("default")
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        self.assertIsNone(manifest)
+        self.assertIsNone(bundle_dir)
+
+    def test_idempotent_skip(self):
+        from story_automator.core.product_profile import load_bundled_profile
+        from story_automator.core.seed_template import seed_template_for_profile
+
+        profile = load_bundled_profile("msme-erp")
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        variables = {"product_name": "TestERP", "service_prefix": "erp"}
+
+        instantiate_template(bundle_dir, manifest, self._target, variables)
+        result2 = instantiate_template(bundle_dir, manifest, self._target, variables)
+        self.assertEqual(len(result2.skipped), 9)
+        self.assertEqual(result2.written, [])
+
+
 if __name__ == "__main__":
     unittest.main()
