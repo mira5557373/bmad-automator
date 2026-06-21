@@ -1,7 +1,8 @@
 """Test-quality-category evidence collectors.
 
 PASS rule: TEA test-review >= band; 0 flaky over burn-in N runs; no hard-waits.
-Collectors: burn-in, hard-wait scanner, TEA test-review reader.
+Collectors: burn-in, hard-wait scanner, TEA test-review reader,
+TEA ATDD verify-RED, DoD verifier, TEA gate-decision composition.
 """
 from __future__ import annotations
 
@@ -45,6 +46,27 @@ def _test_review_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
     ]
 
 
+def _atdd_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return [
+        sys.executable, str(_CHECKS_DIR / "atdd_check.py"),
+        checkout,
+    ]
+
+
+def _dod_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return [
+        sys.executable, str(_CHECKS_DIR / "dod_check.py"),
+        checkout,
+    ]
+
+
+def _tea_gate_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return [
+        sys.executable, str(_CHECKS_DIR / "tea_gate_check.py"),
+        checkout,
+    ]
+
+
 BURN_IN = CollectorConfig(
     collector_id="burn-in-test-quality",
     tool="python3",
@@ -70,4 +92,32 @@ TEST_REVIEW = CollectorConfig(
     file_patterns=frozenset({"*.py", "*.ts", "*.tsx", "*.js", "*.jsx"}),
 )
 
-COLLECTORS: list[CollectorConfig] = [BURN_IN, HARD_WAIT, TEST_REVIEW]
+ATDD_RED = CollectorConfig(
+    collector_id="atdd-red-test-quality",
+    tool="python3",
+    category="test_quality",
+    build_cmd=_atdd_cmd,
+    deterministic=False,
+    file_patterns=frozenset({"*.py", "*.ts", "*.tsx", "*.js", "*.jsx"}),
+)
+
+DOD = CollectorConfig(
+    collector_id="dod-test-quality",
+    tool="python3",
+    category="test_quality",
+    build_cmd=_dod_cmd,
+    file_patterns=frozenset({"*.md"}),
+)
+
+TEA_GATE = CollectorConfig(
+    collector_id="tea-gate-test-quality",
+    tool="python3",
+    category="test_quality",
+    build_cmd=_tea_gate_cmd,
+    deterministic=False,
+    file_patterns=frozenset({"*.json"}),
+)
+
+COLLECTORS: list[CollectorConfig] = [
+    BURN_IN, HARD_WAIT, TEST_REVIEW, ATDD_RED, DOD, TEA_GATE,
+]

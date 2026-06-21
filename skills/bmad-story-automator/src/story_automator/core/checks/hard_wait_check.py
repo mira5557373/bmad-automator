@@ -75,7 +75,8 @@ def scan_file(filepath: str, checkout: str) -> list[str]:
 def scan_directory(checkout: str) -> list[str]:
     """Walk checkout and scan test files for hard-wait patterns."""
     all_findings: list[str] = []
-    for root, _dirs, files in os.walk(checkout):
+    for root, dirs, files in os.walk(checkout):
+        dirs.sort()
         for fname in sorted(files):
             if not _is_test_file(fname):
                 continue
@@ -90,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: hard_wait_check.py <checkout>")
         return 2
     checkout = args[0]
+    if not os.path.isdir(checkout):
+        print(f"checkout directory does not exist: {checkout}")
+        return 2
     findings = scan_directory(checkout)
     for f in findings:
         print(f)

@@ -3,6 +3,7 @@
 Standalone script invoked by the burn-in-test-quality collector.
 Runs the supplied test command N times, tracks per-run exit codes,
 and optionally parses JUnit XML for per-test flakiness.
+Supports diff-scoped selective execution via --changed-files.
 Exit 0 = no flaky, exit 1 = flaky or all-fail, exit 2 = usage.
 
 Stdout includes a BURN_IN_RESULT: JSON line with metrics.
@@ -10,11 +11,13 @@ Stdlib only — no story_automator imports.
 """
 from __future__ import annotations
 
+import fnmatch
 import glob
 import json
 import os
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 
 
@@ -34,6 +37,13 @@ def _parse_junit_tests(xml_path: str) -> dict[str, str]:
         else:
             results[name] = "pass"
     return results
+
+
+def _mtime_safe(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
 
 
 def _find_junit_xmls(checkout: str) -> list[str]:
@@ -68,15 +78,52 @@ def _detect_flaky_tests(
     return flaky
 
 
+_TEST_PATTERNS = ["test_*.py", "*_test.py", "*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"]
+_SRC_TO_TEST = [
+    ("src/", "tests/test_"),
+    ("lib/", "tests/test_"),
+]
+
+
+def _select_test_files(checkout: str, changed_files: list[str]) -> list[str]:
+    """Map changed source files to relevant test files for selective execution."""
+    candidates: set[str] = set()
+    for cf in changed_files:
+        basename = os.path.basename(cf)
+        if any(fnmatch.fnmatch(basename, pat) for pat in _TEST_PATTERNS):
+            full = os.path.join(checkout, cf)
+            if os.path.isfile(full):
+                candidates.add(full)
+            continue
+        stem = os.path.splitext(basename)[0]
+        for src_prefix, test_prefix in _SRC_TO_TEST:
+            if cf.startswith(src_prefix):
+                test_name = f"test_{stem}.py"
+                rel = cf[len(src_prefix):]
+                test_dir = os.path.dirname(rel)
+                test_path = os.path.join(checkout, "tests", test_dir, test_name)
+                if os.path.isfile(test_path):
+                    candidates.add(test_path)
+        for pat in [f"test_{stem}.py", f"{stem}_test.py"]:
+            for root, dirs, files in os.walk(os.path.join(checkout, "tests")):
+                dirs.sort()
+                if pat in files:
+                    candidates.add(os.path.join(root, pat))
+    return sorted(candidates)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) < 3 or "--" not in args:
-        print("usage: burn_in_check.py <checkout> <n_runs> [--timeout <secs>] -- <test_command...>")
+        print("usage: burn_in_check.py <checkout> <n_runs> [--timeout <secs>] [--changed-files f1,f2] -- <test_command...>")
         return 2
 
     sep = args.index("--")
     positional = args[:sep]
     checkout = positional[0]
+    if not os.path.isdir(checkout):
+        print(f"checkout directory does not exist: {checkout}")
+        return 2
     try:
         n_runs = int(positional[1])
     except ValueError:
@@ -87,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     per_run_timeout = 300
+    changed_files: list[str] = []
     if "--timeout" in positional:
         ti = positional.index("--timeout")
         if ti + 1 < len(positional):
@@ -95,17 +143,28 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 print(f"invalid timeout: {positional[ti + 1]}")
                 return 2
+    if "--changed-files" in positional:
+        ci = positional.index("--changed-files")
+        if ci + 1 < len(positional):
+            changed_files = [f for f in positional[ci + 1].split(",") if f.strip()]
 
     test_cmd = args[sep + 1:]
     if not test_cmd:
         print("test command is empty")
         return 2
 
+    if changed_files:
+        selected = _select_test_files(checkout, changed_files)
+        if selected:
+            test_cmd = test_cmd + selected
+            print(f"selective execution: {len(selected)} test file(s) from {len(changed_files)} changed file(s)")
+
     passed_runs = 0
     failed_runs = 0
     per_run_tests: list[dict[str, str]] = []
 
     for run_idx in range(n_runs):
+        run_start = time.time()
         try:
             proc = subprocess.run(
                 test_cmd, cwd=checkout,
@@ -129,8 +188,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"run {run_idx + 1}/{n_runs}: FAIL (exit {proc.returncode})")
 
         junit_files = _find_junit_xmls(checkout)
+        fresh = [f for f in junit_files if _mtime_safe(f) >= run_start]
+        if not fresh:
+            fresh = junit_files
         run_tests: dict[str, str] = {}
-        for jf in junit_files:
+        for jf in fresh:
             run_tests.update(_parse_junit_tests(jf))
         per_run_tests.append(run_tests)
 

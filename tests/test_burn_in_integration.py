@@ -40,6 +40,9 @@ class TestTestQualityPipeline(unittest.TestCase):
         self.assertIn("burn-in-test-quality", ids)
         self.assertIn("hard-wait-test-quality", ids)
         self.assertIn("test-review-test-quality", ids)
+        self.assertIn("atdd-red-test-quality", ids)
+        self.assertIn("dod-test-quality", ids)
+        self.assertIn("tea-gate-test-quality", ids)
 
     def test_registry_includes_mutation(self):
         reg = CollectorRegistry()

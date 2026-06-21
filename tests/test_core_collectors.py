@@ -55,10 +55,13 @@ _EXPECTED_IDS = frozenset(
         "perf-lint-performance",
         # accessibility (1)
         "axe-accessibility",
-        # test_quality (3)
+        # test_quality (6)
         "burn-in-test-quality",
         "hard-wait-test-quality",
         "test-review-test-quality",
+        "atdd-red-test-quality",
+        "dod-test-quality",
+        "tea-gate-test-quality",
         # mutation (1)
         "mutmut-mutation",
         # observability (3)
@@ -133,7 +136,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 43)
+        self.assertEqual(len(reg.all_collectors()), 46)
 
     def test_exported_id_set(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS

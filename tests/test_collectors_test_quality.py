@@ -3,8 +3,11 @@ from __future__ import annotations
 import unittest
 
 from story_automator.core.collectors.test_quality import (
+    ATDD_RED,
     BURN_IN,
+    DOD,
     HARD_WAIT,
+    TEA_GATE,
     TEST_REVIEW,
     COLLECTORS,
 )
@@ -64,13 +67,58 @@ class TestTestReviewCollector(unittest.TestCase):
         self.assertIn("test_review_check.py", cmd[1])
 
 
+class TestAtddRedCollector(unittest.TestCase):
+    def test_category_is_test_quality(self):
+        self.assertEqual(ATDD_RED.category, "test_quality")
+
+    def test_collector_id(self):
+        self.assertEqual(ATDD_RED.collector_id, "atdd-red-test-quality")
+
+    def test_deterministic_is_false(self):
+        self.assertFalse(ATDD_RED.deterministic)
+
+    def test_build_cmd(self):
+        cmd = ATDD_RED.build_cmd("/checkout", {})
+        self.assertIn("atdd_check.py", cmd[1])
+
+
+class TestDodCollector(unittest.TestCase):
+    def test_category_is_test_quality(self):
+        self.assertEqual(DOD.category, "test_quality")
+
+    def test_collector_id(self):
+        self.assertEqual(DOD.collector_id, "dod-test-quality")
+
+    def test_build_cmd(self):
+        cmd = DOD.build_cmd("/checkout", {})
+        self.assertIn("dod_check.py", cmd[1])
+
+
+class TestTeaGateCollector(unittest.TestCase):
+    def test_category_is_test_quality(self):
+        self.assertEqual(TEA_GATE.category, "test_quality")
+
+    def test_collector_id(self):
+        self.assertEqual(TEA_GATE.collector_id, "tea-gate-test-quality")
+
+    def test_deterministic_is_false(self):
+        self.assertFalse(TEA_GATE.deterministic)
+
+    def test_build_cmd(self):
+        cmd = TEA_GATE.build_cmd("/checkout", {})
+        self.assertIn("tea_gate_check.py", cmd[1])
+
+
 class TestCollectorsList(unittest.TestCase):
-    def test_all_three_present(self):
-        self.assertEqual(len(COLLECTORS), 3)
+    def test_all_six_present(self):
+        self.assertEqual(len(COLLECTORS), 6)
         ids = {c.collector_id for c in COLLECTORS}
         self.assertIn("burn-in-test-quality", ids)
         self.assertIn("hard-wait-test-quality", ids)
         self.assertIn("test-review-test-quality", ids)
+        self.assertIn("atdd-red-test-quality", ids)
+        self.assertIn("dod-test-quality", ids)
+        self.assertIn("tea-gate-test-quality", ids)
 
     def test_all_category_test_quality(self):
         for c in COLLECTORS:

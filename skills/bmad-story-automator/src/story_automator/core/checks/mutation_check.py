@@ -110,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: mutation_check.py <checkout> <tool> <threshold> [changed_files]")
         return 2
     checkout = args[0]
+    if not os.path.isdir(checkout):
+        print(f"checkout directory does not exist: {checkout}")
+        return 2
     tool = args[1]
     if tool not in VALID_TOOLS:
         print(f"unsupported mutation tool: {tool}; valid: {sorted(VALID_TOOLS)}")

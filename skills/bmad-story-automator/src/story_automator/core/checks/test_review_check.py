@@ -41,6 +41,9 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: test_review_check.py <checkout> <min_score>")
         return 2
     checkout = args[0]
+    if not os.path.isdir(checkout):
+        print(f"checkout directory does not exist: {checkout}")
+        return 2
     try:
         min_score = float(args[1])
     except ValueError:

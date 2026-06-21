@@ -1,86 +1,118 @@
 {
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 3,
-  "important_gaps": 0,
-  "minor_gaps": 3,
-  "deferred_gaps": 2,
-  "total_gaps_found": 13,
-  "gaps_fixed_this_pass": 5,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
+  "milestone": "extension-m13-test-burn-in",
+  "base_commit": "8f0e2e8dd3a8bf8523ec9afb119261719e67d9e4",
+  "review_date": "2026-06-21",
+  "test_results": {
+    "total": 2603,
+    "passed": 2603,
+    "failed": 0,
+    "skipped": 2,
+    "ruff_clean": true
+  },
   "gap_summaries": [
     {
-      "severity": "fixed",
-      "title": "Task 6 test code references undefined _parse_review_result helper",
-      "resolution": "Extracted Task 6 tests into standalone tests/test_check_test_review.py with full imports and _parse_review_result helper"
+      "id": "G01",
+      "tag": "[post-impl]",
+      "title": "JUnit XML stale data contamination across burn-in runs",
+      "file": "core/checks/burn_in_check.py",
+      "description": "Burn-in runs could accumulate JUnit XML results from prior iterations, inflating pass/fail counts. Fixed by recording run_start timestamp and filtering JUnit files by mtime freshness.",
+      "fix": "Added time import, run_start = time.time() before subprocess, _mtime_safe() helper, filter JUnit files by mtime >= run_start with fallback to all files."
     },
     {
-      "severity": "fixed",
-      "title": "Task 10 does not update _EXPECTED_IDS, _EXPECTED_CATEGORIES, and collector count in test_core_collectors.py",
-      "resolution": "Added explicit instructions to update _EXPECTED_IDS (+4 IDs), _EXPECTED_CATEGORIES (+2 categories), and test_collector_count (39 -> 43)"
+      "id": "G02",
+      "tag": "[post-impl]",
+      "title": "Non-deterministic directory walk order in hard_wait_check",
+      "file": "core/checks/hard_wait_check.py",
+      "description": "os.walk does not guarantee directory order, causing non-deterministic output across platforms. Fixed by sorting dirs in-place.",
+      "fix": "Added dirs.sort() in scan_directory for deterministic walk order."
     },
     {
-      "severity": "fixed",
-      "title": "burn_in_check.py per-run timeout hardcoded at 300s",
-      "resolution": "Added --timeout CLI flag to burn_in_check.py, and updated _burn_in_cmd to derive per_run_timeout from profile.timeouts.test_quality / burn_in_runs"
+      "id": "G03",
+      "tag": "[production]",
+      "title": "Missing checkout directory validation in burn_in_check",
+      "file": "core/checks/burn_in_check.py",
+      "description": "No validation that the checkout argument is a real directory before proceeding.",
+      "fix": "Added os.path.isdir check with stderr message and exit(2) on failure."
     },
     {
-      "severity": "fixed",
-      "title": "Task 5 references test_review_check.py before Task 6 creates it",
-      "resolution": "Added dependency note in Task 6 explaining implementors should create test_review_check.py before running Task 5's test suite"
+      "id": "G04",
+      "tag": "[production]",
+      "title": "Missing checkout directory validation in hard_wait_check",
+      "file": "core/checks/hard_wait_check.py",
+      "description": "No validation that the checkout argument is a real directory before proceeding.",
+      "fix": "Added os.path.isdir check with stderr message and exit(2) on failure."
     },
     {
-      "severity": "fixed",
-      "title": "Task 6 tests embedded inline in test_collectors_test_quality.py missing imports",
-      "resolution": "Moved to standalone test file tests/test_check_test_review.py with all needed imports; updated File Structure and Task 12 accordingly"
+      "id": "G05",
+      "tag": "[production]",
+      "title": "Missing checkout directory validation in mutation_check",
+      "file": "core/checks/mutation_check.py",
+      "description": "No validation that the checkout argument is a real directory before proceeding.",
+      "fix": "Added os.path.isdir check with stderr message and exit(2) on failure."
     },
     {
-      "severity": "architectural",
-      "title": "Evidence metrics not populated by production subprocess flow",
-      "detail": "run_collector_with_timeout creates evidence with metrics={} -- check script stdout metrics never flow into evidence.metrics. Existing rules (correctness, security, license) follow the same pattern: rule tests hand-craft evidence with metrics, production flow works via status only. Pre-existing architecture limitation, not M13-specific.",
-      "mitigation": "Consistent with existing architecture; no M13 fix needed"
+      "id": "G06",
+      "tag": "[production]",
+      "title": "Missing checkout directory validation in test_review_check",
+      "file": "core/checks/test_review_check.py",
+      "description": "No validation that the checkout argument is a real directory before proceeding.",
+      "fix": "Added os.path.isdir check with stderr message and exit(2) on failure."
     },
     {
-      "severity": "architectural",
-      "title": "Burn-in collector hardcodes pytest as test command",
-      "detail": "_burn_in_cmd uses 'pytest --tb=short -q' as the default test command. The profile toolchain could specify a different test runner.",
-      "mitigation": "Acceptable for M13; the check script accepts any command after '--', so the collector cmd builder is the only coupling point. Future enhancement can read toolchain."
+      "id": "G07",
+      "tag": "[post-impl]",
+      "title": "Missing §8-M2: TEA ATDD verify RED check",
+      "file": "core/checks/atdd_check.py",
+      "description": "Spec §8-M2 requires TEA ATDD verify RED integration. Not implemented in initial milestone.",
+      "fix": "Created atdd_check.py: searches .tea/atdd-result.json paths, validates red_verified field, graceful degradation when absent. Registered as ATDD_RED collector in test_quality.py."
     },
     {
-      "severity": "architectural",
-      "title": "Mutation collector does not pass changed files for diff-scoping",
-      "detail": "Spec says 'mutation score >= threshold on changed code (sampled/budgeted)' but _mutmut_cmd does not receive changed files from DiffScope. mutation_check.py accepts optional changed_files arg but it's never populated.",
-      "mitigation": "The collector CmdBuilder signature is (checkout, profile) -- no DiffScope access. Wiring DiffScope into collector build_cmd would require M4 framework changes. Deferred to follow-up."
+      "id": "G08",
+      "tag": "[post-impl]",
+      "title": "Missing §8-M2: BMAD dev-story TDD loop",
+      "file": "core/checks/tdd_loop.py",
+      "description": "Spec §8-M2 requires TDD loop integration for RED/GREEN/REFACTOR phases. Not implemented in initial milestone.",
+      "fix": "Created tdd_loop.py: supports RED (tests must fail), GREEN (tests must pass), REFACTOR (tests must pass) phases. Runs test command via subprocess, validates phase-appropriate exit code."
     },
     {
-      "severity": "minor",
-      "title": "os.chmod in test helper is Unix-only",
-      "detail": "tests/test_check_burn_in.py uses os.chmod with stat.S_IEXEC which is a no-op on Windows. Tests pass on Linux/WSL/macOS.",
-      "mitigation": "Test files invoke scripts via sys.executable (python3 <script>), so execute permission is not strictly needed."
+      "id": "G09",
+      "tag": "[post-impl]",
+      "title": "Missing §8-M2: DoD verifier",
+      "file": "core/checks/dod_check.py",
+      "description": "Spec §8-M2 requires Definition of Done verifier. Not implemented in initial milestone.",
+      "fix": "Created dod_check.py: checks story.md for File List (present + non-empty), Change Log section, Status section. Registered as DOD collector in test_quality.py."
     },
     {
-      "severity": "minor",
-      "title": "JUnit XML glob patterns may match non-JUnit files in deep checkouts",
-      "detail": "_find_junit_xmls uses recursive glob with patterns like **/junit*.xml which could match unrelated XML files.",
-      "mitigation": "_parse_junit_tests gracefully handles non-JUnit XML (returns empty dict), so false matches are harmless."
+      "id": "G10",
+      "tag": "[post-impl]",
+      "title": "Missing §8-M5: Selective execution",
+      "file": "core/checks/burn_in_check.py",
+      "description": "Spec §8-M5 requires selective test execution based on changed files. Not implemented in initial milestone.",
+      "fix": "Added _select_test_files() function and --changed-files CLI arg to burn_in_check.py. Maps changed source files to test files via convention-based patterns and filesystem search."
     },
     {
-      "severity": "minor",
-      "title": "Recursive glob in _find_junit_xmls could be slow on large checkouts",
-      "detail": "glob.glob with recursive=True walks the entire checkout tree. For large projects this adds latency per burn-in run.",
-      "mitigation": "Burn-in runs against a collector_checkout (fresh clone at specific SHA), which is typically small."
+      "id": "G11",
+      "tag": "[post-impl]",
+      "title": "Missing §8-M5: Tekton CI pipeline definition",
+      "file": "core/checks/tekton_emit.py",
+      "description": "Spec §8-M5 requires Tekton CI pipeline emission. Not implemented in initial milestone.",
+      "fix": "Created tekton_emit.py: reads collector definitions from JSON, generates Tekton PipelineRun YAML with one task per collector. Outputs to stdout or file."
     },
     {
-      "severity": "deferred",
-      "title": "Burn-in collector test command not configurable via profile toolchain",
-      "detail": "Future enhancement: read test runner from profile.toolchain[language] to support non-pytest test suites (vitest, jest, cargo test, etc.)."
+      "id": "G12",
+      "tag": "[post-impl]",
+      "title": "Missing §12: TEA gate-decision.json evidence",
+      "file": "core/checks/tea_gate_check.py",
+      "description": "Spec §12 requires composing TEA gate-decision.json as evidence. Not implemented in initial milestone.",
+      "fix": "Created tea_gate_check.py: searches standard TEA paths for gate-decision.json, extracts overall/categories/evidence_hash, graceful degradation when absent. Registered as TEA_GATE collector in test_quality.py."
     },
     {
-      "severity": "deferred",
-      "title": "Mutation collector diff-scoping via DiffScope integration",
-      "detail": "Future enhancement: pass DiffScope changed files to mutation_check.py --paths-to-mutate for targeted mutation testing on changed code only."
+      "id": "G13",
+      "tag": "[post-impl]",
+      "title": "Missing §12: consult-fragments + confidence-gate preambles",
+      "file": "core/checks/consult_preamble.py",
+      "description": "Spec §12 requires consult-fragment discovery and confidence-gate preamble generation. Not implemented in initial milestone.",
+      "fix": "Created consult_preamble.py: searches .tea/fragments/, docs/tea/, _bmad/fragments/ for known fragment files. Generates preamble with confidence gate scoring directive and fragment references."
     }
   ]
 }
