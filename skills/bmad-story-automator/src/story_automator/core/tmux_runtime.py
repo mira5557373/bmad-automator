@@ -1370,3 +1370,46 @@ def _session_name_from_artifact_path(path: Path, root_hash: str) -> str:
         except ValueError:
             return ""
     return ""
+
+
+BMAD_AUTO_ENV_KEYS = (
+    "BMAD_AUTO_STORY_KEY",
+    "BMAD_AUTO_PHASE",
+    "BMAD_AUTO_CLI_ID",
+    "BMAD_AUTO_COMMIT_SHA",
+    "BMAD_AUTO_TASK_ID",
+)
+
+
+def inject_bmad_auto_env(
+    env: dict,
+    *,
+    story_key: str,
+    phase: str,
+    cli_id: str = "claude-code",
+    commit_sha: str = "",
+    task_id: str = "",
+) -> dict:
+    """Return a new env dict with BMAD_AUTO_* keys set for hook propagation.
+
+    Does not mutate the input. Strips whitespace from all values. Requires
+    non-empty ``story_key`` and ``phase``; other fields may be blank.
+    """
+    if not isinstance(env, dict):
+        raise TypeError(f"env must be a dict, got {type(env).__name__}")
+    story_key_clean = story_key.strip() if isinstance(story_key, str) else ""
+    phase_clean = phase.strip() if isinstance(phase, str) else ""
+    if not story_key_clean:
+        raise ValueError("story_key must be a non-empty string")
+    if not phase_clean:
+        raise ValueError("phase must be a non-empty string")
+    cli_id_clean = (cli_id or "").strip() or "claude-code"
+    commit_sha_clean = (commit_sha or "").strip()
+    task_id_clean = (task_id or "").strip()
+    out = dict(env)
+    out["BMAD_AUTO_STORY_KEY"] = story_key_clean
+    out["BMAD_AUTO_PHASE"] = phase_clean
+    out["BMAD_AUTO_CLI_ID"] = cli_id_clean
+    out["BMAD_AUTO_COMMIT_SHA"] = commit_sha_clean
+    out["BMAD_AUTO_TASK_ID"] = task_id_clean
+    return out
