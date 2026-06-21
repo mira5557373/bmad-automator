@@ -1,5 +1,17 @@
 ### Features
 
+- feat(collector): register integration collectors in core registry (c24943a)
+- feat(collector): add observability collector module (d61941c)
+- feat(collector): add health probe check script (c1f40f6)
+- feat(collector): add OTel wiring check script (a42d5f3)
+- feat(collector): add accessibility collector module (b2ba781)
+- feat(collector): add performance collector module (ae75d27)
+- feat(collector): add perf lint check script (85fbc22)
+- feat(collector): add migrations collector module (ebe4cde)
+- feat(collector): add migration check script (5d4efa9)
+- feat(collector): add api_compat collector module (b9156a9)
+- feat(collector): add traceability collector module (1e79a30)
+- feat(collector): add traceability check script with TEA + GWT fallback (2fba3a7)
 - feat(collector): register security collectors in core registry (e868a58)
 - feat(collector): add supply chain collector module with trivy-sbom (5be3ea9)
 - feat(collector): add SBOM check script (bc80be0)
@@ -252,6 +264,7 @@
 
 ### Bug Fixes
 
+- fix(collector): update hardcoded collector count in registry tests (28e75e0)
 - fix(collector): add invariants category and review fixes for collection-m6 (54d1804)
 - fix(collector): handle multi-license artifacts in license check (2ae7236)
 - fix(collector): update core collector tests for 25-collector registry (88ff71f)
@@ -350,6 +363,8 @@
 
 ### Documentation
 
+- docs: write TDD plan for collection-m7-integration-collectors (610d7c3)
+- docs: update generated documentation (9b2acff)
 - docs: write gap report for collection-m6-security-collectors (27a5bb2)
 - docs(plan): add collection-m6-security-collectors implementation plan (d9dbc90)
 - docs: update generated documentation (ba1fa79)
@@ -481,6 +496,7 @@
 
 ### Tests
 
+- test(collector): add integration category pipeline tests (e849b4a)
 - test(collector): add security category pipeline integration tests (2bfc5e8)
 - test(collector): add core collectors pipeline integration tests (c331bbb)
 - test(gate): add full collector pipeline integration tests (1c6263c)
