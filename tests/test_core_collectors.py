@@ -19,6 +19,17 @@ _EXPECTED_IDS = frozenset(
         "docusaurus-docs",
         "adr-process",
         "trace-process",
+        "semgrep-security",
+        "trivy-vuln-security",
+        "osv-security",
+        "gitleaks-security",
+        "license-check-license",
+        "compliance-rules-compliance",
+        "conftest-compliance",
+        "sbom-supply_chain",
+        "cosign-supply_chain",
+        "provenance-supply_chain",
+        "trivy-sbom-supply_chain",
     }
 )
 
@@ -28,6 +39,10 @@ _EXPECTED_CATEGORIES = frozenset(
         "static",
         "docs",
         "process",
+        "security",
+        "license",
+        "compliance",
+        "supply_chain",
     }
 )
 
@@ -74,7 +89,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 14)
+        self.assertEqual(len(reg.all_collectors()), 25)
 
     def test_exported_id_set(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS
