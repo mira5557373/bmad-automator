@@ -9,6 +9,7 @@ import sys
 from typing import Any
 
 from story_automator.core.evidence_io import read_gate_marker
+from story_automator.core.gate_ops import gate_doctor as _gate_doctor_fn
 from story_automator.core.gate_status import (
     invalidate_gates_for_target,
     list_parked,
@@ -92,6 +93,13 @@ def gate_invalidate_action(args: list[str]) -> int:
     return 0
 
 
+def gate_doctor_action(args: list[str]) -> int:
+    project_root = _project_root()
+    result = _gate_doctor_fn(project_root)
+    print_json(result)
+    return 0 if result["healthy"] else 1
+
+
 def gate_dispatch(args: list[str]) -> int:
     if not args:
         _gate_usage()
@@ -101,6 +109,7 @@ def gate_dispatch(args: list[str]) -> int:
         "status": gate_status_action,
         "resume": gate_resume_action,
         "invalidate": gate_invalidate_action,
+        "doctor": gate_doctor_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -110,9 +119,10 @@ def gate_dispatch(args: list[str]) -> int:
 
 
 def _gate_usage() -> None:
-    print("Usage: orchestrator-helper gate <status|resume|invalidate> [args]",
+    print("Usage: orchestrator-helper gate <subcommand> [args]",
           file=sys.stderr)
     print("", file=sys.stderr)
     print("  gate status [--state=parked]", file=sys.stderr)
     print("  gate resume <gate_id>", file=sys.stderr)
     print("  gate invalidate <story|epic>", file=sys.stderr)
+    print("  gate doctor", file=sys.stderr)

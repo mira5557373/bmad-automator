@@ -150,5 +150,29 @@ class GateDispatchTests(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
+class GateDoctorActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_healthy_project(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_dispatch(["doctor"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(output["healthy"])
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_unhealthy_returns_exit_1(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        write_gate_marker(self.tmp, "orphan", "abc")
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_dispatch(["doctor"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 1)
+        self.assertFalse(output["healthy"])
+
+
 if __name__ == "__main__":
     unittest.main()
