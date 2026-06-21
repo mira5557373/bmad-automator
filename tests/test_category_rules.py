@@ -426,5 +426,19 @@ class CategoryRulesDispatchTests(unittest.TestCase):
         self.assertIn("rationale", result)
 
 
+class CategoryRulesEdgeCaseTests(unittest.TestCase):
+    def test_coverage_verdict_float_precision(self) -> None:
+        self.assertEqual(coverage_verdict(89.999, 90, "P1"), "CONCERNS")
+        self.assertEqual(coverage_verdict(90.001, 90, "P1"), "PASS")
+
+    def test_security_rule_all_metrics_zero(self) -> None:
+        evidence = [make_evidence_record(
+            collector="s", tool="t", category="security", status="ok",
+            metrics={"sast_high_count": 0, "deps_critical_count": 0, "secrets_count": 0},
+        )]
+        result = security_rule(evidence, {"rules": {"security": {"sast_max_high": 0}}}, {})
+        self.assertEqual(result["verdict"], "PASS")
+
+
 if __name__ == "__main__":
     unittest.main()

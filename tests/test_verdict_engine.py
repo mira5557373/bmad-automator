@@ -565,5 +565,71 @@ class EvaluateGateTests(unittest.TestCase):
             self.assertEqual(gate["overall"], "FAIL")
 
 
+class VerdictEngineDeterminismTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1, "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness", "security"], "system": []},
+        "categories_na": [],
+    }
+
+    def test_same_input_same_output(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+        r1 = adjudicate(evidence, self.PROFILE, priority="P1")
+        r2 = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertEqual(r1["overall"], r2["overall"])
+        self.assertEqual(r1["evidence_bundle_hash"], r2["evidence_bundle_hash"])
+        self.assertEqual(r1["profile_hash"], r2["profile_hash"])
+
+    def test_evidence_order_does_not_affect_verdict(self) -> None:
+        r1 = make_evidence_record(collector="a", tool="t", category="correctness",
+                                  status="ok", metrics={"coverage_pct": 95, "regressions": 0})
+        r2 = make_evidence_record(collector="b", tool="t", category="security",
+                                  status="ok", metrics={"sast_high_count": 0})
+        adj1 = adjudicate([r1, r2], self.PROFILE, priority="P1")
+        adj2 = adjudicate([r2, r1], self.PROFILE, priority="P1")
+        self.assertEqual(adj1["overall"], adj2["overall"])
+
+    def test_all_na_categories_pass(self) -> None:
+        profile = dict(self.PROFILE)
+        profile["categories"] = {"code": [], "system": []}
+        profile["categories_na"] = ["correctness", "security"]
+        result = adjudicate([], profile, priority="P1")
+        self.assertEqual(result["overall"], "PASS")
+
+    def test_mixed_na_and_active(self) -> None:
+        profile = dict(self.PROFILE)
+        profile["categories_na"] = ["security"]
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        result = adjudicate(evidence, profile, priority="P1")
+        self.assertEqual(result["categories"]["security"]["verdict"], "NA")
+        self.assertEqual(result["categories"]["correctness"]["verdict"], "PASS")
+        self.assertEqual(result["overall"], "PASS")
+
+    def test_fail_takes_precedence_over_concerns(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 85, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="violation", metrics={"sast_high_count": 1},
+                                 findings=["vuln"]),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertEqual(result["overall"], "FAIL")
+
+
 if __name__ == "__main__":
     unittest.main()
