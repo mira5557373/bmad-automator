@@ -1,5 +1,14 @@
 ### Features
 
+- feat(gate): add remediation module with edit-authorization and review_continuation (23905d6)
+- feat(gate): add gate CLI commands and wire into orchestrator dispatch (07dd61a)
+- feat(gate): add run_production_gate lifecycle, verdict routing, and factory version resolution (2bd0990)
+- feat(gate): add gate invalidation by id and target (Task 5/M10) (9af5056)
+- feat(gate): add park/resume story lifecycle (Task 4/M10) (ad5f7bc)
+- feat(gate): add gate reuse check with drift detection and crash recovery (Tasks 6-7/M10) (dc1dd31)
+- feat(gate): add mitigation debt tracking (Task 3/M10) (48bc46b)
+- feat(gate): register production_ready_gate verifier in VERIFIERS and VALID_VERIFIERS (bcb2015)
+- feat(gate): add GateProfileDrift and GateParked audit events (92cdfd1)
 - feat(gate): add evaluate_gate end-to-end entry point with audit events (720b1d6)
 - feat(gate): add GateDecision and GateRendered audit events (8e058f9)
 - feat(gate): add build_gate_file from adjudication results (c332aa1)
@@ -379,6 +388,10 @@
 
 ### Documentation
 
+- docs: update CLAUDE.md with M10 orchestrator wiring module map (21fd264)
+- docs(gate): add operator runbook with executable jq/CLI recipes (a8e2158)
+- docs(gate): add M10 orchestrator-wiring TDD plan with gap analysis (3312c46)
+- docs: update generated documentation (067c57e)
 - docs(gate): add M9 verdict engine TDD plan with gap fixes (997af37)
 - docs(claude-md): module-map for gate subsystem (m1-m7) + parallel-run note (e6a28ae)
 - docs: update generated documentation (6e2acf3)
@@ -515,6 +528,7 @@
 
 ### Tests
 
+- test(gate): add end-to-end integration and edge case tests for M10 orchestrator wiring (48d7843)
 - test(gate): add end-to-end round-trip and gate reuse validation tests (9939805)
 - test(gate): add edge case and determinism integration tests for verdict engine (cb3fbcb)
 - test(collector): add integration category pipeline tests (e849b4a)
