@@ -8,6 +8,7 @@ Flow: evidence bundle -> group by category -> per-category rules ->
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 
@@ -131,3 +132,40 @@ def adjudicate(
         "evidence_bundle_hash": compute_evidence_bundle_hash(evidence_bundle),
         "profile_hash": compute_profile_hash(profile),
     }
+
+
+def apply_waivers(
+    adjudication: dict[str, Any],
+    waivers: list[dict[str, Any]],
+    gate_file_stub: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[str, list[dict[str, Any]], str]:
+    """Section 6.4: validate waivers and apply if valid.
+
+    Returns (overall_verdict, valid_waivers, rationale).
+    WAIVED only if original overall is FAIL and all failing
+    categories are covered by valid, unexpired waivers.
+    """
+    from .gate_rules import validate_waiver_for_gate
+
+    original_overall = adjudication.get("overall", "FAIL")
+    if original_overall == "PASS":
+        return "PASS", [], ""
+    if not waivers:
+        return original_overall, [], "no waivers provided"
+
+    valid_waivers: list[dict[str, Any]] = []
+    rejection_reasons: list[str] = []
+    for waiver in waivers:
+        ok, reason = validate_waiver_for_gate(waiver, gate_file_stub, now=now)
+        if ok:
+            valid_waivers.append(waiver)
+        else:
+            rejection_reasons.append(f"waiver {waiver.get('waiver_id', '?')}: {reason}")
+
+    if valid_waivers and original_overall == "FAIL":
+        return "WAIVED", valid_waivers, "all failing categories waived"
+
+    rationale = "; ".join(rejection_reasons) if rejection_reasons else "waivers not applicable"
+    return original_overall, valid_waivers, rationale

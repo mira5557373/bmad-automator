@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
 from story_automator.core.gate_schema import (
     make_evidence_record,
     make_llm_evidence_record,
 )
+from story_automator.core.gate_schema import make_waiver
 from story_automator.core.verdict_engine import (
     adjudicate,
+    apply_waivers,
     compute_all_verdicts,
     compute_category_verdict,
     group_evidence_by_category,
@@ -312,6 +315,83 @@ class AdjudicateTests(unittest.TestCase):
     def test_empty_evidence_all_active_fail(self) -> None:
         result = adjudicate([], self.PROFILE, priority="P1")
         self.assertEqual(result["overall"], "FAIL")
+
+
+class ApplyWaiversTests(unittest.TestCase):
+    def _failing_adjudication(self) -> dict:
+        return {
+            "categories": {
+                "security": {"verdict": "FAIL", "required": {}, "actual": {}, "rationale": "vuln"},
+                "correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"},
+            },
+            "overall": "FAIL",
+        }
+
+    def _gate_stub(self) -> dict:
+        return {
+            "categories": {
+                "security": {"verdict": "FAIL"},
+                "correctness": {"verdict": "PASS"},
+            },
+            "profile": {"id": "test", "version": 1, "hash": "aabbccdd"},
+        }
+
+    def test_valid_waiver_produces_waived(self) -> None:
+        waiver = make_waiver(
+            waiver_id="w1", operator_id="alice",
+            issued_at="2026-06-20T00:00:00Z", expires_at="2026-07-01T00:00:00Z",
+            failing_categories=["security"], reason="false positive",
+            profile_hash="aabbccdd",
+        )
+        now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+        overall, valid, rationale = apply_waivers(
+            self._failing_adjudication(), [waiver], self._gate_stub(), now=now,
+        )
+        self.assertEqual(overall, "WAIVED")
+        self.assertEqual(len(valid), 1)
+
+    def test_expired_waiver_keeps_fail(self) -> None:
+        waiver = make_waiver(
+            waiver_id="w1", operator_id="alice",
+            issued_at="2026-06-01T00:00:00Z", expires_at="2026-06-15T00:00:00Z",
+            failing_categories=["security"], reason="expired",
+            profile_hash="aabbccdd",
+        )
+        now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+        overall, valid, rationale = apply_waivers(
+            self._failing_adjudication(), [waiver], self._gate_stub(), now=now,
+        )
+        self.assertEqual(overall, "FAIL")
+        self.assertEqual(len(valid), 0)
+        self.assertIn("expired", rationale)
+
+    def test_no_waivers_keeps_original(self) -> None:
+        overall, valid, rationale = apply_waivers(
+            self._failing_adjudication(), [], self._gate_stub(),
+        )
+        self.assertEqual(overall, "FAIL")
+        self.assertEqual(len(valid), 0)
+
+    def test_pass_verdict_ignores_waivers(self) -> None:
+        adj = {"categories": {"correctness": {"verdict": "PASS"}}, "overall": "PASS"}
+        stub = {"categories": {"correctness": {"verdict": "PASS"}},
+                "profile": {"hash": "aabb"}}
+        overall, valid, rationale = apply_waivers(adj, [], stub)
+        self.assertEqual(overall, "PASS")
+
+    def test_profile_hash_mismatch_rejects_waiver(self) -> None:
+        waiver = make_waiver(
+            waiver_id="w1", operator_id="alice",
+            issued_at="2026-06-20T00:00:00Z", expires_at="2026-07-01T00:00:00Z",
+            failing_categories=["security"], reason="reason",
+            profile_hash="wrong_hash",
+        )
+        now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+        overall, valid, rationale = apply_waivers(
+            self._failing_adjudication(), [waiver], self._gate_stub(), now=now,
+        )
+        self.assertEqual(overall, "FAIL")
+        self.assertEqual(len(valid), 0)
 
 
 if __name__ == "__main__":
