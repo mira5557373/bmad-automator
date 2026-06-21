@@ -2,7 +2,8 @@
 
 Runs individual collectors via run_collector_with_timeout (§6.4),
 persists evidence via persist_evidence_record, and emits audit events.
-Full gate loop and diff-scoped mode added in subsequent tasks.
+Full gate collector loop creates a fresh checkout, iterates applicable
+collectors, persists evidence, and returns collected outcomes.
 """
 from __future__ import annotations
 

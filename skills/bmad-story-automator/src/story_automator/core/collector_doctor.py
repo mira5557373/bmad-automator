@@ -75,9 +75,13 @@ def preflight_check(
     """Run preflight checks for all applicable collectors.
 
     Returns (all_ok, list_of_results).  Skips collectors not
-    applicable to the given profile.
+    applicable to the given profile. Deduplicates results by tool name.
     """
     applicable = registry.applicable(profile)
-    results = [check_collector_available(c) for c in applicable]
+    seen: dict[str, DoctorResult] = {}
+    for config in applicable:
+        if config.tool not in seen:
+            seen[config.tool] = check_collector_available(config)
+    results = list(seen.values())
     all_ok = all(r.available for r in results)
     return all_ok, results

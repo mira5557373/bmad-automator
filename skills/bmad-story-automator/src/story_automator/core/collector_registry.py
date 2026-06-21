@@ -1,8 +1,8 @@
 """Collector registry — stores, looks up, and filters collector configs.
 
 Maps collector_id → CollectorConfig and category → [CollectorConfig].
-Profile-aware filtering (categories, categories_na, kill-switch) added
-in a subsequent task.
+Profile-aware filtering prunes collectors by product profile categories,
+categories_na exclusions, and per-tool kill-switch rules.
 """
 from __future__ import annotations
 
