@@ -450,6 +450,80 @@ class FactoryVersionTests(unittest.TestCase):
         self.assertEqual(resolve_factory_version(), __version__)
 
 
+class GateConcurrencyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": ["correctness"], "system": []},
+            "categories_na": [],
+        }
+        self.registry = CollectorRegistry()
+
+    def test_gate_lock_dir_created(self) -> None:
+        """Gate lock directory exists under _bmad/gate/ after a gate run."""
+        from story_automator.core.gate_orchestrator import GateConcurrencyError  # noqa: F401
+        lock_dir = Path(self.tmp) / "_bmad" / "gate"
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        persist_evidence_record(self.tmp, "lock-1", evidence[0])
+        with patch("story_automator.core.gate_orchestrator._run_collectors"):
+            run_production_gate(
+                self.tmp, "lock-1", commit_sha="abc",
+                target={"kind": "story", "id": "s1"},
+                profile=self.profile, factory_version="1.15.0",
+                registry=self.registry,
+            )
+        self.assertTrue(lock_dir.is_dir())
+
+    def test_concurrent_gate_raises_error(self) -> None:
+        """A second gate attempt while locked raises GateConcurrencyError."""
+        from filelock import FileLock
+        from story_automator.core.gate_orchestrator import GateConcurrencyError
+        lock_path = Path(self.tmp) / "_bmad" / "gate" / "gate.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        external_lock = FileLock(str(lock_path), timeout=0)
+        external_lock.acquire()
+        try:
+            with self.assertRaises(GateConcurrencyError):
+                run_production_gate(
+                    self.tmp, "lock-2", commit_sha="abc",
+                    target={"kind": "story", "id": "s1"},
+                    profile=self.profile, factory_version="1.15.0",
+                    registry=self.registry,
+                )
+        finally:
+            external_lock.release()
+
+    def test_lock_released_on_exception(self) -> None:
+        """Lock is released even when gate evaluation raises."""
+        lock_path = Path(self.tmp) / "_bmad" / "gate" / "gate.lock"
+        with patch("story_automator.core.gate_orchestrator._run_collectors", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                run_production_gate(
+                    self.tmp, "lock-exc", commit_sha="abc",
+                    target={"kind": "story", "id": "s1"},
+                    profile=self.profile, factory_version="1.15.0",
+                    registry=self.registry,
+                )
+        from filelock import FileLock
+        reacquired = FileLock(str(lock_path), timeout=0)
+        reacquired.acquire()
+        reacquired.release()
+
+    def test_concurrency_error_is_value_error(self) -> None:
+        from story_automator.core.gate_orchestrator import GateConcurrencyError
+        self.assertTrue(issubclass(GateConcurrencyError, ValueError))
+
+
 class GateDurationTrackingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()

@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock, Timeout as FileLockTimeout
+
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from .evidence_io import (
@@ -36,6 +38,19 @@ from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
 from .verdict_engine import evaluate_gate
+
+
+class GateConcurrencyError(ValueError):
+    """Raised when another gate run is already in progress."""
+
+
+_GATE_LOCK_TIMEOUT = 1
+
+
+def _gate_lock(project_root: str | Path) -> FileLock:
+    lock_dir = Path(project_root) / "_bmad" / "gate"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return FileLock(str(lock_dir / "gate.lock"), timeout=_GATE_LOCK_TIMEOUT)
 
 
 _VERDICT_RUNBOOK_REFS: dict[str, str] = {
@@ -197,41 +212,52 @@ def run_production_gate(
             ),
         )
 
-    _start = time.monotonic()
-    write_gate_marker(project_root, gate_id, commit_sha)
+    lock = _gate_lock(project_root)
     try:
-        _run_collectors(
-            project_root, gate_id, commit_sha, profile, registry,
-            audit_policy=audit_policy, audit_path=audit_path,
+        lock.acquire()
+    except FileLockTimeout:
+        raise GateConcurrencyError(
+            "another gate run is in progress; check 'gate status' for details"
         )
-        gate_file = evaluate_gate(
-            project_root, gate_id,
-            commit_sha=commit_sha, target=target,
-            profile=profile, factory_version=factory_version,
-            priority=priority,
-            has_unmitigated_risk_9=has_unmitigated_risk_9,
-            waivers=waivers,
-            audit_policy=audit_policy, audit_path=audit_path,
-        )
-    finally:
-        clear_gate_marker(project_root)
 
-    duration_ms = int((time.monotonic() - _start) * 1000)
-    gate_file["duration_ms"] = duration_ms
+    _start = time.monotonic()
+    try:
+        write_gate_marker(project_root, gate_id, commit_sha)
+        try:
+            _run_collectors(
+                project_root, gate_id, commit_sha, profile, registry,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+            gate_file = evaluate_gate(
+                project_root, gate_id,
+                commit_sha=commit_sha, target=target,
+                profile=profile, factory_version=factory_version,
+                priority=priority,
+                has_unmitigated_risk_9=has_unmitigated_risk_9,
+                waivers=waivers,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+        finally:
+            clear_gate_marker(project_root)
 
-    if audit_policy is not None and audit_path is not None:
-        emit_gate_audit(
-            audit_policy, audit_path,
-            GateCompletedAudit(
-                gate_id=gate_id,
-                overall=gate_file.get("overall", ""),
-                duration_ms=duration_ms,
-                commit_sha=commit_sha,
-                runbook_ref=_runbook_ref_for_verdict(
-                    gate_file.get("overall", ""),
+        duration_ms = int((time.monotonic() - _start) * 1000)
+        gate_file["duration_ms"] = duration_ms
+
+        if audit_policy is not None and audit_path is not None:
+            emit_gate_audit(
+                audit_policy, audit_path,
+                GateCompletedAudit(
+                    gate_id=gate_id,
+                    overall=gate_file.get("overall", ""),
+                    duration_ms=duration_ms,
+                    commit_sha=commit_sha,
+                    runbook_ref=_runbook_ref_for_verdict(
+                        gate_file.get("overall", ""),
+                    ),
                 ),
-            ),
-        )
+            )
+    finally:
+        lock.release()
 
     return gate_file
 
