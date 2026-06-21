@@ -1,6 +1,6 @@
 # Gate Troubleshooting Runbook
 
-Operator guide for the production-readiness gate (M10).
+Operator guide for the production-readiness gate (M10–M11).
 
 ## 1. First-Run Profile Discovery
 
@@ -70,6 +70,12 @@ After resuming, invalidate the old gate to force re-evaluation:
 
 ```bash
 orchestrator-helper gate invalidate <story_id>
+```
+
+Or use the combined `rerun` convenience command (invalidate + resume in one step):
+
+```bash
+orchestrator-helper gate rerun <target_id>
 ```
 
 ## 4. Partial-FAIL Playbook
@@ -142,7 +148,10 @@ Audit trail: all waivers are recorded in the gate file and audit log.
 The gate uses a `gate-in-progress.json` marker for crash detection:
 
 ```bash
-# Check for stale marker
+# Automated health check (detects orphan markers, orphan evidence, invalid verdicts)
+orchestrator-helper gate doctor
+
+# Check for stale marker manually
 cat _bmad/gate/gate-in-progress.json 2>/dev/null && echo "STALE MARKER" || echo "clean"
 
 # Manual recovery (normally automatic on next run)
@@ -192,3 +201,49 @@ jq 'select(.status == "timeout")' _bmad/gate/evidence/<gate_id>/*.json
 ```
 
 Timeouts are fail-closed: they count as errors, not passes.
+
+## 10. Operational Queries (M11)
+
+### Verdict History
+
+List all gate verdicts (excludes invalidated):
+
+```bash
+orchestrator-helper gate list
+
+# Filter by target
+orchestrator-helper gate list --target=<story_id>
+
+# Filter by verdict
+orchestrator-helper gate list --verdict=FAIL
+```
+
+### Aggregate Metrics
+
+Get a summary of gate activity across the project:
+
+```bash
+orchestrator-helper gate summary
+```
+
+Output includes `total_verdicts`, `by_verdict` breakdown, `parked_count`,
+`mitigation_debt_count`, and `avg_duration_ms`.
+
+### Health Check
+
+Validate gate infrastructure consistency (orphan markers, orphan evidence,
+invalid verdict JSON):
+
+```bash
+orchestrator-helper gate doctor
+```
+
+Returns exit 0 if healthy, exit 1 with a list of issues otherwise.
+
+### Convenience Rerun
+
+Invalidate all gates for a target and resume any parked stories in one step:
+
+```bash
+orchestrator-helper gate rerun <target_id>
+```
