@@ -72,3 +72,49 @@ def propose_timeout_calibrations(
             change_type="feature",
         ))
     return proposals
+
+
+MAX_BURNIN_RUNS = 20
+BURNIN_INCREMENT = 2
+DEFAULT_BURNIN_RUNS = 5
+
+
+def propose_burnin_calibrations(
+    metrics: dict[str, Any],
+    profile: dict[str, Any],
+) -> list[CalibrationProposal]:
+    """Propose burn-in N increase when flaky tests detected."""
+    flaky_cats = metrics.get("flaky_categories", [])
+    if not flaky_cats:
+        return []
+
+    rules = profile.get("rules") or {}
+    tq_rules = rules.get("test_quality") or {}
+    current_burnin = tq_rules.get("burn_in_runs", DEFAULT_BURNIN_RUNS)
+    proposed = min(current_burnin + BURNIN_INCREMENT, MAX_BURNIN_RUNS)
+    if proposed <= current_burnin:
+        return []
+
+    return [CalibrationProposal(
+        category=cat,
+        field_path="rules.test_quality.burn_in_runs",
+        old_value=current_burnin,
+        new_value=proposed,
+        rationale=(
+            f"flaky category {cat} detected; "
+            f"raising burn-in from {current_burnin} to {proposed}"
+        ),
+        confidence=0.8,
+        change_type="breaking",
+    ) for cat in flaky_cats]
+
+
+def propose_all_calibrations(
+    metrics: dict[str, Any],
+    profile: dict[str, Any],
+) -> list[CalibrationProposal]:
+    """Aggregate all calibration proposals."""
+    proposals: list[CalibrationProposal] = []
+    proposals.extend(propose_timeout_calibrations(metrics, profile))
+    proposals.extend(propose_burnin_calibrations(metrics, profile))
+    return proposals
