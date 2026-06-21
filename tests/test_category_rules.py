@@ -5,6 +5,7 @@ import unittest
 from story_automator.core.category_rules import (
     correctness_rule,
     coverage_verdict,
+    license_rule,
     risk_to_requirements,
     security_rule,
     static_rule,
@@ -317,6 +318,49 @@ class StaticRuleTests(unittest.TestCase):
         ]
         result = static_rule(evidence, {}, self.REQ)
         self.assertEqual(result["verdict"], "PASS")
+
+
+class LicenseRuleTests(unittest.TestCase):
+    PROFILE = {
+        "rules": {
+            "license": {"forbidden": ["BSL", "SSPL"], "boundary": {"AGPL-3.0": ["odoo-pod"]}},
+        },
+    }
+    REQ = {"priority": "P1"}
+
+    def test_clean_license_passes(self) -> None:
+        evidence = [make_evidence_record(
+            collector="lic", tool="syft", category="license",
+            status="ok", metrics={"forbidden_count": 0, "boundary_violations": 0},
+        )]
+        result = license_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_forbidden_license_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="lic", tool="syft", category="license",
+            status="violation", metrics={"forbidden_count": 1},
+            findings=["BSL-1.1 in dependency X"],
+        )]
+        result = license_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_boundary_violation_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="lic", tool="syft", category="license",
+            status="violation", metrics={"forbidden_count": 0, "boundary_violations": 1},
+            findings=["AGPL-3.0 outside odoo-pod"],
+        )]
+        result = license_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_error_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="lic", tool="syft", category="license",
+            status="error", findings=["syft crashed"],
+        )]
+        result = license_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
 
 
 if __name__ == "__main__":

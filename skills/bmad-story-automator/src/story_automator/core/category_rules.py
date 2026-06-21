@@ -168,3 +168,34 @@ def static_rule(
 ) -> dict[str, Any]:
     """Section 6.2: tsc=0, mypy=0, ruff/Biome=0, deadcode <= budget."""
     return _status_based_rule("static", evidence)
+
+
+def license_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: 0 forbidden licenses + boundary-aware (AGPL only in Odoo pod)."""
+    status = worst_evidence_status(evidence)
+    forbidden = int(_aggregate_metrics(evidence, "forbidden_count", 0))
+    boundary = int(_aggregate_metrics(evidence, "boundary_violations", 0))
+    rules = rule_for(profile, "license")
+
+    actual = {"forbidden_count": forbidden, "boundary_violations": boundary, "status": status}
+    req = {"forbidden_count": 0, "boundary_violations": 0,
+           "forbidden_licenses": rules.get("forbidden", []),
+           "boundary_rules": rules.get("boundary", {})}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+
+    violations: list[str] = []
+    if forbidden > 0:
+        violations.append(f"forbidden licenses: {forbidden}")
+    if boundary > 0:
+        violations.append(f"boundary violations: {boundary}")
+    if violations:
+        return _make_category_result("FAIL", req, actual, "; ".join(violations))
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "all license checks passed")
