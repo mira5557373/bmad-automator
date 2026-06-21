@@ -6,6 +6,7 @@ import unittest
 
 from story_automator.core.seed_renderer import (
     SeedRenderError,
+    list_template_files,
     resolve_variables,
 )
 
@@ -64,6 +65,69 @@ class ResolveVariablesTests(unittest.TestCase):
         m = _make_manifest_with_vars({})
         result = resolve_variables(m, {})
         self.assertEqual(result, {})
+
+
+def _make_multi_category_manifest():
+    return {
+        "schema_version": 1,
+        "template_id": "test",
+        "template_version": "1.0.0",
+        "categories": {
+            "contracts": {
+                "description": "Contract tests",
+                "files": [
+                    {"src": "c/conftest.py.tmpl", "dst": "tests/contracts/conftest.py"},
+                    {"src": "c/pact.py.tmpl", "dst": "tests/contracts/pact.py", "on_conflict": "overwrite"},
+                ],
+            },
+            "network": {
+                "description": "Network interception",
+                "files": [
+                    {"src": "n/net.py.tmpl", "dst": "tests/network/net.py"},
+                ],
+            },
+            "empty": {
+                "description": "Empty category",
+                "files": [],
+            },
+        },
+    }
+
+
+class ListTemplateFilesTests(unittest.TestCase):
+    def test_list_all_files(self):
+        m = _make_multi_category_manifest()
+        result = list_template_files(m)
+        self.assertEqual(len(result), 3)
+        categories = {e["category"] for e in result}
+        self.assertEqual(categories, {"contracts", "network"})
+
+    def test_filter_by_category(self):
+        m = _make_multi_category_manifest()
+        result = list_template_files(m, category="contracts")
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(e["category"] == "contracts" for e in result))
+
+    def test_unknown_category_raises(self):
+        m = _make_multi_category_manifest()
+        with self.assertRaises(SeedRenderError):
+            list_template_files(m, category="nonexistent")
+
+    def test_default_on_conflict(self):
+        m = _make_multi_category_manifest()
+        result = list_template_files(m, category="network")
+        self.assertEqual(result[0]["on_conflict"], "skip")
+
+    def test_explicit_on_conflict(self):
+        m = _make_multi_category_manifest()
+        result = list_template_files(m, category="contracts")
+        overwrite_entries = [e for e in result if e["on_conflict"] == "overwrite"]
+        self.assertEqual(len(overwrite_entries), 1)
+
+    def test_empty_category_files(self):
+        m = _make_multi_category_manifest()
+        result = list_template_files(m, category="empty")
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

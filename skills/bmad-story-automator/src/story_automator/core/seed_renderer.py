@@ -31,3 +31,31 @@ def resolve_variables(
             raise SeedRenderError(f"required variable {var_name!r} not provided")
 
     return result
+
+
+def list_template_files(
+    manifest: dict, category: str | None = None
+) -> list[dict[str, str]]:
+    """List file entries from the manifest, optionally filtered by category.
+
+    Each returned dict has ``src``, ``dst``, ``on_conflict``, ``category``.
+    Raises `SeedRenderError` if *category* is given but not found.
+    """
+    categories = manifest.get("categories", {})
+
+    if category is not None and category not in categories:
+        raise SeedRenderError(f"unknown category: {category!r}")
+
+    result: list[dict[str, str]] = []
+    for cat_name, cat in categories.items():
+        if category is not None and cat_name != category:
+            continue
+        for entry in cat.get("files", []):
+            result.append({
+                "src": entry["src"],
+                "dst": entry["dst"],
+                "on_conflict": entry.get("on_conflict", "skip"),
+                "category": cat_name,
+            })
+
+    return result
