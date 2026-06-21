@@ -115,6 +115,36 @@ def gate_list_action(args: list[str]) -> int:
     return 0
 
 
+def gate_rerun_action(args: list[str]) -> int:
+    if not args:
+        print_json({"ok": False, "error": "target_id required"})
+        return 1
+    target_id = args[0]
+    if not _SAFE_ID.match(target_id):
+        print_json({"ok": False, "error": "invalid target_id format"})
+        return 1
+    project_root = _project_root()
+    invalidated = invalidate_gates_for_target(project_root, target_id)
+    resumed: list[str] = []
+    parked = list_parked(project_root)
+    for record in parked:
+        if record.get("story_key") == target_id:
+            gate_id = record.get("gate_id", "")
+            if gate_id:
+                result = resume_story(project_root, gate_id)
+                if result is not None:
+                    resumed.append(gate_id)
+    print_json({
+        "ok": True,
+        "target": target_id,
+        "invalidated": invalidated,
+        "invalidated_count": len(invalidated),
+        "resumed": resumed,
+        "resumed_count": len(resumed),
+    })
+    return 0
+
+
 def gate_summary_action(args: list[str]) -> int:
     project_root = _project_root()
     summary = _gate_summary_fn(project_root)
@@ -141,6 +171,7 @@ def gate_dispatch(args: list[str]) -> int:
         "doctor": gate_doctor_action,
         "list": gate_list_action,
         "summary": gate_summary_action,
+        "rerun": gate_rerun_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -159,3 +190,4 @@ def _gate_usage() -> None:
     print("  gate doctor", file=sys.stderr)
     print("  gate list [--target=<id>] [--verdict=<PASS|FAIL|...>]", file=sys.stderr)
     print("  gate summary", file=sys.stderr)
+    print("  gate rerun <target_id>", file=sys.stderr)

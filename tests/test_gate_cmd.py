@@ -258,5 +258,46 @@ class GateDoctorActionTests(unittest.TestCase):
         self.assertFalse(output["healthy"])
 
 
+class GateRerunActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_rerun_invalidates_and_resumes(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        gate = make_gate_file(
+            gate_id="g1",
+            target={"kind": "story", "id": "story-rerun"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={"c": {"verdict": "FAIL", "required": {}, "actual": {}, "rationale": "r"}},
+            overall="FAIL",
+        )
+        persist_gate_file(self.tmp, gate)
+        park_story(self.tmp, "g1", "story-rerun", "exhausted", "FAIL")
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_dispatch(["rerun", "story-rerun"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(output["ok"])
+        self.assertEqual(output["invalidated_count"], 1)
+        self.assertEqual(output["resumed_count"], 1)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_rerun_requires_target(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO):
+            code = gate_dispatch(["rerun"])
+        self.assertEqual(code, 1)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_rerun_rejects_traversal(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO):
+            code = gate_dispatch(["rerun", "../../etc/passwd"])
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
