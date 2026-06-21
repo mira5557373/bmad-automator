@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .adjudicator import resolve_timeout, run_collector_with_timeout
+from .collector_checkout import collector_checkout
 from .collector_config import CollectorConfig, CollectorOutcome
+from .collector_registry import CollectorRegistry
 from .evidence_io import persist_evidence_record
 from .gate_audit import EvidenceCollectedAudit, emit_gate_audit
 from .gate_schema import make_evidence_record
@@ -18,6 +20,7 @@ from .trust_boundary import assert_host_context
 
 __all__ = [
     "run_single_collector",
+    "run_gate_collectors",
 ]
 
 
@@ -100,3 +103,44 @@ def run_single_collector(
         evidence=evidence,
         persisted_path=persisted_path,
     )
+
+
+def run_gate_collectors(
+    project_root: str | Path,
+    gate_id: str,
+    commit_sha: str,
+    profile: dict[str, Any],
+    registry: CollectorRegistry,
+    *,
+    diff_categories: set[str] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> list[CollectorOutcome]:
+    """Run all applicable collectors for a gate evaluation.
+
+    Creates a fresh checkout at commit_sha (§7), iterates applicable
+    collectors from the registry, and returns collected evidence.
+    """
+    assert_host_context("run_gate_collectors")
+    collectors = registry.applicable(profile)
+    if diff_categories is not None:
+        collectors = [
+            c for c in collectors if c.category in diff_categories
+        ]
+    if not collectors:
+        return []
+
+    outcomes: list[CollectorOutcome] = []
+    with collector_checkout(project_root, commit_sha) as checkout:
+        for config in collectors:
+            outcome = run_single_collector(
+                config=config,
+                checkout_path=str(checkout),
+                profile=profile,
+                gate_id=gate_id,
+                project_root=project_root,
+                audit_policy=audit_policy,
+                audit_path=audit_path,
+            )
+            outcomes.append(outcome)
+    return outcomes

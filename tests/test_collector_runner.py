@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,7 +13,8 @@ from story_automator.core.collector_config import (
     CollectorConfig,
     CollectorOutcome,
 )
-from story_automator.core.collector_runner import run_single_collector
+from story_automator.core.collector_registry import CollectorRegistry
+from story_automator.core.collector_runner import run_single_collector, run_gate_collectors
 
 
 def _ok_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
@@ -170,6 +172,158 @@ class RunSingleCollectorTests(unittest.TestCase):
                     cfg, self.tmpdir, _profile(),
                     "gate-001", self.project_root,
                 )
+
+
+def _init_repo(path: Path) -> str:
+    subprocess.run(["git", "init", str(path)], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"],
+        capture_output=True, check=True,
+    )
+    (path / "src.py").write_text("x = 1\n")
+    subprocess.run(
+        ["git", "-C", str(path), "add", "."],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init"],
+        capture_output=True, check=True,
+    )
+    return subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+class RunGateCollectorsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-gate-test-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _profile(self, cats: list[str]) -> dict[str, Any]:
+        return {
+            "categories": {"code": cats, "system": []},
+            "categories_na": [],
+            "rules": {},
+            "timeouts": {},
+        }
+
+    def test_runs_all_applicable_collectors(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="b", tool="python3", category="static",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness", "static"]), reg,
+            )
+        self.assertEqual(len(outcomes), 2)
+        ids = {o.config.collector_id for o in outcomes}
+        self.assertEqual(ids, {"a", "b"})
+        self.assertTrue(all(o.evidence["status"] == "ok" for o in outcomes))
+
+    def test_skips_non_applicable_categories(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="b", tool="python3", category="performance",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].config.collector_id, "a")
+
+    def test_empty_registry_returns_empty(self) -> None:
+        reg = CollectorRegistry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertEqual(outcomes, [])
+
+    def test_evidence_persisted_to_disk(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertTrue(outcomes[0].persisted_path.exists())
+
+    def test_mixed_pass_and_fail(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="pass", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="fail", tool="python3", category="security",
+            build_cmd=_fail_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness", "security"]), reg,
+            )
+        statuses = {o.config.collector_id: o.evidence["status"] for o in outcomes}
+        self.assertEqual(statuses["pass"], "ok")
+        self.assertEqual(statuses["fail"], "violation")
+
+    def test_checkout_path_passed_to_collectors(self) -> None:
+        captured_paths: list[str] = []
+        path_validity: list[bool] = []
+
+        def capture_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+            captured_paths.append(checkout)
+            # Verify during execution (before cleanup) that path is valid
+            path_validity.append(Path(checkout).is_dir())
+            return [sys.executable, "-c", "pass"]
+
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=capture_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertEqual(len(captured_paths), 1)
+        self.assertEqual(len(path_validity), 1)
+        self.assertTrue(path_validity[0])
 
 
 if __name__ == "__main__":
