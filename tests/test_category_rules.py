@@ -409,6 +409,13 @@ class CategoryRulesDispatchTests(unittest.TestCase):
         result = apply_category_rule("unknown_cat", evidence, {}, self.REQ)
         self.assertEqual(result["verdict"], "PASS")
 
+    def test_unknown_category_rationale_uses_actual_name(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="docs", status="ok",
+        )]
+        result = apply_category_rule("docs", evidence, {}, self.REQ)
+        self.assertIn("docs", result["rationale"])
+
     def test_dispatch_returns_correct_shape(self) -> None:
         evidence = [make_evidence_record(
             collector="c", tool="t", category="correctness",

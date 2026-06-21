@@ -570,6 +570,63 @@ class EvaluateGateTests(unittest.TestCase):
             self.assertEqual(gate["overall"], "FAIL")
 
 
+class EvaluateGateAuditTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1,
+        "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness"], "system": []},
+        "categories_na": [],
+    }
+
+    def test_audit_events_emitted_when_policy_enabled(self) -> None:
+        import json
+        import os
+        from unittest.mock import patch as mock_patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "aud-g1", make_evidence_record(
+                collector="a", tool="t", category="correctness",
+                status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+            ))
+            audit_path = Path(tmp) / "audit.jsonl"
+            policy = {"security": {"audit_trail": True}}
+            with mock_patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-key"}):
+                evaluate_gate(
+                    tmp, "aud-g1", commit_sha="abc",
+                    target={"kind": "story", "id": "E1.S1"},
+                    profile=self.PROFILE, factory_version="0.1.0",
+                    audit_policy=policy, audit_path=audit_path,
+                )
+            self.assertTrue(audit_path.exists())
+            lines = audit_path.read_text().strip().split("\n")
+            events = [json.loads(line) for line in lines]
+            event_names = [e["event"] for e in events]
+            self.assertIn("GateDecision", event_names)
+            self.assertIn("GateRendered", event_names)
+            decision = next(e for e in events if e["event"] == "GateDecision")
+            self.assertEqual(decision["payload"]["overall"], "PASS")
+
+    def test_no_audit_when_policy_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "aud-g2", make_evidence_record(
+                collector="a", tool="t", category="correctness",
+                status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+            ))
+            audit_path = Path(tmp) / "audit.jsonl"
+            evaluate_gate(
+                tmp, "aud-g2", commit_sha="abc",
+                target={"kind": "story", "id": "E1.S2"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            self.assertFalse(audit_path.exists())
+
+
 class VerdictEngineDeterminismTests(unittest.TestCase):
     PROFILE = {
         "version": 1, "id": "test",

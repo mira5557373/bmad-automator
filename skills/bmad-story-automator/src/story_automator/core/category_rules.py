@@ -227,5 +227,7 @@ def apply_category_rule(
     required: dict[str, Any],
 ) -> dict[str, Any]:
     """Dispatch to the right rule function for a category."""
-    rule_fn = CATEGORY_RULES.get(category, generic_rule)
-    return rule_fn(evidence, profile, required)
+    rule_fn = CATEGORY_RULES.get(category)
+    if rule_fn is not None:
+        return rule_fn(evidence, profile, required)
+    return _status_based_rule(category, evidence)
