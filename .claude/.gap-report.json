@@ -1,90 +1,22 @@
 {
-  "milestone": "collection-m5-core-collectors",
-  "timestamp": "2026-06-21",
-  "phase": "review",
-  "passes": 1,
-  "convergence": {
-    "critical_gaps": 0,
-    "important_gaps": 0,
-    "tests_green": true,
-    "lint_clean": true,
-    "converged": true
-  },
+  "pass": 1,
+  "critical_gaps": 0,
+  "architectural_gaps": 0,
+  "important_gaps": 0,
+  "minor_gaps": 0,
+  "deferred_gaps": 0,
+  "total_gaps_found": 7,
+  "gaps_fixed_this_pass": 7,
+  "tests_green": true,
+  "lint_clean": true,
+  "converged": true,
   "gap_summaries": [
-    {
-      "id": "I-1",
-      "severity": "important",
-      "tag": "[post-impl]",
-      "file": "tests/test_collectors_docs.py:63-69",
-      "description": "ApiDocsCollectorTests.test_config_fields missing file_patterns assertion for API_DOCS collector",
-      "status": "fixed"
-    },
-    {
-      "id": "I-2",
-      "severity": "important",
-      "tag": "[post-impl]",
-      "file": "tests/test_check_trace.py:33-37",
-      "description": "test_missing_file_list_returns_one not isolating File List check — story missing AC+Tasks sections",
-      "status": "fixed"
-    },
-    {
-      "id": "I-3",
-      "severity": "important",
-      "tag": "[post-impl]",
-      "file": "tests/test_check_trace.py:76-80",
-      "description": "test_empty_file_list_returns_one not isolating empty File List — story missing AC, empty Tasks",
-      "status": "fixed"
-    },
-    {
-      "id": "I-4",
-      "severity": "important",
-      "tag": "[post-impl]",
-      "file": "skills/bmad-story-automator/src/story_automator/core/collectors/docs.py:5",
-      "description": "Module docstring Collectors list missing api-docs-docs",
-      "status": "fixed"
-    },
-    {
-      "id": "I-5",
-      "severity": "important",
-      "tag": "[post-impl]",
-      "file": "skills/bmad-story-automator/src/story_automator/core/checks/trace_check.py:4-5",
-      "description": "Module docstring only mentions File List, not Acceptance Criteria and Tasks sections",
-      "status": "fixed"
-    },
-    {
-      "id": "M-1",
-      "severity": "minor",
-      "tag": "[post-impl]",
-      "file": "tests/test_core_collectors_integration.py:177",
-      "description": "assertTrue(len(bundle_hash) > 0) is a weak assertion — could verify hash format",
-      "status": "accepted"
-    },
-    {
-      "id": "M-2",
-      "severity": "minor",
-      "tag": "[post-impl]",
-      "file": "skills/bmad-story-automator/src/story_automator/core/checks/trace_check.py:22",
-      "description": "_TASKS_RE regex loosely matches headings starting with 'Task' (e.g. 'Task 1')",
-      "status": "accepted"
-    },
-    {
-      "id": "M-3",
-      "severity": "minor",
-      "tag": "[post-impl]",
-      "file": "tests/test_check_trace.py:39-48",
-      "description": "test_mixed_stories S002 tests multiple missing sections, not just a single 'mix'",
-      "status": "accepted"
-    }
-  ],
-  "spec_requirements_implemented": [
-    "docs: API docs generated enforcement (api-docs-docs collector via presence_check.py)",
-    "process/DoD: ACs↔tasks↔tests traced enforcement (trace_check.py checks AC, Tasks, File List sections)"
-  ],
-  "production_readiness": {
-    "security": "pass",
-    "error_resilience": "pass",
-    "testing": "pass",
-    "code_quality": "pass",
-    "cli_conventions": "pass"
-  }
+    "[ultrathink] 🔴 FIXED: Hard-coded collector count 22 was wrong — M5 has 14 collectors (correctness:4 + docs:3 + process:2 + static:5), not 13. Updated all assertions to 25 (14 M5 + 11 M6).",
+    "[ultrathink] 🟡 FIXED: Missing conftest-compliance collector — spec §6.2 says 'compliance rulepack (semgrep/conftest)' but plan only had semgrep. Added CONFTEST collector with configurable policy_dir, tests, and updated compliance module from 1 to 2 collectors.",
+    "[ultrathink] 🟡 FIXED: Missing trivy-sbom-supply_chain collector — spec §6.2 lists Trivy as supply_chain evidence source for SBOM-level vulnerability scanning. Added TRIVY_SBOM collector with configurable severity, tests, and updated supply_chain module from 3 to 4 collectors.",
+    "[ultrathink] 🟡 FIXED: parse_syft_output in license_check.py crashed if licenses[0] was not a dict (no isinstance guard). Added type guard: first_lic = licenses[0] if licenses else {}; license_val = first_lic.get('value', '') if isinstance(first_lic, dict) else ''.",
+    "[ultrathink] 🟡 FIXED: cosign artifact path was hardcoded as 'sbom.json'. Made configurable via profile.rules.supply_chain.cosign_artifact with default 'sbom.json'. Added test_build_cmd_custom_artifact test.",
+    "[ultrathink] 🔵 FIXED: parse_syft_output return type annotation was dict[str, str] but values include list[str]. Changed to list[dict] matching actual return shape.",
+    "[ultrathink] 🔵 FIXED: Provenance test was missing file-existence assertion for presence_check.py (inconsistent with license/sbom collector tests). Added test_check_script_path_exists method."
+  ]
 }
