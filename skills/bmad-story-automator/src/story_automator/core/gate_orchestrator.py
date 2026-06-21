@@ -28,9 +28,11 @@ from .gate_audit import (
 )
 from .gate_schema import GateSchemaError
 from .gate_remediation import (
+    EditAuthorizationError,
     failing_categories_from_gate,
     prepare_remediation_tasks,
     request_review_continuation,
+    write_remediation_to_story,
 )
 from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
@@ -360,8 +362,23 @@ def route_gate_verdict(
     has_unmitigated_risk_9: bool = False,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
+    story_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Route verdict to action: done, remediate, or park."""
+    """Route verdict to action: done, remediate, or park.
+
+    Calling-convention:
+    - cycle 0 = first evaluation of a story.
+    - On verdict == FAIL with cycle < max_cycles, returns
+      {action: "remediate", cycle: cycle+1, ...}. The caller MUST then
+      drive a fresh dev-story cycle and call route_gate_verdict again
+      with remediation_cycle=cycle+1.
+    - When cycle reaches max_cycles, the story is PARKed.
+    - When ``story_path`` is provided AND the verdict triggers remediation,
+      the [AI-Review] tasks are persisted into that file (§9.2 closes the
+      BMAD code-review → review_continuation loop). When omitted, the
+      tasks are still returned in the descriptor for the caller to write
+      itself — backward-compatible.
+    """
     assert_host_context("route_gate_verdict")
     overall = gate_file.get("overall", "FAIL")
     gate_id = gate_file.get("gate_id", "")
@@ -418,13 +435,33 @@ def route_gate_verdict(
         cycle=next_cycle,
         failing_categories=failing,
     )
-    return {
+
+    # §9.2: persist [AI-Review] tasks to the dev-story file so the next
+    # cycle of bmad-dev-story picks them up. Honors edit-authorization
+    # (only the Tasks section is touched).
+    tasks_persisted = False
+    persist_error: str | None = None
+    if story_path is not None and tasks:
+        try:
+            write_remediation_to_story(story_path, tasks)
+            tasks_persisted = True
+        except (EditAuthorizationError, OSError) as exc:
+            # Don't silently swallow — surface in the descriptor so the
+            # caller can decide whether to escalate. Verdict-routing
+            # continues so the orchestrator gets a usable response.
+            persist_error = str(exc)
+
+    descriptor: dict[str, Any] = {
         "action": "remediate", "overall": overall,
         "gate_id": gate_id, "cycle": next_cycle,
         "failing_categories": failing,
         "remediation_tasks": tasks,
         "review_continuation": continuation,
+        "tasks_persisted": tasks_persisted,
     }
+    if persist_error is not None:
+        descriptor["persist_error"] = persist_error
+    return descriptor
 
 
 def resolve_factory_version() -> str:

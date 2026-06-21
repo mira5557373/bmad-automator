@@ -479,6 +479,106 @@ class RouteGateVerdictTests(unittest.TestCase):
         self.assertEqual(len(parked), 1)
         self.assertEqual(parked[0]["story_key"], "E1-001")
 
+    # WIRING-001: persist [AI-Review] tasks to the story file when story_path
+    # is provided. Closes the BMAD code-review → review_continuation loop
+    # the spec promised (§9.2).
+
+    def test_remediate_without_story_path_returns_tasks_unpersisted(self) -> None:
+        """Backward-compat: no story_path → tasks returned in-memory, not written."""
+        gate = self._gate("FAIL", {
+            "security": {"verdict": "FAIL", "required": {}, "actual": {},
+                         "rationale": "1 critical CVE", "evidence": []},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate,
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "remediate")
+        self.assertFalse(result["tasks_persisted"])
+        self.assertTrue(len(result["remediation_tasks"]) > 0)
+
+    def test_remediate_with_story_path_persists_tasks_to_file(self) -> None:
+        """story_path provided → tasks land in the story file's Tasks section."""
+        gate = self._gate("FAIL", {
+            "security": {"verdict": "FAIL", "required": {}, "actual": {},
+                         "rationale": "1 critical CVE", "evidence": []},
+        })
+        story = self.project_root / "E1-001.md"
+        story.write_text(
+            "# Story E1-001\n\n## Tasks\n\n- [x] existing task\n\n## Notes\n",
+            encoding="utf-8",
+        )
+        result = route_gate_verdict(
+            self.project_root, gate,
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+            story_path=story,
+        )
+        self.assertEqual(result["action"], "remediate")
+        self.assertTrue(result["tasks_persisted"])
+        self.assertNotIn("persist_error", result)
+        content = story.read_text(encoding="utf-8")
+        # Existing task preserved
+        self.assertIn("existing task", content)
+        # At least one [AI-Review] task appended under Tasks
+        self.assertGreater(content.count("- [ ]"), 0)
+        # Tasks went under the Tasks section, before Notes
+        self.assertLess(content.find("## Tasks"), content.find("## Notes"))
+
+    def test_remediate_with_missing_story_path_surfaces_error_not_silent(self) -> None:
+        """If story_path points at a nonexistent file, the descriptor
+        carries persist_error rather than silently dropping tasks."""
+        gate = self._gate("FAIL", {
+            "static": {"verdict": "FAIL", "required": {}, "actual": {},
+                       "rationale": "mypy errors", "evidence": []},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate,
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+            story_path=self.project_root / "does-not-exist.md",
+        )
+        self.assertEqual(result["action"], "remediate")
+        self.assertFalse(result["tasks_persisted"])
+        self.assertIn("persist_error", result)
+
+
+class ResolveStoryArtifactPathTests(unittest.TestCase):
+    """artifact_paths.resolve_story_artifact_path: shared helper used by
+    the orchestrator to find the right .md file for a story_key."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        # Place a fake implementation-artifacts dir + BMAD-style story file
+        self.art_dir = self.project_root / "_bmad-output" / "implementation-artifacts"
+        self.art_dir.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_exact_match_wins(self) -> None:
+        from story_automator.core.artifact_paths import resolve_story_artifact_path
+        (self.art_dir / "E1-001.md").write_text("# Story\n", encoding="utf-8")
+        (self.art_dir / "E1-001-Login-flow.md").write_text("# Story\n", encoding="utf-8")
+        result = resolve_story_artifact_path(self.project_root, "E1-001")
+        self.assertEqual(result.name, "E1-001.md")
+
+    def test_prefix_fallback(self) -> None:
+        from story_automator.core.artifact_paths import resolve_story_artifact_path
+        (self.art_dir / "1.2-Add-checkout-form.md").write_text("# Story\n", encoding="utf-8")
+        result = resolve_story_artifact_path(self.project_root, "1.2")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, "1.2-Add-checkout-form.md")
+
+    def test_no_match_returns_none(self) -> None:
+        from story_automator.core.artifact_paths import resolve_story_artifact_path
+        self.assertIsNone(
+            resolve_story_artifact_path(self.project_root, "E99-999")
+        )
+
+    def test_empty_key_returns_none(self) -> None:
+        from story_automator.core.artifact_paths import resolve_story_artifact_path
+        self.assertIsNone(resolve_story_artifact_path(self.project_root, ""))
+
 
 class FactoryVersionTests(unittest.TestCase):
     """Task 10: factory version resolution."""

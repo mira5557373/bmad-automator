@@ -46,6 +46,33 @@ def implementation_artifacts_glob(project_root: str | Path, pattern: str) -> str
     return f"{implementation_artifacts_relpath(project_root)}/{pattern}"
 
 
+def resolve_story_artifact_path(
+    project_root: str | Path,
+    story_key: str,
+) -> Path | None:
+    """Locate the dev-story markdown file for a given story_key.
+
+    Used by gate_orchestrator.route_gate_verdict (§9.2) and the
+    orchestrator's remediation handler to persist [AI-Review] tasks
+    into the story file BMAD-natively.
+
+    Returns the path when a unique file matches under
+    ``implementation-artifacts/``; returns None when no match exists.
+    Matches ``{story_key}.md`` first; falls back to ``{story_key}-*.md``
+    (BMAD's "Story 1.2 — Title.md" convention).
+    """
+    if not story_key:
+        return None
+    artifacts = implementation_artifacts_dir(project_root)
+    if not artifacts.is_dir():
+        return None
+    exact = artifacts / f"{story_key}.md"
+    if exact.is_file():
+        return exact
+    matches = sorted(artifacts.glob(f"{story_key}-*.md"))
+    return matches[0] if matches else None
+
+
 def resolve_artifact_glob(project_root: str | Path, pattern: str) -> tuple[Path, str]:
     root = Path(project_root)
     root_resolved = root.resolve()
