@@ -342,5 +342,47 @@ class InstantiationSafeguardTests(unittest.TestCase):
         self.assertIn("missing.tmpl", result.errors[0])
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TEMPLATE_DIR = (
+    REPO_ROOT
+    / "skills"
+    / "bmad-story-automator"
+    / "data"
+    / "templates"
+    / "msme-erp-golden-template"
+)
+STANDARD_VARS = {
+    "product_name": "TestProduct",
+    "service_prefix": "tst",
+    "health_port": "9090",
+    "otel_endpoint": "http://otel:4317",
+    "pact_broker_url": "http://pact:9292",
+    "db_name": "test_db",
+}
+
+
+class ContractTemplateRenderTests(unittest.TestCase):
+    def _render(self, src_file):
+        content = (TEMPLATE_DIR / src_file).read_text(encoding="utf-8")
+        return render_template_content(content, STANDARD_VARS)
+
+    def test_conftest_renders(self):
+        out = self._render("contracts/conftest.py.tmpl")
+        self.assertIn("tst", out)
+        self.assertNotIn("$service_prefix", out)
+
+    def test_pact_consumer_renders(self):
+        out = self._render("contracts/pact_consumer.py.tmpl")
+        self.assertIn("tst", out)
+
+    def test_network_first_renders(self):
+        out = self._render("network/network_first.py.tmpl")
+        self.assertIn("tst", out)
+
+    def test_har_recorder_renders(self):
+        out = self._render("network/har_recorder.py.tmpl")
+        self.assertIn("har", out.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
