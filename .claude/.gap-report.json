@@ -1,119 +1,99 @@
 {
-  "milestone": "integration-m10-orchestrator-wiring",
-  "phase": "C",
-  "phase_name": "Review + Fix",
-  "timestamp": "2026-06-21",
-  "spec_gaps_implemented": [
+  "pass": 1,
+  "critical_gaps": 4,
+  "architectural_gaps": 1,
+  "important_gaps": 2,
+  "minor_gaps": 2,
+  "deferred_gaps": 3,
+  "total_gaps_found": 12,
+  "gaps_fixed_this_pass": 4,
+  "tests_green": true,
+  "lint_clean": true,
+  "converged": true,
+  "gap_summaries": [
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
-      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
-      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
+      "severity": "critical",
+      "location": "Task 16 / gate_orchestrator.py run_production_gate",
+      "description": "build_gate_file (verdict_engine.py) never stores breaking_hash in the gate file profile section. The breaking-hash reuse fallback reads gate_file.profile.breaking_hash, which would always be empty. Without enrichment in run_production_gate, the semver reuse path is dead code.",
+      "status": "fixed",
+      "fix": "Added run_production_gate enrichment step: after evaluate_gate returns, inject breaking_hash via compute_breaking_hash and re-persist the gate file for semver profiles."
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
-      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
-      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
+      "severity": "critical",
+      "location": "Task 5 / gate_metrics.py compute_gate_metrics",
+      "description": "Task 4 creates compute_gate_metrics with hardcoded flaky_categories=[] and timeout_categories=[]. Task 5 adds the detector functions but the prose instruction 'Update compute_gate_metrics to call these detectors' lacks code. An implementer could miss this, causing integration tests (Task 17) to fail because metrics.flaky_categories would always be empty.",
+      "status": "fixed",
+      "fix": "Added explicit code showing the updated return dict calling detect_flaky_categories(history) and detect_timeout_categories(history). Added two integration-level tests for compute_gate_metrics verifying the fields are populated."
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
-      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
-      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+      "severity": "critical",
+      "location": "Task 15 / learning_loop.py run_learning_loop",
+      "description": "After apply_calibrations returns, the profile version is never bumped. The GateCalibrationAudit event would report identical old_version and new_version. Profile snapshots would not reflect that calibrations were applied.",
+      "status": "fixed",
+      "fix": "Added version bump after apply_calibrations: if any applied proposals have change_type='breaking', bump breaking; otherwise bump feature. Placed before the audit event emission so old_version/new_version reflect the actual change."
     },
     {
-      "spec_section": "§11",
-      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
-      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
-      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+      "severity": "critical",
+      "location": "Task 9 / tests/test_product_profile.py",
+      "description": "Tests reference _make_valid_profile() helper function that does not exist in the test file. All six VersionDictValidationTests would fail with NameError.",
+      "status": "fixed",
+      "fix": "Added _make_valid_profile() helper definition to the plan with all required profile fields, placed near the top of the test file before any test class."
+    },
+    {
+      "severity": "architectural",
+      "location": "Task 16 / gate_orchestrator.py run_production_gate",
+      "description": "Breaking-hash enrichment requires a second persist_gate_file call after evaluate_gate, which already persists internally. This double-write is acceptable (gate evaluation is orders of magnitude more expensive) but creates a brief window where the on-disk file lacks breaking_hash.",
+      "status": "accepted",
+      "fix": "Documented in the plan. Alternative (modifying verdict_engine.py) is blocked by the 'do not modify m1-m9' constraint."
+    },
+    {
+      "severity": "important",
+      "location": "Task 16 / check_gate_reuse breaking-hash fallback",
+      "description": "The fallback uses string matching ('profile.hash mismatch' in reason) against can_reuse_gate_file's error message. If that message format changes, the fallback silently stops working.",
+      "status": "accepted",
+      "fix": "The exact string is verified against evidence_io.py line 216. The coupling is acceptable because both modules are under the same project's control and the string is a stable part of the interface."
+    },
+    {
+      "severity": "important",
+      "location": "Task 15 / learning_loop.py",
+      "description": "run_learning_loop returns updated_profile but does not persist it. The operator must manually save the calibrated profile. This is by design (operator controls profile changes) but could surprise an integrator.",
+      "status": "accepted",
+      "fix": "Intentional: the learning loop proposes and applies in-memory; persistence is the caller's responsibility. The retrospective summary provides visibility into what changed."
+    },
+    {
+      "severity": "minor",
+      "location": "Task 10, Task 8",
+      "description": "Duplicate _BASE_PROFILE fixtures in test_profile_versioning.py and test_profile_calibrator.py. These could diverge over time if profile schema changes.",
+      "status": "accepted",
+      "fix": "Acceptable for test isolation. A shared test_fixtures.py module would add coupling between test files."
+    },
+    {
+      "severity": "minor",
+      "location": "Task 6",
+      "description": "compute_category_trends window test uses assertIn(trends.get('security'), ('improving', 'stable')) which accepts two outcomes.",
+      "status": "accepted",
+      "fix": "The test correctly accepts both because with only 3 PASS results, the first/second half comparison depends on the 10% tolerance threshold."
+    },
+    {
+      "severity": "deferred",
+      "location": "commands/gate_cmd.py",
+      "description": "No CLI command for running the learning loop or viewing gate history.",
+      "status": "deferred",
+      "fix": "CLI integration is a follow-up milestone. The learning loop is designed to be called programmatically from the orchestrator."
+    },
+    {
+      "severity": "deferred",
+      "location": "gate_history.py",
+      "description": "No concurrent-write protection for history records beyond write_atomic. Timestamp-based filename collision is possible if two gate evaluations complete in the same second with the same gate_id.",
+      "status": "deferred",
+      "fix": "Acceptable for single-user threat model (per project memory). The gate_id collision with same-second completion is extremely unlikely in practice."
+    },
+    {
+      "severity": "deferred",
+      "location": "gate_history.py / prune_gate_history",
+      "description": "No CLI command to invoke pruning. prune_gate_history is available as Python API only.",
+      "status": "deferred",
+      "fix": "CLI integration is a follow-up. Pruning could be wired into the learning loop itself as an optional step."
     }
-  ],
-  "post_impl_findings": [
-    {
-      "id": "PI-1",
-      "severity": "medium",
-      "tag": "[post-impl]",
-      "file": "core/gate_orchestrator.py:route_gate_verdict",
-      "finding": "Unknown verdicts silently fell through to remediate branch",
-      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-2",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "tests/test_gate_remediation.py",
-      "finding": "No test for frontmatter-only story file (no ## sections)",
-      "fix": "Added test_handles_frontmatter_only_file test case",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-3",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
-      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
-      "status": "accepted"
-    }
-  ],
-  "production_findings": [
-    {
-      "id": "PR-1",
-      "severity": "high",
-      "tag": "[production]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Non-atomic story file write via path.write_text()",
-      "fix": "Changed to write_atomic() from utils.py",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-2",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_orchestrator.py:recover_from_crash",
-      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
-      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-3",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
-      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
-      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-4",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
-      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
-      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-5",
-      "severity": "low",
-      "tag": "[production]",
-      "file": "core/gate_status.py:resume_story",
-      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
-      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
-      "status": "accepted"
-    }
-  ],
-  "ruff_findings_fixed": [
-    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
-    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
-    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
-  ],
-  "verification": {
-    "test_count": 2486,
-    "test_result": "OK (skipped=2)",
-    "ruff": "All checks passed",
-    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
-  }
+  ]
 }
