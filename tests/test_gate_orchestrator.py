@@ -1,4 +1,4 @@
-"""Tests for gate_orchestrator: reuse checks with drift detection and crash recovery."""
+"""Tests for gate_orchestrator: reuse, crash recovery, lifecycle, verdict routing."""
 from __future__ import annotations
 
 import json
@@ -7,18 +7,24 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from story_automator.core.gate_schema import make_gate_file
+from story_automator.core.collector_registry import CollectorRegistry
 from story_automator.core.evidence_io import (
+    persist_evidence_record,
     persist_gate_file,
     write_gate_marker,
 )
-from story_automator.core.product_profile import compute_profile_hash
 from story_automator.core.gate_orchestrator import (
     check_gate_reuse,
     recover_from_crash,
+    resolve_factory_version,
+    route_gate_verdict,
+    run_production_gate,
 )
+from story_automator.core.gate_schema import make_evidence_record, make_gate_file
+from story_automator.core.gate_status import list_parked
+from story_automator.core.product_profile import compute_profile_hash
 
 
 def _minimal_profile(*, hash_override: str = "") -> dict:
@@ -257,6 +263,192 @@ class RecoverFromCrashTests(unittest.TestCase):
             self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
         )
         self.assertFalse(marker_path.exists())
+
+
+class RunProductionGateTests(unittest.TestCase):
+    """Task 8: core gate orchestration."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        self.profile = _minimal_profile()
+        self.registry = CollectorRegistry()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _persist_evidence(self, gate_id: str, records: list[dict]) -> None:
+        for record in records:
+            persist_evidence_record(self.project_root, gate_id, record)
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_full_lifecycle_pass(self, mock_run: MagicMock) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        self._persist_evidence("gate-test", evidence)
+        mock_run.return_value = []
+        gate = run_production_gate(
+            self.project_root, "gate-test",
+            commit_sha="abc123",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile,
+            factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertEqual(gate["overall"], "PASS")
+        marker = self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        self.assertFalse(marker.exists())
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_marker_cleared_on_success(self, mock_run: MagicMock) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        self._persist_evidence("gate-test2", evidence)
+        mock_run.return_value = []
+        run_production_gate(
+            self.project_root, "gate-test2", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        marker_path = self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        self.assertFalse(marker_path.exists())
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_marker_cleared_on_failure(self, mock_run: MagicMock) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="error", findings=["crash"],
+        )]
+        self._persist_evidence("gate-test3", evidence)
+        mock_run.return_value = []
+        gate = run_production_gate(
+            self.project_root, "gate-test3", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertEqual(gate["overall"], "FAIL")
+        marker_path = self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        self.assertFalse(marker_path.exists())
+
+    def test_reuse_returns_cached_gate(self) -> None:
+        profile_hash = compute_profile_hash(self.profile)
+        gate = _make_test_gate_file(
+            gate_id="gate-cache",
+            commit_sha="abc",
+            profile=self.profile,
+            factory_version="1.15.0",
+        )
+        persist_gate_file(self.project_root, gate)
+        result = run_production_gate(
+            self.project_root, "gate-cache", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertEqual(result["overall"], "PASS")
+
+
+class RouteGateVerdictTests(unittest.TestCase):
+    """Task 9: verdict routing."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _gate(self, overall: str, categories: dict | None = None) -> dict:
+        return make_gate_file(
+            gate_id="gate-1",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "t", "version": 1, "hash": "x"},
+            factory_version="1.15.0",
+            categories=categories or {"c": {"verdict": overall, "required": {}, "actual": {}, "rationale": "r"}},
+            overall=overall,
+        )
+
+    def test_pass_returns_done(self) -> None:
+        result = route_gate_verdict(
+            self.project_root, self._gate("PASS"),
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "done")
+        self.assertTrue(result["commit"])
+
+    def test_concerns_returns_done_with_debt(self) -> None:
+        gate = self._gate("CONCERNS", {
+            "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "low confidence"},
+            "correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate,
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "done")
+        self.assertTrue(result["commit"])
+        self.assertIn("mitigation_debt", result)
+
+    def test_waived_returns_done(self) -> None:
+        result = route_gate_verdict(
+            self.project_root, self._gate("WAIVED"),
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "done")
+        self.assertTrue(result["waived"])
+
+    def test_fail_below_max_returns_remediate(self) -> None:
+        result = route_gate_verdict(
+            self.project_root, self._gate("FAIL"),
+            story_key="E1-001", remediation_cycle=1, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "remediate")
+
+    def test_fail_at_max_returns_park(self) -> None:
+        result = route_gate_verdict(
+            self.project_root, self._gate("FAIL"),
+            story_key="E1-001", remediation_cycle=3, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "park")
+        self.assertEqual(result["reason"], "exhausted")
+
+    def test_fail_risk_9_parks_immediately(self) -> None:
+        result = route_gate_verdict(
+            self.project_root, self._gate("FAIL"),
+            story_key="E1-001", remediation_cycle=0, max_cycles=3,
+            has_unmitigated_risk_9=True,
+        )
+        self.assertEqual(result["action"], "park")
+        self.assertEqual(result["reason"], "risk-9")
+
+    def test_park_creates_parked_record(self) -> None:
+        route_gate_verdict(
+            self.project_root, self._gate("FAIL"),
+            story_key="E1-001", remediation_cycle=3, max_cycles=3,
+        )
+        parked = list_parked(self.project_root)
+        self.assertEqual(len(parked), 1)
+        self.assertEqual(parked[0]["story_key"], "E1-001")
+
+
+class FactoryVersionTests(unittest.TestCase):
+    """Task 10: factory version resolution."""
+
+    def test_returns_nonempty_string(self) -> None:
+        version = resolve_factory_version()
+        self.assertIsInstance(version, str)
+        self.assertTrue(len(version) > 0)
+
+    def test_matches_package_version(self) -> None:
+        from story_automator import __version__
+        self.assertEqual(resolve_factory_version(), __version__)
 
 
 if __name__ == "__main__":

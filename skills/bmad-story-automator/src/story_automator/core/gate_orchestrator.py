@@ -1,10 +1,8 @@
-"""Gate orchestrator: reuse checks with drift detection and crash recovery.
+"""Gate orchestrator — lifecycle management for production-readiness gate.
 
-Coordinates gate lifecycle at the top level. Before running a full
-collector loop, ``check_gate_reuse`` determines whether a prior gate
-file can be reused (same commit, profile, and factory version).
-``recover_from_crash`` cleans up stale markers and orphan evidence
-left by an interrupted gate run.
+Wires the gate step into the orchestrator loop: crash recovery, reuse
+validation, drift detection, collect -> adjudicate -> verdict routing,
+and atomic-marker semantics.
 """
 from __future__ import annotations
 
@@ -12,16 +10,25 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .collector_registry import CollectorRegistry
+from .collector_runner import run_gate_collectors
 from .evidence_io import (
     can_reuse_gate_file,
     clear_gate_marker,
     load_gate_file,
     read_gate_marker,
+    write_gate_marker,
 )
-from .gate_audit import GateProfileDriftAudit, emit_gate_audit
+from .gate_audit import (
+    GateProfileDriftAudit,
+    GateStartedAudit,
+    emit_gate_audit,
+)
 from .gate_schema import GateSchemaError
+from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
+from .verdict_engine import evaluate_gate
 
 
 def check_gate_reuse(
@@ -112,3 +119,146 @@ def recover_from_crash(
         "had_verdict": had_verdict,
         "commit_sha": commit_sha,
     }
+
+
+def _run_collectors(
+    project_root: str | Path,
+    gate_id: str,
+    commit_sha: str,
+    profile: dict[str, Any],
+    registry: CollectorRegistry,
+    *,
+    diff_categories: set[str] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> list[Any]:
+    """Wrapper for testability — delegates to run_gate_collectors."""
+    return run_gate_collectors(
+        project_root, gate_id, commit_sha, profile, registry,
+        diff_categories=diff_categories,
+        audit_policy=audit_policy, audit_path=audit_path,
+    )
+
+
+def run_production_gate(
+    project_root: str | Path,
+    gate_id: str,
+    *,
+    commit_sha: str,
+    target: dict[str, str],
+    profile: dict[str, Any],
+    factory_version: str,
+    registry: CollectorRegistry,
+    priority: str = "P1",
+    has_unmitigated_risk_9: bool = False,
+    waivers: list[dict[str, Any]] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> dict[str, Any]:
+    """Full gate lifecycle: crash recovery -> reuse -> collect -> evaluate."""
+    assert_host_context("run_production_gate")
+
+    recover_from_crash(project_root)
+
+    existing, _ = check_gate_reuse(
+        project_root, gate_id, commit_sha, profile, factory_version,
+        audit_policy=audit_policy, audit_path=audit_path,
+    )
+    if existing is not None:
+        return existing
+
+    if audit_policy is not None and audit_path is not None:
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateStartedAudit(
+                gate_id=gate_id, commit_sha=commit_sha,
+                profile_hash=compute_profile_hash(profile),
+            ),
+        )
+
+    write_gate_marker(project_root, gate_id, commit_sha)
+    try:
+        _run_collectors(
+            project_root, gate_id, commit_sha, profile, registry,
+            audit_policy=audit_policy, audit_path=audit_path,
+        )
+        gate_file = evaluate_gate(
+            project_root, gate_id,
+            commit_sha=commit_sha, target=target,
+            profile=profile, factory_version=factory_version,
+            priority=priority,
+            has_unmitigated_risk_9=has_unmitigated_risk_9,
+            waivers=waivers,
+            audit_policy=audit_policy, audit_path=audit_path,
+        )
+    finally:
+        clear_gate_marker(project_root)
+
+    return gate_file
+
+
+def route_gate_verdict(
+    project_root: str | Path,
+    gate_file: dict[str, Any],
+    *,
+    story_key: str,
+    remediation_cycle: int = 0,
+    max_cycles: int = 3,
+    has_unmitigated_risk_9: bool = False,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> dict[str, Any]:
+    """Route verdict to action: done, remediate, or park."""
+    assert_host_context("route_gate_verdict")
+    overall = gate_file.get("overall", "FAIL")
+    gate_id = gate_file.get("gate_id", "")
+
+    if overall == "PASS":
+        return {"action": "done", "commit": True, "overall": "PASS"}
+
+    if overall == "WAIVED":
+        return {"action": "done", "commit": True, "waived": True, "overall": "WAIVED"}
+
+    if overall == "CONCERNS":
+        concerns_cats = [
+            cat for cat, info in gate_file.get("categories", {}).items()
+            if isinstance(info, dict) and info.get("verdict") == "CONCERNS"
+        ]
+        record_mitigation_debt(project_root, gate_id, story_key, concerns_cats)
+        return {
+            "action": "done", "commit": True,
+            "overall": "CONCERNS", "mitigation_debt": concerns_cats,
+        }
+
+    if has_unmitigated_risk_9:
+        park_story(
+            project_root, gate_id, story_key,
+            "risk-9", overall,
+            audit_policy=audit_policy, audit_path=audit_path,
+        )
+        return {
+            "action": "park", "reason": "risk-9",
+            "overall": overall, "gate_id": gate_id,
+        }
+
+    if remediation_cycle >= max_cycles:
+        park_story(
+            project_root, gate_id, story_key,
+            "exhausted", overall,
+            audit_policy=audit_policy, audit_path=audit_path,
+        )
+        return {
+            "action": "park", "reason": "exhausted",
+            "overall": overall, "gate_id": gate_id,
+        }
+
+    return {
+        "action": "remediate", "overall": overall,
+        "gate_id": gate_id, "cycle": remediation_cycle + 1,
+    }
+
+
+def resolve_factory_version() -> str:
+    """Return the current factory version from the package."""
+    from story_automator import __version__
+    return __version__
