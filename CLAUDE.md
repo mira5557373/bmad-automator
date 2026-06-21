@@ -40,7 +40,8 @@ The production-ready factory gate. **Read these existing modules before planning
 - **Trust boundary (m3)** `core/trust_boundary.py`, `core/collector_checkout.py` — fresh checkout @SHA, sandbox env scrub. Collectors run here, never inside the generation child's tree.
 - **Collector framework (m4)** `core/collector_registry.py`, `core/collector_runner.py`, `core/collector_config.py`, `core/collector_doctor.py`, `core/diff_scope.py`, `core/profile_bridge.py`. All collectors implement `run(config: CollectorConfig, scope: DiffScope) -> CollectorOutcome`. Registry is profile-aware (kill-switches via `profile.categories_na` + `profile.timeouts`).
 - **Collectors (m5–m7)** `core/collectors/{correctness,static,docs,process, security,license,compliance,supply_chain, traceability,api_compat,migrations,performance,accessibility,observability}.py`. Sub-checks in `core/checks/*_check.py`.
-- **Stubs ready for m8+**: `core/adjudicator.py`, `core/gate_rules.py` exist as scaffolds; m9 fills them.
+- **Collectors (m8)** `core/collectors/{test_quality,mutation,agentic}.py`, `core/invariant_registry.py`. Check scripts in `core/checks/{test_review_check,burn_in_check,hard_wait_check,mutation_check,pack_schema_check,aibom_check,opa_check}.py`. Invariant registry YAML loader (§6.4).
+- **Stubs ready for m9+**: `core/adjudicator.py`, `core/gate_rules.py` exist as scaffolds; m9 fills them.
 
 **Shared invariants for every collector** (verified by existing tests — don't break them):
 1. Output is `CollectorOutcome` with `status ∈ {ok, violation, error, timeout}` (fail-closed: error/timeout never count as PASS).
