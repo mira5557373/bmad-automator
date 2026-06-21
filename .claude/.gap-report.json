@@ -1,20 +1,25 @@
 {
   "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 0,
+  "critical_gaps": 2,
+  "architectural_gaps": 1,
+  "important_gaps": 2,
   "minor_gaps": 3,
-  "deferred_gaps": 0,
-  "total_gaps_found": 5,
-  "gaps_fixed_this_pass": 3,
+  "deferred_gaps": 2,
+  "total_gaps_found": 10,
+  "gaps_fixed_this_pass": 4,
   "tests_green": true,
   "lint_clean": true,
   "converged": true,
   "gap_summaries": [
-    "[ultrathink] FIXED 🔴 gwt_fallback() marked ALL ACs as mapped when ANY GWT test existed — rewrote to per-AC keyword matching with ≥2 word overlap threshold",
-    "[ultrathink] FIXED 🟡 test_maps_acs_to_tests used weak len>=1 assertion — replaced with distinctive AC descriptions and per-AC status verification (AC-1 mapped, AC-2 unmapped)",
-    "[ultrathink] FIXED 🟡 scan_for_n_plus_one _FOR_LOOP_RE used \\s+ (required leading whitespace) — changed to \\s* to also catch top-level for loops",
-    "[ultrathink] 🔵 schema-diff uses oasdiff (OpenAPI-specific) — profile-configurable via base/revision paths, no code change needed",
-    "[ultrathink] 🔵 no Marabunta migration support — Odoo-specific, deferred to future milestone if needed"
+    "[ultrathink] FIXED 🔴 CRITICAL: Circular import between category_rules.py and verdict_engine.py — Task 4 had `from .verdict_engine import worst_evidence_status` while Task 9 had `from .category_rules import apply_category_rule`. Fix: moved _STATUS_SEVERITY + worst_evidence_status into category_rules.py (Task 3), removed cross-module import in Task 4. Import graph now strictly unidirectional.",
+    "[ultrathink] FIXED 🔴 CRITICAL: verdict_na() shape mismatch — gate_rules.verdict_na() returns {verdict, rationale} (2 keys) but all other CategoryResult dicts return {verdict, required, actual, rationale, evidence_refs} (5 keys). Fix: compute_all_verdicts now normalizes NA verdicts to full 5-key shape with empty defaults.",
+    "[ultrathink] FIXED 🟠 ARCHITECTURAL: Plan header dependency graph contradicted actual imports — stated category_rules <- verdict_engine but Task 4 imported in the reverse direction. Fix: updated header to document unidirectional constraint and added GAP FIX note to Task 3.",
+    "[ultrathink] FIXED 🟡 IMPORTANT: Task 10 lacked test for NA verdict shape consistency — added test_na_verdict_has_consistent_shape asserting required, actual, and evidence_refs keys exist on NA verdicts.",
+    "[ultrathink] 🟡 IMPORTANT: _aggregate_metrics returns first-match only — if multiple evidence records have the same metric key (e.g., two pytest runners with different coverage_pct), only the first is used. Acceptable for M9 since categories typically have one primary evidence source per metric. Document if multi-evidence-per-category becomes common.",
+    "[ultrathink] 🔵 MINOR: No explicit __all__ exports in category_rules.py or verdict_engine.py — codebase has mixed convention (some modules have it, some don't). Not blocking.",
+    "[ultrathink] 🔵 MINOR: No end-to-end test combining invariant-severity FAIL through adjudicate() — the individual verdict_for_invariant_severity function is tested in test_gate_rules.py and generic_rule handles invariants via status. Covered transitively.",
+    "[ultrathink] 🔵 MINOR: No test for coverage_verdict with float precision edge cases beyond 89.999/90.001 — Task 16 adds coverage_verdict_float_precision test which covers the critical boundary.",
+    "[ultrathink] ⚪ DEFERRED: No cost_tier verdict integration into category_rules dispatch — cost_to_serve is a system-altitude category handled by M22, not M9's code-altitude gate.",
+    "[ultrathink] ⚪ DEFERRED: No invariant registry entry integration — invariant category uses generic_rule (status-based). Full invariant registry checking (per-entry severity) is an M18 concern per spec."
   ]
 }
