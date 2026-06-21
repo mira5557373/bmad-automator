@@ -843,5 +843,81 @@ class ProfileActivationBlocksTests(BundledProfileTests):
         self.assertEqual(blocks["append"], "")
 
 
+def _make_valid_profile():
+    """Minimal valid profile dict for unit tests that don't need file I/O."""
+    return {
+        "version": 1,
+        "id": "test",
+        "snapshot": {"relativeDir": "_bmad-output/story-automator/profile-snapshots"},
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": ["unit"]},
+            "P1": {"coverage_pct": 90, "levels": ["unit"]},
+            "P2": {"coverage_pct": 50, "levels": ["unit"]},
+            "P3": {"coverage_pct": 20, "levels": ["smoke"]},
+        },
+        "categories": {"code": ["correctness"], "system": []},
+        "categories_na": [],
+        "rules": {},
+        "timeouts": {},
+        "cost_tier": {},
+        "forbidden_until": {},
+        "invariants": {},
+        "toolchain": {},
+        "seed_template": {},
+    }
+
+
+class VersionDictValidationTests(unittest.TestCase):
+    """Verify that profile validation accepts both integer and dict version."""
+
+    def test_integer_version_still_valid(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = 1
+        from story_automator.core.product_profile import _validate_profile_shape
+        _validate_profile_shape(profile)
+
+    def test_dict_version_valid(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = {"breaking": 1, "feature": 0}
+        from story_automator.core.product_profile import _validate_profile_shape
+        _validate_profile_shape(profile)
+
+    def test_dict_version_with_feature(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = {"breaking": 2, "feature": 5}
+        from story_automator.core.product_profile import _validate_profile_shape
+        _validate_profile_shape(profile)
+
+    def test_dict_version_missing_breaking_rejected(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = {"feature": 1}
+        from story_automator.core.product_profile import (
+            ProfileError,
+            _validate_profile_shape,
+        )
+        with self.assertRaises(ProfileError):
+            _validate_profile_shape(profile)
+
+    def test_dict_version_non_positive_breaking_rejected(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = {"breaking": 0, "feature": 1}
+        from story_automator.core.product_profile import (
+            ProfileError,
+            _validate_profile_shape,
+        )
+        with self.assertRaises(ProfileError):
+            _validate_profile_shape(profile)
+
+    def test_string_version_rejected(self) -> None:
+        profile = _make_valid_profile()
+        profile["version"] = "1.0"
+        from story_automator.core.product_profile import (
+            ProfileError,
+            _validate_profile_shape,
+        )
+        with self.assertRaises(ProfileError):
+            _validate_profile_shape(profile)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -89,8 +89,21 @@ def _validate_profile_shape(profile: dict[str, Any]) -> None:
 
 def _validate_version_and_id(profile: dict[str, Any]) -> None:
     version = profile.get("version")
-    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
-        raise ProfileError("profile.version must be a positive integer")
+    if isinstance(version, dict):
+        breaking = version.get("breaking")
+        if not isinstance(breaking, int) or isinstance(breaking, bool) or breaking < 1:
+            raise ProfileError(
+                "profile.version.breaking must be a positive integer"
+            )
+        feature = version.get("feature")
+        if not isinstance(feature, int) or isinstance(feature, bool) or feature < 0:
+            raise ProfileError(
+                "profile.version.feature must be a non-negative integer"
+            )
+    elif not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise ProfileError(
+            "profile.version must be a positive integer or {breaking, feature} dict"
+        )
     pid = profile.get("id")
     if not isinstance(pid, str) or not pid.strip():
         raise ProfileError("profile.id must be a non-empty string")
