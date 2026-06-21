@@ -16,6 +16,7 @@ from .evidence_io import (
     can_reuse_gate_file,
     clear_gate_marker,
     load_gate_file,
+    persist_gate_file,
     read_gate_marker,
     write_gate_marker,
 )
@@ -67,6 +68,15 @@ def check_gate_reuse(
     )
     if reusable:
         return gate_file, ""
+
+    if not reusable and "profile.hash mismatch" in reason:
+        from .profile_versioning import compute_breaking_hash, has_semver_profile
+
+        if has_semver_profile(profile):
+            current_bh = compute_breaking_hash(profile)
+            old_bh = (gate_file.get("profile") or {}).get("breaking_hash", "")
+            if old_bh and current_bh == old_bh:
+                return gate_file, ""
 
     if audit_policy is not None and audit_path is not None:
         old_hash = (gate_file.get("profile") or {}).get("hash", "")
@@ -202,6 +212,14 @@ def run_production_gate(
     finally:
         clear_gate_marker(project_root)
 
+    from .profile_versioning import compute_breaking_hash, has_semver_profile
+
+    if has_semver_profile(profile):
+        gate_file.setdefault("profile", {})["breaking_hash"] = (
+            compute_breaking_hash(profile)
+        )
+        persist_gate_file(project_root, gate_file)
+
     return gate_file
 
 
@@ -218,6 +236,17 @@ def route_gate_verdict(
 ) -> dict[str, Any]:
     """Route verdict to action: done, remediate, or park."""
     assert_host_context("route_gate_verdict")
+
+    from .learning_loop import record_gate_for_learning
+
+    try:
+        record_gate_for_learning(
+            project_root, gate_file,
+            story_key=story_key, remediation_cycle=remediation_cycle,
+        )
+    except Exception:
+        pass
+
     overall = gate_file.get("overall", "FAIL")
     gate_id = gate_file.get("gate_id", "")
 
