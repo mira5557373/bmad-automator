@@ -425,5 +425,175 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
         self.assertIn("security", run_cats)
 
 
+class IntegrationCategoryPipelineTests(unittest.TestCase):
+    """Pipeline tests with traceability, api_compat, migrations,
+    performance, accessibility, observability categories."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-integ-integration-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.base_sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _integration_profile(self) -> dict[str, Any]:
+        return {
+            "categories": {
+                "code": [
+                    "traceability", "api_compat", "migrations",
+                    "performance", "accessibility", "observability",
+                ],
+                "system": [],
+            },
+            "categories_na": [],
+            "rules": {
+                "traceability": {},
+                "api_compat": {},
+                "migrations": {},
+                "performance": {},
+                "accessibility": {},
+                "observability": {},
+            },
+            "timeouts": {},
+        }
+
+    def _integration_registry(self) -> CollectorRegistry:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="trace-traceability",
+            tool="python3", category="traceability", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="openapi-diff-api_compat",
+            tool="python3", category="api_compat", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="alembic-migrations",
+            tool="python3", category="migrations", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="lighthouse-performance",
+            tool="python3", category="performance", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="axe-accessibility",
+            tool="python3", category="accessibility", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="otel-wiring-observability",
+            tool="python3", category="observability", build_cmd=_ok_cmd,
+        ))
+        return reg
+
+    def test_all_integration_categories_pass(self) -> None:
+        profile = self._integration_profile()
+        reg = self._integration_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-integ-pass", self.base_sha,
+                profile, reg,
+            )
+        self.assertEqual(len(outcomes), 6)
+        for outcome in outcomes:
+            self.assertEqual(outcome.evidence["status"], "ok")
+        records = load_evidence_bundle(self.project_root, "gate-integ-pass")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(aggregate_verdicts(verdicts), "PASS")
+
+    def test_performance_fail_propagates(self) -> None:
+        profile = self._integration_profile()
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="lighthouse-performance",
+            tool="python3", category="performance", build_cmd=_fail_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="axe-accessibility",
+            tool="python3", category="accessibility", build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            run_gate_collectors(
+                self.project_root, "gate-integ-fail", self.base_sha,
+                profile, reg,
+            )
+        records = load_evidence_bundle(self.project_root, "gate-integ-fail")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(verdicts["performance"], "FAIL")
+        self.assertEqual(verdicts["accessibility"], "PASS")
+        self.assertEqual(aggregate_verdicts(verdicts), "FAIL")
+
+    def test_kill_switch_integration_tool(self) -> None:
+        profile = self._integration_profile()
+        profile["rules"]["performance"]["disabled_tools"] = ["python3"]
+        reg = self._integration_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-integ-kill", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("performance", run_cats)
+        self.assertIn("traceability", run_cats)
+
+    def test_categories_na_excludes_accessibility(self) -> None:
+        profile = self._integration_profile()
+        profile["categories_na"] = ["accessibility"]
+        reg = self._integration_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-integ-na", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("accessibility", run_cats)
+        self.assertIn("observability", run_cats)
+
+    def test_mixed_categories_all_tiers(self) -> None:
+        profile = {
+            "categories": {
+                "code": [
+                    "correctness", "static", "security",
+                    "traceability", "performance", "observability",
+                ],
+                "system": [],
+            },
+            "categories_na": [],
+            "rules": {},
+            "timeouts": {},
+        }
+        reg = CollectorRegistry()
+        for cat in ["correctness", "static", "security",
+                     "traceability", "performance", "observability"]:
+            reg.register(CollectorConfig(
+                collector_id=f"test-{cat}",
+                tool="python3", category=cat, build_cmd=_ok_cmd,
+            ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-mixed-tiers", self.base_sha,
+                profile, reg,
+            )
+        self.assertEqual(len(outcomes), 6)
+        records = load_evidence_bundle(self.project_root, "gate-mixed-tiers")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(aggregate_verdicts(verdicts), "PASS")
+
+
 if __name__ == "__main__":
     unittest.main()
