@@ -595,5 +595,139 @@ class IntegrationCategoryPipelineTests(unittest.TestCase):
         self.assertEqual(aggregate_verdicts(verdicts), "PASS")
 
 
+class AdvancedCategoryPipelineTests(unittest.TestCase):
+    """Pipeline tests with test_quality, mutation, agentic categories."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-adv-integration-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.base_sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _advanced_profile(self) -> dict[str, Any]:
+        return {
+            "categories": {
+                "code": ["test_quality", "mutation", "agentic"],
+                "system": [],
+            },
+            "categories_na": [],
+            "rules": {
+                "test_quality": {"min_score": 70, "burn_in_runs": 5, "max_flaky": 0},
+                "mutation": {"threshold": 80},
+                "agentic": {},
+            },
+            "timeouts": {"test_quality": 900},
+        }
+
+    def _advanced_registry(self) -> CollectorRegistry:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="test-review-test_quality",
+            tool="python3", category="test_quality", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="burn-in-test_quality",
+            tool="python3", category="test_quality", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="hard-wait-test_quality",
+            tool="python3", category="test_quality", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="mutmut-mutation",
+            tool="python3", category="mutation", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="stryker-mutation",
+            tool="python3", category="mutation", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="pack-schema-agentic",
+            tool="python3", category="agentic", build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="opa-agentic",
+            tool="python3", category="agentic", build_cmd=_ok_cmd,
+        ))
+        return reg
+
+    def test_all_advanced_categories_pass(self) -> None:
+        profile = self._advanced_profile()
+        reg = self._advanced_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-adv-pass", self.base_sha,
+                profile, reg,
+            )
+        self.assertEqual(len(outcomes), 7)
+        for outcome in outcomes:
+            self.assertEqual(outcome.evidence["status"], "ok")
+        records = load_evidence_bundle(self.project_root, "gate-adv-pass")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(aggregate_verdicts(verdicts), "PASS")
+
+    def test_mutation_fail_propagates(self) -> None:
+        profile = self._advanced_profile()
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="mutmut-mutation",
+            tool="python3", category="mutation", build_cmd=_fail_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="test-review-test_quality",
+            tool="python3", category="test_quality", build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            run_gate_collectors(
+                self.project_root, "gate-adv-fail", self.base_sha,
+                profile, reg,
+            )
+        records = load_evidence_bundle(self.project_root, "gate-adv-fail")
+        verdicts = {
+            r["category"]: verdict_for_collector_status(r["status"])
+            for r in records
+        }
+        self.assertEqual(verdicts["mutation"], "FAIL")
+        self.assertEqual(verdicts["test_quality"], "PASS")
+        self.assertEqual(aggregate_verdicts(verdicts), "FAIL")
+
+    def test_kill_switch_advanced_tool(self) -> None:
+        profile = self._advanced_profile()
+        profile["rules"]["mutation"]["disabled_tools"] = ["python3"]
+        reg = self._advanced_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-adv-kill", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("mutation", run_cats)
+        self.assertIn("test_quality", run_cats)
+
+    def test_categories_na_excludes_agentic(self) -> None:
+        profile = self._advanced_profile()
+        profile["categories_na"] = ["agentic"]
+        reg = self._advanced_registry()
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-adv-na", self.base_sha,
+                profile, reg,
+            )
+        run_cats = {o.config.category for o in outcomes}
+        self.assertNotIn("agentic", run_cats)
+        self.assertIn("test_quality", run_cats)
+
+
 if __name__ == "__main__":
     unittest.main()
