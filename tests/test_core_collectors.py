@@ -5,33 +5,60 @@ import unittest
 
 _EXPECTED_IDS = frozenset(
     {
+        # static (5)
         "ruff-static",
         "mypy-static",
         "tsc-static",
         "biome-static",
         "knip-static",
+        # correctness (4)
         "pytest-correctness",
         "vitest-correctness",
         "playwright-correctness",
         "coverage-correctness",
+        # docs (3)
         "doc-presence-docs",
         "api-docs-docs",
         "docusaurus-docs",
+        # process (2)
         "adr-process",
         "trace-process",
+        # security (4)
         "semgrep-security",
         "trivy-vuln-security",
         "osv-security",
         "gitleaks-security",
+        # license (1)
         "license-check-license",
+        # compliance (2)
         "compliance-rules-compliance",
         "conftest-compliance",
+        # supply_chain (4)
         "sbom-supply_chain",
         "cosign-supply_chain",
         "provenance-supply_chain",
         "trivy-sbom-supply_chain",
+        # invariants (2)
         "invariant-semgrep-invariants",
         "invariant-conftest-invariants",
+        # traceability (1)
+        "trace-traceability",
+        # api_compat (2)
+        "openapi-diff-api_compat",
+        "schema-diff-api_compat",
+        # migrations (2)
+        "alembic-migrations",
+        "migration-lint-migrations",
+        # performance (3)
+        "lighthouse-performance",
+        "bundlesize-performance",
+        "perf-lint-performance",
+        # accessibility (1)
+        "axe-accessibility",
+        # observability (3)
+        "otel-wiring-observability",
+        "health-probe-observability",
+        "slo-observability",
     }
 )
 
@@ -46,6 +73,12 @@ _EXPECTED_CATEGORIES = frozenset(
         "compliance",
         "supply_chain",
         "invariants",
+        "traceability",
+        "api_compat",
+        "migrations",
+        "performance",
+        "accessibility",
+        "observability",
     }
 )
 
@@ -60,7 +93,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
         registered_ids = {c.collector_id for c in reg.all_collectors()}
         self.assertEqual(registered_ids, _EXPECTED_IDS)
 
-    def test_covers_four_categories(self) -> None:
+    def test_covers_all_categories(self) -> None:
         from story_automator.core.collector_registry import CollectorRegistry
         from story_automator.core.collectors import register_core_collectors
 
@@ -92,7 +125,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 27)
+        self.assertEqual(len(reg.all_collectors()), 39)
 
     def test_exported_id_set(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS
@@ -144,3 +177,24 @@ class ProfileFilteringTests(unittest.TestCase):
         ids = {c.collector_id for c in applicable}
         self.assertNotIn("knip-static", ids)
         self.assertIn("ruff-static", ids)
+
+    def test_integration_categories_filter(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        profile = {
+            "categories": {"code": [
+                "traceability", "api_compat", "migrations",
+                "performance", "accessibility", "observability",
+            ]},
+            "categories_na": [],
+        }
+        applicable = reg.applicable(profile)
+        cats = {c.category for c in applicable}
+        self.assertEqual(cats, {
+            "traceability", "api_compat", "migrations",
+            "performance", "accessibility", "observability",
+        })
+        self.assertEqual(len(applicable), 12)
