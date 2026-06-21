@@ -255,5 +255,38 @@ class GateParkedAuditTests(unittest.TestCase):
         self.assertEqual(d["overall_verdict"], "FAIL")
 
 
+class GateCalibrationAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        from story_automator.core.gate_audit import GateCalibrationAudit
+        event = GateCalibrationAudit(
+            profile_id="default",
+            proposals_applied=2,
+            proposals_deferred=1,
+            old_version="1.0",
+            new_version="1.1",
+        )
+        self.assertEqual(event.event_name, "GateCalibration")
+
+    def test_to_dict_contains_all_fields(self) -> None:
+        from story_automator.core.gate_audit import GateCalibrationAudit
+        event = GateCalibrationAudit(
+            profile_id="msme-erp",
+            proposals_applied=3,
+            proposals_deferred=0,
+            old_version="1.2",
+            new_version="1.3",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["profile_id"], "msme-erp")
+        self.assertEqual(d["proposals_applied"], 3)
+        self.assertEqual(d["proposals_deferred"], 0)
+
+    def test_frozen(self) -> None:
+        from story_automator.core.gate_audit import GateCalibrationAudit
+        event = GateCalibrationAudit(profile_id="x")
+        with self.assertRaises(AttributeError):
+            event.profile_id = "y"
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ __all__ = [
     "GateRenderedAudit",
     "GateProfileDriftAudit",
     "GateParkedAudit",
+    "GateCalibrationAudit",
     "emit_gate_audit",
 ]
 
@@ -156,10 +157,31 @@ class GateParkedAudit:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class GateCalibrationAudit:
+    """Audit event: learning loop applied profile calibrations."""
+    event_name: str = dataclasses.field(default="GateCalibration", init=False)
+    profile_id: str = ""
+    proposals_applied: int = 0
+    proposals_deferred: int = 0
+    old_version: str = ""
+    new_version: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "profile_id": self.profile_id,
+            "proposals_applied": self.proposals_applied,
+            "proposals_deferred": self.proposals_deferred,
+            "old_version": self.old_version,
+            "new_version": self.new_version,
+        }
+
+
 _AuditEvent = (
     GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
     | GateDecisionAudit | GateRenderedAudit
     | GateProfileDriftAudit | GateParkedAudit
+    | GateCalibrationAudit
 )
 
 
