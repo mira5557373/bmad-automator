@@ -16,6 +16,8 @@ __all__ = [
     "GateStartedAudit",
     "EvidenceCollectedAudit",
     "GateBoundaryViolation",
+    "GateDecisionAudit",
+    "GateRenderedAudit",
     "emit_gate_audit",
 ]
 
@@ -74,10 +76,54 @@ class GateBoundaryViolation:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class GateDecisionAudit:
+    """Audit event: adjudicator produced a verdict."""
+    event_name: str = dataclasses.field(default="GateDecision", init=False)
+    gate_id: str = ""
+    overall: str = ""
+    commit_sha: str = ""
+    profile_hash: str = ""
+    categories_summary: str = ""
+    tier: str = "code"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "overall": self.overall,
+            "commit_sha": self.commit_sha,
+            "profile_hash": self.profile_hash,
+            "categories_summary": self.categories_summary,
+            "tier": self.tier,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class GateRenderedAudit:
+    """Audit event: gate file persisted to disk."""
+    event_name: str = dataclasses.field(default="GateRendered", init=False)
+    gate_id: str = ""
+    gate_file_path: str = ""
+    evidence_bundle_hash: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "gate_file_path": self.gate_file_path,
+            "evidence_bundle_hash": self.evidence_bundle_hash,
+        }
+
+
+_AuditEvent = (
+    GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
+    | GateDecisionAudit | GateRenderedAudit
+)
+
+
 def emit_gate_audit(
     policy: Mapping[str, Any],
     audit_path: pathlib.Path,
-    event: GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation,
+    event: _AuditEvent,
 ) -> None:
     """Emit a gate audit event through the HMAC audit chain.
 

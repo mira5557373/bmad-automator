@@ -11,6 +11,8 @@ from story_automator.core.audit import Event as AuditEventProtocol
 from story_automator.core.gate_audit import (
     EvidenceCollectedAudit,
     GateBoundaryViolation,
+    GateDecisionAudit,
+    GateRenderedAudit,
     GateStartedAudit,
     emit_gate_audit,
 )
@@ -164,6 +166,45 @@ class EmitGateAuditTests(unittest.TestCase):
             record = json.loads(line)
             self.assertEqual(record["event"], "EvidenceCollected")
             self.assertEqual(record["payload"]["status"], "ok")
+
+
+class GateDecisionAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = GateDecisionAudit(
+            gate_id="g1", overall="PASS", commit_sha="abc",
+            profile_hash="aabb", categories_summary="correctness:PASS,security:PASS",
+        )
+        self.assertEqual(event.event_name, "GateDecision")
+
+    def test_to_dict_has_all_fields(self) -> None:
+        event = GateDecisionAudit(
+            gate_id="g1", overall="FAIL", commit_sha="abc",
+            profile_hash="aabb", categories_summary="security:FAIL",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["gate_id"], "g1")
+        self.assertEqual(d["overall"], "FAIL")
+        self.assertEqual(d["commit_sha"], "abc")
+        self.assertIn("categories_summary", d)
+
+
+class GateRenderedAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = GateRenderedAudit(
+            gate_id="g1", gate_file_path="verdicts/g1.json",
+            evidence_bundle_hash="1234567890abcdef",
+        )
+        self.assertEqual(event.event_name, "GateRendered")
+
+    def test_to_dict_has_all_fields(self) -> None:
+        event = GateRenderedAudit(
+            gate_id="g1", gate_file_path="verdicts/g1.json",
+            evidence_bundle_hash="abcd1234",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["gate_id"], "g1")
+        self.assertEqual(d["gate_file_path"], "verdicts/g1.json")
+        self.assertEqual(d["evidence_bundle_hash"], "abcd1234")
 
 
 if __name__ == "__main__":
