@@ -77,6 +77,48 @@ def make_risk_entry(
     return entry
 
 
+_PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+_SCORE_RANGE = range(1, 10)  # 1–9
+
+DEFAULT_RISK_THRESHOLDS: dict[int, str] = {9: "P0", 6: "P1", 3: "P2", 1: "P3"}
+
+
+def risk_score_to_priority(
+    score: int,
+    *,
+    thresholds: dict[int, str] | None = None,
+) -> str:
+    if not isinstance(score, int) or isinstance(score, bool) or score not in _SCORE_RANGE:
+        raise RiskProfileError(f"risk score must be 1–9; got {score}")
+    thr = thresholds or DEFAULT_RISK_THRESHOLDS
+    for threshold in sorted(thr, reverse=True):
+        if score >= threshold:
+            return thr[threshold]
+    return "P3"
+
+
+def aggregate_risk_priority(entries: list[dict[str, Any]]) -> str:
+    validate_risk_profile(entries)
+    worst = "P3"
+    worst_order = _PRIORITY_ORDER["P3"]
+    for entry in entries:
+        priority = risk_score_to_priority(entry["score"])
+        order = _PRIORITY_ORDER.get(priority, 3)
+        if order < worst_order:
+            worst = priority
+            worst_order = order
+    return worst
+
+
+def has_unmitigated_risk_9(entries: list[dict[str, Any]]) -> bool:
+    for entry in entries:
+        if entry.get("score", 0) == 9:
+            rationale = entry.get("rationale", "")
+            if not rationale or not rationale.strip():
+                return True
+    return False
+
+
 def _validate_int_range(
     obj: dict[str, Any], key: str, valid_range: range,
 ) -> None:
