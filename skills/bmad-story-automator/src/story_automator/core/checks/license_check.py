@@ -17,7 +17,11 @@ import sys
 
 
 def parse_syft_output(raw: str) -> list[dict]:
-    """Parse syft JSON output into a flat list of {name, license, locations}."""
+    """Parse syft JSON output into a flat list of {name, license, locations}.
+
+    Emits one entry per license per artifact. If an artifact has multiple licenses,
+    each license gets its own package entry with the same name and locations.
+    """
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
@@ -29,15 +33,26 @@ def parse_syft_output(raw: str) -> list[dict]:
             continue
         name = art.get("name", "")
         licenses = art.get("licenses") or []
-        first_lic = licenses[0] if licenses else {}
-        license_val = first_lic.get("value", "") if isinstance(first_lic, dict) else ""
         locs = art.get("locations") or []
         loc_paths = [loc.get("path", "") for loc in locs if isinstance(loc, dict)]
-        packages.append({
-            "name": name,
-            "license": license_val,
-            "locations": loc_paths,
-        })
+
+        # Extract all license values from license list.
+        lics = []
+        for lic_entry in licenses:
+            if isinstance(lic_entry, dict) and lic_entry.get("value"):
+                lics.append(lic_entry["value"])
+
+        # If no licenses found, emit one entry with empty license.
+        if not lics:
+            lics = [""]
+
+        # Emit one package entry per license.
+        for license_val in lics:
+            packages.append({
+                "name": name,
+                "license": license_val,
+                "locations": loc_paths,
+            })
     return packages
 
 

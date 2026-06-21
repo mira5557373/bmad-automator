@@ -53,6 +53,18 @@ class LicenseCheckForbiddenTests(unittest.TestCase):
         violations = check_licenses(packages, ["SSPL-1.0"], {})
         self.assertEqual(len(violations), 1)
 
+    def test_multi_license_forbidden_detected(self) -> None:
+        from story_automator.core.checks.license_check import check_licenses
+
+        packages = [
+            {"name": "dual-pkg", "license": "MIT"},
+            {"name": "dual-pkg", "license": "GPL-3.0"},
+        ]
+        violations = check_licenses(packages, ["GPL-3.0"], {})
+        self.assertEqual(len(violations), 1)
+        self.assertIn("dual-pkg", violations[0])
+        self.assertIn("GPL-3.0", violations[0])
+
 
 class LicenseCheckBoundaryTests(unittest.TestCase):
     def test_boundary_violation_detected(self) -> None:
@@ -108,3 +120,18 @@ class ParseSyftOutputTests(unittest.TestCase):
 
         packages = parse_syft_output("not json")
         self.assertEqual(packages, [])
+
+    def test_parse_multi_license_artifact(self) -> None:
+        from story_automator.core.checks.license_check import parse_syft_output
+
+        syft_json = json.dumps({
+            "artifacts": [
+                {"name": "dual-pkg", "version": "1.0", "licenses": [
+                    {"value": "MIT"}, {"value": "GPL-3.0"}
+                ], "locations": [{"path": "/app/dual.py"}]},
+            ]
+        })
+        packages = parse_syft_output(syft_json)
+        self.assertEqual(len(packages), 2)
+        self.assertEqual(packages[0]["license"], "MIT")
+        self.assertEqual(packages[1]["license"], "GPL-3.0")
