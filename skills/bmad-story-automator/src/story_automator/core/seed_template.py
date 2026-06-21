@@ -6,6 +6,9 @@ Spec references: §5 (template system), §16 M24 (golden seed-template bundle).
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+from story_automator.core.runtime_layout import bundled_story_skill_root
 
 TEMPLATE_SCHEMA_VERSION = 1
 
@@ -107,3 +110,31 @@ def validate_manifest(manifest: dict) -> None:
                 raise SeedTemplateError(
                     f"variable {var_name!r}: required must be a bool"
                 )
+
+
+_TEMPLATES_DIR = "data/templates"
+
+
+def resolve_bundle_dir(
+    template_id: str, project_root: str | None = None
+) -> Path:
+    """Resolve the bundle directory for a template id.
+
+    Returns the absolute path to ``data/templates/<template_id>/`` under
+    the bundled skill root.  Raises `SeedTemplateError` if the directory
+    does not exist or the id contains path traversal.
+    """
+    if ".." in template_id or "/" in template_id or os.sep in template_id:
+        raise SeedTemplateError(
+            f"invalid template_id (path traversal): {template_id!r}"
+        )
+
+    skill_root = bundled_story_skill_root(project_root)
+    bundle = (skill_root / _TEMPLATES_DIR / template_id).resolve()
+
+    if not bundle.is_dir():
+        raise SeedTemplateError(
+            f"template bundle not found: {bundle}"
+        )
+
+    return bundle

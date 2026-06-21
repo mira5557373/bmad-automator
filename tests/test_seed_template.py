@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from story_automator.core.seed_template import (
     TEMPLATE_SCHEMA_VERSION,
     SeedTemplateError,
+    resolve_bundle_dir,
     resolve_template_ref,
     validate_manifest,
 )
@@ -186,6 +190,45 @@ class ValidateManifestTests(unittest.TestCase):
             validate_manifest(_make_manifest(
                 variables={"foo-bar": {"required": True}}
             ))
+
+
+class ResolveBundleDirTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._skill_root = Path(self._tmp) / "skills" / "bmad-story-automator"
+        tpl_dir = self._skill_root / "data" / "templates" / "test-template"
+        tpl_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _patch_root(self):
+        return patch(
+            "story_automator.core.seed_template.bundled_story_skill_root",
+            return_value=self._skill_root,
+        )
+
+    def test_existing_bundle_resolves(self):
+        with self._patch_root():
+            result = resolve_bundle_dir("test-template")
+        self.assertTrue(result.is_dir())
+
+    def test_missing_bundle_raises(self):
+        with self._patch_root():
+            with self.assertRaises(SeedTemplateError):
+                resolve_bundle_dir("nonexistent-template")
+
+    def test_path_traversal_blocked(self):
+        with self._patch_root():
+            with self.assertRaises(SeedTemplateError):
+                resolve_bundle_dir("../evil")
+
+    def test_result_is_absolute(self):
+        with self._patch_root():
+            result = resolve_bundle_dir("test-template")
+        self.assertTrue(result.is_absolute())
 
 
 if __name__ == "__main__":
