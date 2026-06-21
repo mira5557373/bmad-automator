@@ -6,7 +6,13 @@ drive downstream coverage/level requirements via profile.matrix.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
+
+from .gate_schema import canonical_json
+from .trust_boundary import assert_host_context
+from .utils import ensure_dir, iso_now, write_atomic
 
 
 class RiskProfileError(ValueError):
@@ -117,6 +123,63 @@ def has_unmitigated_risk_9(entries: list[dict[str, Any]]) -> bool:
             if not rationale or not rationale.strip():
                 return True
     return False
+
+
+_RISK_DIR = "risk"
+_RISK_PROFILE_VERSION = 1
+
+
+def _risk_dir(project_root: str | Path) -> Path:
+    return Path(project_root) / "_bmad" / "gate" / _RISK_DIR
+
+
+def persist_risk_profile(
+    project_root: str | Path,
+    target_id: str,
+    entries: list[dict[str, Any]],
+    *,
+    tier: str = "code",
+) -> Path:
+    assert_host_context("persist_risk_profile")
+    validate_risk_profile(entries)
+    risk_d = _risk_dir(project_root)
+    ensure_dir(risk_d)
+    record: dict[str, Any] = {
+        "version": _RISK_PROFILE_VERSION,
+        "target_id": target_id,
+        "tier": tier,
+        "entries": entries,
+        "created_at": iso_now(),
+    }
+    target = risk_d / f"{target_id}.json"
+    write_atomic(target, canonical_json(record) + "\n")
+    return target
+
+
+def load_risk_profile(
+    project_root: str | Path,
+    target_id: str,
+) -> dict[str, Any]:
+    path = _risk_dir(project_root) / f"{target_id}.json"
+    if not path.is_file():
+        raise RiskProfileError(f"risk profile not found: {target_id}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RiskProfileError(
+            f"risk profile corrupt: {target_id}: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise RiskProfileError(f"risk profile must be a dict: {target_id}")
+    validate_risk_profile(data.get("entries", []))
+    return data
+
+
+def risk_profile_exists(
+    project_root: str | Path,
+    target_id: str,
+) -> bool:
+    return (_risk_dir(project_root) / f"{target_id}.json").is_file()
 
 
 def _validate_int_range(

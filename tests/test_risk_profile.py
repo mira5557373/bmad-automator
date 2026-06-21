@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from story_automator.core.risk_profile import (
     DEFAULT_RISK_THRESHOLDS,
@@ -8,7 +11,10 @@ from story_automator.core.risk_profile import (
     RiskProfileError,
     aggregate_risk_priority,
     has_unmitigated_risk_9,
+    load_risk_profile,
     make_risk_entry,
+    persist_risk_profile,
+    risk_profile_exists,
     risk_score_to_priority,
     validate_risk_entry,
     validate_risk_profile,
@@ -201,6 +207,76 @@ class HasUnmitigatedRisk9Tests(unittest.TestCase):
             make_risk_entry("DATA", 3, 3),  # score=9, no rationale
         ]
         self.assertTrue(has_unmitigated_risk_9(entries))
+
+
+class PersistRiskProfileTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.entries = [
+            make_risk_entry("SEC", 3, 3, rationale="auth flow"),
+            make_risk_entry("TECH", 2, 2),
+        ]
+
+    def test_persist_creates_file(self) -> None:
+        path = persist_risk_profile(self.tmp, "E1-001", self.entries)
+        self.assertTrue(path.is_file())
+        data = json.loads(path.read_text())
+        self.assertEqual(data["target_id"], "E1-001")
+        self.assertEqual(len(data["entries"]), 2)
+        self.assertIn("created_at", data)
+
+    def test_persist_validates_entries(self) -> None:
+        with self.assertRaises(RiskProfileError):
+            persist_risk_profile(self.tmp, "E1-001", [])
+
+    def test_persist_path_under_gate_risk(self) -> None:
+        path = persist_risk_profile(self.tmp, "E1-001", self.entries)
+        self.assertIn("_bmad/gate/risk", path.as_posix())
+        self.assertEqual(path.name, "E1-001.json")
+
+    def test_persist_overwrites_existing(self) -> None:
+        persist_risk_profile(self.tmp, "E1-001", self.entries)
+        new_entries = [make_risk_entry("OPS", 1, 1)]
+        path = persist_risk_profile(self.tmp, "E1-001", new_entries)
+        data = json.loads(path.read_text())
+        self.assertEqual(len(data["entries"]), 1)
+        self.assertEqual(data["entries"][0]["category"], "OPS")
+
+
+class LoadRiskProfileTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.entries = [make_risk_entry("SEC", 3, 2)]
+
+    def test_load_returns_persisted_data(self) -> None:
+        persist_risk_profile(self.tmp, "E1-001", self.entries)
+        data = load_risk_profile(self.tmp, "E1-001")
+        self.assertEqual(data["target_id"], "E1-001")
+        self.assertEqual(len(data["entries"]), 1)
+
+    def test_load_missing_raises(self) -> None:
+        with self.assertRaises(RiskProfileError):
+            load_risk_profile(self.tmp, "no-such")
+
+    def test_load_corrupt_raises(self) -> None:
+        risk_dir = Path(self.tmp) / "_bmad" / "gate" / "risk"
+        risk_dir.mkdir(parents=True)
+        (risk_dir / "bad.json").write_text("not json")
+        with self.assertRaises(RiskProfileError):
+            load_risk_profile(self.tmp, "bad")
+
+
+class RiskProfileExistsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def test_exists_after_persist(self) -> None:
+        entries = [make_risk_entry("TECH", 1, 1)]
+        persist_risk_profile(self.tmp, "E1-001", entries)
+        self.assertTrue(risk_profile_exists(self.tmp, "E1-001"))
+
+    def test_not_exists_initially(self) -> None:
+        self.assertFalse(risk_profile_exists(self.tmp, "E1-001"))
 
 
 if __name__ == "__main__":
