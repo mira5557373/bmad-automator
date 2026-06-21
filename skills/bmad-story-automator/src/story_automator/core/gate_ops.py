@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_io import read_gate_marker
+from .gate_remediation import write_remediation_to_story
 
 __all__ = [
     "list_verdicts",
     "gate_doctor",
+    "apply_remediation",
 ]
 
 
@@ -106,4 +108,22 @@ def gate_doctor(project_root: str | Path) -> dict[str, Any]:
         "healthy": len(issues) == 0,
         "checks": checks,
         "issues": issues,
+    }
+
+
+def apply_remediation(
+    story_path: str | Path,
+    route_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Bridge route_gate_verdict's remediate action to story write-back."""
+    if route_result.get("action") != "remediate":
+        raise ValueError(
+            f"apply_remediation requires action='remediate', got '{route_result.get('action')}'"
+        )
+    tasks = route_result.get("remediation_tasks", [])
+    write_remediation_to_story(story_path, tasks)
+    return {
+        "applied": True,
+        "tasks_written": len(tasks),
+        "review_continuation": route_result.get("review_continuation", {}),
     }

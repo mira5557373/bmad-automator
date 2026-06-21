@@ -68,6 +68,73 @@ class ListVerdictsTests(unittest.TestCase):
         self.assertIn("profile_id", result[0])
 
 
+class ApplyRemediationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.story_path = Path(self.tmp) / "E1-001.md"
+        self.story_path.write_text(
+            "---\nStatus: in-progress\n---\n\n## Tasks\n- [ ] Existing\n",
+            encoding="utf-8",
+        )
+
+    def test_writes_tasks_to_story(self) -> None:
+        from story_automator.core.gate_ops import apply_remediation
+        route_result = {
+            "action": "remediate",
+            "remediation_tasks": [
+                {"title": "[AI-Review] Fix correctness: low coverage",
+                 "category": "correctness", "gate_id": "g1", "rationale": "cov 40<80"},
+            ],
+            "review_continuation": {
+                "action": "review_continuation",
+                "story_key": "E1-001",
+                "gate_id": "g1",
+                "cycle": 1,
+                "failing_categories": ["correctness"],
+            },
+        }
+        result = apply_remediation(self.story_path, route_result)
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["tasks_written"], 1)
+        self.assertIn("review_continuation", result)
+        content = self.story_path.read_text(encoding="utf-8")
+        self.assertIn("[AI-Review] Fix correctness", content)
+
+    def test_rejects_non_remediate_action(self) -> None:
+        from story_automator.core.gate_ops import apply_remediation
+        with self.assertRaises(ValueError):
+            apply_remediation(self.story_path, {"action": "done"})
+
+    def test_noop_with_empty_tasks(self) -> None:
+        from story_automator.core.gate_ops import apply_remediation
+        route_result = {
+            "action": "remediate",
+            "remediation_tasks": [],
+            "review_continuation": {"action": "review_continuation"},
+        }
+        result = apply_remediation(self.story_path, route_result)
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["tasks_written"], 0)
+
+    def test_multiple_tasks_written(self) -> None:
+        from story_automator.core.gate_ops import apply_remediation
+        route_result = {
+            "action": "remediate",
+            "remediation_tasks": [
+                {"title": "[AI-Review] Fix correctness", "category": "correctness",
+                 "gate_id": "g1", "rationale": "r"},
+                {"title": "[AI-Review] Fix security", "category": "security",
+                 "gate_id": "g1", "rationale": "r"},
+            ],
+            "review_continuation": {"action": "review_continuation"},
+        }
+        result = apply_remediation(self.story_path, route_result)
+        self.assertEqual(result["tasks_written"], 2)
+        content = self.story_path.read_text(encoding="utf-8")
+        self.assertIn("[AI-Review] Fix correctness", content)
+        self.assertIn("[AI-Review] Fix security", content)
+
+
 class GateDoctorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
