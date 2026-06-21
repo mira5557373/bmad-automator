@@ -6,6 +6,7 @@ from story_automator.core.category_rules import (
     correctness_rule,
     coverage_verdict,
     risk_to_requirements,
+    security_rule,
     worst_evidence_status,
 )
 from story_automator.core.gate_schema import make_evidence_record
@@ -198,6 +199,77 @@ class CorrectnessRuleTests(unittest.TestCase):
         self.assertIn("actual", result)
         self.assertIn("rationale", result)
         self.assertEqual(result["actual"]["coverage_pct"], 95)
+
+
+class SecurityRuleTests(unittest.TestCase):
+    PROFILE = {
+        "rules": {
+            "security": {"sast_max_high": 0, "deps_max_critical": 0, "secrets_max": 0},
+        },
+    }
+    REQ = {"priority": "P1"}
+
+    def test_clean_scan_passes(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="semgrep", category="security",
+            status="ok", metrics={"sast_high_count": 0, "deps_critical_count": 0, "secrets_count": 0},
+        )]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_sast_high_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="semgrep", category="security",
+            status="violation", metrics={"sast_high_count": 2},
+            findings=["SQL injection", "XSS"],
+        )]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_deps_critical_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="trivy", category="security",
+            status="violation", metrics={"deps_critical_count": 1},
+            findings=["CVE-2026-0001"],
+        )]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_secrets_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="gitleaks", category="security",
+            status="violation", metrics={"secrets_count": 1},
+            findings=["API key in config"],
+        )]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_error_status_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="semgrep", category="security",
+            status="error", findings=["semgrep crashed"],
+        )]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_no_rules_in_profile_uses_zero_defaults(self) -> None:
+        evidence = [make_evidence_record(
+            collector="scanner", tool="semgrep", category="security",
+            status="ok", metrics={"sast_high_count": 0},
+        )]
+        result = security_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_multiple_evidence_worst_wins(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="semgrep", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+            make_evidence_record(collector="b", tool="trivy", category="security",
+                                 status="violation", metrics={"deps_critical_count": 3},
+                                 findings=["CVE-1", "CVE-2", "CVE-3"]),
+        ]
+        result = security_rule(evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
 
 
 if __name__ == "__main__":

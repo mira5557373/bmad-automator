@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .product_profile import VALID_PRIORITIES, required_for_priority
+from .product_profile import VALID_PRIORITIES, required_for_priority, rule_for
 
 _P1_CONCERNS_FLOOR = 80
 _DEFAULT_PRIORITY = "P1"
@@ -104,3 +104,42 @@ def correctness_rule(
         return _make_category_result(cov_verdict, req, actual, rationale)
 
     return _make_category_result("PASS", req, actual, "all checks passed")
+
+
+def security_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: SAST 0 high+, deps 0 critical-unwaived, 0 secrets."""
+    status = worst_evidence_status(evidence)
+    rules = rule_for(profile, "security")
+    max_sast = int(rules.get("sast_max_high", 0))
+    max_deps = int(rules.get("deps_max_critical", 0))
+    max_secrets = int(rules.get("secrets_max", 0))
+
+    sast = int(_aggregate_metrics(evidence, "sast_high_count", 0))
+    deps = int(_aggregate_metrics(evidence, "deps_critical_count", 0))
+    secrets = int(_aggregate_metrics(evidence, "secrets_count", 0))
+
+    actual = {"sast_high_count": sast, "deps_critical_count": deps,
+              "secrets_count": secrets, "status": status}
+    req = {"sast_max_high": max_sast, "deps_max_critical": max_deps,
+           "secrets_max": max_secrets}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+
+    violations: list[str] = []
+    if sast > max_sast:
+        violations.append(f"SAST high: {sast} > {max_sast}")
+    if deps > max_deps:
+        violations.append(f"deps critical: {deps} > {max_deps}")
+    if secrets > max_secrets:
+        violations.append(f"secrets: {secrets} > {max_secrets}")
+
+    if violations:
+        return _make_category_result("FAIL", req, actual, "; ".join(violations))
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "all security checks passed")
