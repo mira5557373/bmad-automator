@@ -1,68 +1,71 @@
 {
   "milestone": "integration-m11-gate-operations",
-  "phase": "A",
-  "phase_name": "Plan + Gap Analysis",
-  "timestamp": "2026-06-21",
-  "plan_path": "docs/superpowers/plans/2026-06-21-integration-m11-gate-operations.md",
-  "spec_sections_checked": ["§9.2", "§11.1", "§18"],
-  "critical_gaps": [],
-  "medium_gaps": [],
-  "low_gaps": [
+  "reviewed_files": [
+    "skills/bmad-story-automator/src/story_automator/core/gate_ops.py",
+    "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+    "skills/bmad-story-automator/src/story_automator/core/gate_audit.py",
+    "skills/bmad-story-automator/commands/gate_cmd.py",
+    "docs/operations/gate-troubleshooting.md",
+    "tests/test_gate_ops.py",
+    "tests/test_gate_cmd.py",
+    "tests/test_gate_m11_integration.py",
+    "tests/test_gate_orchestrator.py",
+    "tests/test_gate_audit.py",
+    "SECURITY.md"
+  ],
+  "base_commit": "d39d8ec2231e7ba00c137402d47943efa3803fbb",
+  "review_commit": "8c9df41",
+  "gap_summaries": [
     {
-      "id": "L1",
-      "title": "Lock timeout was 5s making concurrent test slow",
-      "spec_ref": "§18-resilience",
-      "description": "Original plan used _GATE_LOCK_TIMEOUT = 5 seconds, causing test_concurrent_gate_raises_error to wait 5s before timeout. Reduced to 1s — fail fast and let operator retry via 'gate status'.",
-      "resolution": "fixed-inline",
-      "task": 3
+      "id": "gap-1",
+      "tag": "[post-impl]",
+      "severity": "correctness",
+      "title": "§9.2 blocking CONCERNS not implemented",
+      "description": "route_gate_verdict treated all CONCERNS as action=done/commit=True. Spec §9.2 says 'profile may mark some categories CONCERNS as blocking (e.g. security)'. Added optional profile kwarg with concerns_blocking list; matched CONCERNS categories route to remediate/park.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+        "tests/test_gate_orchestrator.py",
+        "tests/test_gate_m11_integration.py"
+      ],
+      "status": "fixed",
+      "tests_added": 7
     },
     {
-      "id": "L2",
-      "title": "gate_summary double-read of verdict files",
-      "spec_ref": "§18-performance",
-      "description": "Original implementation called list_verdicts() then re-scanned verdicts/ for duration_ms data — two passes over the same files. Refactored to a single pass reading both verdict counts and durations together.",
-      "resolution": "fixed-inline",
-      "task": 7
+      "id": "gap-2",
+      "tag": "[post-impl]",
+      "severity": "spec-compliance",
+      "title": "§11.1 runbook not linked from SECURITY.md",
+      "description": "Spec line 220: 'Linked from docs/SECURITY.md'. SECURITY.md had no reference to the gate troubleshooting runbook. Added H2 section with link.",
+      "files_changed": [
+        "SECURITY.md",
+        "tests/test_security_md.py"
+      ],
+      "status": "fixed",
+      "tests_added": 0
     },
     {
-      "id": "L3",
-      "title": "Missing __all__ in gate_ops.py",
-      "spec_ref": "style-consistency",
-      "description": "New gate_ops.py module was missing __all__ export list, inconsistent with gate_audit.py and other core modules that declare __all__.",
-      "resolution": "fixed-inline",
-      "task": 4
-    },
-    {
-      "id": "L4",
-      "title": "No test for lock release on exception",
-      "spec_ref": "§18-resilience",
-      "description": "Task 3 tested lock acquisition and contention but not that the lock is released when gate evaluation raises an exception. Added test_lock_released_on_exception to verify the finally-block releases the lock.",
-      "resolution": "fixed-inline",
-      "task": 3
+      "id": "gap-3",
+      "tag": "[post-impl]",
+      "severity": "correctness",
+      "title": "GateStartedAudit emitted before filelock acquisition",
+      "description": "GateStartedAudit was emitted before the filelock was acquired. If lock acquisition failed (GateConcurrencyError), an orphan GateStarted event existed without a corresponding GateCompleted. Moved emission inside the lock scope.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/gate_orchestrator.py",
+        "tests/test_gate_m11_integration.py"
+      ],
+      "status": "fixed",
+      "tests_added": 1
     }
   ],
-  "coverage_assessment": {
-    "spec_9_2_control_flow": {
-      "status": "complete",
-      "notes": "Resumable gates (M10 check_gate_reuse), atomic marker (M10), CONCERNS→debt (M10), FAIL→Remediator→park (M10 route_gate_verdict), apply_remediation bridge (M11 Task 6), review_max_cycles (M10), PARK+continue (M10 park_story), human takeover (M10 risk-9 park)."
-    },
-    "spec_11_1_operator_runbook": {
-      "status": "complete",
-      "notes": "9-section runbook (M10), runbook reference enrichment in route results (M11 Task 8), runbook ref in GateCompletedAudit (M11 Task 1/2), runbook update with M11 CLI commands (M11 Task 15)."
-    },
-    "spec_18_nfrs": {
-      "determinism": "covered by M9 verdict engine (pure adjudication)",
-      "performance": "duration tracking (M11 Task 2), avg_duration_ms in summary (M11 Task 7)",
-      "resilience": "crash recovery (M10), concurrent gate protection via filelock (M11 Task 3), fail-closed (M10 empty-registry test)",
-      "observability": "GateDecision+GateRendered (M9/M10), GateCompletedAudit with duration+runbook_ref (M11 Tasks 1-2), gate doctor health check (M11 Task 5)",
-      "auditability": "HMAC hash-chain (M10), full audit chain e2e test (M11 Task 13)",
-      "security": "trust boundary (M3), _SAFE_ID CLI validation (M10), rerun input validation (M11 Task 12)",
-      "compatibility": "Path.as_posix() convention, cross-platform paths, os.replace for atomics"
-    }
-  },
-  "task_count": 15,
-  "estimated_new_loc": {
-    "production": 455,
-    "test": 950
-  }
+  "production_readiness_notes": [
+    "All 2551 tests pass (2549 existing + 2 skipped + 8 new)",
+    "ruff check clean across src and tests",
+    "npm run verify passes (test:python, pack:dry-run, test:cli, test:smoke)",
+    "No new Python deps introduced",
+    "gate_orchestrator.py stays within 500-LOC soft limit",
+    "Backwards-compatible: profile kwarg on route_gate_verdict defaults to None (no blocking)"
+  ],
+  "total_gaps_found": 3,
+  "total_gaps_fixed": 3,
+  "total_tests_added": 8
 }
