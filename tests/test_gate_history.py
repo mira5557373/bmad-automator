@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from story_automator.core.gate_history import (
+    count_gate_history,
+    load_gate_history,
     make_history_record,
     record_gate_result,
 )
@@ -100,6 +102,99 @@ class RecordGateResultTests(unittest.TestCase):
         gf = _make_gate_file(gate_id="my-gate-42")
         path = record_gate_result(self.tmp, gf, story_key="E1-001")
         self.assertIn("my-gate-42", path.name)
+
+
+class LoadGateHistoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.patcher = patch(
+            "story_automator.core.gate_history.assert_host_context",
+        )
+        self.patcher.start()
+
+    def tearDown(self) -> None:
+        self.patcher.stop()
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_empty_history(self) -> None:
+        records = load_gate_history(self.tmp)
+        self.assertEqual(records, [])
+
+    def test_loads_persisted_records(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(), story_key="E1-001")
+        record_gate_result(self.tmp, _make_gate_file(gate_id="g-002"), story_key="E1-002")
+        records = load_gate_history(self.tmp)
+        self.assertEqual(len(records), 2)
+
+    def test_sorted_chronologically(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(gate_id="g-a"), story_key="E1-001")
+        record_gate_result(self.tmp, _make_gate_file(gate_id="g-b"), story_key="E1-002")
+        records = load_gate_history(self.tmp)
+        self.assertEqual(records[0]["gate_id"], "g-a")
+        self.assertEqual(records[1]["gate_id"], "g-b")
+
+    def test_filter_by_profile_id(self) -> None:
+        record_gate_result(
+            self.tmp, _make_gate_file(profile_id="default"), story_key="E1-001",
+        )
+        record_gate_result(
+            self.tmp,
+            _make_gate_file(gate_id="g-002", profile_id="msme-erp"),
+            story_key="E1-002",
+        )
+        records = load_gate_history(self.tmp, profile_id="msme-erp")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["profile_id"], "msme-erp")
+
+    def test_filter_by_story_key(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(), story_key="E1-001")
+        record_gate_result(
+            self.tmp, _make_gate_file(gate_id="g-002"), story_key="E2-003",
+        )
+        records = load_gate_history(self.tmp, story_key="E1-001")
+        self.assertEqual(len(records), 1)
+
+    def test_filter_by_overall(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(overall="PASS"), story_key="E1-001")
+        record_gate_result(
+            self.tmp, _make_gate_file(gate_id="g-002", overall="FAIL"),
+            story_key="E1-002",
+        )
+        records = load_gate_history(self.tmp, overall="FAIL")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["overall"], "FAIL")
+
+    def test_filter_by_since(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(), story_key="E1-001")
+        records = load_gate_history(self.tmp, since="2099-01-01T00:00:00Z")
+        self.assertEqual(len(records), 0)
+        records_all = load_gate_history(self.tmp, since="2000-01-01T00:00:00Z")
+        self.assertEqual(len(records_all), 1)
+
+
+class CountGateHistoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.patcher = patch(
+            "story_automator.core.gate_history.assert_host_context",
+        )
+        self.patcher.start()
+
+    def tearDown(self) -> None:
+        self.patcher.stop()
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_empty(self) -> None:
+        self.assertEqual(count_gate_history(self.tmp), 0)
+
+    def test_counts_files(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(), story_key="E1-001")
+        record_gate_result(
+            self.tmp, _make_gate_file(gate_id="g-002"), story_key="E1-002",
+        )
+        self.assertEqual(count_gate_history(self.tmp), 2)
 
 
 if __name__ == "__main__":

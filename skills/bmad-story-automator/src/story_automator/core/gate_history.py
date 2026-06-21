@@ -6,6 +6,7 @@ detection, and profile auto-tuning.  Storage layout:
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -73,3 +74,43 @@ def record_gate_result(
     target = history_dir / filename
     write_atomic(target, canonical_json(record) + "\n")
     return target
+
+
+def load_gate_history(
+    project_root: str | Path,
+    *,
+    since: str | None = None,
+    profile_id: str | None = None,
+    story_key: str | None = None,
+    overall: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load history records, optionally filtered."""
+    history_dir = Path(project_root) / _HISTORY_DIR
+    if not history_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(history_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if profile_id and data.get("profile_id") != profile_id:
+            continue
+        if story_key and data.get("story_key") != story_key:
+            continue
+        if overall and data.get("overall") != overall:
+            continue
+        if since and data.get("recorded_at", "") < since:
+            continue
+        records.append(data)
+    return records
+
+
+def count_gate_history(project_root: str | Path) -> int:
+    """Count history entries without parsing JSON."""
+    history_dir = Path(project_root) / _HISTORY_DIR
+    if not history_dir.is_dir():
+        return 0
+    return len(list(history_dir.glob("*.json")))
