@@ -11,10 +11,12 @@ from story_automator.core.risk_profile import (
     RiskProfileError,
     aggregate_risk_priority,
     has_unmitigated_risk_9,
+    compute_risk_profile_ref,
     load_risk_profile,
     make_risk_entry,
     persist_risk_profile,
     risk_profile_exists,
+    risk_profile_to_evidence,
     risk_score_to_priority,
     validate_risk_entry,
     validate_risk_profile,
@@ -277,6 +279,55 @@ class RiskProfileExistsTests(unittest.TestCase):
 
     def test_not_exists_initially(self) -> None:
         self.assertFalse(risk_profile_exists(self.tmp, "E1-001"))
+
+
+class RiskProfileToEvidenceTests(unittest.TestCase):
+    def test_basic_evidence_record(self) -> None:
+        entries = [
+            make_risk_entry("SEC", 3, 3, rationale="critical"),
+            make_risk_entry("TECH", 2, 1),
+        ]
+        evidence = risk_profile_to_evidence(entries, "E1-001")
+        self.assertEqual(evidence["category"], "readiness")
+        self.assertEqual(evidence["status"], "ok")
+        self.assertFalse(evidence["deterministic"])
+        self.assertIn("confidence", evidence)
+        self.assertEqual(evidence["metrics"]["priority"], "P0")
+        self.assertEqual(evidence["metrics"]["max_score"], 9)
+        self.assertEqual(evidence["metrics"]["entry_count"], 2)
+
+    def test_evidence_flags_unmitigated_risk_9(self) -> None:
+        entries = [make_risk_entry("SEC", 3, 3)]
+        evidence = risk_profile_to_evidence(entries, "E1-001")
+        self.assertTrue(evidence["metrics"]["unmitigated_risk_9"])
+
+    def test_evidence_with_custom_confidence(self) -> None:
+        entries = [make_risk_entry("TECH", 1, 1)]
+        evidence = risk_profile_to_evidence(entries, "E1-001", confidence=3)
+        self.assertEqual(evidence["confidence"], 3)
+
+    def test_collector_name(self) -> None:
+        entries = [make_risk_entry("DATA", 2, 2)]
+        evidence = risk_profile_to_evidence(entries, "E1-001")
+        self.assertEqual(evidence["collector"], "risk_assessment")
+        self.assertEqual(evidence["tool"], "tea_risk")
+
+
+class ComputeRiskProfileRefTests(unittest.TestCase):
+    def test_deterministic_ref(self) -> None:
+        entries = [make_risk_entry("SEC", 3, 2)]
+        ref1 = compute_risk_profile_ref(entries, "E1-001")
+        ref2 = compute_risk_profile_ref(entries, "E1-001")
+        self.assertEqual(ref1, ref2)
+        self.assertTrue(len(ref1) > 0)
+
+    def test_different_entries_different_ref(self) -> None:
+        e1 = [make_risk_entry("SEC", 3, 2)]
+        e2 = [make_risk_entry("SEC", 1, 1)]
+        self.assertNotEqual(
+            compute_risk_profile_ref(e1, "E1-001"),
+            compute_risk_profile_ref(e2, "E1-001"),
+        )
 
 
 if __name__ == "__main__":

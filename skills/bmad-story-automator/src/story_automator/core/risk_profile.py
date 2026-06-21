@@ -10,9 +10,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .gate_schema import canonical_json
+from .gate_schema import canonical_json, make_llm_evidence_record
 from .trust_boundary import assert_host_context
-from .utils import ensure_dir, iso_now, write_atomic
+from .utils import ensure_dir, iso_now, md5_hex8, write_atomic
 
 
 class RiskProfileError(ValueError):
@@ -180,6 +180,41 @@ def risk_profile_exists(
     target_id: str,
 ) -> bool:
     return (_risk_dir(project_root) / f"{target_id}.json").is_file()
+
+
+def risk_profile_to_evidence(
+    entries: list[dict[str, Any]],
+    target_id: str,
+    *,
+    confidence: int = 7,
+) -> dict[str, Any]:
+    validate_risk_profile(entries)
+    priority = aggregate_risk_priority(entries)
+    max_score = max(e["score"] for e in entries)
+    unmitigated = has_unmitigated_risk_9(entries)
+    return make_llm_evidence_record(
+        collector="risk_assessment",
+        tool="tea_risk",
+        category="readiness",
+        status="ok",
+        metrics={
+            "priority": priority,
+            "max_score": max_score,
+            "unmitigated_risk_9": unmitigated,
+            "entry_count": len(entries),
+            "target_id": target_id,
+        },
+        confidence=confidence,
+        rationale=f"risk assessment for {target_id}: priority={priority}, max_score={max_score}",
+    )
+
+
+def compute_risk_profile_ref(
+    entries: list[dict[str, Any]],
+    target_id: str,
+) -> str:
+    stable = canonical_json({"target_id": target_id, "entries": entries})
+    return md5_hex8(stable)
 
 
 def _validate_int_range(
