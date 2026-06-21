@@ -11,11 +11,13 @@ from typing import Any
 
 from .evidence_io import read_gate_marker
 from .gate_remediation import write_remediation_to_story
+from .gate_status import list_parked, load_mitigation_debt
 
 __all__ = [
     "list_verdicts",
     "gate_doctor",
     "apply_remediation",
+    "gate_summary",
 ]
 
 
@@ -108,6 +110,41 @@ def gate_doctor(project_root: str | Path) -> dict[str, Any]:
         "healthy": len(issues) == 0,
         "checks": checks,
         "issues": issues,
+    }
+
+
+def gate_summary(project_root: str | Path) -> dict[str, Any]:
+    """Aggregate operational metrics across gate verdicts."""
+    root = Path(project_root)
+    verdicts_dir = root / "_bmad" / "gate" / "verdicts"
+    by_verdict: dict[str, int] = {}
+    durations: list[int] = []
+    total = 0
+    if verdicts_dir.is_dir():
+        for path in sorted(verdicts_dir.glob("*.json")):
+            if path.name.endswith(".invalidated.json"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            total += 1
+            overall = data.get("overall", "")
+            by_verdict[overall] = by_verdict.get(overall, 0) + 1
+            dur = data.get("duration_ms")
+            if isinstance(dur, int):
+                durations.append(dur)
+    parked = list_parked(project_root)
+    debt = load_mitigation_debt(project_root)
+    avg_dur = int(sum(durations) / len(durations)) if durations else None
+    return {
+        "total_verdicts": total,
+        "by_verdict": by_verdict,
+        "parked_count": len(parked),
+        "mitigation_debt_count": len(debt),
+        "avg_duration_ms": avg_dur,
     }
 
 

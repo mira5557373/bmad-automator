@@ -196,5 +196,68 @@ class GateDoctorTests(unittest.TestCase):
         self.assertIsInstance(result["checks"], list)
 
 
+class GateSummaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def _create_gate(self, gate_id: str, overall: str = "PASS",
+                     duration_ms: int | None = None) -> None:
+        gate = make_gate_file(
+            gate_id=gate_id,
+            target={"kind": "story", "id": f"s-{gate_id}"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={"c": {"verdict": overall, "required": {}, "actual": {}, "rationale": "ok"}},
+            overall=overall,
+        )
+        if duration_ms is not None:
+            gate["duration_ms"] = duration_ms
+        persist_gate_file(self.tmp, gate)
+
+    def test_empty_project(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        result = gate_summary(self.tmp)
+        self.assertEqual(result["total_verdicts"], 0)
+        self.assertIsNone(result["avg_duration_ms"])
+
+    def test_counts_by_verdict(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        self._create_gate("g1", "PASS")
+        self._create_gate("g2", "PASS")
+        self._create_gate("g3", "FAIL")
+        result = gate_summary(self.tmp)
+        self.assertEqual(result["total_verdicts"], 3)
+        self.assertEqual(result["by_verdict"]["PASS"], 2)
+        self.assertEqual(result["by_verdict"]["FAIL"], 1)
+
+    def test_includes_parked_count(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        from story_automator.core.gate_status import park_story
+        park_story(self.tmp, "g1", "E1-001", "exhausted", "FAIL")
+        result = gate_summary(self.tmp)
+        self.assertEqual(result["parked_count"], 1)
+
+    def test_includes_debt_count(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        from story_automator.core.gate_status import record_mitigation_debt
+        record_mitigation_debt(self.tmp, "g1", "E1-001", ["security"])
+        result = gate_summary(self.tmp)
+        self.assertEqual(result["mitigation_debt_count"], 1)
+
+    def test_avg_duration_computed(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        self._create_gate("g1", "PASS", duration_ms=1000)
+        self._create_gate("g2", "PASS", duration_ms=3000)
+        result = gate_summary(self.tmp)
+        self.assertEqual(result["avg_duration_ms"], 2000)
+
+    def test_avg_duration_none_without_data(self) -> None:
+        from story_automator.core.gate_ops import gate_summary
+        self._create_gate("g1", "PASS")
+        result = gate_summary(self.tmp)
+        self.assertIsNone(result["avg_duration_ms"])
+
+
 if __name__ == "__main__":
     unittest.main()
