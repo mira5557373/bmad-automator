@@ -7,6 +7,7 @@ from story_automator.core.gate_schema import (
     make_llm_evidence_record,
 )
 from story_automator.core.verdict_engine import (
+    compute_all_verdicts,
     compute_category_verdict,
     group_evidence_by_category,
     has_llm_low_confidence,
@@ -141,6 +142,94 @@ class ComputeCategoryVerdictTests(unittest.TestCase):
         result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
         self.assertIn("evidence_refs", result)
         self.assertIsInstance(result["evidence_refs"], list)
+
+
+class ComputeAllVerdictsTests(unittest.TestCase):
+    PROFILE = {
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {
+            "code": ["correctness", "security", "static"],
+            "system": [],
+        },
+        "categories_na": ["accessibility", "performance"],
+    }
+
+    def test_na_categories_get_na_verdict(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        verdicts = compute_all_verdicts(evidence, self.PROFILE, "P1")
+        self.assertEqual(verdicts["accessibility"]["verdict"], "NA")
+        self.assertEqual(verdicts["performance"]["verdict"], "NA")
+        self.assertIn("profile-declared", verdicts["accessibility"]["rationale"])
+
+    def test_na_verdict_has_consistent_shape(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        verdicts = compute_all_verdicts(evidence, self.PROFILE, "P1")
+        na_verdict = verdicts["accessibility"]
+        self.assertIn("required", na_verdict)
+        self.assertIn("actual", na_verdict)
+        self.assertIn("evidence_refs", na_verdict)
+        self.assertEqual(na_verdict["required"], {})
+        self.assertEqual(na_verdict["actual"], {})
+        self.assertEqual(na_verdict["evidence_refs"], [])
+
+    def test_evidence_categories_get_computed_verdict(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="c", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+        verdicts = compute_all_verdicts(evidence, self.PROFILE, "P1")
+        self.assertEqual(verdicts["correctness"]["verdict"], "PASS")
+        self.assertEqual(verdicts["security"]["verdict"], "PASS")
+
+    def test_empty_evidence_for_active_category_fails_closed(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        profile = dict(self.PROFILE)
+        profile["categories"] = {"code": ["correctness", "security"], "system": []}
+        profile["categories_na"] = []
+        verdicts = compute_all_verdicts(evidence, profile, "P1")
+        self.assertEqual(verdicts["security"]["verdict"], "FAIL")
+
+    def test_returns_all_active_plus_na_categories(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="c", tool="t", category="security",
+                                 status="ok"),
+            make_evidence_record(collector="c", tool="t", category="static",
+                                 status="ok"),
+        ]
+        verdicts = compute_all_verdicts(evidence, self.PROFILE, "P1")
+        self.assertIn("correctness", verdicts)
+        self.assertIn("security", verdicts)
+        self.assertIn("static", verdicts)
+        self.assertIn("accessibility", verdicts)
+        self.assertIn("performance", verdicts)
+
+    def test_extra_evidence_category_not_in_profile_still_evaluated(self) -> None:
+        evidence = [
+            make_evidence_record(collector="c", tool="t", category="docs",
+                                 status="ok"),
+        ]
+        profile = dict(self.PROFILE)
+        profile["categories"] = {"code": [], "system": []}
+        verdicts = compute_all_verdicts(evidence, profile, "P1")
+        self.assertIn("docs", verdicts)
 
 
 if __name__ == "__main__":

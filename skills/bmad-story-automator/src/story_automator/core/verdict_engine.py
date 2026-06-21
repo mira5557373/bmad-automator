@@ -55,3 +55,51 @@ def compute_category_verdict(
         result["rationale"] = "low LLM confidence (<5) on evidence; " + result.get("rationale", "")
 
     return result
+
+
+def compute_all_verdicts(
+    evidence_bundle: list[dict[str, Any]],
+    profile: dict[str, Any],
+    priority: str,
+) -> dict[str, dict[str, Any]]:
+    """Compute verdicts for all categories.
+
+    Categories in categories_na -> NA.
+    Categories with evidence -> computed verdict.
+    Active categories without evidence -> fail-closed.
+    """
+    from .category_rules import risk_to_requirements
+    from .gate_rules import verdict_na
+
+    required = risk_to_requirements(priority, profile)
+    grouped = group_evidence_by_category(evidence_bundle)
+    na_cats = set(profile.get("categories_na") or [])
+    active_cats: set[str] = set()
+    for tier_cats in (profile.get("categories") or {}).values():
+        if isinstance(tier_cats, list):
+            active_cats.update(tier_cats)
+    all_cats = active_cats | set(grouped.keys()) | na_cats
+
+    verdicts: dict[str, dict[str, Any]] = {}
+    for cat in sorted(all_cats):
+        if cat in na_cats:
+            na_result = verdict_na()
+            na_result["required"] = {}
+            na_result["actual"] = {}
+            na_result["evidence_refs"] = []
+            verdicts[cat] = na_result
+            continue
+        cat_evidence = grouped.get(cat, [])
+        if not cat_evidence and cat in active_cats:
+            verdicts[cat] = {
+                "verdict": "FAIL",
+                "required": {},
+                "actual": {"status": "missing"},
+                "rationale": f"no evidence collected for active category {cat}",
+                "evidence_refs": [],
+            }
+            continue
+        if cat_evidence:
+            verdicts[cat] = compute_category_verdict(cat, cat_evidence, profile, required)
+
+    return verdicts
