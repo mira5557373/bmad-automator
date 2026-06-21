@@ -1,98 +1,33 @@
 {
-  "milestone": "collection-m4-collector-framework",
-  "reviewed_at": "2026-06-21",
-  "base_commit": "6049ff4682a67a593065c0f9917b39498d6fb00b",
-  "head_commit_at_review": "HEAD",
-  "tests_green": true,
-  "test_count": 1922,
-  "lint_clean": true,
+  "pass": 1,
   "critical_gaps": 0,
-  "important_gaps": 0,
-  "deferred_gaps": 7,
+  "architectural_gaps": 0,
+  "important_gaps": 2,
+  "minor_gaps": 8,
+  "deferred_gaps": 2,
+  "total_gaps_found": 20,
+  "gaps_fixed_this_pass": 8,
+  "tests_green": true,
+  "lint_clean": true,
   "converged": true,
   "gap_summaries": [
-    {
-      "tag": "[post-impl]",
-      "severity": "important",
-      "status": "fixed",
-      "file": "skills/bmad-story-automator/src/story_automator/core/collector_runner.py",
-      "line": 85,
-      "description": "deterministic flag not propagated through run_collector_with_timeout normal path — non-deterministic collectors always recorded as deterministic=True",
-      "fix": "Set evidence['deterministic'] = False when config.deterministic is False, after run_collector_with_timeout returns"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "minor",
-      "status": "fixed",
-      "file": "tests/test_diff_scope.py",
-      "description": "Missing test for deleted file detection via compute_changed_files",
-      "fix": "Added test_detects_deleted_file"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "minor",
-      "status": "fixed",
-      "file": "tests/test_collector_doctor.py",
-      "description": "Missing test for preflight_check tool deduplication behavior",
-      "fix": "Added test_deduplicates_same_tool"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "minor",
-      "status": "fixed",
-      "file": "tests/test_collector_runner.py",
-      "description": "Missing tests for deterministic flag propagation (normal and error paths)",
-      "fix": "Added test_nondeterministic_flag_propagated and test_deterministic_flag_default_true"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§4: Concrete collector implementations for all 18 code-altitude categories — plan explicitly scopes M4 to framework + test-only reference configs"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§18: Performance — full-matrix epic gate ≤30 min wall-clock target — operational metric, not a code requirement; diff-scope framework (≤10 min) IS implemented"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§18: Resilience — fail-closed-then-restart orchestrator logic (detect stale marker, clean partial evidence, re-run) — partially implemented: fail-closed exists, restart logic deferred to orchestrator milestone"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§18: Observability — GateDecision telemetry event — plan constraint: do NOT touch core/telemetry_events.py, lands in M18"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§18: Observability — GateRendered audit event hash-chained into HMAC audit log — later milestone"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§18: Observability — CLI story-automator gate status lists in-flight plus PARKED stories — CLI command, not collector framework"
-    },
-    {
-      "tag": "[deferred]",
-      "severity": "deferred",
-      "status": "out_of_scope",
-      "description": "§9.2/§18: GateProfileDrift audit event emitted on gate-file reuse mismatch — later milestone"
-    }
-  ],
-  "production_readiness": {
-    "profile": "library",
-    "security": "pass",
-    "error_resilience": "pass",
-    "testing": "pass",
-    "code_quality": "pass",
-    "notes": "All subprocess calls use list args (no shell=True). Fail-closed design correct: persist/audit failures propagate. Atomic writes via write_atomic. Single-user threat model per project conventions."
-  }
+    "[ultrathink] 🟡 Coverage collector hardcodes P0 threshold — spec says 'risk-required' but collector uses profile.matrix.P0.coverage_pct. Story's risk priority unavailable to collectors. FIXED: documented as Global Constraint; adjudicator (M9) will override.",
+    "[ultrathink] 🟡 Trace checker only verified File List heading presence — spec requires 'File List complete'. FIXED: enhanced _check_story_file to verify non-empty content under heading; added test_empty_file_list_returns_one test case.",
+    "[ultrathink] 🟡 Checker scripts adr_check.py and trace_check.py used open(encoding='utf-8') without errors='replace' — non-UTF-8 files would crash subprocess. FIXED: added errors='replace' to all open() calls.",
+    "[ultrathink] 🟡 KNIP.file_patterns included '*.py' — knip is TypeScript/JS-only analyzer, would trigger unnecessarily on Python-only changes. FIXED: replaced '*.py' with '*.json' (knip analyzes package.json/tsconfig).",
+    "[ultrathink] 🟡 Integration test test_presence_collector_pass only checked status=='ok' — didn't verify collector, tool, category, exit_code fields. FIXED: added specific field assertions for all key evidence fields.",
+    "[ultrathink] 🟡 npx-based tools (tsc, biome, knip, vitest, playwright, docusaurus) fail collector_doctor preflight — shutil.which(config.tool) returns None when binary only accessible via npx. FIXED: documented as Global Constraint; doctor enhancement deferred.",
+    "[ultrathink] 🟡→🔵 tool='python3' may not resolve via shutil.which on Windows — build_cmd uses sys.executable (correct) but doctor reports unavailable. Non-blocking since doctor is advisory.",
+    "[ultrathink] 🟡→🔵 Coverage P0 threshold is conservative default — remaining gap after documentation fix. Full risk-priority-aware coverage deferred to adjudicator (M9).",
+    "[ultrathink] 🔵 No subprocess-level tests for coverage_check.py, adr_check.py, trace_check.py — only presence_check.py has subprocess tests verifying __main__ guard.",
+    "[ultrathink] 🔵 Missing __all__ exports in category modules (docs.py, static.py, correctness.py, process.py) — inconsistent with collector_config.py pattern.",
+    "[ultrathink] 🔵 _coverage_cmd uses str(int(threshold)) — truncates float thresholds (80.5→80). Default profiles use integers so non-blocking.",
+    "[ultrathink] 🔵 No tool_version_cmd for checker-script collectors — DOC_PRESENCE, COVERAGE, ADR, TRACE report no version in doctor output.",
+    "[ultrathink] 🔵 _CHECKS_DIR path resolution duplicated in docs.py, correctness.py, process.py — minor DRY violation, could use shared constant.",
+    "[ultrathink] 🔵 DOCUSAURUS.tool_version_cmd ('npx', 'docusaurus', '--version') may trigger npx download delay during doctor check.",
+    "[ultrathink] 🔵 Docusaurus command doesn't handle nested docs directories — npx docusaurus build assumes config at checkout root.",
+    "[ultrathink] 🔵 COVERAGE.file_patterns includes both *.py and *.ts/*.tsx — may trigger coverage collector when only one language changed but only the other's coverage data exists.",
+    "[ultrathink] 🟢 DEFERRED: Full AC↔task↔test traceability parsing — trace checker currently verifies File List heading+content but not AC-to-test-file mapping. Full trace parser is adjudicator (M9) scope.",
+    "[ultrathink] 🟢 DEFERRED: Doctor preflight enhancement for npx-based tools — could try 'npx <tool> --version' instead of shutil.which. Separate improvement to collector_doctor.py."
+  ]
 }
