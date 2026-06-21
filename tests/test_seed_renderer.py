@@ -7,6 +7,7 @@ import unittest
 from story_automator.core.seed_renderer import (
     SeedRenderError,
     list_template_files,
+    render_template_content,
     resolve_variables,
 )
 
@@ -128,6 +129,44 @@ class ListTemplateFilesTests(unittest.TestCase):
         m = _make_multi_category_manifest()
         result = list_template_files(m, category="empty")
         self.assertEqual(result, [])
+
+
+class RenderTemplateContentTests(unittest.TestCase):
+    def test_simple_substitution(self):
+        self.assertEqual(
+            render_template_content("Hello $name", {"name": "World"}),
+            "Hello World",
+        )
+
+    def test_braced_substitution(self):
+        self.assertEqual(
+            render_template_content("${service}_api", {"service": "erp"}),
+            "erp_api",
+        )
+
+    def test_dollar_escape(self):
+        self.assertEqual(
+            render_template_content("Price: $$5", {}),
+            "Price: $5",
+        )
+
+    def test_missing_var_safe(self):
+        self.assertEqual(
+            render_template_content("Hello $unknown", {}),
+            "Hello $unknown",
+        )
+
+    def test_empty_content(self):
+        self.assertEqual(render_template_content("", {"x": "y"}), "")
+
+    def test_multiline(self):
+        tpl = "line1: $a\nline2: $b"
+        result = render_template_content(tpl, {"a": "X", "b": "Y"})
+        self.assertEqual(result, "line1: X\nline2: Y")
+
+    def test_no_variables_passthrough(self):
+        plain = "no variables here"
+        self.assertEqual(render_template_content(plain, {}), plain)
 
 
 if __name__ == "__main__":

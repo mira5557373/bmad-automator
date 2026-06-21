@@ -5,6 +5,8 @@ Spec references: §5 (template system), §16 M24 (golden seed-template bundle).
 
 from __future__ import annotations
 
+import string
+
 
 class SeedRenderError(ValueError):
     """Raised on rendering or instantiation failure."""
@@ -59,3 +61,10 @@ def list_template_files(
             })
 
     return result
+
+
+def render_template_content(
+    content: str, variables: dict[str, str]
+) -> str:
+    """Render ``$variable`` / ``${variable}`` placeholders via safe_substitute."""
+    return string.Template(content).safe_substitute(variables)
