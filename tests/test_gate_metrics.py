@@ -1,6 +1,10 @@
 import unittest
 
-from story_automator.core.gate_metrics import compute_gate_metrics
+from story_automator.core.gate_metrics import (
+    compute_gate_metrics,
+    detect_flaky_categories,
+    detect_timeout_categories,
+)
 
 
 def _hist(
@@ -64,6 +68,118 @@ class ComputeGateMetricsTests(unittest.TestCase):
         m = compute_gate_metrics(history)
         self.assertEqual(m["per_category"]["security"]["pass_count"], 1)
         self.assertEqual(m["per_category"]["security"]["fail_count"], 1)
+
+
+    def test_metrics_includes_flaky_from_detector(self) -> None:
+        verdicts = ["PASS", "FAIL", "PASS", "FAIL", "PASS"]
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "correctness": {"verdict": v, "rationale": ""},
+            })
+            for i, v in enumerate(verdicts)
+        ]
+        m = compute_gate_metrics(history)
+        self.assertIn("correctness", m["flaky_categories"])
+
+    def test_metrics_includes_timeout_from_detector(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "performance": {
+                    "verdict": "FAIL",
+                    "rationale": "TIMEOUT: lighthouse exceeded 600s",
+                },
+            })
+            for i in range(4)
+        ]
+        m = compute_gate_metrics(history)
+        self.assertIn("performance", m["timeout_categories"])
+
+
+class DetectFlakyCategoriesTests(unittest.TestCase):
+    def test_no_flaky_when_all_pass(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "correctness": {"verdict": "PASS", "rationale": ""},
+            })
+            for i in range(5)
+        ]
+        self.assertEqual(detect_flaky_categories(history), [])
+
+    def test_detects_alternating_pass_fail(self) -> None:
+        verdicts = ["PASS", "FAIL", "PASS", "FAIL", "PASS"]
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "correctness": {"verdict": v, "rationale": ""},
+            })
+            for i, v in enumerate(verdicts)
+        ]
+        result = detect_flaky_categories(history, min_flips=3)
+        self.assertIn("correctness", result)
+
+    def test_below_min_flips_not_flagged(self) -> None:
+        verdicts = ["PASS", "FAIL", "PASS"]
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "correctness": {"verdict": v, "rationale": ""},
+            })
+            for i, v in enumerate(verdicts)
+        ]
+        result = detect_flaky_categories(history, min_flips=3)
+        self.assertEqual(result, [])
+
+    def test_ignores_na_categories(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "accessibility": {"verdict": "NA", "rationale": ""},
+            })
+            for i in range(5)
+        ]
+        self.assertEqual(detect_flaky_categories(history), [])
+
+
+class DetectTimeoutCategoriesTests(unittest.TestCase):
+    def test_no_timeouts(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "security": {"verdict": "PASS", "rationale": "clean"},
+            })
+            for i in range(5)
+        ]
+        self.assertEqual(detect_timeout_categories(history), [])
+
+    def test_high_timeout_rate_detected(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "performance": {
+                    "verdict": "FAIL",
+                    "rationale": "TIMEOUT: lighthouse exceeded 600s",
+                },
+            })
+            for i in range(4)
+        ] + [
+            _hist(gate_id="g-4", categories={
+                "performance": {"verdict": "PASS", "rationale": "ok"},
+            })
+        ]
+        result = detect_timeout_categories(history, min_rate=0.3)
+        self.assertIn("performance", result)
+
+    def test_low_timeout_rate_not_flagged(self) -> None:
+        history = [
+            _hist(gate_id="g-0", categories={
+                "performance": {
+                    "verdict": "FAIL",
+                    "rationale": "TIMEOUT: lighthouse exceeded 600s",
+                },
+            }),
+        ] + [
+            _hist(gate_id=f"g-{i}", categories={
+                "performance": {"verdict": "PASS", "rationale": "ok"},
+            })
+            for i in range(1, 10)
+        ]
+        result = detect_timeout_categories(history, min_rate=0.3)
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

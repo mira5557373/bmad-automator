@@ -59,6 +59,56 @@ def compute_gate_metrics(
         "concerns_rate": counts["CONCERNS"] / total,
         "waived_rate": counts["WAIVED"] / total,
         "per_category": per_cat,
-        "flaky_categories": [],
-        "timeout_categories": [],
+        "flaky_categories": detect_flaky_categories(history),
+        "timeout_categories": detect_timeout_categories(history),
     }
+
+
+def detect_flaky_categories(
+    history: list[dict[str, Any]],
+    *,
+    min_flips: int = 3,
+) -> list[str]:
+    """Detect categories that flip between PASS and FAIL."""
+    sequences: dict[str, list[str]] = {}
+    for record in history:
+        for cat, info in (record.get("categories") or {}).items():
+            if not isinstance(info, dict):
+                continue
+            verdict = info.get("verdict", "")
+            if verdict in ("PASS", "FAIL"):
+                sequences.setdefault(cat, []).append(verdict)
+
+    flaky: list[str] = []
+    for cat, seq in sorted(sequences.items()):
+        flips = sum(
+            1 for i in range(1, len(seq)) if seq[i] != seq[i - 1]
+        )
+        if flips >= min_flips:
+            flaky.append(cat)
+    return flaky
+
+
+def detect_timeout_categories(
+    history: list[dict[str, Any]],
+    *,
+    min_rate: float = 0.3,
+) -> list[str]:
+    """Detect categories with recurring timeout rationale."""
+    cat_counts: dict[str, dict[str, int]] = {}
+    for record in history:
+        for cat, info in (record.get("categories") or {}).items():
+            if not isinstance(info, dict):
+                continue
+            if cat not in cat_counts:
+                cat_counts[cat] = {"total": 0, "timeout": 0}
+            cat_counts[cat]["total"] += 1
+            rationale = info.get("rationale", "")
+            if "TIMEOUT" in rationale.upper():
+                cat_counts[cat]["timeout"] += 1
+
+    timeout_cats: list[str] = []
+    for cat, counts in sorted(cat_counts.items()):
+        if counts["total"] > 0 and counts["timeout"] / counts["total"] >= min_rate:
+            timeout_cats.append(cat)
+    return timeout_cats
