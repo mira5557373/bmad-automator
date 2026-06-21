@@ -9,7 +9,12 @@ from story_automator.core.gate_schema import (
     make_evidence_record,
     make_llm_evidence_record,
 )
-from story_automator.core.evidence_io import persist_evidence_record
+from story_automator.core.evidence_io import (
+    can_reuse_gate_file,
+    load_gate_file,
+    persist_evidence_record,
+)
+from story_automator.core.product_profile import compute_profile_hash
 from story_automator.core.gate_schema import GATE_SCHEMA_VERSION, make_waiver
 from story_automator.core.verdict_engine import (
     adjudicate,
@@ -629,6 +634,71 @@ class VerdictEngineDeterminismTests(unittest.TestCase):
         ]
         result = adjudicate(evidence, self.PROFILE, priority="P1")
         self.assertEqual(result["overall"], "FAIL")
+
+
+class GateRoundTripTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1, "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness"], "system": []},
+        "categories_na": [],
+    }
+
+    def test_evaluate_then_reload_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "rt-g1", make_evidence_record(
+                collector="a", tool="t", category="correctness",
+                status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+            ))
+            gate = evaluate_gate(
+                tmp, "rt-g1", commit_sha="sha1",
+                target={"kind": "story", "id": "E1.S1"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            loaded = load_gate_file(tmp, "rt-g1")
+            self.assertEqual(loaded["overall"], gate["overall"])
+            self.assertEqual(loaded["gate_id"], gate["gate_id"])
+
+    def test_reuse_validation_passes_for_matching(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "rt-g2", make_evidence_record(
+                collector="a", tool="t", category="correctness",
+                status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+            ))
+            gate = evaluate_gate(
+                tmp, "rt-g2", commit_sha="sha2",
+                target={"kind": "story", "id": "E1.S2"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            ok, reason = can_reuse_gate_file(
+                gate, commit_sha="sha2",
+                profile_hash=compute_profile_hash(self.PROFILE),
+                factory_version="0.1.0",
+            )
+            self.assertTrue(ok, reason)
+
+    def test_reuse_fails_on_commit_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "rt-g3", make_evidence_record(
+                collector="a", tool="t", category="correctness",
+                status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+            ))
+            gate = evaluate_gate(
+                tmp, "rt-g3", commit_sha="sha3",
+                target={"kind": "story", "id": "E1.S3"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            ok, reason = can_reuse_gate_file(
+                gate, commit_sha="sha-different",
+                profile_hash=compute_profile_hash(self.PROFILE),
+                factory_version="0.1.0",
+            )
+            self.assertFalse(ok)
 
 
 if __name__ == "__main__":
