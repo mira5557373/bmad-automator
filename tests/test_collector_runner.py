@@ -501,6 +501,83 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertIsNotNone(outcomes[0].persisted_path)
         self.assertTrue(outcomes[0].persisted_path.exists())
 
+    def test_one_collector_crash_does_not_kill_others(self) -> None:
+        """Phase 1 crash isolation: an Exception from run_single_collector
+        is caught and surfaced as an ``error`` evidence record; remaining
+        collectors still run."""
+        from unittest.mock import patch as _patch
+
+        from story_automator.core import collector_runner
+
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="boom", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="ok", tool="python3", category="static",
+            build_cmd=_ok_cmd,
+        ))
+
+        original = collector_runner.run_single_collector
+        call_count = {"n": 0}
+
+        def crashing_runner(*args: Any, **kwargs: Any) -> Any:
+            call_count["n"] += 1
+            cfg = kwargs.get("config") or args[0]
+            if cfg.collector_id == "boom":
+                raise RuntimeError("synthetic crash")
+            return original(*args, **kwargs)
+
+        with patch.dict(os.environ, _host_env(), clear=True), \
+                _patch.object(
+                    collector_runner,
+                    "run_single_collector",
+                    side_effect=crashing_runner,
+                ):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness", "static"]), reg,
+            )
+
+        self.assertEqual(len(outcomes), 2)
+        statuses = {o.config.collector_id: o.evidence["status"] for o in outcomes}
+        self.assertEqual(statuses["boom"], "error")
+        self.assertEqual(statuses["ok"], "ok")
+        # The crash must surface in findings, not be silently dropped.
+        boom = next(o for o in outcomes if o.config.collector_id == "boom")
+        self.assertTrue(
+            any("synthetic crash" in f for f in boom.evidence.get("findings", []))
+        )
+
+    def test_collector_crash_keyboardinterrupt_propagates(self) -> None:
+        """Operator signals (KeyboardInterrupt/SIGTERM/SystemExit) must
+        bubble — only ``Exception`` subclasses are isolated."""
+        from unittest.mock import patch as _patch
+
+        from story_automator.core import collector_runner
+
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="signal", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+
+        def signal_runner(*args: Any, **kwargs: Any) -> Any:
+            raise KeyboardInterrupt()
+
+        with patch.dict(os.environ, _host_env(), clear=True), \
+                _patch.object(
+                    collector_runner,
+                    "run_single_collector",
+                    side_effect=signal_runner,
+                ):
+            with self.assertRaises(KeyboardInterrupt):
+                run_gate_collectors(
+                    self.project_root, "gate-001", self.sha,
+                    self._profile(["correctness"]), reg,
+                )
+
     def test_multiple_collectors_same_category(self) -> None:
         reg = CollectorRegistry()
         reg.register(CollectorConfig(

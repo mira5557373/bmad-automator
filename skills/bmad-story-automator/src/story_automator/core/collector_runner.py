@@ -123,6 +123,14 @@ def run_gate_collectors(
 
     Creates a fresh checkout at commit_sha (§7), iterates applicable
     collectors from the registry, and returns collected evidence.
+
+    Phase 1 crash isolation: each collector invocation is wrapped in a
+    narrow ``except Exception`` so a bug in one collector cannot bring
+    down the whole gate. ``BaseException`` (KeyboardInterrupt, SIGTERM)
+    still propagates — operator signals must remain authoritative. The
+    failure surfaces as an evidence record with ``status="error"`` and
+    a synthetic ``exit_code=-1`` so the verdict engine treats it as
+    real evidence rather than missing evidence.
     """
     assert_host_context("run_gate_collectors")
     collectors = registry.applicable(profile)
@@ -136,14 +144,36 @@ def run_gate_collectors(
     outcomes: list[CollectorOutcome] = []
     with collector_checkout(project_root, commit_sha) as checkout:
         for config in collectors:
-            outcome = run_single_collector(
-                config=config,
-                checkout_path=str(checkout),
-                profile=profile,
-                gate_id=gate_id,
-                project_root=project_root,
-                audit_policy=audit_policy,
-                audit_path=audit_path,
-            )
+            try:
+                outcome = run_single_collector(
+                    config=config,
+                    checkout_path=str(checkout),
+                    profile=profile,
+                    gate_id=gate_id,
+                    project_root=project_root,
+                    audit_policy=audit_policy,
+                    audit_path=audit_path,
+                )
+            except Exception as exc:
+                evidence = make_evidence_record(
+                    collector=config.collector_id,
+                    tool=config.tool,
+                    category=config.category,
+                    status="error",
+                    findings=[f"collector crashed: {exc!r}"],
+                    exit_code=-1,
+                    deterministic=config.deterministic,
+                )
+                try:
+                    persisted = persist_evidence_record(
+                        project_root, gate_id, evidence,
+                    )
+                except Exception:
+                    persisted = None
+                outcome = CollectorOutcome(
+                    config=config,
+                    evidence=evidence,
+                    persisted_path=persisted,
+                )
             outcomes.append(outcome)
     return outcomes

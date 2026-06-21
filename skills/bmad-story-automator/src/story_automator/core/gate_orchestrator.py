@@ -35,6 +35,7 @@ from .gate_remediation import (
     write_remediation_to_story,
 )
 from .gate_status import park_story, record_mitigation_debt
+from .lie_detector import detect_baseline_drift
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
 from .utils import iso_now
@@ -309,8 +310,25 @@ def run_production_gate(
     waivers: list[dict[str, Any]] | None = None,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
+    enable_lie_detector: bool = False,
+    baseline_sha: str | None = None,
 ) -> dict[str, Any]:
-    """Full gate lifecycle: crash recovery -> reuse -> collect -> evaluate."""
+    """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
+
+    ``enable_lie_detector`` (Phase 1, default ``False``) toggles the
+    baseline-commit drift check before collectors run. When enabled and
+    HEAD does not match ``commit_sha``, the call returns a tiny
+    descriptor ``{"action": "baseline_drift", "verify": <wire form>,
+    "gate_id": ...}`` instead of a full gate file — the orchestrator
+    loop interprets this as "re-dispatch the dev session, do not
+    persist a verdict". The default-off behavior preserves every
+    existing call site exactly; Phase 3 will switch the default once
+    the wider pre-gate verifier suite is in place.
+
+    ``baseline_sha`` is the commit the session started from; when
+    provided, the lie-detector distinguishes "no commit was made" from
+    "branched somewhere unexpected" (see :func:`detect_baseline_drift`).
+    """
     assert_host_context("run_production_gate")
 
     recover_from_crash(project_root)
@@ -321,6 +339,19 @@ def run_production_gate(
     )
     if existing is not None:
         return existing
+
+    if enable_lie_detector:
+        outcome = detect_baseline_drift(
+            project_root,
+            expected_sha=commit_sha,
+            baseline_sha=baseline_sha,
+        )
+        if not outcome.ok:
+            return {
+                "action": "baseline_drift",
+                "gate_id": gate_id,
+                "verify": outcome.to_dict(),
+            }
 
     if audit_policy is not None and audit_path is not None:
         emit_gate_audit(
