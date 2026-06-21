@@ -204,7 +204,12 @@ def can_reuse_gate_file(
     profile_hash: str,
     factory_version: str,
 ) -> tuple[bool, str]:
-    """§9.2: gate file reusable only if all three match."""
+    """§9.2: gate file reusable only if all three match AND waivers still valid.
+
+    Per §6.4(e), the Adjudicator re-checks waiver.expires_at against current
+    time on every gate-file reuse (not just at issue). An expired waiver
+    forces re-evaluation rather than keeping a stale PASS alive forever.
+    """
     gate_sha = gate_file.get("commit_sha", "")
     if gate_sha != commit_sha:
         return False, (
@@ -222,6 +227,27 @@ def can_reuse_gate_file(
             f"factory_version mismatch: gate={gate_fv!r}, "
             f"current={factory_version!r}"
         )
+    # §6.4(e): re-check every waiver's expires_at on each reuse. Imported
+    # lazily to avoid a module-load cycle with gate_rules (which transitively
+    # imports gate_schema, which imports evidence_io for marker helpers).
+    waivers = gate_file.get("waivers") or []
+    if waivers:
+        from .gate_rules import is_waiver_expired
+        for waiver in waivers:
+            if not isinstance(waiver, dict):
+                continue
+            try:
+                if is_waiver_expired(waiver):
+                    waiver_id = waiver.get("waiver_id", "<unknown>")
+                    return False, (
+                        f"waiver expired: waiver_id={waiver_id!r} "
+                        f"expires_at={waiver.get('expires_at', '')!r}"
+                    )
+            except Exception as exc:  # noqa: BLE001 — fail-closed on any waiver error
+                waiver_id = waiver.get("waiver_id", "<unknown>")
+                return False, (
+                    f"waiver validation error: waiver_id={waiver_id!r} {exc}"
+                )
     return True, ""
 
 

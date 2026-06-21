@@ -424,6 +424,77 @@ class CanReuseGateFileTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("profile", reason)
 
+    # §6.4(e): waiver.expires_at must be re-checked on EVERY reuse.
+    # Expired waiver → forces re-evaluation, even when all three of
+    # commit_sha / profile.hash / factory_version match.
+
+    def test_expired_waiver_blocks_reuse(self) -> None:
+        gate = self._gate()
+        gate["waivers"] = [{
+            "waiver_id": "01J90000000000000000000W",
+            "operator_id": "mira",
+            "issued_at": "2026-06-01T00:00:00Z",
+            "expires_at": "2026-06-02T00:00:00Z",  # past
+            "failing_categories": ["security"],
+            "reason": "deadline",
+            "signature": "sig",
+            "profile_hash": "aabbccdd",
+        }]
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("waiver expired", reason)
+        self.assertIn("01J90000000000000000000W", reason)
+
+    def test_unexpired_waiver_allows_reuse(self) -> None:
+        gate = self._gate()
+        gate["waivers"] = [{
+            "waiver_id": "01J90000000000000000000F",
+            "operator_id": "mira",
+            "issued_at": "2099-01-01T00:00:00Z",
+            "expires_at": "2099-12-31T23:59:59Z",
+            "failing_categories": ["security"],
+            "reason": "infra dependency",
+            "signature": "sig",
+            "profile_hash": "aabbccdd",
+        }]
+        ok, _reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertTrue(ok)
+
+    def test_no_waivers_allows_reuse(self) -> None:
+        gate = self._gate()
+        gate["waivers"] = []
+        ok, _reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertTrue(ok)
+
+    def test_malformed_waiver_blocks_reuse_fail_closed(self) -> None:
+        gate = self._gate()
+        # Missing expires_at → is_waiver_expired raises WaiverError →
+        # reuse must fail-closed.
+        gate["waivers"] = [{"waiver_id": "01J9MALFORMED", "reason": "bad"}]
+        ok, reason = can_reuse_gate_file(
+            gate,
+            commit_sha="abc123",
+            profile_hash="aabbccdd",
+            factory_version="0.1.0",
+        )
+        self.assertFalse(ok)
+        self.assertIn("waiver validation error", reason)
+
 
 class GateMarkerLifecycleTests(unittest.TestCase):
     def test_write_creates_marker(self) -> None:
