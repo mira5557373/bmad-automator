@@ -1,5 +1,13 @@
 ### Features
 
+- feat(collector): register security collectors in core registry (e868a58)
+- feat(collector): add supply chain collector module with trivy-sbom (5be3ea9)
+- feat(collector): add SBOM check script (bc80be0)
+- feat(collector): add compliance collector module (0486d79)
+- feat(collector): add license collector module (541422d)
+- feat(collector): add license check script (989da6a)
+- feat(collector): add osv + gitleaks security collectors (52842ea)
+- feat(collector): add semgrep + trivy security collectors (00e871a)
 - feat(collector): add register_core_collectors entry point for 13 collectors (4ca72d1)
 - feat(collector): add trace checker + process/DoD collector (5e5fc69)
 - feat(collector): add ADR production-readiness checker + process collector (fa7b189)
@@ -244,6 +252,9 @@
 
 ### Bug Fixes
 
+- fix(collector): add invariants category and review fixes for collection-m6 (54d1804)
+- fix(collector): handle multi-license artifacts in license check (2ae7236)
+- fix(collector): update core collector tests for 25-collector registry (88ff71f)
 - fix(collector): Phase C review fixes for collection-m5-core-collectors (6361191)
 - fix(collector): post-review fixes for collection-m5-core-collectors (3b92083)
 - fix(collector): post-impl review fixes for collection-m4-collector-framework (b13925a)
@@ -339,6 +350,9 @@
 
 ### Documentation
 
+- docs: write gap report for collection-m6-security-collectors (27a5bb2)
+- docs(plan): add collection-m6-security-collectors implementation plan (d9dbc90)
+- docs: update generated documentation (ba1fa79)
 - docs(collector): add collection-m5-core-collectors TDD plan (c4147d5)
 - docs: update generated documentation (f4ccff1)
 - docs(gate): write Phase A plan for collection-m4-collector-framework (6049ff4)
@@ -467,6 +481,7 @@
 
 ### Tests
 
+- test(collector): add security category pipeline integration tests (2bfc5e8)
 - test(collector): add core collectors pipeline integration tests (c331bbb)
 - test(gate): add full collector pipeline integration tests (1c6263c)
 - test(gate): add diff-scoped mode and edge case tests for runner (d21b8cf)
