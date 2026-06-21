@@ -1,119 +1,68 @@
 {
-  "milestone": "integration-m10-orchestrator-wiring",
-  "phase": "C",
-  "phase_name": "Review + Fix",
+  "milestone": "integration-m11-gate-operations",
+  "phase": "A",
+  "phase_name": "Plan + Gap Analysis",
   "timestamp": "2026-06-21",
-  "spec_gaps_implemented": [
+  "plan_path": "docs/superpowers/plans/2026-06-21-integration-m11-gate-operations.md",
+  "spec_sections_checked": ["§9.2", "§11.1", "§18"],
+  "critical_gaps": [],
+  "medium_gaps": [],
+  "low_gaps": [
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
-      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
-      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
+      "id": "L1",
+      "title": "Lock timeout was 5s making concurrent test slow",
+      "spec_ref": "§18-resilience",
+      "description": "Original plan used _GATE_LOCK_TIMEOUT = 5 seconds, causing test_concurrent_gate_raises_error to wait 5s before timeout. Reduced to 1s — fail fast and let operator retry via 'gate status'.",
+      "resolution": "fixed-inline",
+      "task": 3
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
-      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
-      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
+      "id": "L2",
+      "title": "gate_summary double-read of verdict files",
+      "spec_ref": "§18-performance",
+      "description": "Original implementation called list_verdicts() then re-scanned verdicts/ for duration_ms data — two passes over the same files. Refactored to a single pass reading both verdict counts and durations together.",
+      "resolution": "fixed-inline",
+      "task": 7
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
-      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
-      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+      "id": "L3",
+      "title": "Missing __all__ in gate_ops.py",
+      "spec_ref": "style-consistency",
+      "description": "New gate_ops.py module was missing __all__ export list, inconsistent with gate_audit.py and other core modules that declare __all__.",
+      "resolution": "fixed-inline",
+      "task": 4
     },
     {
-      "spec_section": "§11",
-      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
-      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
-      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+      "id": "L4",
+      "title": "No test for lock release on exception",
+      "spec_ref": "§18-resilience",
+      "description": "Task 3 tested lock acquisition and contention but not that the lock is released when gate evaluation raises an exception. Added test_lock_released_on_exception to verify the finally-block releases the lock.",
+      "resolution": "fixed-inline",
+      "task": 3
     }
   ],
-  "post_impl_findings": [
-    {
-      "id": "PI-1",
-      "severity": "medium",
-      "tag": "[post-impl]",
-      "file": "core/gate_orchestrator.py:route_gate_verdict",
-      "finding": "Unknown verdicts silently fell through to remediate branch",
-      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
-      "status": "fixed"
+  "coverage_assessment": {
+    "spec_9_2_control_flow": {
+      "status": "complete",
+      "notes": "Resumable gates (M10 check_gate_reuse), atomic marker (M10), CONCERNS→debt (M10), FAIL→Remediator→park (M10 route_gate_verdict), apply_remediation bridge (M11 Task 6), review_max_cycles (M10), PARK+continue (M10 park_story), human takeover (M10 risk-9 park)."
     },
-    {
-      "id": "PI-2",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "tests/test_gate_remediation.py",
-      "finding": "No test for frontmatter-only story file (no ## sections)",
-      "fix": "Added test_handles_frontmatter_only_file test case",
-      "status": "fixed"
+    "spec_11_1_operator_runbook": {
+      "status": "complete",
+      "notes": "9-section runbook (M10), runbook reference enrichment in route results (M11 Task 8), runbook ref in GateCompletedAudit (M11 Task 1/2), runbook update with M11 CLI commands (M11 Task 15)."
     },
-    {
-      "id": "PI-3",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
-      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
-      "status": "accepted"
+    "spec_18_nfrs": {
+      "determinism": "covered by M9 verdict engine (pure adjudication)",
+      "performance": "duration tracking (M11 Task 2), avg_duration_ms in summary (M11 Task 7)",
+      "resilience": "crash recovery (M10), concurrent gate protection via filelock (M11 Task 3), fail-closed (M10 empty-registry test)",
+      "observability": "GateDecision+GateRendered (M9/M10), GateCompletedAudit with duration+runbook_ref (M11 Tasks 1-2), gate doctor health check (M11 Task 5)",
+      "auditability": "HMAC hash-chain (M10), full audit chain e2e test (M11 Task 13)",
+      "security": "trust boundary (M3), _SAFE_ID CLI validation (M10), rerun input validation (M11 Task 12)",
+      "compatibility": "Path.as_posix() convention, cross-platform paths, os.replace for atomics"
     }
-  ],
-  "production_findings": [
-    {
-      "id": "PR-1",
-      "severity": "high",
-      "tag": "[production]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Non-atomic story file write via path.write_text()",
-      "fix": "Changed to write_atomic() from utils.py",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-2",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_orchestrator.py:recover_from_crash",
-      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
-      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-3",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
-      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
-      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-4",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
-      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
-      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-5",
-      "severity": "low",
-      "tag": "[production]",
-      "file": "core/gate_status.py:resume_story",
-      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
-      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
-      "status": "accepted"
-    }
-  ],
-  "ruff_findings_fixed": [
-    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
-    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
-    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
-  ],
-  "verification": {
-    "test_count": 2486,
-    "test_result": "OK (skipped=2)",
-    "ruff": "All checks passed",
-    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
+  },
+  "task_count": 15,
+  "estimated_new_loc": {
+    "production": 455,
+    "test": 950
   }
 }
