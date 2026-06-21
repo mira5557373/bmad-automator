@@ -143,59 +143,57 @@ class ValidateManifestTests(unittest.TestCase):
 
     def test_category_missing_files(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={"c": {"description": "no files key"}}
-            ))
+            validate_manifest(_make_manifest(categories={"c": {"description": "no files key"}}))
 
     def test_category_missing_description(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={"c": {"files": []}}
-            ))
+            validate_manifest(_make_manifest(categories={"c": {"files": []}}))
 
     def test_file_entry_missing_src(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={"c": {"description": "d", "files": [{"dst": "a.py"}]}}
-            ))
+            validate_manifest(
+                _make_manifest(categories={"c": {"description": "d", "files": [{"dst": "a.py"}]}})
+            )
 
     def test_file_entry_missing_dst(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={"c": {"description": "d", "files": [{"src": "a.py.tmpl"}]}}
-            ))
+            validate_manifest(
+                _make_manifest(
+                    categories={"c": {"description": "d", "files": [{"src": "a.py.tmpl"}]}}
+                )
+            )
 
     def test_file_entry_invalid_on_conflict(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={
-                    "c": {
-                        "description": "d",
-                        "files": [{"src": "a.tmpl", "dst": "a.py", "on_conflict": "merge"}],
+            validate_manifest(
+                _make_manifest(
+                    categories={
+                        "c": {
+                            "description": "d",
+                            "files": [{"src": "a.tmpl", "dst": "a.py", "on_conflict": "merge"}],
+                        }
                     }
-                }
-            ))
+                )
+            )
 
     def test_variable_invalid_required_type(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                variables={"name": {"required": "yes"}}
-            ))
+            validate_manifest(_make_manifest(variables={"name": {"required": "yes"}}))
 
     def test_duplicate_dst_across_categories(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                categories={
-                    "a": {"description": "A", "files": [{"src": "x.tmpl", "dst": "same.py"}]},
-                    "b": {"description": "B", "files": [{"src": "y.tmpl", "dst": "same.py"}]},
-                }
-            ))
+            validate_manifest(
+                _make_manifest(
+                    categories={
+                        "a": {"description": "A", "files": [{"src": "x.tmpl", "dst": "same.py"}]},
+                        "b": {"description": "B", "files": [{"src": "y.tmpl", "dst": "same.py"}]},
+                    }
+                )
+            )
 
     def test_variable_name_invalid_identifier(self):
         with self.assertRaises(SeedTemplateError):
-            validate_manifest(_make_manifest(
-                variables={"foo-bar": {"required": True}}
-            ))
+            validate_manifest(_make_manifest(variables={"foo-bar": {"required": True}}))
 
 
 class ResolveBundleDirTests(unittest.TestCase):
@@ -261,9 +259,7 @@ class LoadTemplateManifestTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
         self._skill_root = Path(self._tmp) / "skills" / "bmad-story-automator"
-        self._bundle_dir = (
-            self._skill_root / "data" / "templates" / "test-template"
-        )
+        self._bundle_dir = self._skill_root / "data" / "templates" / "test-template"
         self._bundle_dir.mkdir(parents=True)
 
     def tearDown(self):
@@ -276,18 +272,14 @@ class LoadTemplateManifestTests(unittest.TestCase):
         )
 
     def _write_manifest(self, data):
-        (self._bundle_dir / "manifest.json").write_text(
-            json.dumps(data), encoding="utf-8"
-        )
+        (self._bundle_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
 
     def test_empty_ref_returns_none(self):
         with self._patch_root():
             self.assertIsNone(load_template_manifest(""))
 
     def test_loads_valid_manifest(self):
-        self._write_manifest(_make_manifest(
-            template_id="test-template", template_version="1.0.0"
-        ))
+        self._write_manifest(_make_manifest(template_id="test-template", template_version="1.0.0"))
         with self._patch_root():
             result = load_template_manifest("test-template@1.0.0")
         self.assertEqual(result["template_id"], "test-template")
@@ -298,17 +290,13 @@ class LoadTemplateManifestTests(unittest.TestCase):
                 load_template_manifest("test-template@1.0.0")
 
     def test_invalid_json_raises(self):
-        (self._bundle_dir / "manifest.json").write_text(
-            "{bad json", encoding="utf-8"
-        )
+        (self._bundle_dir / "manifest.json").write_text("{bad json", encoding="utf-8")
         with self._patch_root():
             with self.assertRaises(SeedTemplateError):
                 load_template_manifest("test-template@1.0.0")
 
     def test_version_mismatch_raises(self):
-        self._write_manifest(_make_manifest(
-            template_id="test-template", template_version="2.0.0"
-        ))
+        self._write_manifest(_make_manifest(template_id="test-template", template_version="2.0.0"))
         with self._patch_root():
             with self.assertRaises(SeedTemplateError):
                 load_template_manifest("test-template@1.0.0")
@@ -328,10 +316,7 @@ class ValidateBundleTests(unittest.TestCase):
         for cat, srcs in files_by_category.items():
             categories[cat] = {
                 "description": cat,
-                "files": [
-                    {"src": s, "dst": s.replace(".tmpl", "")}
-                    for s in srcs
-                ],
+                "files": [{"src": s, "dst": s.replace(".tmpl", "")} for s in srcs],
             }
         return _make_manifest(categories=categories)
 
@@ -353,9 +338,7 @@ class ValidateBundleTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
     def test_empty_manifest_valid(self):
-        m = _make_manifest(
-            categories={"c": {"description": "empty", "files": []}}
-        )
+        m = _make_manifest(categories={"c": {"description": "empty", "files": []}})
         self.assertEqual(validate_bundle(self._bundle_dir, m), [])
 
 

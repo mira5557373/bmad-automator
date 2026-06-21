@@ -69,25 +69,17 @@ def validate_manifest(manifest: dict) -> None:
 
     for cat_name, cat in categories.items():
         if not isinstance(cat.get("description"), str):
-            raise SeedTemplateError(
-                f"category {cat_name!r}: description must be a string"
-            )
+            raise SeedTemplateError(f"category {cat_name!r}: description must be a string")
         files = cat.get("files")
         if not isinstance(files, list):
-            raise SeedTemplateError(
-                f"category {cat_name!r}: files must be a list"
-            )
+            raise SeedTemplateError(f"category {cat_name!r}: files must be a list")
         for entry in files:
             for key in ("src", "dst"):
                 if not isinstance(entry.get(key), str) or not entry[key]:
-                    raise SeedTemplateError(
-                        f"category {cat_name!r}: file entry missing {key}"
-                    )
+                    raise SeedTemplateError(f"category {cat_name!r}: file entry missing {key}")
             conflict = entry.get("on_conflict")
             if conflict is not None and conflict not in VALID_CONFLICT_MODES:
-                raise SeedTemplateError(
-                    f"category {cat_name!r}: invalid on_conflict {conflict!r}"
-                )
+                raise SeedTemplateError(f"category {cat_name!r}: invalid on_conflict {conflict!r}")
             dst = entry["dst"]
             if dst in seen_dst:
                 raise SeedTemplateError(f"duplicate dst path: {dst!r}")
@@ -103,22 +95,16 @@ def validate_manifest(manifest: dict) -> None:
                     f"variable name {var_name!r} is not a valid Python identifier"
                 )
             if not isinstance(var_def, dict):
-                raise SeedTemplateError(
-                    f"variable {var_name!r}: definition must be a dict"
-                )
+                raise SeedTemplateError(f"variable {var_name!r}: definition must be a dict")
             req = var_def.get("required")
             if req is not None and not isinstance(req, bool):
-                raise SeedTemplateError(
-                    f"variable {var_name!r}: required must be a bool"
-                )
+                raise SeedTemplateError(f"variable {var_name!r}: required must be a bool")
 
 
 _TEMPLATES_DIR = "data/templates"
 
 
-def resolve_bundle_dir(
-    template_id: str, project_root: str | None = None
-) -> Path:
+def resolve_bundle_dir(template_id: str, project_root: str | None = None) -> Path:
     """Resolve the bundle directory for a template id.
 
     Returns the absolute path to ``data/templates/<template_id>/`` under
@@ -126,17 +112,13 @@ def resolve_bundle_dir(
     does not exist or the id contains path traversal.
     """
     if ".." in template_id or "/" in template_id or os.sep in template_id:
-        raise SeedTemplateError(
-            f"invalid template_id (path traversal): {template_id!r}"
-        )
+        raise SeedTemplateError(f"invalid template_id (path traversal): {template_id!r}")
 
     skill_root = bundled_story_skill_root(project_root)
     bundle = (skill_root / _TEMPLATES_DIR / template_id).resolve()
 
     if not bundle.is_dir():
-        raise SeedTemplateError(
-            f"template bundle not found: {bundle}"
-        )
+        raise SeedTemplateError(f"template bundle not found: {bundle}")
 
     return bundle
 
@@ -157,9 +139,7 @@ def version_satisfies(manifest_version: str, ref_version: str) -> bool:
     return manifest_version == ref_version
 
 
-def load_template_manifest(
-    ref: str, project_root: str | None = None
-) -> dict | None:
+def load_template_manifest(ref: str, project_root: str | None = None) -> dict | None:
     """Load and validate the template manifest for *ref*.
 
     Returns ``None`` if *ref* is empty.  Raises `SeedTemplateError` on

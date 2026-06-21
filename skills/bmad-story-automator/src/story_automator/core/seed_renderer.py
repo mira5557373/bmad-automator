@@ -15,9 +15,7 @@ class SeedRenderError(ValueError):
     """Raised on rendering or instantiation failure."""
 
 
-def resolve_variables(
-    manifest: dict, provided: dict[str, str]
-) -> dict[str, str]:
+def resolve_variables(manifest: dict, provided: dict[str, str]) -> dict[str, str]:
     """Merge *provided* variables with manifest defaults.
 
     Raises `SeedRenderError` if a required variable is missing.
@@ -38,9 +36,7 @@ def resolve_variables(
     return result
 
 
-def list_template_files(
-    manifest: dict, category: str | None = None
-) -> list[dict[str, str]]:
+def list_template_files(manifest: dict, category: str | None = None) -> list[dict[str, str]]:
     """List file entries from the manifest, optionally filtered by category.
 
     Each returned dict has ``src``, ``dst``, ``on_conflict``, ``category``.
@@ -56,19 +52,19 @@ def list_template_files(
         if category is not None and cat_name != category:
             continue
         for entry in cat.get("files", []):
-            result.append({
-                "src": entry["src"],
-                "dst": entry["dst"],
-                "on_conflict": entry.get("on_conflict", "skip"),
-                "category": cat_name,
-            })
+            result.append(
+                {
+                    "src": entry["src"],
+                    "dst": entry["dst"],
+                    "on_conflict": entry.get("on_conflict", "skip"),
+                    "category": cat_name,
+                }
+            )
 
     return result
 
 
-def render_template_content(
-    content: str, variables: dict[str, str]
-) -> str:
+def render_template_content(content: str, variables: dict[str, str]) -> str:
     """Render ``$variable`` / ``${variable}`` placeholders via safe_substitute."""
     return string.Template(content).safe_substitute(variables)
 
@@ -110,16 +106,12 @@ def instantiate_template(
         try:
             src_path.relative_to(resolved_bundle)
         except ValueError:
-            raise SeedRenderError(
-                f"src path escapes bundle dir: {entry['src']!r}"
-            ) from None
+            raise SeedRenderError(f"src path escapes bundle dir: {entry['src']!r}") from None
 
         try:
             dst_path.relative_to(resolved_target)
         except ValueError:
-            raise SeedRenderError(
-                f"dst path escapes target dir: {entry['dst']!r}"
-            ) from None
+            raise SeedRenderError(f"dst path escapes target dir: {entry['dst']!r}") from None
 
         if not src_path.is_file():
             result.errors.append(f"src not found: {entry['src']}")

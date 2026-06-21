@@ -84,7 +84,11 @@ def _make_multi_category_manifest():
                 "description": "Contract tests",
                 "files": [
                     {"src": "c/conftest.py.tmpl", "dst": "tests/contracts/conftest.py"},
-                    {"src": "c/pact.py.tmpl", "dst": "tests/contracts/pact.py", "on_conflict": "overwrite"},
+                    {
+                        "src": "c/pact.py.tmpl",
+                        "dst": "tests/contracts/pact.py",
+                        "on_conflict": "overwrite",
+                    },
                 ],
             },
             "network": {
@@ -218,7 +222,9 @@ class InstantiateTemplateTests(unittest.TestCase):
 
     def test_basic_instantiation(self):
         instantiate_template(
-            self._bundle, self._manifest, self._target,
+            self._bundle,
+            self._manifest,
+            self._target,
             {"product_name": "MyApp"},
         )
         dst = self._target / "src" / "hello.py"
@@ -227,7 +233,9 @@ class InstantiateTemplateTests(unittest.TestCase):
 
     def test_creates_parent_dirs(self):
         instantiate_template(
-            self._bundle, self._manifest, self._target,
+            self._bundle,
+            self._manifest,
+            self._target,
             {"product_name": "X"},
         )
         self.assertTrue((self._target / "src").is_dir())
@@ -235,29 +243,39 @@ class InstantiateTemplateTests(unittest.TestCase):
 
     def test_multiple_files(self):
         result = instantiate_template(
-            self._bundle, self._manifest, self._target,
-            {"product_name": "X"}, category="cat1",
+            self._bundle,
+            self._manifest,
+            self._target,
+            {"product_name": "X"},
+            category="cat1",
         )
         self.assertEqual(len(result.written), 1)
 
     def test_multiple_categories(self):
         result = instantiate_template(
-            self._bundle, self._manifest, self._target,
+            self._bundle,
+            self._manifest,
+            self._target,
             {"product_name": "X"},
         )
         self.assertEqual(len(result.written), 2)
 
     def test_filter_by_category(self):
         result = instantiate_template(
-            self._bundle, self._manifest, self._target,
-            {"product_name": "X"}, category="cat2",
+            self._bundle,
+            self._manifest,
+            self._target,
+            {"product_name": "X"},
+            category="cat2",
         )
         self.assertEqual(len(result.written), 1)
         self.assertIn("lib/world.py", result.written[0])
 
     def test_rendered_content(self):
         instantiate_template(
-            self._bundle, self._manifest, self._target,
+            self._bundle,
+            self._manifest,
+            self._target,
             {"product_name": "ACME"},
         )
         content = (self._target / "src" / "hello.py").read_text(encoding="utf-8")
@@ -266,7 +284,9 @@ class InstantiateTemplateTests(unittest.TestCase):
 
     def test_result_tracks_written(self):
         result = instantiate_template(
-            self._bundle, self._manifest, self._target,
+            self._bundle,
+            self._manifest,
+            self._target,
             {"product_name": "X"},
         )
         self.assertEqual(len(result.written), 2)
@@ -433,7 +453,9 @@ class EndToEndIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(manifest)
 
         result = instantiate_template(
-            bundle_dir, manifest, self._target,
+            bundle_dir,
+            manifest,
+            self._target,
             {"product_name": "TestERP", "service_prefix": "erp"},
         )
         self.assertEqual(len(result.written), 9)
@@ -452,7 +474,9 @@ class EndToEndIntegrationTests(unittest.TestCase):
         pre_existing.write_text("existing", encoding="utf-8")
 
         result = instantiate_template(
-            bundle_dir, manifest, self._target,
+            bundle_dir,
+            manifest,
+            self._target,
             {"product_name": "TestERP", "service_prefix": "erp"},
         )
         self.assertEqual(len(result.skipped), 1)
