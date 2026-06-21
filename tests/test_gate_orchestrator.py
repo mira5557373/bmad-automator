@@ -450,5 +450,63 @@ class FactoryVersionTests(unittest.TestCase):
         self.assertEqual(resolve_factory_version(), __version__)
 
 
+class GateDurationTrackingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": ["correctness"], "system": []},
+            "categories_na": [],
+        }
+        self.registry = CollectorRegistry()
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_gate_file_contains_duration_ms(self, mock_run: MagicMock) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        persist_evidence_record(self.tmp, "dur-1", evidence[0])
+        mock_run.return_value = []
+        gate = run_production_gate(
+            self.tmp, "dur-1", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertIn("duration_ms", gate)
+        self.assertIsInstance(gate["duration_ms"], int)
+        self.assertGreaterEqual(gate["duration_ms"], 0)
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_reused_gate_has_no_new_duration(self, mock_run: MagicMock) -> None:
+        """Reused gates keep their original data — no duration_ms override."""
+        profile_hash = compute_profile_hash(self.profile)
+        gate = make_gate_file(
+            gate_id="dur-reuse",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": profile_hash},
+            factory_version="1.15.0",
+            categories={"correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"}},
+            overall="PASS",
+        )
+        persist_gate_file(self.tmp, gate)
+        result = run_production_gate(
+            self.tmp, "dur-reuse", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        mock_run.assert_not_called()
+        self.assertNotIn("duration_ms", result)
+
+
 if __name__ == "__main__":
     unittest.main()

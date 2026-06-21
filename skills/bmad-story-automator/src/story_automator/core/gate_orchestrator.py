@@ -7,6 +7,7 @@ and atomic-marker semantics.
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from .evidence_io import (
     write_gate_marker,
 )
 from .gate_audit import (
+    GateCompletedAudit,
     GateProfileDriftAudit,
     GateStartedAudit,
     emit_gate_audit,
@@ -34,6 +36,17 @@ from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
 from .verdict_engine import evaluate_gate
+
+
+_VERDICT_RUNBOOK_REFS: dict[str, str] = {
+    "FAIL": "section-4",
+    "CONCERNS": "section-2",
+    "WAIVED": "section-6",
+}
+
+
+def _runbook_ref_for_verdict(overall: str) -> str:
+    return _VERDICT_RUNBOOK_REFS.get(overall, "")
 
 
 def check_gate_reuse(
@@ -184,6 +197,7 @@ def run_production_gate(
             ),
         )
 
+    _start = time.monotonic()
     write_gate_marker(project_root, gate_id, commit_sha)
     try:
         _run_collectors(
@@ -201,6 +215,23 @@ def run_production_gate(
         )
     finally:
         clear_gate_marker(project_root)
+
+    duration_ms = int((time.monotonic() - _start) * 1000)
+    gate_file["duration_ms"] = duration_ms
+
+    if audit_policy is not None and audit_path is not None:
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateCompletedAudit(
+                gate_id=gate_id,
+                overall=gate_file.get("overall", ""),
+                duration_ms=duration_ms,
+                commit_sha=commit_sha,
+                runbook_ref=_runbook_ref_for_verdict(
+                    gate_file.get("overall", ""),
+                ),
+            ),
+        )
 
     return gate_file
 
