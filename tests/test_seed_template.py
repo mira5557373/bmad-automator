@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +12,11 @@ from unittest.mock import patch
 from story_automator.core.seed_template import (
     TEMPLATE_SCHEMA_VERSION,
     SeedTemplateError,
+    load_template_manifest,
     resolve_bundle_dir,
     resolve_template_ref,
     validate_manifest,
+    version_satisfies,
 )
 
 
@@ -229,6 +233,83 @@ class ResolveBundleDirTests(unittest.TestCase):
         with self._patch_root():
             result = resolve_bundle_dir("test-template")
         self.assertTrue(result.is_absolute())
+
+
+class VersionSatisfiesTests(unittest.TestCase):
+    def test_exact_match(self):
+        self.assertTrue(version_satisfies("1.0.0", "1.0.0"))
+
+    def test_exact_mismatch(self):
+        self.assertFalse(version_satisfies("1.0.0", "2.0.0"))
+
+    def test_major_wildcard_match(self):
+        self.assertTrue(version_satisfies("1.2.3", "1.x"))
+
+    def test_major_wildcard_mismatch(self):
+        self.assertFalse(version_satisfies("2.0.0", "1.x"))
+
+    def test_major_only_match(self):
+        self.assertTrue(version_satisfies("1.2.3", "1"))
+
+    def test_empty_ref_matches_any(self):
+        self.assertTrue(version_satisfies("3.0.0", ""))
+
+
+class LoadTemplateManifestTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._skill_root = Path(self._tmp) / "skills" / "bmad-story-automator"
+        self._bundle_dir = (
+            self._skill_root / "data" / "templates" / "test-template"
+        )
+        self._bundle_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _patch_root(self):
+        return patch(
+            "story_automator.core.seed_template.bundled_story_skill_root",
+            return_value=self._skill_root,
+        )
+
+    def _write_manifest(self, data):
+        (self._bundle_dir / "manifest.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+
+    def test_empty_ref_returns_none(self):
+        with self._patch_root():
+            self.assertIsNone(load_template_manifest(""))
+
+    def test_loads_valid_manifest(self):
+        self._write_manifest(_make_manifest(
+            template_id="test-template", template_version="1.0.0"
+        ))
+        with self._patch_root():
+            result = load_template_manifest("test-template@1.0.0")
+        self.assertEqual(result["template_id"], "test-template")
+
+    def test_missing_manifest_raises(self):
+        with self._patch_root():
+            with self.assertRaises(SeedTemplateError):
+                load_template_manifest("test-template@1.0.0")
+
+    def test_invalid_json_raises(self):
+        (self._bundle_dir / "manifest.json").write_text(
+            "{bad json", encoding="utf-8"
+        )
+        with self._patch_root():
+            with self.assertRaises(SeedTemplateError):
+                load_template_manifest("test-template@1.0.0")
+
+    def test_version_mismatch_raises(self):
+        self._write_manifest(_make_manifest(
+            template_id="test-template", template_version="2.0.0"
+        ))
+        with self._patch_root():
+            with self.assertRaises(SeedTemplateError):
+                load_template_manifest("test-template@1.0.0")
 
 
 if __name__ == "__main__":

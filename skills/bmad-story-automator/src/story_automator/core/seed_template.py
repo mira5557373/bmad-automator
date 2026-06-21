@@ -5,6 +5,7 @@ Spec references: §5 (template system), §16 M24 (golden seed-template bundle).
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -138,3 +139,54 @@ def resolve_bundle_dir(
         )
 
     return bundle
+
+
+def version_satisfies(manifest_version: str, ref_version: str) -> bool:
+    """Check if *manifest_version* satisfies *ref_version*.
+
+    Rules: empty ref matches any; ``"1.x"`` or ``"1"`` match major;
+    otherwise exact match.
+    """
+    if not ref_version:
+        return True
+    if ref_version.endswith(".x"):
+        major = ref_version[:-2]
+        return manifest_version.split(".")[0] == major
+    if "." not in ref_version:
+        return manifest_version.split(".")[0] == ref_version
+    return manifest_version == ref_version
+
+
+def load_template_manifest(
+    ref: str, project_root: str | None = None
+) -> dict | None:
+    """Load and validate the template manifest for *ref*.
+
+    Returns ``None`` if *ref* is empty.  Raises `SeedTemplateError` on
+    I/O, JSON, validation, or version-mismatch errors.
+    """
+    template_id, ref_version = resolve_template_ref(ref)
+    if not template_id:
+        return None
+
+    bundle_dir = resolve_bundle_dir(template_id, project_root)
+    manifest_path = bundle_dir / "manifest.json"
+
+    if not manifest_path.is_file():
+        raise SeedTemplateError(f"manifest.json not found in {bundle_dir}")
+
+    try:
+        raw = manifest_path.read_text(encoding="utf-8")
+        manifest = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SeedTemplateError(f"failed to read manifest: {exc}") from exc
+
+    validate_manifest(manifest)
+
+    if not version_satisfies(manifest["template_version"], ref_version):
+        raise SeedTemplateError(
+            f"version mismatch: manifest has {manifest['template_version']!r}, "
+            f"ref requires {ref_version!r}"
+        )
+
+    return manifest
