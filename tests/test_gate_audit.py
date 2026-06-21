@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from story_automator.core.audit import Event as AuditEventProtocol
 from story_automator.core.gate_audit import (
+    EpicGateDecisionAudit,
     EvidenceCollectedAudit,
     GateBoundaryViolation,
     GateDecisionAudit,
@@ -17,6 +18,7 @@ from story_automator.core.gate_audit import (
     GateReadinessAudit,
     GateRenderedAudit,
     GateStartedAudit,
+    SystemGateStartedAudit,
     emit_gate_audit,
 )
 
@@ -279,6 +281,50 @@ class GateReadinessAuditTests(unittest.TestCase):
         event = GateReadinessAudit(story_id="E1-001")
         with self.assertRaises(AttributeError):
             event.story_id = "E1-002"  # type: ignore[misc]
+
+
+class SystemGateStartedAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = SystemGateStartedAudit(
+            gate_id="sg1", epic_id="E1", commit_sha="abc",
+            profile_hash="hash1", env_tier="full",
+        )
+        self.assertEqual(event.event_name, "SystemGateStarted")
+
+    def test_to_dict(self) -> None:
+        event = SystemGateStartedAudit(
+            gate_id="sg1", epic_id="E1", commit_sha="abc",
+            profile_hash="hash1", env_tier="full",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["epic_id"], "E1")
+        self.assertEqual(d["env_tier"], "full")
+        self.assertEqual(d["gate_id"], "sg1")
+
+    def test_frozen(self) -> None:
+        event = SystemGateStartedAudit(gate_id="sg1")
+        with self.assertRaises(AttributeError):
+            event.gate_id = "sg2"  # type: ignore[misc]
+
+
+class EpicGateDecisionAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = EpicGateDecisionAudit(
+            gate_id="sg1", epic_id="E1", overall="PASS",
+            commit_sha="abc", env_tier="minimal",
+        )
+        self.assertEqual(event.event_name, "EpicGateDecision")
+
+    def test_to_dict(self) -> None:
+        event = EpicGateDecisionAudit(
+            gate_id="sg1", epic_id="E1", overall="FAIL",
+            commit_sha="abc", env_tier="full",
+            categories_summary="reliability:PASS,resilience:FAIL",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["overall"], "FAIL")
+        self.assertEqual(d["epic_id"], "E1")
+        self.assertIn("resilience", d["categories_summary"])
 
 
 if __name__ == "__main__":

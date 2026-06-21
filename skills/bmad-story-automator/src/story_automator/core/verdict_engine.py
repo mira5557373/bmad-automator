@@ -180,6 +180,7 @@ def build_gate_file(
     commit_sha: str,
     profile: dict[str, Any],
     factory_version: str,
+    tier: str = "code",
     waivers: list[dict[str, Any]] | None = None,
     scanner_data_snapshot: str = "",
     risk_profile_ref: str = "",
@@ -209,6 +210,7 @@ def build_gate_file(
 
     return _make_gate_file(
         gate_id=gate_id,
+        tier=tier,
         target=target,
         commit_sha=commit_sha,
         scanner_data_snapshot=scanner_data_snapshot,
@@ -234,6 +236,7 @@ def evaluate_gate(
     target: dict[str, str],
     profile: dict[str, Any],
     factory_version: str,
+    tier: str = "code",
     priority: str = "P1",
     has_unmitigated_risk_9: bool = False,
     waivers: list[dict[str, Any]] | None = None,
@@ -258,7 +261,8 @@ def evaluate_gate(
     )
     gate_file = build_gate_file(
         adj, gate_id=gate_id, target=target, commit_sha=commit_sha,
-        profile=profile, factory_version=factory_version, waivers=waivers,
+        profile=profile, factory_version=factory_version, tier=tier,
+        waivers=waivers,
     )
 
     gate_path = persist_gate_file(project_root, gate_file)
