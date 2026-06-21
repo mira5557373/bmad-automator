@@ -7,6 +7,7 @@ from story_automator.core.category_rules import (
     coverage_verdict,
     risk_to_requirements,
     security_rule,
+    static_rule,
     worst_evidence_status,
 )
 from story_automator.core.gate_schema import make_evidence_record
@@ -270,6 +271,52 @@ class SecurityRuleTests(unittest.TestCase):
         ]
         result = security_rule(evidence, self.PROFILE, self.REQ)
         self.assertEqual(result["verdict"], "FAIL")
+
+
+class StaticRuleTests(unittest.TestCase):
+    REQ = {"priority": "P1"}
+
+    def test_clean_analysis_passes(self) -> None:
+        evidence = [make_evidence_record(
+            collector="linter", tool="ruff", category="static",
+            status="ok", metrics={"errors": 0, "warnings": 0},
+        )]
+        result = static_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_violation_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="linter", tool="mypy", category="static",
+            status="violation", findings=["type error in foo.py"],
+        )]
+        result = static_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_error_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="linter", tool="ruff", category="static",
+            status="error", findings=["ruff crashed"],
+        )]
+        result = static_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_multiple_tools_worst_wins(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="ruff", category="static", status="ok"),
+            make_evidence_record(collector="b", tool="mypy", category="static",
+                                 status="violation", findings=["type error"]),
+        ]
+        result = static_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_all_ok_multiple_tools_passes(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="ruff", category="static", status="ok"),
+            make_evidence_record(collector="b", tool="mypy", category="static", status="ok"),
+            make_evidence_record(collector="c", tool="biome", category="static", status="ok"),
+        ]
+        result = static_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
 
 
 if __name__ == "__main__":

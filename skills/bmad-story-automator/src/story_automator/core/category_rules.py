@@ -143,3 +143,28 @@ def security_rule(
     if status == "violation":
         return _make_category_result("FAIL", req, actual, "collector reported violation")
     return _make_category_result("PASS", req, actual, "all security checks passed")
+
+
+def _status_based_rule(category: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    """Generic rule: verdict follows worst evidence status."""
+    status = worst_evidence_status(evidence)
+    actual = {"status": status}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", {}, actual, f"fail-closed: collector {status}")
+    if status == "violation":
+        findings = []
+        for r in evidence:
+            if r.get("status") == "violation":
+                findings.extend(r.get("findings", []))
+        rationale = "; ".join(findings[:5]) if findings else "violations detected"
+        return _make_category_result("FAIL", {}, actual, rationale)
+    return _make_category_result("PASS", {}, actual, f"all {category} checks passed")
+
+
+def static_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: tsc=0, mypy=0, ruff/Biome=0, deadcode <= budget."""
+    return _status_based_rule("static", evidence)
