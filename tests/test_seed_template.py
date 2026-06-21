@@ -382,5 +382,28 @@ class MsmeErpManifestTests(unittest.TestCase):
         self.assertTrue(variables["service_prefix"]["required"])
 
 
+class MsmeErpBundleIntegrityTests(unittest.TestCase):
+    """Validate the shipped MSME ERP bundle is internally consistent."""
+
+    def test_all_manifest_files_exist(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        bundle_dir = resolve_bundle_dir("msme-erp-golden-template")
+        missing = validate_bundle(bundle_dir, manifest)
+        self.assertEqual(missing, [], f"Missing files: {missing}")
+
+    def test_manifest_passes_validation(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        validate_manifest(manifest)
+
+    def test_ref_resolves(self):
+        tid, ver = resolve_template_ref("msme-erp-golden-template@1.0.0")
+        self.assertEqual(tid, "msme-erp-golden-template")
+        self.assertEqual(ver, "1.0.0")
+
+    def test_bundle_dir_resolves(self):
+        bundle_dir = resolve_bundle_dir("msme-erp-golden-template")
+        self.assertTrue(bundle_dir.is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()
