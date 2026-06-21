@@ -144,5 +144,105 @@ class TestBurnInCheckSingleRun(unittest.TestCase):
         self.assertFalse(result["flaky"])
 
 
+class TestJUnitParsing(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_junit(self, name: str, content: str) -> str:
+        path = os.path.join(self.tmp, name)
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def test_parse_passing_tests(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _parse_junit_tests
+        finally:
+            sys.path.pop(0)
+        path = self._write_junit("junit.xml", textwrap.dedent("""\
+            <?xml version="1.0" ?>
+            <testsuite tests="2">
+              <testcase classname="test_foo" name="test_one"/>
+              <testcase classname="test_foo" name="test_two"/>
+            </testsuite>
+        """))
+        result = _parse_junit_tests(path)
+        self.assertEqual(result["test_foo.test_one"], "pass")
+        self.assertEqual(result["test_foo.test_two"], "pass")
+
+    def test_parse_failing_tests(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _parse_junit_tests
+        finally:
+            sys.path.pop(0)
+        path = self._write_junit("junit.xml", textwrap.dedent("""\
+            <?xml version="1.0" ?>
+            <testsuite tests="2">
+              <testcase classname="test_foo" name="test_one"/>
+              <testcase classname="test_foo" name="test_two">
+                <failure message="assert False"/>
+              </testcase>
+            </testsuite>
+        """))
+        result = _parse_junit_tests(path)
+        self.assertEqual(result["test_foo.test_one"], "pass")
+        self.assertEqual(result["test_foo.test_two"], "fail")
+
+    def test_parse_malformed_xml_returns_empty(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _parse_junit_tests
+        finally:
+            sys.path.pop(0)
+        path = self._write_junit("bad.xml", "not xml")
+        result = _parse_junit_tests(path)
+        self.assertEqual(result, {})
+
+
+class TestFlakyDetection(unittest.TestCase):
+    def test_no_flaky_all_pass(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _detect_flaky_tests
+        finally:
+            sys.path.pop(0)
+        runs = [
+            {"a.test_1": "pass", "a.test_2": "pass"},
+            {"a.test_1": "pass", "a.test_2": "pass"},
+        ]
+        self.assertEqual(_detect_flaky_tests(runs), [])
+
+    def test_flaky_detected(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _detect_flaky_tests
+        finally:
+            sys.path.pop(0)
+        runs = [
+            {"a.test_1": "pass", "a.test_2": "pass"},
+            {"a.test_1": "pass", "a.test_2": "fail"},
+        ]
+        result = _detect_flaky_tests(runs)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "a.test_2")
+
+    def test_all_fail_not_flaky(self):
+        sys.path.insert(0, str(_CHECKS_DIR))
+        try:
+            from burn_in_check import _detect_flaky_tests
+        finally:
+            sys.path.pop(0)
+        runs = [
+            {"a.test_1": "fail"},
+            {"a.test_1": "fail"},
+        ]
+        self.assertEqual(_detect_flaky_tests(runs), [])
+
+
 if __name__ == "__main__":
     unittest.main()
