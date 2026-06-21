@@ -7,10 +7,11 @@ from story_automator.core.gate_schema import (
     make_evidence_record,
     make_llm_evidence_record,
 )
-from story_automator.core.gate_schema import make_waiver
+from story_automator.core.gate_schema import GATE_SCHEMA_VERSION, make_waiver
 from story_automator.core.verdict_engine import (
     adjudicate,
     apply_waivers,
+    build_gate_file,
     compute_all_verdicts,
     compute_category_verdict,
     group_evidence_by_category,
@@ -392,6 +393,99 @@ class ApplyWaiversTests(unittest.TestCase):
         )
         self.assertEqual(overall, "FAIL")
         self.assertEqual(len(valid), 0)
+
+
+class BuildGateFileTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1,
+        "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness", "security"], "system": []},
+        "categories_na": [],
+    }
+
+    def _evidence(self) -> list:
+        return [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+
+    def test_pass_gate_file(self) -> None:
+        adj = adjudicate(self._evidence(), self.PROFILE, priority="P1")
+        gate = build_gate_file(
+            adj, gate_id="g1", target={"kind": "story", "id": "E1.S1"},
+            commit_sha="abc123", profile=self.PROFILE,
+            factory_version="0.1.0",
+        )
+        self.assertEqual(gate["gate_id"], "g1")
+        self.assertEqual(gate["overall"], "PASS")
+        self.assertEqual(gate["schema_version"], GATE_SCHEMA_VERSION)
+        self.assertEqual(gate["commit_sha"], "abc123")
+        self.assertIn("hash", gate["profile"])
+
+    def test_fail_gate_file(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="violation"),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok"),
+        ]
+        adj = adjudicate(evidence, self.PROFILE, priority="P1")
+        gate = build_gate_file(
+            adj, gate_id="g2", target={"kind": "story", "id": "E1.S2"},
+            commit_sha="def456", profile=self.PROFILE,
+            factory_version="0.1.0",
+        )
+        self.assertEqual(gate["overall"], "FAIL")
+
+    def test_waived_gate_file(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="violation", metrics={"sast_high_count": 1},
+                                 findings=["vuln"]),
+        ]
+        adj = adjudicate(evidence, self.PROFILE, priority="P1")
+        profile_hash = adj["profile_hash"]
+        waiver = make_waiver(
+            waiver_id="w1", operator_id="alice",
+            issued_at="2026-06-20T00:00:00Z", expires_at="2026-07-01T00:00:00Z",
+            failing_categories=["security"], reason="false positive",
+            profile_hash=profile_hash,
+        )
+        now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+        gate = build_gate_file(
+            adj, gate_id="g3", target={"kind": "story", "id": "E1.S3"},
+            commit_sha="ghi789", profile=self.PROFILE,
+            factory_version="0.1.0", waivers=[waiver], now=now,
+        )
+        self.assertEqual(gate["overall"], "WAIVED")
+        self.assertEqual(len(gate["waivers"]), 1)
+
+    def test_gate_file_has_evidence_bundle_hash(self) -> None:
+        adj = adjudicate(self._evidence(), self.PROFILE, priority="P1")
+        gate = build_gate_file(
+            adj, gate_id="g4", target={"kind": "story", "id": "E1.S4"},
+            commit_sha="abc", profile=self.PROFILE, factory_version="0.1.0",
+        )
+        self.assertEqual(len(gate["evidence_bundle_hash"]), 16)
+
+    def test_gate_file_validates(self) -> None:
+        from story_automator.core.gate_schema import validate_gate_file
+        adj = adjudicate(self._evidence(), self.PROFILE, priority="P1")
+        gate = build_gate_file(
+            adj, gate_id="g5", target={"kind": "story", "id": "E1.S5"},
+            commit_sha="abc", profile=self.PROFILE, factory_version="0.1.0",
+        )
+        validate_gate_file(gate)
 
 
 if __name__ == "__main__":

@@ -169,3 +169,57 @@ def apply_waivers(
 
     rationale = "; ".join(rejection_reasons) if rejection_reasons else "waivers not applicable"
     return original_overall, valid_waivers, rationale
+
+
+def build_gate_file(
+    adjudication: dict[str, Any],
+    *,
+    gate_id: str,
+    target: dict[str, str],
+    commit_sha: str,
+    profile: dict[str, Any],
+    factory_version: str,
+    waivers: list[dict[str, Any]] | None = None,
+    scanner_data_snapshot: str = "",
+    risk_profile_ref: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a complete gate file from adjudication results."""
+    from .gate_schema import make_gate_file as _make_gate_file
+    from .product_profile import compute_profile_hash
+
+    profile_hash = adjudication.get("profile_hash", compute_profile_hash(profile))
+    categories = adjudication["categories"]
+    overall = adjudication["overall"]
+
+    gate_stub = {
+        "categories": categories,
+        "profile": {
+            "id": profile.get("id", ""),
+            "version": profile.get("version", 1),
+            "hash": profile_hash,
+        },
+    }
+    valid_waivers: list[dict[str, Any]] = []
+    if waivers and overall in ("FAIL", "CONCERNS"):
+        overall, valid_waivers, _ = apply_waivers(
+            adjudication, waivers, gate_stub, now=now,
+        )
+
+    return _make_gate_file(
+        gate_id=gate_id,
+        target=target,
+        commit_sha=commit_sha,
+        scanner_data_snapshot=scanner_data_snapshot,
+        profile={
+            "id": profile.get("id", ""),
+            "version": profile.get("version", 1),
+            "hash": profile_hash,
+        },
+        factory_version=factory_version,
+        risk_profile_ref=risk_profile_ref,
+        categories=categories,
+        overall=overall,
+        waivers=valid_waivers,
+        evidence_bundle_hash=adjudication.get("evidence_bundle_hash", ""),
+    )
