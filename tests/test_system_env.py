@@ -89,6 +89,40 @@ class BuildEnvConfigTests(unittest.TestCase):
         self.assertIn("deadbeef", config.namespace)
 
 
+class NamespaceSanitizationTests(unittest.TestCase):
+    def test_uppercase_lowered(self) -> None:
+        config = build_env_config(
+            "/tmp/project", "abc12345",
+            {"id": "Epic_ONE"}, {"version": 1, "id": "test"},
+        )
+        self.assertEqual(config.namespace, config.namespace.lower())
+
+    def test_special_chars_replaced(self) -> None:
+        config = build_env_config(
+            "/tmp/project", "abc12345",
+            {"id": "epic/one.two"}, {"version": 1, "id": "test"},
+        )
+        self.assertNotIn("/", config.namespace)
+        self.assertNotIn(".", config.namespace)
+
+    def test_max_length_enforced(self) -> None:
+        config = build_env_config(
+            "/tmp/project", "abc12345",
+            {"id": "a" * 100}, {"version": 1, "id": "test"},
+        )
+        self.assertLessEqual(len(config.namespace), 63)
+
+
+class SeedDataConfigTests(unittest.TestCase):
+    def test_seed_data_from_profile(self) -> None:
+        profile = {
+            "version": 1, "id": "test",
+            "rules": {"system_env": {"seed_data": "fixtures/seed.sql"}},
+        }
+        config = build_env_config("/tmp", "abc12345", {}, profile)
+        self.assertEqual(config.seed_data, "fixtures/seed.sql")
+
+
 class SystemEnvInfoTests(unittest.TestCase):
     def test_frozen(self) -> None:
         info = SystemEnvInfo(env_id="e1", tier=ENV_TIER_MINIMAL, namespace="ns")
@@ -129,6 +163,37 @@ class ProvisionEnvTests(unittest.TestCase):
         mock_sub.run.return_value = MagicMock(returncode=1)
         mock_sub.CalledProcessError = Exception
         config = SystemEnvConfig(tier=ENV_TIER_MINIMAL, namespace="test-ns")
+        with tempfile.TemporaryDirectory() as td:
+            info = provision_system_env(config, td)
+        self.assertFalse(info.provisioned)
+
+    @patch("story_automator.core.system_env.subprocess")
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    def test_minimal_applies_seed_data(self, mock_sub: MagicMock) -> None:
+        mock_sub.run.return_value = MagicMock(returncode=0)
+        config = SystemEnvConfig(
+            tier=ENV_TIER_MINIMAL, namespace="test-ns",
+            seed_data="fixtures/seed.sql",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            info = provision_system_env(config, td)
+        self.assertTrue(info.provisioned)
+        self.assertEqual(mock_sub.run.call_count, 2)
+
+    @patch("story_automator.core.system_env.subprocess")
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    def test_full_helm_failure_returns_not_provisioned(self, mock_sub: MagicMock) -> None:
+        call_count = [0]
+        def side_effect(*a, **kw):
+            call_count[0] += 1
+            m = MagicMock()
+            m.returncode = 0 if call_count[0] == 1 else 1
+            return m
+        mock_sub.run.side_effect = side_effect
+        config = SystemEnvConfig(
+            tier=ENV_TIER_FULL, namespace="test-ns",
+            helm_values="values.yaml",
+        )
         with tempfile.TemporaryDirectory() as td:
             info = provision_system_env(config, td)
         self.assertFalse(info.provisioned)
@@ -174,6 +239,16 @@ class SystemEnvContextManagerTests(unittest.TestCase):
             with system_env(config, "/tmp"):
                 raise RuntimeError("boom")
         mock_tear.assert_called_once()
+
+    @patch("story_automator.core.system_env.teardown_system_env")
+    @patch("story_automator.core.system_env.provision_system_env")
+    def test_skips_teardown_when_not_provisioned(self, mock_prov: MagicMock, mock_tear: MagicMock) -> None:
+        failed = SystemEnvInfo(env_id="e1", tier=ENV_TIER_MINIMAL, namespace="ns", provisioned=False)
+        mock_prov.return_value = failed
+        config = SystemEnvConfig(tier=ENV_TIER_MINIMAL, namespace="ns")
+        with system_env(config, "/tmp") as info:
+            self.assertFalse(info.provisioned)
+        mock_tear.assert_not_called()
 
 
 if __name__ == "__main__":

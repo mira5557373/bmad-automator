@@ -348,6 +348,25 @@ def progressive_delivery_rule(
     return _make_category_result("PASS", req, actual, "progressive delivery check passed")
 
 
+def cert_cadence_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§13/HR6(e): cert-cadence is a human/release gate checkpoint."""
+    status = worst_evidence_status(evidence)
+    actual = {"status": status}
+    req = {"human_review": True}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if status == "ok" and evidence:
+        return _make_category_result("PASS", req, actual, "cert-cadence human review completed")
+    return _make_category_result(
+        "CONCERNS", req, actual,
+        "cert-cadence requires human/release gate review",
+    )
+
+
 CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "correctness": correctness_rule,
     "security": security_rule,
@@ -359,6 +378,7 @@ CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "durable_hitl": durable_hitl_rule,
     "cost_to_serve": cost_to_serve_rule,
     "progressive_delivery": progressive_delivery_rule,
+    "cert_cadence": cert_cadence_rule,
 }
 
 

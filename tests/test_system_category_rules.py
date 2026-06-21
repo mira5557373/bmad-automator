@@ -11,6 +11,7 @@ from story_automator.core.category_rules import (
     durable_hitl_rule,
     cost_to_serve_rule,
     progressive_delivery_rule,
+    cert_cadence_rule,
 )
 
 
@@ -217,6 +218,33 @@ class ProgressiveDeliveryRuleTests(unittest.TestCase):
         evidence = [_evidence("progressive_delivery", status="timeout")]
         result = progressive_delivery_rule(evidence, profile, {})
         self.assertEqual(result["verdict"], "FAIL")
+
+
+class CertCadenceRuleTests(unittest.TestCase):
+    def test_concerns_without_evidence(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("cert_cadence")]
+        evidence[0]["status"] = "ok"
+        evidence[0]["metrics"] = {}
+        result = cert_cadence_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_concerns_no_human_signoff(self) -> None:
+        profile = _sys_profile()
+        result = cert_cadence_rule([], profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_fail_closed_on_error(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("cert_cadence", status="error")]
+        result = cert_cadence_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_dispatch_via_apply(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("cert_cadence")]
+        result = apply_category_rule("cert_cadence", evidence, profile, {})
+        self.assertEqual(result["verdict"], "PASS")
 
 
 if __name__ == "__main__":

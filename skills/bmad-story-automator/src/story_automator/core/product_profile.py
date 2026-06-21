@@ -52,6 +52,7 @@ VALID_CODE_CATEGORIES = {
 VALID_SYSTEM_CATEGORIES = {
     "reliability", "resilience", "durable_hitl",
     "blast_radius", "cost_to_serve", "progressive_delivery",
+    "cert_cadence",
 }
 DEFAULT_TIMEOUTS: dict[str, int] = {
     "security": 300,

@@ -7,12 +7,16 @@ SystemEnvConfig used by provision/teardown.
 from __future__ import annotations
 
 import dataclasses
+import re
 import subprocess
 import uuid
 from contextlib import contextmanager
 from typing import Any
 
 from .trust_boundary import assert_host_context
+
+_NS_SANITIZE = re.compile(r"[^a-z0-9-]")
+_NS_MAX_LEN = 63
 
 ENV_TIER_MINIMAL = "minimal"
 ENV_TIER_FULL = "full"
@@ -77,7 +81,7 @@ def build_env_config(
     tier = resolve_env_tier(epic_metadata, profile)
     sha_prefix = commit_sha[:8] if commit_sha else "unknown"
     epic_id = epic_metadata.get("id", "epic")
-    namespace = f"gate-{epic_id}-{sha_prefix}"
+    namespace = _sanitize_namespace(f"gate-{epic_id}-{sha_prefix}")
 
     rules = (profile.get("rules") or {}).get("system_env") or {}
     compose_file = str(rules.get("compose_file", ""))
@@ -93,6 +97,13 @@ def build_env_config(
         services=services,
         seed_data=seed_data,
     )
+
+
+def _sanitize_namespace(raw: str) -> str:
+    sanitized = _NS_SANITIZE.sub("-", raw.lower()).strip("-")
+    if len(sanitized) > _NS_MAX_LEN:
+        sanitized = sanitized[:_NS_MAX_LEN].rstrip("-")
+    return sanitized or "gate-default"
 
 
 def provision_system_env(
@@ -122,6 +133,7 @@ def _provision_minimal(
             env_id=env_id, tier=ENV_TIER_MINIMAL,
             namespace=config.namespace, provisioned=False,
         )
+    _apply_seed_data(config, project_root)
     return SystemEnvInfo(
         env_id=env_id, tier=ENV_TIER_MINIMAL, namespace=config.namespace,
     )
@@ -146,11 +158,30 @@ def _provision_full(
             "helm", "install", config.namespace, ".",
             "-f", config.helm_values, "-n", config.namespace,
         ]
-        subprocess.run(
+        helm_result = subprocess.run(
             helm_cmd, cwd=project_root, capture_output=True, text=True, timeout=600,
         )
+        if helm_result.returncode != 0:
+            return SystemEnvInfo(
+                env_id=env_id, tier=ENV_TIER_FULL,
+                namespace=config.namespace, provisioned=False,
+            )
+    _apply_seed_data(config, project_root)
     return SystemEnvInfo(
         env_id=env_id, tier=ENV_TIER_FULL, namespace=config.namespace,
+    )
+
+
+def _apply_seed_data(config: SystemEnvConfig, project_root: str) -> None:
+    if not config.seed_data:
+        return
+    seed_cmd = ["docker", "compose", "-p", config.namespace, "exec",
+                "-T", "db", "sh", "-c", config.seed_data]
+    if config.tier == ENV_TIER_FULL:
+        seed_cmd = ["kubectl", "apply", "-n", config.namespace,
+                     "-f", config.seed_data]
+    subprocess.run(
+        seed_cmd, cwd=project_root, capture_output=True, text=True, timeout=300,
     )
 
 
@@ -179,4 +210,5 @@ def system_env(config: SystemEnvConfig, project_root: str):
     try:
         yield info
     finally:
-        teardown_system_env(info, project_root)
+        if info.provisioned:
+            teardown_system_env(info, project_root)
