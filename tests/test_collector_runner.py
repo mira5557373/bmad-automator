@@ -326,5 +326,171 @@ class RunGateCollectorsTests(unittest.TestCase):
         self.assertTrue(path_validity[0])
 
 
+class DiffScopedTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-diff-runner-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _profile(self, cats: list[str]) -> dict[str, Any]:
+        return {
+            "categories": {"code": cats, "system": []},
+            "categories_na": [],
+            "rules": {},
+            "timeouts": {},
+        }
+
+    def test_diff_scope_filters_categories(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="b", tool="python3", category="security",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness", "security"]), reg,
+                diff_categories={"correctness"},
+            )
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].config.category, "correctness")
+
+    def test_diff_scope_empty_skips_all(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+                diff_categories=set(),
+            )
+        self.assertEqual(outcomes, [])
+
+    def test_diff_scope_none_runs_all(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+                diff_categories=None,
+            )
+        self.assertEqual(len(outcomes), 1)
+
+
+class EdgeCaseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-edge-test-")
+        self.project_root = Path(self.tmpdir) / "project"
+        self.project_root.mkdir()
+        self.sha = _init_repo(self.project_root)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.project_root), "worktree", "prune"],
+            capture_output=True,
+        )
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _profile(self, cats: list[str]) -> dict[str, Any]:
+        return {
+            "categories": {"code": cats, "system": []},
+            "categories_na": [],
+            "rules": {},
+            "timeouts": {},
+        }
+
+    def test_all_collectors_fail(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="a", tool="python3", category="correctness",
+            build_cmd=_fail_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="b", tool="python3", category="security",
+            build_cmd=_fail_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness", "security"]), reg,
+            )
+        self.assertTrue(
+            all(o.evidence["status"] == "violation" for o in outcomes)
+        )
+
+    def test_binary_not_found_produces_error(self) -> None:
+        def missing_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+            return ["nonexistent-binary-xyz-999"]
+
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="missing", tool="python3", category="correctness",
+            build_cmd=missing_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].evidence["status"], "error")
+
+    def test_build_cmd_exception_produces_error(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="broken", tool="python3", category="correctness",
+            build_cmd=_error_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["correctness"]), reg,
+            )
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].evidence["status"], "error")
+        self.assertIsNotNone(outcomes[0].persisted_path)
+        self.assertTrue(outcomes[0].persisted_path.exists())
+
+    def test_multiple_collectors_same_category(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(CollectorConfig(
+            collector_id="lint-a", tool="python3", category="static",
+            build_cmd=_ok_cmd,
+        ))
+        reg.register(CollectorConfig(
+            collector_id="lint-b", tool="python3", category="static",
+            build_cmd=_ok_cmd,
+        ))
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcomes = run_gate_collectors(
+                self.project_root, "gate-001", self.sha,
+                self._profile(["static"]), reg,
+            )
+        self.assertEqual(len(outcomes), 2)
+        ids = {o.config.collector_id for o in outcomes}
+        self.assertEqual(ids, {"lint-a", "lint-b"})
+
+
 if __name__ == "__main__":
     unittest.main()
