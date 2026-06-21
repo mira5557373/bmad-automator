@@ -7,8 +7,10 @@ prepend/append — no fork of BMAD required.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
+from .invariant_registry import load_invariant_registry
 from .product_profile import compute_profile_hash
 
 
@@ -70,3 +72,22 @@ def profile_activation_blocks(profile: dict[str, Any]) -> dict[str, str]:
         "prepend": "\n".join(lines) if lines else "",
         "append": "",
     }
+
+
+def enrich_profile_invariants(
+    profile: dict[str, Any],
+    base_dir: str,
+) -> dict[str, Any]:
+    """Enrich profile with invariant registry entries from YAML file.
+
+    Loads entries from profile.invariants.registry_file and injects
+    them into profile.rules.invariants.registry. Returns a deep
+    copy — does not mutate the original profile.
+    """
+    enriched = copy.deepcopy(profile)
+    entries = load_invariant_registry(profile, base_dir)
+    if entries:
+        rules = enriched.setdefault("rules", {})
+        inv_rules = rules.setdefault("invariants", {})
+        inv_rules["registry"] = entries
+    return enriched
