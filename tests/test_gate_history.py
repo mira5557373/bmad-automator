@@ -7,6 +7,7 @@ from story_automator.core.gate_history import (
     count_gate_history,
     load_gate_history,
     make_history_record,
+    prune_gate_history,
     record_gate_result,
 )
 
@@ -195,6 +196,52 @@ class CountGateHistoryTests(unittest.TestCase):
             self.tmp, _make_gate_file(gate_id="g-002"), story_key="E1-002",
         )
         self.assertEqual(count_gate_history(self.tmp), 2)
+
+
+class PruneGateHistoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.patcher = patch(
+            "story_automator.core.gate_history.assert_host_context",
+        )
+        self.patcher.start()
+
+    def tearDown(self) -> None:
+        self.patcher.stop()
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_prune_empty(self) -> None:
+        pruned = prune_gate_history(self.tmp, max_age_days=1)
+        self.assertEqual(pruned, 0)
+
+    def test_prune_old_records(self) -> None:
+        record_gate_result(self.tmp, _make_gate_file(), story_key="E1-001")
+        pruned = prune_gate_history(self.tmp, max_age_days=365)
+        self.assertEqual(pruned, 0)
+        self.assertEqual(count_gate_history(self.tmp), 1)
+
+    def test_prune_by_max_records(self) -> None:
+        for i in range(5):
+            record_gate_result(
+                self.tmp, _make_gate_file(gate_id=f"g-{i:03d}"),
+                story_key=f"E1-{i:03d}",
+            )
+        pruned = prune_gate_history(self.tmp, max_records=3)
+        self.assertEqual(pruned, 2)
+        self.assertEqual(count_gate_history(self.tmp), 3)
+
+    def test_prune_keeps_newest(self) -> None:
+        for i in range(5):
+            record_gate_result(
+                self.tmp, _make_gate_file(gate_id=f"g-{i:03d}"),
+                story_key=f"E1-{i:03d}",
+            )
+        prune_gate_history(self.tmp, max_records=2)
+        remaining = load_gate_history(self.tmp)
+        gate_ids = [r["gate_id"] for r in remaining]
+        self.assertIn("g-003", gate_ids)
+        self.assertIn("g-004", gate_ids)
 
 
 if __name__ == "__main__":

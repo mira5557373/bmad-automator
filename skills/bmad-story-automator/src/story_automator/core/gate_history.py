@@ -114,3 +114,50 @@ def count_gate_history(project_root: str | Path) -> int:
     if not history_dir.is_dir():
         return 0
     return len(list(history_dir.glob("*.json")))
+
+
+def prune_gate_history(
+    project_root: str | Path,
+    *,
+    max_age_days: int = 90,
+    max_records: int = 1000,
+) -> int:
+    """Remove old history entries. Returns count pruned.
+
+    Prunes entries older than max_age_days AND trims to max_records
+    (keeping the newest). Age pruning runs first.
+    """
+    assert_host_context("prune_gate_history")
+    history_dir = Path(project_root) / _HISTORY_DIR
+    if not history_dir.is_dir():
+        return 0
+
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    files = sorted(history_dir.glob("*.json"))
+    pruned = 0
+
+    surviving: list[Path] = []
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            surviving.append(path)
+            continue
+        recorded = data.get("recorded_at", "") if isinstance(data, dict) else ""
+        if recorded and recorded < cutoff_iso:
+            path.unlink(missing_ok=True)
+            pruned += 1
+        else:
+            surviving.append(path)
+
+    if len(surviving) > max_records:
+        to_remove = surviving[: len(surviving) - max_records]
+        for path in to_remove:
+            path.unlink(missing_ok=True)
+            pruned += 1
+
+    return pruned
