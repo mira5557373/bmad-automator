@@ -59,6 +59,19 @@ _EXPECTED_IDS = frozenset(
         "otel-wiring-observability",
         "health-probe-observability",
         "slo-observability",
+        # test_quality (3)
+        "test-review-test_quality",
+        "burn-in-test_quality",
+        "hard-wait-test_quality",
+        # mutation (2)
+        "mutmut-mutation",
+        "stryker-mutation",
+        # agentic (5)
+        "pack-schema-agentic",
+        "aibom-diff-agentic",
+        "opa-agentic",
+        "evals-agentic",
+        "guardrail-agentic",
     }
 )
 
@@ -79,6 +92,9 @@ _EXPECTED_CATEGORIES = frozenset(
         "performance",
         "accessibility",
         "observability",
+        "test_quality",
+        "mutation",
+        "agentic",
     }
 )
 
@@ -125,7 +141,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 39)
+        self.assertEqual(len(reg.all_collectors()), 49)
 
     def test_exported_id_set(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS
