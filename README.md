@@ -1,1 +1,1 @@
-README.md updated with all four sections. Stats reflect the current codebase (v1.15.0, 66 source files / ~16k LOC, 78 test files / ~31k LOC), and the architecture tree covers the three bundled skills, core subsystems, and security model.
+README.md updated with all four sections. Stats reflect the current codebase (v1.15.0, 80 source files / ~18k LOC, 88 test files / ~32k LOC), and the architecture tree covers the three bundled skills, core subsystems, and security model.

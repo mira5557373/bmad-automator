@@ -1,5 +1,15 @@
 ### Features
 
+- feat(collector): add register_core_collectors entry point for 13 collectors (4ca72d1)
+- feat(collector): add trace checker + process/DoD collector (5e5fc69)
+- feat(collector): add ADR production-readiness checker + process collector (fa7b189)
+- feat(collector): add coverage threshold checker + correctness collector (c142ed4)
+- feat(collector): add vitest + playwright correctness collectors (026e850)
+- feat(collector): add pytest correctness collector (305c8a6)
+- feat(collector): add tsc + biome + knip static collectors (385057d)
+- feat(collector): add ruff + mypy static-analysis collectors (8e94715)
+- feat(collector): add docs-category collectors (presence + docusaurus) (44e3f33)
+- feat(collector): add presence checker script for file-existence evidence (21efb79)
 - feat(gate): add full gate collector loop (431a5c5)
 - feat(gate): add collector runner — single collector execution (11161e9)
 - feat(gate): add collector doctor — preflight tool checks (40da393)
@@ -234,6 +244,8 @@
 
 ### Bug Fixes
 
+- fix(collector): Phase C review fixes for collection-m5-core-collectors (6361191)
+- fix(collector): post-review fixes for collection-m5-core-collectors (3b92083)
 - fix(collector): post-impl review fixes for collection-m4-collector-framework (b13925a)
 - fix(collector): update stale docstrings and deduplicate preflight checks (8753287)
 - fix(gate): enforce sandbox_env ordering so extras cannot override security vars (19d0568)
@@ -327,6 +339,8 @@
 
 ### Documentation
 
+- docs(collector): add collection-m5-core-collectors TDD plan (c4147d5)
+- docs: update generated documentation (f4ccff1)
 - docs(gate): write Phase A plan for collection-m4-collector-framework (6049ff4)
 - docs: update generated documentation (8854fb0)
 - docs(gate): write Phase C gap report for foundation-m3-factory-self-trust (0722266)
@@ -453,6 +467,7 @@
 
 ### Tests
 
+- test(collector): add core collectors pipeline integration tests (c331bbb)
 - test(gate): add full collector pipeline integration tests (1c6263c)
 - test(gate): add diff-scoped mode and edge case tests for runner (d21b8cf)
 - test(gate): add trust pipeline round-trip integration tests (a2376ee)
