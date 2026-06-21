@@ -39,3 +39,21 @@ def risk_to_requirements(
     req = required_for_priority(profile, priority)
     req["priority"] = priority
     return req
+
+
+_STATUS_SEVERITY = {"ok": 0, "violation": 1, "timeout": 2, "error": 3}
+
+
+def worst_evidence_status(records: list[dict[str, Any]]) -> str:
+    """Find worst status across records. Empty = error (fail-closed)."""
+    if not records:
+        return "error"
+    worst = "ok"
+    worst_sev = 0
+    for record in records:
+        status = record.get("status", "error")
+        sev = _STATUS_SEVERITY.get(status, 3)
+        if sev > worst_sev:
+            worst_sev = sev
+            worst = status
+    return worst

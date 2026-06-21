@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from story_automator.core.category_rules import coverage_verdict, risk_to_requirements
+from story_automator.core.category_rules import (
+    coverage_verdict,
+    risk_to_requirements,
+    worst_evidence_status,
+)
+from story_automator.core.gate_schema import make_evidence_record
 
 
 class CoverageVerdictTests(unittest.TestCase):
@@ -77,6 +82,42 @@ class RiskToRequirementsTests(unittest.TestCase):
     def test_empty_priority_defaults_to_p1(self) -> None:
         req = risk_to_requirements("", self.PROFILE)
         self.assertEqual(req["priority"], "P1")
+
+
+class WorstEvidenceStatusTests(unittest.TestCase):
+    def test_all_ok(self) -> None:
+        records = [
+            make_evidence_record(collector="a", tool="t", category="x", status="ok"),
+            make_evidence_record(collector="b", tool="t", category="x", status="ok"),
+        ]
+        self.assertEqual(worst_evidence_status(records), "ok")
+
+    def test_violation_worse_than_ok(self) -> None:
+        records = [
+            make_evidence_record(collector="a", tool="t", category="x", status="ok"),
+            make_evidence_record(collector="b", tool="t", category="x", status="violation"),
+        ]
+        self.assertEqual(worst_evidence_status(records), "violation")
+
+    def test_timeout_worse_than_violation(self) -> None:
+        records = [
+            make_evidence_record(collector="a", tool="t", category="x", status="violation"),
+            make_evidence_record(collector="b", tool="t", category="x", status="timeout",
+                                 findings=["TIMEOUT: t exceeded 10s"]),
+        ]
+        self.assertEqual(worst_evidence_status(records), "timeout")
+
+    def test_error_worst(self) -> None:
+        records = [
+            make_evidence_record(collector="a", tool="t", category="x", status="timeout",
+                                 findings=["TIMEOUT"]),
+            make_evidence_record(collector="b", tool="t", category="x", status="error",
+                                 findings=["crash"]),
+        ]
+        self.assertEqual(worst_evidence_status(records), "error")
+
+    def test_empty_list_fail_closed(self) -> None:
+        self.assertEqual(worst_evidence_status([]), "error")
 
 
 if __name__ == "__main__":
