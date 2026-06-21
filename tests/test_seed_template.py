@@ -358,5 +358,29 @@ class ValidateBundleTests(unittest.TestCase):
         self.assertEqual(validate_bundle(self._bundle_dir, m), [])
 
 
+class MsmeErpManifestTests(unittest.TestCase):
+    """Tests that load the real MSME ERP manifest from the bundle."""
+
+    def test_manifest_loads_and_validates(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        self.assertIsNotNone(manifest)
+        validate_manifest(manifest)
+
+    def test_manifest_has_expected_categories(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        expected = {"contracts", "network", "resilience", "factories", "har", "observability"}
+        self.assertEqual(set(manifest["categories"].keys()), expected)
+
+    def test_manifest_version(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        self.assertEqual(manifest["template_version"], "1.0.0")
+
+    def test_manifest_has_variables(self):
+        manifest = load_template_manifest("msme-erp-golden-template@1.0.0")
+        variables = manifest["variables"]
+        self.assertTrue(variables["product_name"]["required"])
+        self.assertTrue(variables["service_prefix"]["required"])
+
+
 if __name__ == "__main__":
     unittest.main()

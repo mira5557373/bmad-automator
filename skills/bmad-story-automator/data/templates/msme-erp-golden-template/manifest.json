@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "template_id": "msme-erp-golden-template",
+  "template_version": "1.0.0",
+  "description": "Production-ready seed template for MSME ERP products. Seeds Pact contracts, network-first interception, selector resilience, data factories, HAR recording, and observability endpoints.",
+  "variables": {
+    "product_name": {
+      "required": true,
+      "description": "Human-readable product name"
+    },
+    "service_prefix": {
+      "required": true,
+      "description": "Short lowercase prefix for service naming (e.g. erp, inv)"
+    },
+    "health_port": {
+      "required": false,
+      "default": "8080",
+      "description": "Port for health endpoints"
+    },
+    "otel_endpoint": {
+      "required": false,
+      "default": "http://localhost:4317",
+      "description": "OpenTelemetry collector gRPC endpoint"
+    },
+    "pact_broker_url": {
+      "required": false,
+      "default": "http://localhost:9292",
+      "description": "Pact Broker URL for contract publishing"
+    },
+    "db_name": {
+      "required": false,
+      "default": "app_db",
+      "description": "Database name for factory connection reference"
+    }
+  },
+  "categories": {
+    "contracts": {
+      "description": "Pact consumer-driven contract test scaffolding",
+      "tea_fragment": "pact-consumer-framework-setup.md",
+      "files": [
+        {
+          "src": "contracts/conftest.py.tmpl",
+          "dst": "tests/contracts/conftest.py"
+        },
+        {
+          "src": "contracts/pact_consumer.py.tmpl",
+          "dst": "tests/contracts/test_pact_consumer.py"
+        }
+      ]
+    },
+    "network": {
+      "description": "Network-first HTTP interception fixtures",
+      "tea_fragment": "network-first.md",
+      "files": [
+        {
+          "src": "network/network_first.py.tmpl",
+          "dst": "tests/network/conftest.py"
+        }
+      ]
+    },
+    "resilience": {
+      "description": "Selector resilience helpers for UI tests",
+      "tea_fragment": "selector-resilience.md",
+      "files": [
+        {
+          "src": "resilience/selectors.py.tmpl",
+          "dst": "tests/helpers/selectors.py"
+        }
+      ]
+    },
+    "factories": {
+      "description": "Data factory base with auto-cleanup",
+      "tea_fragment": "data-factories.md",
+      "files": [
+        {
+          "src": "factories/factory_base.py.tmpl",
+          "dst": "tests/factories/factory_base.py"
+        }
+      ]
+    },
+    "har": {
+      "description": "HAR recording fixture for HTTP traffic capture",
+      "tea_fragment": "network-recorder.md",
+      "files": [
+        {
+          "src": "network/har_recorder.py.tmpl",
+          "dst": "tests/network/har_recorder.py"
+        }
+      ]
+    },
+    "observability": {
+      "description": "OTel tracing/metrics, health endpoints, and SLO definitions",
+      "tea_fragment": null,
+      "files": [
+        {
+          "src": "observability/otel_setup.py.tmpl",
+          "dst": "src/observability/otel_setup.py"
+        },
+        {
+          "src": "observability/health_endpoints.py.tmpl",
+          "dst": "src/observability/health_endpoints.py"
+        },
+        {
+          "src": "observability/slo_config.yaml.tmpl",
+          "dst": "config/slo_config.yaml"
+        }
+      ]
+    }
+  }
+}
