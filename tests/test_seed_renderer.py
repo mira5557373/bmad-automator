@@ -384,5 +384,34 @@ class ContractTemplateRenderTests(unittest.TestCase):
         self.assertIn("har", out.lower())
 
 
+class ResilienceFactoryObservabilityTemplateTests(unittest.TestCase):
+    def _render(self, src_file):
+        content = (TEMPLATE_DIR / src_file).read_text(encoding="utf-8")
+        return render_template_content(content, STANDARD_VARS)
+
+    def test_selectors_renders(self):
+        out = self._render("resilience/selectors.py.tmpl")
+        self.assertIn("data-testid", out)
+
+    def test_factory_base_renders(self):
+        out = self._render("factories/factory_base.py.tmpl")
+        self.assertIn("cleanup", out.lower())
+        self.assertIn("test_db", out)
+
+    def test_otel_setup_renders(self):
+        out = self._render("observability/otel_setup.py.tmpl")
+        self.assertIn("tst", out)
+        self.assertIn("http://otel:4317", out)
+
+    def test_health_endpoints_renders(self):
+        out = self._render("observability/health_endpoints.py.tmpl")
+        self.assertIn("healthz", out)
+        self.assertIn("readyz", out)
+
+    def test_slo_config_renders(self):
+        out = self._render("observability/slo_config.yaml.tmpl")
+        self.assertIn("tst", out)
+
+
 if __name__ == "__main__":
     unittest.main()
