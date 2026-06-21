@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 from story_automator.core.gate_schema import (
     make_evidence_record,
     make_llm_evidence_record,
 )
+from story_automator.core.evidence_io import persist_evidence_record
 from story_automator.core.gate_schema import GATE_SCHEMA_VERSION, make_waiver
 from story_automator.core.verdict_engine import (
     adjudicate,
@@ -14,6 +17,7 @@ from story_automator.core.verdict_engine import (
     build_gate_file,
     compute_all_verdicts,
     compute_category_verdict,
+    evaluate_gate,
     group_evidence_by_category,
     has_llm_low_confidence,
 )
@@ -486,6 +490,79 @@ class BuildGateFileTests(unittest.TestCase):
             commit_sha="abc", profile=self.PROFILE, factory_version="0.1.0",
         )
         validate_gate_file(gate)
+
+
+class EvaluateGateTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1,
+        "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness", "security"], "system": []},
+        "categories_na": [],
+    }
+
+    def _setup_evidence(self, tmp: str, gate_id: str) -> None:
+        persist_evidence_record(tmp, gate_id, make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        ))
+        persist_evidence_record(tmp, gate_id, make_evidence_record(
+            collector="scanner", tool="semgrep", category="security",
+            status="ok", metrics={"sast_high_count": 0},
+        ))
+
+    def test_end_to_end_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_evidence(tmp, "eval-g1")
+            gate = evaluate_gate(
+                tmp, "eval-g1", commit_sha="abc123",
+                target={"kind": "story", "id": "E1.S1"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            self.assertEqual(gate["overall"], "PASS")
+            self.assertEqual(gate["gate_id"], "eval-g1")
+
+    def test_persists_gate_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_evidence(tmp, "eval-g2")
+            evaluate_gate(
+                tmp, "eval-g2", commit_sha="abc123",
+                target={"kind": "story", "id": "E1.S2"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            gate_path = Path(tmp) / "_bmad" / "gate" / "verdicts" / "eval-g2.json"
+            self.assertTrue(gate_path.is_file())
+
+    def test_end_to_end_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            persist_evidence_record(tmp, "eval-g3", make_evidence_record(
+                collector="runner", tool="pytest", category="correctness",
+                status="violation",
+            ))
+            persist_evidence_record(tmp, "eval-g3", make_evidence_record(
+                collector="scanner", tool="semgrep", category="security",
+                status="ok",
+            ))
+            gate = evaluate_gate(
+                tmp, "eval-g3", commit_sha="def456",
+                target={"kind": "story", "id": "E1.S3"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            self.assertEqual(gate["overall"], "FAIL")
+
+    def test_no_evidence_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = evaluate_gate(
+                tmp, "eval-g4", commit_sha="xyz",
+                target={"kind": "story", "id": "E1.S4"},
+                profile=self.PROFILE, factory_version="0.1.0",
+            )
+            self.assertEqual(gate["overall"], "FAIL")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ Flow: evidence bundle -> group by category -> per-category rules ->
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -223,3 +224,66 @@ def build_gate_file(
         waivers=valid_waivers,
         evidence_bundle_hash=adjudication.get("evidence_bundle_hash", ""),
     )
+
+
+def evaluate_gate(
+    project_root: str | Path,
+    gate_id: str,
+    *,
+    commit_sha: str,
+    target: dict[str, str],
+    profile: dict[str, Any],
+    factory_version: str,
+    priority: str = "P1",
+    has_unmitigated_risk_9: bool = False,
+    waivers: list[dict[str, Any]] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> dict[str, Any]:
+    """End-to-end gate evaluation entry point.
+
+    Loads evidence -> adjudicates -> builds gate file -> persists -> audit.
+    """
+    from .evidence_io import load_evidence_bundle, persist_gate_file
+    from .gate_audit import (
+        GateDecisionAudit,
+        GateRenderedAudit,
+        emit_gate_audit,
+    )
+
+    evidence_bundle = load_evidence_bundle(project_root, gate_id)
+    adj = adjudicate(
+        evidence_bundle, profile,
+        priority=priority, has_unmitigated_risk_9=has_unmitigated_risk_9,
+    )
+    gate_file = build_gate_file(
+        adj, gate_id=gate_id, target=target, commit_sha=commit_sha,
+        profile=profile, factory_version=factory_version, waivers=waivers,
+    )
+
+    gate_path = persist_gate_file(project_root, gate_file)
+
+    if audit_policy is not None and audit_path is not None:
+        cats_summary = ",".join(
+            f"{c}:{v['verdict']}" for c, v in sorted(gate_file["categories"].items())
+            if isinstance(v, dict) and "verdict" in v
+        )
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateDecisionAudit(
+                gate_id=gate_id, overall=gate_file["overall"],
+                commit_sha=commit_sha,
+                profile_hash=gate_file["profile"].get("hash", ""),
+                categories_summary=cats_summary,
+            ),
+        )
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateRenderedAudit(
+                gate_id=gate_id,
+                gate_file_path=gate_path.as_posix() if gate_path else "",
+                evidence_bundle_hash=gate_file.get("evidence_bundle_hash", ""),
+            ),
+        )
+
+    return gate_file
