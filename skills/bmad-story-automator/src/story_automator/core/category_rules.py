@@ -6,7 +6,7 @@ Pure functions, no I/O.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .product_profile import VALID_PRIORITIES, required_for_priority, rule_for
 
@@ -199,3 +199,33 @@ def license_rule(
     if status == "violation":
         return _make_category_result("FAIL", req, actual, "collector reported violation")
     return _make_category_result("PASS", req, actual, "all license checks passed")
+
+
+def generic_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Fallback rule: verdict follows worst evidence status."""
+    return _status_based_rule("category", evidence)
+
+
+CategoryRuleFn = Callable[[list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
+
+CATEGORY_RULES: dict[str, CategoryRuleFn] = {
+    "correctness": correctness_rule,
+    "security": security_rule,
+    "static": static_rule,
+    "license": license_rule,
+}
+
+
+def apply_category_rule(
+    category: str,
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Dispatch to the right rule function for a category."""
+    rule_fn = CATEGORY_RULES.get(category, generic_rule)
+    return rule_fn(evidence, profile, required)

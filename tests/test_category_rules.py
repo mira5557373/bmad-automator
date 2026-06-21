@@ -3,8 +3,11 @@ from __future__ import annotations
 import unittest
 
 from story_automator.core.category_rules import (
+    CATEGORY_RULES,
+    apply_category_rule,
     correctness_rule,
     coverage_verdict,
+    generic_rule,
     license_rule,
     risk_to_requirements,
     security_rule,
@@ -361,6 +364,66 @@ class LicenseRuleTests(unittest.TestCase):
         )]
         result = license_rule(evidence, self.PROFILE, self.REQ)
         self.assertEqual(result["verdict"], "FAIL")
+
+
+class GenericRuleTests(unittest.TestCase):
+    REQ = {"priority": "P1"}
+
+    def test_ok_passes(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="docs", status="ok",
+        )]
+        result = generic_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_violation_fails(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="docs",
+            status="violation", findings=["missing runbook"],
+        )]
+        result = generic_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_error_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="process",
+            status="error", findings=["tool crashed"],
+        )]
+        result = generic_rule(evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+
+class CategoryRulesDispatchTests(unittest.TestCase):
+    REQ = {"coverage_pct": 90, "levels": ["unit"], "priority": "P1"}
+
+    def test_correctness_dispatches_to_correctness_rule(self) -> None:
+        self.assertIn("correctness", CATEGORY_RULES)
+
+    def test_security_dispatches_to_security_rule(self) -> None:
+        self.assertIn("security", CATEGORY_RULES)
+
+    def test_unknown_category_uses_generic(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="unknown_cat", status="ok",
+        )]
+        result = apply_category_rule("unknown_cat", evidence, {}, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_dispatch_returns_correct_shape(self) -> None:
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        result = apply_category_rule("correctness", evidence, {"matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        }}, self.REQ)
+        self.assertIn("verdict", result)
+        self.assertIn("required", result)
+        self.assertIn("actual", result)
+        self.assertIn("rationale", result)
 
 
 if __name__ == "__main__":
