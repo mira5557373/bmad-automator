@@ -18,6 +18,18 @@ def _mypy_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
     return ["mypy", "."]
 
 
+def _tsc_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return ["npx", "tsc", "--noEmit"]
+
+
+def _biome_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return ["npx", "@biomejs/biome", "check", "."]
+
+
+def _knip_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return ["npx", "knip"]
+
+
 RUFF = CollectorConfig(
     collector_id="ruff-static",
     tool="ruff",
@@ -36,4 +48,31 @@ MYPY = CollectorConfig(
     file_patterns=frozenset({"*.py", "*.pyi"}),
 )
 
-COLLECTORS: list[CollectorConfig] = [RUFF, MYPY]
+TSC = CollectorConfig(
+    collector_id="tsc-static",
+    tool="tsc",
+    category="static",
+    build_cmd=_tsc_cmd,
+    tool_version_cmd=("npx", "tsc", "--version"),
+    file_patterns=frozenset({"*.ts", "*.tsx"}),
+)
+
+BIOME = CollectorConfig(
+    collector_id="biome-static",
+    tool="biome",
+    category="static",
+    build_cmd=_biome_cmd,
+    tool_version_cmd=("npx", "@biomejs/biome", "--version"),
+    file_patterns=frozenset({"*.ts", "*.tsx", "*.js", "*.jsx"}),
+)
+
+KNIP = CollectorConfig(
+    collector_id="knip-static",
+    tool="knip",
+    category="static",
+    build_cmd=_knip_cmd,
+    tool_version_cmd=("npx", "knip", "--version"),
+    file_patterns=frozenset({"*.ts", "*.tsx", "*.js", "*.jsx", "*.json"}),
+)
+
+COLLECTORS: list[CollectorConfig] = [RUFF, MYPY, TSC, BIOME, KNIP]
