@@ -7,6 +7,7 @@ from story_automator.core.gate_schema import (
     make_llm_evidence_record,
 )
 from story_automator.core.verdict_engine import (
+    compute_category_verdict,
     group_evidence_by_category,
     has_llm_low_confidence,
 )
@@ -78,6 +79,68 @@ class HasLlmLowConfidenceTests(unittest.TestCase):
             ),
         ]
         self.assertTrue(has_llm_low_confidence(records))
+
+
+class ComputeCategoryVerdictTests(unittest.TestCase):
+    PROFILE = {
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+    }
+    REQ = {"coverage_pct": 90, "levels": [], "priority": "P1"}
+
+    def test_pass_verdict(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_fail_verdict(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="violation",
+        )]
+        result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_llm_low_confidence_downgrades_pass_to_concerns(self) -> None:
+        evidence = [
+            make_evidence_record(collector="runner", tool="pytest", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_llm_evidence_record(
+                collector="llm", tool="claude", category="correctness",
+                status="ok", confidence=3, rationale="uncertain about edge cases",
+            ),
+        ]
+        result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "CONCERNS")
+        self.assertIn("confidence", result["rationale"].lower())
+
+    def test_llm_low_confidence_does_not_upgrade_fail(self) -> None:
+        evidence = [
+            make_evidence_record(collector="runner", tool="pytest", category="correctness",
+                                 status="violation"),
+            make_llm_evidence_record(
+                collector="llm", tool="claude", category="correctness",
+                status="ok", confidence=3, rationale="uncertain",
+            ),
+        ]
+        result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_result_includes_evidence_refs(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        result = compute_category_verdict("correctness", evidence, self.PROFILE, self.REQ)
+        self.assertIn("evidence_refs", result)
+        self.assertIsInstance(result["evidence_refs"], list)
 
 
 if __name__ == "__main__":

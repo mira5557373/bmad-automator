@@ -30,3 +30,28 @@ def has_llm_low_confidence(records: list[dict[str, Any]]) -> bool:
             if isinstance(confidence, int) and confidence < 5:
                 return True
     return False
+
+
+def compute_category_verdict(
+    category: str,
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute verdict for a single category.
+
+    Applies category rule, then checks LLM confidence.
+    FAIL from rule is never upgraded; PASS may downgrade to CONCERNS.
+    """
+    from .category_rules import apply_category_rule
+    from .evidence_io import evidence_filename
+
+    result = apply_category_rule(category, evidence, profile, required)
+    refs = [evidence_filename(r) for r in evidence]
+    result["evidence_refs"] = refs
+
+    if result["verdict"] == "PASS" and has_llm_low_confidence(evidence):
+        result["verdict"] = "CONCERNS"
+        result["rationale"] = "low LLM confidence (<5) on evidence; " + result.get("rationale", "")
+
+    return result
