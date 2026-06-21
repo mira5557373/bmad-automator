@@ -276,19 +276,50 @@ def write_gate_marker(
     return path
 
 
+class GateMarkerCorruptedError(RuntimeError):
+    """§9.2: a corrupted gate-in-progress marker must fail-loud, not silent.
+
+    Raised by read_gate_marker when the marker file exists but cannot be
+    parsed as valid JSON or has the wrong shape. The orchestrator's
+    recover_from_crash treats this distinctly from "no marker present":
+    the partial evidence is quarantined (not deleted) and an operator
+    alert is emitted.
+    """
+
+
 def read_gate_marker(
     project_root: str | Path,
 ) -> dict[str, Any] | None:
-    """Read gate-in-progress marker; returns None if absent."""
+    """Read gate-in-progress marker.
+
+    Returns None when the marker file is absent (the normal "no in-flight
+    gate" case).
+
+    Raises GateMarkerCorruptedError when the marker exists but is
+    unreadable or malformed. Corruption is a distinct condition from
+    "no marker" — silently dropping the marker would let the orchestrator
+    silently delete evidence the operator may still need to investigate
+    (§9.2: "corruption is loud, not silent").
+    """
     path = _gate_marker_path(project_root)
     if not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GateMarkerCorruptedError(
+            f"gate marker unreadable: {path}: {exc}"
+        ) from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise GateMarkerCorruptedError(
+            f"gate marker not valid JSON: {path}: {exc.msg} (line {exc.lineno})"
+        ) from exc
     if not isinstance(data, dict):
-        return None
+        raise GateMarkerCorruptedError(
+            f"gate marker must be a JSON object, got {type(data).__name__}: {path}"
+        )
     return data
 
 

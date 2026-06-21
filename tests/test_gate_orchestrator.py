@@ -231,6 +231,49 @@ class RecoverFromCrashTests(unittest.TestCase):
         self.assertFalse(marker_path.exists())
 
     @patch.dict(os.environ, {}, clear=False)
+    def test_corrupted_marker_quarantines_evidence(self) -> None:
+        """§9.2 corruption-is-loud: corrupted marker → evidence quarantined,
+        not silently deleted. recover_from_crash must signal it loudly."""
+        # Write a corrupted marker by hand (bypassing write_gate_marker)
+        marker_path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        marker_path.write_text("{not valid json", encoding="utf-8")
+
+        # Seed an evidence directory the operator should be able to inspect
+        evidence_dir = (
+            self.project_root / "_bmad" / "gate" / "evidence" / "lost-gate"
+        )
+        evidence_dir.mkdir(parents=True)
+        (evidence_dir / "dummy.json").write_text(
+            '{"important": "do not delete"}', encoding="utf-8"
+        )
+
+        result = recover_from_crash(self.project_root)
+
+        # The operator-facing contract: NOT silently "recovered=True".
+        # The caller knows something needs investigation.
+        self.assertFalse(result["recovered"])
+        self.assertTrue(result["quarantined"])
+        self.assertIn("corruption_reason", result)
+        self.assertIn("quarantine_dir", result)
+
+        # The evidence must NOT have been deleted.
+        self.assertFalse(evidence_dir.exists(),
+                         "evidence dir should have been MOVED out of the live tree")
+        # It must have been moved into the quarantine.
+        quar_dir = Path(result["quarantine_dir"])
+        self.assertTrue(quar_dir.is_dir())
+        quar_evidence = quar_dir / "evidence" / "lost-gate" / "dummy.json"
+        self.assertTrue(quar_evidence.is_file(),
+                        f"evidence should now be at {quar_evidence}")
+        self.assertIn("do not delete", quar_evidence.read_text(encoding="utf-8"))
+
+        # The corrupted marker should also be in the quarantine, so the
+        # operator can see what state the orchestrator was in.
+        self.assertTrue((quar_dir / "gate-in-progress.json").is_file())
+
+    @patch.dict(os.environ, {}, clear=False)
     def test_marker_with_existing_verdict_clears_marker_only(self) -> None:
         """Marker present with existing verdict -> preserve verdict, clear marker."""
         profile = _minimal_profile()

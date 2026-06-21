@@ -14,6 +14,7 @@ from story_automator.core.gate_schema import (
     make_llm_evidence_record,
 )
 from story_automator.core.evidence_io import (
+    GateMarkerCorruptedError,
     can_reuse_gate_file,
     clear_gate_marker,
     compute_evidence_bundle_hash,
@@ -539,6 +540,33 @@ class GateMarkerLifecycleTests(unittest.TestCase):
             write_gate_marker(tmp, "gate-new", "sha-new")
             marker = read_gate_marker(tmp)
             self.assertEqual(marker["gate_id"], "gate-new")
+
+    # §9.2 "corruption is loud, not silent":
+    # read_gate_marker must raise GateMarkerCorruptedError when the marker
+    # file exists but is unreadable / malformed JSON / not an object.
+
+    def test_corrupted_json_marker_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("{not valid json", encoding="utf-8")
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("not valid JSON", str(cm.exception))
+
+    def test_non_object_marker_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("[1,2,3]", encoding="utf-8")  # array, not object
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("must be a JSON object", str(cm.exception))
+
+    def test_absent_marker_still_returns_none(self) -> None:
+        # Regression: corruption-detection didn't change the absent path.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(read_gate_marker(tmp))
 
 
 class RoundTripDeterminismTests(unittest.TestCase):

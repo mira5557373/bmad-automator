@@ -13,6 +13,7 @@ from typing import Any
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from .evidence_io import (
+    GateMarkerCorruptedError,
     can_reuse_gate_file,
     clear_gate_marker,
     load_gate_file,
@@ -34,6 +35,7 @@ from .gate_remediation import (
 from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
+from .utils import iso_now
 from .verdict_engine import evaluate_gate
 
 
@@ -97,17 +99,58 @@ def recover_from_crash(
     verdict was already persisted.  Orphan evidence directories (no
     matching verdict) are removed.  The marker is always cleared.
 
+    Corruption (per §9.2 "loud, not silent"): when the marker file
+    exists but cannot be parsed, the partial evidence directory is
+    QUARANTINED under ``_bmad/gate/quarantine/<timestamp>/`` instead
+    of being deleted, the marker is moved to the quarantine alongside
+    it, and the returned dict has ``recovered=False, quarantined=True``
+    so the operator can see something needs investigation.
+
     Returns a dict describing what was recovered.
     """
     assert_host_context("recover_from_crash")
 
-    marker = read_gate_marker(project_root)
+    root = Path(project_root)
+    marker_path = root / "_bmad" / "gate" / "gate-in-progress.json"
+
+    try:
+        marker = read_gate_marker(project_root)
+    except GateMarkerCorruptedError as exc:
+        # Don't delete anything. Move the corrupted marker plus any
+        # evidence dirs under _bmad/gate/evidence/ into a quarantine
+        # bucket so the operator can investigate.
+        quarantine_root = root / "_bmad" / "gate" / "quarantine" / iso_now().replace(":", "-")
+        try:
+            quarantine_root.mkdir(parents=True, exist_ok=True)
+            if marker_path.is_file():
+                marker_path.rename(quarantine_root / "gate-in-progress.json")
+            evidence_root = root / "_bmad" / "gate" / "evidence"
+            if evidence_root.is_dir():
+                # Move whole evidence root contents under quarantine so the
+                # operator can inspect which gate_id was in flight.
+                quar_evidence = quarantine_root / "evidence"
+                quar_evidence.mkdir(exist_ok=True)
+                for child in evidence_root.iterdir():
+                    try:
+                        (child).rename(quar_evidence / child.name)
+                    except OSError:
+                        pass
+        except OSError:
+            # Quarantine itself failing is a separate operator-alertable
+            # situation; still surface the corruption.
+            pass
+        return {
+            "recovered": False,
+            "quarantined": True,
+            "quarantine_dir": str(quarantine_root),
+            "corruption_reason": str(exc),
+        }
+
     if marker is None:
         return {"recovered": False}
 
     gate_id = marker.get("gate_id", "")
     commit_sha = marker.get("commit_sha", "")
-    root = Path(project_root)
 
     verdict_path = root / "_bmad" / "gate" / "verdicts" / f"{gate_id}.json"
     had_verdict = verdict_path.is_file()
