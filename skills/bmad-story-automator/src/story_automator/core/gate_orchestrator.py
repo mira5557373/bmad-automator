@@ -21,6 +21,7 @@ from .evidence_io import (
 )
 from .gate_audit import (
     GateProfileDriftAudit,
+    GateReadinessAudit,
     GateStartedAudit,
     emit_gate_audit,
 )
@@ -127,6 +128,65 @@ def recover_from_crash(
         "had_verdict": had_verdict,
         "commit_sha": commit_sha,
     }
+
+
+def run_readiness_gate(
+    project_root: str | Path,
+    story_id: str,
+    *,
+    profile: dict[str, Any],
+    risk_entries: list[dict[str, Any]] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> dict[str, Any]:
+    """§9.1: full readiness lifecycle — risk + blockers → verdict."""
+    from .readiness_gate import check_readiness, persist_readiness_result
+    from .risk_profile import (
+        RiskProfileError,
+        compute_risk_profile_ref,
+        load_risk_profile,
+        persist_risk_profile,
+        risk_profile_exists,
+    )
+
+    assert_host_context("run_readiness_gate")
+
+    resolved_entries = risk_entries
+    if resolved_entries:
+        persist_risk_profile(project_root, story_id, resolved_entries)
+    elif risk_entries is None and risk_profile_exists(project_root, story_id):
+        try:
+            risk_data = load_risk_profile(project_root, story_id)
+            resolved_entries = risk_data.get("entries")
+        except RiskProfileError:
+            resolved_entries = None
+
+    result = check_readiness(
+        story_id, profile=profile, risk_entries=resolved_entries,
+    )
+
+    if resolved_entries:
+        result["risk_profile_ref"] = compute_risk_profile_ref(
+            resolved_entries, story_id,
+        )
+    else:
+        result["risk_profile_ref"] = ""
+
+    persist_readiness_result(project_root, story_id, result)
+
+    if audit_policy is not None and audit_path is not None:
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateReadinessAudit(
+                story_id=story_id,
+                verdict=result["verdict"],
+                priority=result.get("priority", ""),
+                blocker_count=len(result.get("blockers", [])),
+                reason=result.get("reason", ""),
+            ),
+        )
+
+    return result
 
 
 def _run_collectors(
