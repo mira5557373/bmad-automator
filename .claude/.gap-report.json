@@ -1,58 +1,20 @@
 {
-  "milestone": "collection-m6-security-collectors",
-  "review_date": "2026-06-21",
-  "base_commit": "d9dbc90d639247c2a9a840fa42243e4cc5b332ff",
-  "review_commit": "54d1804",
+  "pass": 1,
+  "critical_gaps": 0,
+  "architectural_gaps": 0,
+  "important_gaps": 0,
+  "minor_gaps": 3,
+  "deferred_gaps": 0,
+  "total_gaps_found": 5,
+  "gaps_fixed_this_pass": 3,
   "tests_green": true,
   "lint_clean": true,
-  "verify_clean": true,
-  "critical_gaps": 0,
-  "important_gaps": 0,
-  "minor_gaps": 0,
+  "converged": true,
   "gap_summaries": [
-    {
-      "tag": "[post-impl]",
-      "severity": "important",
-      "file": "skills/bmad-story-automator/src/story_automator/core/collectors/invariants.py",
-      "description": "Missing §8 Module 3 invariants category — DG/ADR semgrep runner and invariants feed to adjudicator not implemented",
-      "status": "fixed",
-      "fix": "Added invariant_check.py + invariants.py collector module (2 collectors) + tests + registry wiring"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "important",
-      "file": "tests/test_collector_integration.py",
-      "description": "No integration test coverage for invariants category pipeline",
-      "status": "fixed",
-      "fix": "Extended SecurityCategoryPipelineTests to include invariants category with mock collector"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "minor",
-      "file": "tests/test_check_sbom.py",
-      "description": "Weak assertTrue/assertFalse assertions on validate_sbom return values",
-      "status": "fixed",
-      "fix": "Replaced with assertEqual(ok, True/False) + assertIn on message content"
-    },
-    {
-      "tag": "[post-impl]",
-      "severity": "minor",
-      "file": "tests/test_collectors_supply_chain.py:96",
-      "description": "Weak assertion assertTrue(len(files) > 0) on provenance default files",
-      "status": "fixed",
-      "fix": "Replaced with assertEqual(len(files), 2) matching known default list size"
-    }
-  ],
-  "production_review": {
-    "security": "pass",
-    "error_resilience": "pass",
-    "testing": "pass",
-    "code_quality": "pass",
-    "notes": "Library artifact type. All check scripts use subprocess.run with list args (no shell injection). All external calls have FileNotFoundError + TimeoutExpired + returncode handling. No secrets, no TODOs. Single-user threat model applies."
-  },
-  "collector_count": 27,
-  "categories": [
-    "correctness", "static", "docs", "process",
-    "security", "license", "compliance", "supply_chain", "invariants"
+    "[ultrathink] FIXED 🔴 gwt_fallback() marked ALL ACs as mapped when ANY GWT test existed — rewrote to per-AC keyword matching with ≥2 word overlap threshold",
+    "[ultrathink] FIXED 🟡 test_maps_acs_to_tests used weak len>=1 assertion — replaced with distinctive AC descriptions and per-AC status verification (AC-1 mapped, AC-2 unmapped)",
+    "[ultrathink] FIXED 🟡 scan_for_n_plus_one _FOR_LOOP_RE used \\s+ (required leading whitespace) — changed to \\s* to also catch top-level for loops",
+    "[ultrathink] 🔵 schema-diff uses oasdiff (OpenAPI-specific) — profile-configurable via base/revision paths, no code change needed",
+    "[ultrathink] 🔵 no Marabunta migration support — Odoo-specific, deferred to future milestone if needed"
   ]
 }
