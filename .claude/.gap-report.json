@@ -1,69 +1,78 @@
 {
-  "milestone": "adjudication-m9-verdict-engine",
-  "branch": "sw-parallel/adjudication-m9-verdict-engine",
-  "base_commit": "997af375e8369035b88001113e7dc9e489255ff9",
-  "review_commit": "9939805",
-  "fix_commit": "6a2aaf0",
-  "timestamp": "2026-06-21",
-  "files_reviewed": [
-    "skills/bmad-story-automator/src/story_automator/core/category_rules.py",
-    "skills/bmad-story-automator/src/story_automator/core/verdict_engine.py",
-    "skills/bmad-story-automator/src/story_automator/core/gate_audit.py",
-    "tests/test_category_rules.py",
-    "tests/test_verdict_engine.py",
-    "tests/test_gate_audit.py"
-  ],
-  "loc_summary": {
-    "category_rules.py": 233,
-    "verdict_engine.py": 289,
-    "gate_audit.py": 137,
-    "test_category_rules.py": 451,
-    "test_verdict_engine.py": 762,
-    "test_gate_audit.py": 212
-  },
-  "post_impl_gaps": [],
-  "production_gaps": [
+  "milestone": "integration-m10-orchestrator-wiring",
+  "plan": "docs/superpowers/plans/2026-06-21-integration-m10-orchestrator-wiring.md",
+  "spec": "docs/superpowers/specs/2026-06-20-production-ready-factory-design.md",
+  "analysed_at": "2026-06-21",
+  "gaps": [
     {
-      "id": "P1",
-      "tag": "[production]",
-      "severity": "low",
-      "title": "Generic fallback rationale used hardcoded 'category' literal",
-      "description": "apply_category_rule dispatched unmapped categories through generic_rule which called _status_based_rule('category', evidence), producing rationale 'all category checks passed' instead of using the actual category name.",
-      "fix": "Changed apply_category_rule to call _status_based_rule(category, evidence) directly for unmapped categories. Added test_unknown_category_rationale_uses_actual_name.",
-      "status": "fixed"
+      "id": "GAP-01",
+      "severity": "critical",
+      "title": "Test mocking strategy causes false passes: evidence not persisted to disk",
+      "description": "run_gate_collectors persists evidence to disk via run_single_collector -> persist_evidence_record. When _run_collectors is mocked, no evidence reaches disk, so evaluate_gate -> load_evidence_bundle finds nothing and fails closed (all FAIL). Tests in Tasks 8, 15, 16 originally set mock_run.return_value to evidence dicts, but the return value is unused by run_production_gate — evidence is consumed from disk by evaluate_gate.",
+      "spec_section": "§9.2",
+      "affected_tasks": [8, 15, 16],
+      "fix": "Tests must persist evidence to disk via persist_evidence_record in setUp/arrange, then mock _run_collectors to no-op (preventing real subprocess calls). The mock return value is irrelevant.",
+      "status": "fixed_inline"
     },
     {
-      "id": "P2",
-      "tag": "[production]",
+      "id": "GAP-02",
+      "severity": "moderate",
+      "title": "Risk-9 immediate park not handled in route_gate_verdict",
+      "description": "Spec §9.1 says 'exhausted/risk-9 persists -> PARK+escalate'. The original plan only parked when remediation_cycle >= max_cycles (exhaustion), but did not handle the case where has_unmitigated_risk_9 is true — which should park immediately without trying remediation, since risk-9 is a risk assessment issue not fixable by code remediation.",
+      "spec_section": "§9.1, §9.2",
+      "affected_tasks": [9],
+      "fix": "Added has_unmitigated_risk_9 parameter to route_gate_verdict. When true and overall is FAIL, parks immediately with reason 'risk-9' before checking max_cycles. Added test_fail_risk_9_parks_immediately test.",
+      "status": "fixed_inline"
+    },
+    {
+      "id": "GAP-03",
       "severity": "low",
-      "title": "evaluate_gate audit integration was untested",
-      "description": "The audit emission code path in evaluate_gate (lines 266-287) including GateDecision and GateRendered event wiring was never exercised by tests. Individual audit events were tested in test_gate_audit.py but the integration in evaluate_gate was not.",
-      "fix": "Added EvaluateGateAuditTests with test_audit_events_emitted_when_policy_enabled (verifies both events written to audit log) and test_no_audit_when_policy_absent (verifies no file created).",
-      "status": "fixed"
+      "title": "_run_collectors wrapper missing diff_categories passthrough",
+      "description": "The _run_collectors wrapper in gate_orchestrator.py omitted the diff_categories parameter that run_gate_collectors accepts. While M10 doesn't use diff-scoping by default, the wrapper should forward it for future callers.",
+      "spec_section": "§9.1",
+      "affected_tasks": [8],
+      "fix": "Added diff_categories=None parameter to _run_collectors wrapper and forward it to run_gate_collectors.",
+      "status": "fixed_inline"
+    },
+    {
+      "id": "GAP-04",
+      "severity": "low",
+      "title": "Task 2 tests missing setUp and _write_gate_file helper",
+      "description": "ProductionReadyGateVerifierTests referenced self.project_root without defining setUp, and used self._write_gate_file without implementing the helper. Tests would fail at runtime.",
+      "spec_section": "§9.2",
+      "affected_tasks": [2],
+      "fix": "Added setUp with tempfile.mkdtemp(), and _write_gate_file helper that uses make_gate_file + persist_gate_file.",
+      "status": "fixed_inline"
+    },
+    {
+      "id": "GAP-05",
+      "severity": "info",
+      "title": "Remediator dispatch is signal-only — no direct invocation",
+      "description": "The plan's route_gate_verdict returns {action: 'remediate'} as a signal to the caller, but does not directly invoke the BMAD review_continuation -> dev-story remediation loop. This is architecturally correct — the existing orchestrator loop in orchestrator.py handles the actual dispatch — but the plan should be explicit that M10 provides the verdict-routing signal, not the full remediation loop.",
+      "spec_section": "§9.2",
+      "affected_tasks": [9],
+      "fix": "No code change needed. The signal-based design is correct — M10 returns the routing decision, the orchestrator loop acts on it.",
+      "status": "accepted"
+    },
+    {
+      "id": "GAP-06",
+      "severity": "info",
+      "title": "run_gate_collectors returns CollectorOutcome, not evidence dicts",
+      "description": "run_gate_collectors returns list[CollectorOutcome] (with .config, .evidence, .persisted_path), not list[dict]. The run_production_gate function correctly ignores the return value — evidence is consumed from disk by evaluate_gate via load_evidence_bundle. No interface mismatch in production code, only in the original test mocks (addressed by GAP-01).",
+      "spec_section": "§9.2",
+      "affected_tasks": [8],
+      "fix": "No production code change needed. Test mocking fixed in GAP-01.",
+      "status": "accepted"
     }
   ],
-  "verified_invariants": [
-    "Fail-closed: empty evidence -> error status; active categories without evidence -> FAIL; error/timeout statuses -> FAIL",
-    "LLM confidence gate: PASS downgrades to CONCERNS on confidence < 5; FAIL is never upgraded",
-    "Determinism: sorted category iteration, sorted evidence bundle hashing, deterministic filenames",
-    "Waiver exact-match: _check_categories requires waiver failing_categories to exactly match gate's failing categories",
-    "NA handling: categories_na produces NA verdict with consistent 5-key shape (verdict, rationale, required, actual, evidence_refs)",
-    "No new Python deps: all imports from stdlib + existing internal modules",
-    "LOC limits: category_rules 233, verdict_engine 289, gate_audit 137 — all under 500",
-    "No circular imports: category_rules <- verdict_engine (unidirectional)",
-    "Audit events ride UnknownEvent forward-compat; telemetry_events.py untouched"
-  ],
-  "test_summary": {
-    "total_tests": 2381,
-    "milestone_tests": 125,
-    "new_tests_added": 3,
-    "passed": 2381,
-    "failed": 0,
-    "skipped": 2
-  },
-  "verification": {
-    "npm_run_verify": "pass",
-    "ruff_check": "pass",
-    "full_test_suite": "pass"
+  "coverage": {
+    "spec_sections_checked": ["§9.1", "§9.2", "§11", "§11.1", "§14"],
+    "total_gaps": 6,
+    "critical": 1,
+    "moderate": 1,
+    "low": 2,
+    "info": 2,
+    "all_critical_fixed": true,
+    "all_moderate_fixed": true
   }
 }
