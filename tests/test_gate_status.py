@@ -7,8 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from story_automator.core.evidence_io import persist_gate_file
+from story_automator.core.gate_schema import make_gate_file
 from story_automator.core.gate_status import (
     clear_mitigation_debt,
+    invalidate_gate,
+    invalidate_gates_for_target,
     list_parked,
     load_mitigation_debt,
     park_story,
@@ -153,6 +157,79 @@ class ResumeStoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = resume_story(tmp, "gate-nonexistent")
             self.assertIsNone(result)
+
+
+def _make_test_gate(gate_id: str, target_id: str = "E1.S1", overall: str = "PASS") -> dict:
+    """Helper to build a minimal valid gate file for testing."""
+    return make_gate_file(
+        gate_id=gate_id,
+        target={"kind": "story", "id": target_id},
+        commit_sha="abc123def456",
+        profile={"id": "default", "version": 1, "hash": "aabbccdd"},
+        factory_version="0.1.0",
+        categories={"correctness": {"verdict": "PASS"}},
+        overall=overall,
+    )
+
+
+class InvalidateGateTests(unittest.TestCase):
+    def test_renames_existing_gate_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = _make_test_gate("gate-200")
+            persist_gate_file(tmp, gate)
+            ok, msg = invalidate_gate(tmp, "gate-200")
+            self.assertTrue(ok)
+            # Original should be gone
+            original = Path(tmp) / "_bmad" / "gate" / "verdicts" / "gate-200.json"
+            self.assertFalse(original.exists())
+            # Invalidated copy should exist
+            renamed = Path(tmp) / "_bmad" / "gate" / "verdicts" / "gate-200.invalidated.json"
+            self.assertTrue(renamed.is_file())
+
+    def test_returns_false_when_gate_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, msg = invalidate_gate(tmp, "gate-nonexistent")
+            self.assertFalse(ok)
+            self.assertIn("not found", msg)
+
+    def test_invalidated_file_is_valid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = _make_test_gate("gate-201")
+            persist_gate_file(tmp, gate)
+            invalidate_gate(tmp, "gate-201")
+            renamed = Path(tmp) / "_bmad" / "gate" / "verdicts" / "gate-201.invalidated.json"
+            data = json.loads(renamed.read_text(encoding="utf-8"))
+            self.assertEqual(data["gate_id"], "gate-201")
+
+
+class InvalidateGatesForTargetTests(unittest.TestCase):
+    def test_invalidates_matching_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate1 = _make_test_gate("gate-300", target_id="E1.S1")
+            gate2 = _make_test_gate("gate-301", target_id="E1.S1")
+            gate3 = _make_test_gate("gate-302", target_id="E2.S1")
+            persist_gate_file(tmp, gate1)
+            persist_gate_file(tmp, gate2)
+            persist_gate_file(tmp, gate3)
+            invalidated = invalidate_gates_for_target(tmp, "E1.S1")
+            self.assertEqual(len(invalidated), 2)
+            self.assertIn("gate-300", invalidated)
+            self.assertIn("gate-301", invalidated)
+            # gate-302 should still be intact
+            remaining = Path(tmp) / "_bmad" / "gate" / "verdicts" / "gate-302.json"
+            self.assertTrue(remaining.is_file())
+
+    def test_returns_empty_when_no_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = _make_test_gate("gate-310", target_id="E5.S1")
+            persist_gate_file(tmp, gate)
+            invalidated = invalidate_gates_for_target(tmp, "E99.S99")
+            self.assertEqual(invalidated, [])
+
+    def test_returns_empty_when_no_verdicts_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            invalidated = invalidate_gates_for_target(tmp, "E1.S1")
+            self.assertEqual(invalidated, [])
 
 
 if __name__ == "__main__":

@@ -165,3 +165,57 @@ def resume_story(
         return None
     target.unlink(missing_ok=True)
     return data if isinstance(data, dict) else None
+
+
+# ── Gate invalidation ───────────────────────────────────────────────
+
+
+def invalidate_gate(
+    project_root: str | Path,
+    gate_id: str,
+) -> tuple[bool, str]:
+    """Invalidate a gate verdict by renaming it to ``<gate_id>.invalidated.json``.
+
+    Returns ``(True, "")`` on success, ``(False, reason)`` when the
+    gate file does not exist.
+    """
+    assert_host_context("invalidate_gate")
+    verdicts_dir = Path(project_root) / "_bmad" / "gate" / "verdicts"
+    source = verdicts_dir / f"{gate_id}.json"
+    if not source.is_file():
+        return False, f"gate file not found: {gate_id}"
+    dest = verdicts_dir / f"{gate_id}.invalidated.json"
+    source.rename(dest)
+    return True, ""
+
+
+def invalidate_gates_for_target(
+    project_root: str | Path,
+    target_id: str,
+) -> list[str]:
+    """Invalidate all gate verdicts whose ``target.id`` matches *target_id*.
+
+    Returns the list of gate_ids that were invalidated.
+    """
+    assert_host_context("invalidate_gates_for_target")
+    verdicts_dir = Path(project_root) / "_bmad" / "gate" / "verdicts"
+    if not verdicts_dir.is_dir():
+        return []
+    invalidated: list[str] = []
+    for path in sorted(verdicts_dir.glob("*.json")):
+        # Skip already-invalidated files
+        if path.name.endswith(".invalidated.json"):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        target = data.get("target")
+        if isinstance(target, dict) and target.get("id") == target_id:
+            gate_id = data.get("gate_id", path.stem)
+            dest = verdicts_dir / f"{gate_id}.invalidated.json"
+            path.rename(dest)
+            invalidated.append(gate_id)
+    return invalidated
