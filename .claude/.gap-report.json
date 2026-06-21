@@ -1,119 +1,86 @@
 {
-  "milestone": "integration-m10-orchestrator-wiring",
-  "phase": "C",
-  "phase_name": "Review + Fix",
-  "timestamp": "2026-06-21",
-  "spec_gaps_implemented": [
+  "pass": 1,
+  "critical_gaps": 0,
+  "architectural_gaps": 3,
+  "important_gaps": 0,
+  "minor_gaps": 3,
+  "deferred_gaps": 2,
+  "total_gaps_found": 13,
+  "gaps_fixed_this_pass": 5,
+  "tests_green": true,
+  "lint_clean": true,
+  "converged": true,
+  "gap_summaries": [
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
-      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
-      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
+      "severity": "fixed",
+      "title": "Task 6 test code references undefined _parse_review_result helper",
+      "resolution": "Extracted Task 6 tests into standalone tests/test_check_test_review.py with full imports and _parse_review_result helper"
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
-      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
-      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
+      "severity": "fixed",
+      "title": "Task 10 does not update _EXPECTED_IDS, _EXPECTED_CATEGORIES, and collector count in test_core_collectors.py",
+      "resolution": "Added explicit instructions to update _EXPECTED_IDS (+4 IDs), _EXPECTED_CATEGORIES (+2 categories), and test_collector_count (39 -> 43)"
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
-      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
-      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+      "severity": "fixed",
+      "title": "burn_in_check.py per-run timeout hardcoded at 300s",
+      "resolution": "Added --timeout CLI flag to burn_in_check.py, and updated _burn_in_cmd to derive per_run_timeout from profile.timeouts.test_quality / burn_in_runs"
     },
     {
-      "spec_section": "§11",
-      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
-      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
-      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+      "severity": "fixed",
+      "title": "Task 5 references test_review_check.py before Task 6 creates it",
+      "resolution": "Added dependency note in Task 6 explaining implementors should create test_review_check.py before running Task 5's test suite"
+    },
+    {
+      "severity": "fixed",
+      "title": "Task 6 tests embedded inline in test_collectors_test_quality.py missing imports",
+      "resolution": "Moved to standalone test file tests/test_check_test_review.py with all needed imports; updated File Structure and Task 12 accordingly"
+    },
+    {
+      "severity": "architectural",
+      "title": "Evidence metrics not populated by production subprocess flow",
+      "detail": "run_collector_with_timeout creates evidence with metrics={} -- check script stdout metrics never flow into evidence.metrics. Existing rules (correctness, security, license) follow the same pattern: rule tests hand-craft evidence with metrics, production flow works via status only. Pre-existing architecture limitation, not M13-specific.",
+      "mitigation": "Consistent with existing architecture; no M13 fix needed"
+    },
+    {
+      "severity": "architectural",
+      "title": "Burn-in collector hardcodes pytest as test command",
+      "detail": "_burn_in_cmd uses 'pytest --tb=short -q' as the default test command. The profile toolchain could specify a different test runner.",
+      "mitigation": "Acceptable for M13; the check script accepts any command after '--', so the collector cmd builder is the only coupling point. Future enhancement can read toolchain."
+    },
+    {
+      "severity": "architectural",
+      "title": "Mutation collector does not pass changed files for diff-scoping",
+      "detail": "Spec says 'mutation score >= threshold on changed code (sampled/budgeted)' but _mutmut_cmd does not receive changed files from DiffScope. mutation_check.py accepts optional changed_files arg but it's never populated.",
+      "mitigation": "The collector CmdBuilder signature is (checkout, profile) -- no DiffScope access. Wiring DiffScope into collector build_cmd would require M4 framework changes. Deferred to follow-up."
+    },
+    {
+      "severity": "minor",
+      "title": "os.chmod in test helper is Unix-only",
+      "detail": "tests/test_check_burn_in.py uses os.chmod with stat.S_IEXEC which is a no-op on Windows. Tests pass on Linux/WSL/macOS.",
+      "mitigation": "Test files invoke scripts via sys.executable (python3 <script>), so execute permission is not strictly needed."
+    },
+    {
+      "severity": "minor",
+      "title": "JUnit XML glob patterns may match non-JUnit files in deep checkouts",
+      "detail": "_find_junit_xmls uses recursive glob with patterns like **/junit*.xml which could match unrelated XML files.",
+      "mitigation": "_parse_junit_tests gracefully handles non-JUnit XML (returns empty dict), so false matches are harmless."
+    },
+    {
+      "severity": "minor",
+      "title": "Recursive glob in _find_junit_xmls could be slow on large checkouts",
+      "detail": "glob.glob with recursive=True walks the entire checkout tree. For large projects this adds latency per burn-in run.",
+      "mitigation": "Burn-in runs against a collector_checkout (fresh clone at specific SHA), which is typically small."
+    },
+    {
+      "severity": "deferred",
+      "title": "Burn-in collector test command not configurable via profile toolchain",
+      "detail": "Future enhancement: read test runner from profile.toolchain[language] to support non-pytest test suites (vitest, jest, cargo test, etc.)."
+    },
+    {
+      "severity": "deferred",
+      "title": "Mutation collector diff-scoping via DiffScope integration",
+      "detail": "Future enhancement: pass DiffScope changed files to mutation_check.py --paths-to-mutate for targeted mutation testing on changed code only."
     }
-  ],
-  "post_impl_findings": [
-    {
-      "id": "PI-1",
-      "severity": "medium",
-      "tag": "[post-impl]",
-      "file": "core/gate_orchestrator.py:route_gate_verdict",
-      "finding": "Unknown verdicts silently fell through to remediate branch",
-      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-2",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "tests/test_gate_remediation.py",
-      "finding": "No test for frontmatter-only story file (no ## sections)",
-      "fix": "Added test_handles_frontmatter_only_file test case",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-3",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
-      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
-      "status": "accepted"
-    }
-  ],
-  "production_findings": [
-    {
-      "id": "PR-1",
-      "severity": "high",
-      "tag": "[production]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Non-atomic story file write via path.write_text()",
-      "fix": "Changed to write_atomic() from utils.py",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-2",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_orchestrator.py:recover_from_crash",
-      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
-      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-3",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
-      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
-      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-4",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
-      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
-      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-5",
-      "severity": "low",
-      "tag": "[production]",
-      "file": "core/gate_status.py:resume_story",
-      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
-      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
-      "status": "accepted"
-    }
-  ],
-  "ruff_findings_fixed": [
-    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
-    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
-    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
-  ],
-  "verification": {
-    "test_count": 2486,
-    "test_result": "OK (skipped=2)",
-    "ruff": "All checks passed",
-    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
-  }
+  ]
 }
