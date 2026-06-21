@@ -16,3 +16,6 @@
 [submodule "external/bmad-method-test-architecture-enterprise"]
 	path = external/bmad-method-test-architecture-enterprise
 	url = https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise
+[submodule "external/bmad-auto"]
+	path = external/bmad-auto
+	url = https://github.com/bmad-code-org/bmad-auto.git
