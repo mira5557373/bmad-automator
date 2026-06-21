@@ -190,3 +190,17 @@ def load_template_manifest(
         )
 
     return manifest
+
+
+def validate_bundle(bundle_dir: Path, manifest: dict) -> list[str]:
+    """Check that every ``src`` file in the manifest exists on disk.
+
+    Returns a list of missing file paths (empty means valid).
+    """
+    missing: list[str] = []
+    for cat in manifest.get("categories", {}).values():
+        for entry in cat.get("files", []):
+            src_path = bundle_dir / entry["src"]
+            if not src_path.is_file():
+                missing.append(entry["src"])
+    return missing

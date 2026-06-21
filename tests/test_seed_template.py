@@ -15,6 +15,7 @@ from story_automator.core.seed_template import (
     load_template_manifest,
     resolve_bundle_dir,
     resolve_template_ref,
+    validate_bundle,
     validate_manifest,
     version_satisfies,
 )
@@ -310,6 +311,51 @@ class LoadTemplateManifestTests(unittest.TestCase):
         with self._patch_root():
             with self.assertRaises(SeedTemplateError):
                 load_template_manifest("test-template@1.0.0")
+
+
+class ValidateBundleTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._bundle_dir = Path(self._tmp) / "bundle"
+        self._bundle_dir.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _manifest_with_files(self, files_by_category):
+        categories = {}
+        for cat, srcs in files_by_category.items():
+            categories[cat] = {
+                "description": cat,
+                "files": [
+                    {"src": s, "dst": s.replace(".tmpl", "")}
+                    for s in srcs
+                ],
+            }
+        return _make_manifest(categories=categories)
+
+    def test_all_files_present(self):
+        src = self._bundle_dir / "a.tmpl"
+        src.write_text("ok", encoding="utf-8")
+        m = self._manifest_with_files({"c": ["a.tmpl"]})
+        self.assertEqual(validate_bundle(self._bundle_dir, m), [])
+
+    def test_missing_file_reported(self):
+        m = self._manifest_with_files({"c": ["missing.tmpl"]})
+        result = validate_bundle(self._bundle_dir, m)
+        self.assertEqual(len(result), 1)
+        self.assertIn("missing.tmpl", result[0])
+
+    def test_multiple_missing(self):
+        m = self._manifest_with_files({"a": ["x.tmpl"], "b": ["y.tmpl"]})
+        result = validate_bundle(self._bundle_dir, m)
+        self.assertEqual(len(result), 2)
+
+    def test_empty_manifest_valid(self):
+        m = _make_manifest(
+            categories={"c": {"description": "empty", "files": []}}
+        )
+        self.assertEqual(validate_bundle(self._bundle_dir, m), [])
 
 
 if __name__ == "__main__":
