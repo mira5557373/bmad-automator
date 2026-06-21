@@ -112,3 +112,50 @@ def detect_timeout_categories(
         if counts["total"] > 0 and counts["timeout"] / counts["total"] >= min_rate:
             timeout_cats.append(cat)
     return timeout_cats
+
+
+def compute_category_trends(
+    history: list[dict[str, Any]],
+    *,
+    window: int = 10,
+) -> dict[str, str]:
+    """Compute per-category trend direction over a sliding window.
+
+    Compares pass rate in the first half vs second half of the window.
+    Returns: "improving" (second-half pass rate higher), "degrading"
+    (second-half lower), or "stable" (within 10% tolerance).
+    """
+    sequences: dict[str, list[str]] = {}
+    for record in history:
+        for cat, info in (record.get("categories") or {}).items():
+            if not isinstance(info, dict):
+                continue
+            verdict = info.get("verdict", "")
+            if verdict in ("PASS", "FAIL", "CONCERNS"):
+                sequences.setdefault(cat, []).append(verdict)
+
+    trends: dict[str, str] = {}
+    for cat, seq in sorted(sequences.items()):
+        recent = seq[-window:] if len(seq) > window else seq
+        if len(recent) < 2:
+            trends[cat] = "stable"
+            continue
+        mid = len(recent) // 2
+        first_half = recent[:mid]
+        second_half = recent[mid:]
+        first_pass = (
+            sum(1 for v in first_half if v == "PASS") / len(first_half)
+            if first_half else 0
+        )
+        second_pass = (
+            sum(1 for v in second_half if v == "PASS") / len(second_half)
+            if second_half else 0
+        )
+        diff = second_pass - first_pass
+        if diff > 0.1:
+            trends[cat] = "improving"
+        elif diff < -0.1:
+            trends[cat] = "degrading"
+        else:
+            trends[cat] = "stable"
+    return trends

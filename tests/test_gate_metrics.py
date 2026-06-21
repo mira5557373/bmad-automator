@@ -1,6 +1,7 @@
 import unittest
 
 from story_automator.core.gate_metrics import (
+    compute_category_trends,
     compute_gate_metrics,
     detect_flaky_categories,
     detect_timeout_categories,
@@ -180,6 +181,51 @@ class DetectTimeoutCategoriesTests(unittest.TestCase):
         ]
         result = detect_timeout_categories(history, min_rate=0.3)
         self.assertEqual(result, [])
+
+
+class ComputeCategoryTrendsTests(unittest.TestCase):
+    def test_empty_history(self) -> None:
+        self.assertEqual(compute_category_trends([]), {})
+
+    def test_all_pass_is_stable(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "security": {"verdict": "PASS", "rationale": ""},
+            })
+            for i in range(10)
+        ]
+        trends = compute_category_trends(history)
+        self.assertEqual(trends.get("security"), "stable")
+
+    def test_improving_trend(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "security": {"verdict": "FAIL" if i < 5 else "PASS", "rationale": ""},
+            })
+            for i in range(10)
+        ]
+        trends = compute_category_trends(history)
+        self.assertEqual(trends.get("security"), "improving")
+
+    def test_degrading_trend(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "security": {"verdict": "PASS" if i < 5 else "FAIL", "rationale": ""},
+            })
+            for i in range(10)
+        ]
+        trends = compute_category_trends(history)
+        self.assertEqual(trends.get("security"), "degrading")
+
+    def test_window_limits_scope(self) -> None:
+        history = [
+            _hist(gate_id=f"g-{i}", categories={
+                "security": {"verdict": "FAIL" if i < 7 else "PASS", "rationale": ""},
+            })
+            for i in range(10)
+        ]
+        trends = compute_category_trends(history, window=3)
+        self.assertIn(trends.get("security"), ("improving", "stable"))
 
 
 if __name__ == "__main__":
