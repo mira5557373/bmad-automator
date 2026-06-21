@@ -28,6 +28,14 @@ def _trivy_vuln_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
     ]
 
 
+def _osv_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return ["osv-scanner", "scan", "--recursive", "."]
+
+
+def _gitleaks_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return ["gitleaks", "detect", "--source", ".", "--no-banner"]
+
+
 SEMGREP = CollectorConfig(
     collector_id="semgrep-security",
     tool="semgrep",
@@ -46,4 +54,22 @@ TRIVY_VULN = CollectorConfig(
     file_patterns=frozenset({"*.lock", "*.txt", "*.toml", "*.cfg", "package.json"}),
 )
 
-COLLECTORS: list[CollectorConfig] = [SEMGREP, TRIVY_VULN]
+OSV = CollectorConfig(
+    collector_id="osv-security",
+    tool="osv-scanner",
+    category="security",
+    build_cmd=_osv_cmd,
+    tool_version_cmd=("osv-scanner", "--version"),
+    file_patterns=frozenset({"*.lock", "*.txt", "*.toml", "*.cfg", "package.json"}),
+)
+
+GITLEAKS = CollectorConfig(
+    collector_id="gitleaks-security",
+    tool="gitleaks",
+    category="security",
+    build_cmd=_gitleaks_cmd,
+    tool_version_cmd=("gitleaks", "version"),
+    file_patterns=frozenset(),
+)
+
+COLLECTORS: list[CollectorConfig] = [SEMGREP, TRIVY_VULN, OSV, GITLEAKS]
