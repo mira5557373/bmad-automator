@@ -1,7 +1,7 @@
 """Correctness-category evidence collectors (§6.2).
 
 PASS rule: all tiers green, 0 regressions, line/branch >= risk-required.
-Collectors: pytest-correctness (+ vitest, playwright, coverage added later).
+Collectors: pytest-correctness, vitest-correctness, playwright-correctness, coverage-correctness.
 """
 from __future__ import annotations
 

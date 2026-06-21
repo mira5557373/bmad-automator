@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         print("no coverage data found")
         return 1
     try:
-        with open(coverage_file, encoding="utf-8") as f:
+        with open(coverage_file, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         print(f"failed to read coverage data: {exc}")

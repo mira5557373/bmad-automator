@@ -2,7 +2,7 @@
 
 PASS rule: ADR Production-Readiness section present;
            ACs<->tasks<->tests traced; File List complete.
-Collectors: adr-process (+ trace-process added in Task 9).
+Collectors: adr-process, trace-process.
 """
 from __future__ import annotations
 

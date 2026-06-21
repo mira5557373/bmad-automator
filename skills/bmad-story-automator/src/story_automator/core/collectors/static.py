@@ -1,7 +1,7 @@
 """Static-analysis evidence collectors (§6.2).
 
 PASS rule: tsc=0, mypy=0, ruff/Biome=0, deadcode ≤ budget.
-Collectors: ruff-static, mypy-static (+ tsc, biome, knip added in Task 4).
+Collectors: ruff-static, mypy-static, tsc-static, biome-static, knip-static.
 """
 from __future__ import annotations
 
