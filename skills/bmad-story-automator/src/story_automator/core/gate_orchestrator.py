@@ -203,15 +203,6 @@ def run_production_gate(
     if existing is not None:
         return existing
 
-    if audit_policy is not None and audit_path is not None:
-        emit_gate_audit(
-            audit_policy, audit_path,
-            GateStartedAudit(
-                gate_id=gate_id, commit_sha=commit_sha,
-                profile_hash=compute_profile_hash(profile),
-            ),
-        )
-
     lock = _gate_lock(project_root)
     try:
         lock.acquire()
@@ -222,6 +213,14 @@ def run_production_gate(
 
     _start = time.monotonic()
     try:
+        if audit_policy is not None and audit_path is not None:
+            emit_gate_audit(
+                audit_policy, audit_path,
+                GateStartedAudit(
+                    gate_id=gate_id, commit_sha=commit_sha,
+                    profile_hash=compute_profile_hash(profile),
+                ),
+            )
         write_gate_marker(project_root, gate_id, commit_sha)
         try:
             _run_collectors(
@@ -270,6 +269,7 @@ def route_gate_verdict(
     remediation_cycle: int = 0,
     max_cycles: int = 3,
     has_unmitigated_risk_9: bool = False,
+    profile: dict[str, Any] | None = None,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -284,16 +284,20 @@ def route_gate_verdict(
     if overall == "WAIVED":
         return {"action": "done", "commit": True, "waived": True, "overall": "WAIVED"}
 
+    _blocked_concerns: list[str] = []
     if overall == "CONCERNS":
         concerns_cats = [
             cat for cat, info in gate_file.get("categories", {}).items()
             if isinstance(info, dict) and info.get("verdict") == "CONCERNS"
         ]
+        blocking = set((profile or {}).get("concerns_blocking") or [])
+        _blocked_concerns = [c for c in concerns_cats if c in blocking]
         record_mitigation_debt(project_root, gate_id, story_key, concerns_cats)
-        return {
-            "action": "done", "commit": True,
-            "overall": "CONCERNS", "mitigation_debt": concerns_cats,
-        }
+        if not _blocked_concerns:
+            return {
+                "action": "done", "commit": True,
+                "overall": "CONCERNS", "mitigation_debt": concerns_cats,
+            }
 
     # Fail-closed: unrecognized verdicts are treated as FAIL
     if overall not in ("FAIL", "PASS", "WAIVED", "CONCERNS"):
@@ -322,6 +326,8 @@ def route_gate_verdict(
         }
 
     failing = failing_categories_from_gate(gate_file)
+    if _blocked_concerns:
+        failing = sorted(set(failing) | set(_blocked_concerns))
     tasks = prepare_remediation_tasks(gate_file)
     next_cycle = remediation_cycle + 1
     continuation = request_review_continuation(

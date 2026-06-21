@@ -108,6 +108,90 @@ class AuditChainIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(completed[0]["payload"]["duration_ms"], 0)
 
 
+class BlockingConcernsIntegrationTests(unittest.TestCase):
+    """§9.2: blocking CONCERNS categories trigger remediation."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def test_blocking_concerns_triggers_remediate(self) -> None:
+        gate = make_gate_file(
+            gate_id="g-block",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={
+                "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+                "correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"},
+            },
+            overall="CONCERNS",
+        )
+        route = route_gate_verdict(
+            self.tmp, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+            profile={"concerns_blocking": ["security"]},
+        )
+        self.assertEqual(route["action"], "remediate")
+        self.assertIn("security", route["failing_categories"])
+
+    def test_non_blocking_concerns_commits(self) -> None:
+        gate = make_gate_file(
+            gate_id="g-noblock",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={
+                "correctness": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+            },
+            overall="CONCERNS",
+        )
+        route = route_gate_verdict(
+            self.tmp, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+            profile={"concerns_blocking": ["security"]},
+        )
+        self.assertEqual(route["action"], "done")
+        self.assertTrue(route["commit"])
+
+
+class AuditNoOrphanOnLockFailureTests(unittest.TestCase):
+    """GateStarted must not be emitted if lock acquisition fails."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.audit_path = pathlib.Path(self.tmp) / "audit.jsonl"
+        self.audit_policy = {"security": {"audit_trail": True}}
+        self.registry = CollectorRegistry()
+
+    def test_no_gate_started_on_lock_failure(self) -> None:
+        from filelock import FileLock
+        from story_automator.core.gate_orchestrator import GateConcurrencyError
+        lock_path = Path(self.tmp) / "_bmad" / "gate" / "gate.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        external_lock = FileLock(str(lock_path), timeout=0)
+        external_lock.acquire()
+        try:
+            with self.assertRaises(GateConcurrencyError):
+                with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-secret"}):
+                    run_production_gate(
+                        self.tmp, "lock-audit", commit_sha="abc",
+                        target={"kind": "story", "id": "s1"},
+                        profile=PROFILE, factory_version="1.15.0",
+                        registry=self.registry,
+                        audit_policy=self.audit_policy,
+                        audit_path=self.audit_path,
+                    )
+        finally:
+            external_lock.release()
+        if self.audit_path.exists():
+            content = self.audit_path.read_text().strip()
+            if content:
+                events = [json.loads(line)["event"] for line in content.split("\n")]
+                self.assertNotIn("GateStarted", events)
+
+
 class RemediationWriteBackIntegrationTests(unittest.TestCase):
     """FAIL -> route -> apply_remediation -> story file updated."""
 

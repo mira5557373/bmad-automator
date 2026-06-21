@@ -6,6 +6,12 @@ and deliberately suppresses interactive permission prompts. See
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contributor guidance, and read this document
 in full before invoking the skill in any project you do not own.
 
+## Gate troubleshooting runbook
+
+For production-readiness gate operations (verdict interpretation, PARK/remediation
+flows, crash recovery, profile-drift re-gating, waiver SOP, and operator takeover),
+see [`docs/operations/gate-troubleshooting.md`](./docs/operations/gate-troubleshooting.md).
+
 ## Orchestrator posture
 
 The orchestrator launches child agent sessions with interactive permission prompts

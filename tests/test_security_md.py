@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SECURITY_MD = REPO_ROOT / "SECURITY.md"
 
 REQUIRED_H2_HEADINGS = [
+    "Gate troubleshooting runbook",
     "Orchestrator posture",
     "Trust boundary",
     "Forbidden actions",

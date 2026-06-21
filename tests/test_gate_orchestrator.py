@@ -437,6 +437,87 @@ class RouteGateVerdictTests(unittest.TestCase):
         self.assertEqual(parked[0]["story_key"], "E1-001")
 
 
+class BlockingConcernsTests(unittest.TestCase):
+    """§9.2: profile may mark CONCERNS categories as blocking."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _gate(self, categories: dict) -> dict:
+        return make_gate_file(
+            gate_id="gate-block",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "t", "version": 1, "hash": "x"},
+            factory_version="1.15.0",
+            categories=categories,
+            overall="CONCERNS",
+        )
+
+    def test_non_blocking_concerns_returns_done(self) -> None:
+        gate = self._gate({
+            "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+            "correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "r"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+            profile={"concerns_blocking": []},
+        )
+        self.assertEqual(result["action"], "done")
+
+    def test_blocking_concerns_returns_remediate(self) -> None:
+        gate = self._gate({
+            "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+            "correctness": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "r"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+            profile={"concerns_blocking": ["security"]},
+        )
+        self.assertEqual(result["action"], "remediate")
+        self.assertEqual(result["overall"], "CONCERNS")
+
+    def test_blocking_concerns_at_max_cycles_parks(self) -> None:
+        gate = self._gate({
+            "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate, story_key="E1-001",
+            remediation_cycle=3, max_cycles=3,
+            profile={"concerns_blocking": ["security"]},
+        )
+        self.assertEqual(result["action"], "park")
+        self.assertEqual(result["reason"], "exhausted")
+
+    def test_no_profile_concerns_not_blocked(self) -> None:
+        """Without profile param, CONCERNS is never blocked (backwards compat)."""
+        gate = self._gate({
+            "security": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+        )
+        self.assertEqual(result["action"], "done")
+
+    def test_blocking_unrelated_category_not_affected(self) -> None:
+        gate = self._gate({
+            "correctness": {"verdict": "CONCERNS", "required": {}, "actual": {}, "rationale": "r"},
+        })
+        result = route_gate_verdict(
+            self.project_root, gate, story_key="E1-001",
+            remediation_cycle=0, max_cycles=3,
+            profile={"concerns_blocking": ["security"]},
+        )
+        self.assertEqual(result["action"], "done")
+
+
 class FactoryVersionTests(unittest.TestCase):
     """Task 10: factory version resolution."""
 
