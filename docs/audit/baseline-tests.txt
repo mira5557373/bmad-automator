@@ -1,0 +1,2 @@
+Baseline test count captured 2026-06-21 (SASA+ start)
+Ran 3124 tests in 52.055s
