@@ -210,6 +210,85 @@ def generic_rule(
     return _status_based_rule("category", evidence)
 
 
+def test_quality_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: TEA test-review >= band; 0 flaky over burn-in; no hard-waits."""
+    status = worst_evidence_status(evidence)
+    rules = rule_for(profile, "test_quality")
+    max_flaky = int(rules.get("max_flaky", 0))
+    min_score = float(rules.get("min_score", 70))
+
+    flaky_count = int(_aggregate_metrics(evidence, "flaky_count", 0))
+    hard_wait_count = int(_aggregate_metrics(evidence, "hard_wait_count", 0))
+    test_review_score = _aggregate_metrics(evidence, "test_review_score", None)
+
+    actual = {
+        "flaky_count": flaky_count,
+        "hard_wait_count": hard_wait_count,
+        "test_review_score": test_review_score,
+        "status": status,
+    }
+    req = {"max_flaky": max_flaky, "min_score": min_score, "hard_wait_count": 0}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+
+    violations: list[str] = []
+    if flaky_count > max_flaky:
+        violations.append(f"flaky tests: {flaky_count} > {max_flaky}")
+    if hard_wait_count > 0:
+        violations.append(f"hard-wait(s): {hard_wait_count}")
+    if test_review_score is not None and float(test_review_score) < min_score:
+        violations.append(f"test-review score: {test_review_score} < {min_score}")
+    if status == "violation":
+        violations.append("collector reported violation")
+
+    if violations:
+        return _make_category_result("FAIL", req, actual, "; ".join(violations))
+    return _make_category_result("PASS", req, actual, "all test-quality checks passed")
+
+
+def mutation_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: mutation score >= threshold on changed code."""
+    status = worst_evidence_status(evidence)
+    rules = rule_for(profile, "mutation")
+    min_score = float(rules.get("min_score", 60))
+
+    mutation_score = float(_aggregate_metrics(evidence, "mutation_score", 0))
+    mutants_total = int(_aggregate_metrics(evidence, "mutants_total", 0))
+    mutants_killed = int(_aggregate_metrics(evidence, "mutants_killed", 0))
+    mutants_survived = int(_aggregate_metrics(evidence, "mutants_survived", 0))
+
+    actual = {
+        "mutation_score": mutation_score,
+        "mutants_total": mutants_total,
+        "mutants_killed": mutants_killed,
+        "mutants_survived": mutants_survived,
+        "status": status,
+    }
+    req = {"min_score": min_score}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if mutants_total == 0 and status != "ok":
+        return _make_category_result("FAIL", req, actual, "mutation tool did not produce results")
+    if mutation_score < min_score:
+        return _make_category_result(
+            "FAIL", req, actual,
+            f"mutation score {mutation_score:.1f}% < {min_score}%",
+        )
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "mutation testing passed")
+
+
 CategoryRuleFn = Callable[[list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 CATEGORY_RULES: dict[str, CategoryRuleFn] = {
@@ -217,6 +296,8 @@ CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "security": security_rule,
     "static": static_rule,
     "license": license_rule,
+    "test_quality": test_quality_rule,
+    "mutation": mutation_rule,
 }
 
 

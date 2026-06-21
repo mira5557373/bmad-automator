@@ -282,7 +282,7 @@ class SecurityCategoryRegistrationTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 39)
+        self.assertEqual(len(reg.all_collectors()), 46)
 
     def test_all_categories_present(self) -> None:
         from story_automator.core.collector_registry import CollectorRegistry
@@ -297,7 +297,7 @@ class SecurityCategoryRegistrationTests(unittest.TestCase):
     def test_core_collector_ids_frozenset(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS
 
-        self.assertEqual(len(CORE_COLLECTOR_IDS), 39)
+        self.assertEqual(len(CORE_COLLECTOR_IDS), 46)
         self.assertIn("semgrep-security", CORE_COLLECTOR_IDS)
         self.assertIn("license-check-license", CORE_COLLECTOR_IDS)
         self.assertIn("compliance-rules-compliance", CORE_COLLECTOR_IDS)

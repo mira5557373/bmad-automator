@@ -22,15 +22,17 @@ from .process import COLLECTORS as _PROCESS
 from .security import COLLECTORS as _SECURITY
 from .static import COLLECTORS as _STATIC
 from .supply_chain import COLLECTORS as _SUPPLY_CHAIN
+from .mutation import COLLECTORS as _MUTATION
+from .test_quality import COLLECTORS as _TEST_QUALITY
 from .traceability import COLLECTORS as _TRACEABILITY
 
 __all__ = ["register_core_collectors", "CORE_COLLECTOR_IDS"]
 
 _ALL = (
     _ACCESSIBILITY + _API_COMPAT + _COMPLIANCE + _CORRECTNESS + _DOCS
-    + _INVARIANTS + _LICENSE + _MIGRATIONS + _OBSERVABILITY
+    + _INVARIANTS + _LICENSE + _MIGRATIONS + _MUTATION + _OBSERVABILITY
     + _PERFORMANCE + _PROCESS + _SECURITY + _STATIC + _SUPPLY_CHAIN
-    + _TRACEABILITY
+    + _TEST_QUALITY + _TRACEABILITY
 )
 
 CORE_COLLECTOR_IDS: frozenset[str] = frozenset(c.collector_id for c in _ALL)
