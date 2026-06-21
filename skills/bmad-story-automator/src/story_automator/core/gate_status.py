@@ -11,9 +11,11 @@ Artifact layout:
 from __future__ import annotations
 
 import json
+import pathlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
+from .gate_audit import GateParkedAudit, emit_gate_audit
 from .gate_schema import canonical_json
 from .trust_boundary import assert_host_context
 from .utils import ensure_dir, iso_now, write_atomic
@@ -75,3 +77,91 @@ def clear_mitigation_debt(
         return True
     except FileNotFoundError:
         return False
+
+
+# ── Park / resume ───────────────────────────────────────────────────
+
+
+def park_story(
+    project_root: str | Path,
+    gate_id: str,
+    story_key: str,
+    reason: str,
+    overall_verdict: str,
+    *,
+    audit_policy: Mapping[str, Any] | None = None,
+    audit_path: pathlib.Path | None = None,
+) -> Path:
+    """Park a story due to exhaustion or unmitigated risk.
+
+    Stores to ``_bmad/gate/parked/<gate_id>.json``.  Optionally emits
+    a ``GateParkedAudit`` event when *audit_policy* and *audit_path*
+    are both provided.
+    """
+    assert_host_context("park_story")
+    root = Path(project_root)
+    parked_dir = root / "_bmad" / "gate" / "parked"
+    ensure_dir(parked_dir)
+    record: dict[str, Any] = {
+        "gate_id": gate_id,
+        "story_key": story_key,
+        "reason": reason,
+        "overall_verdict": overall_verdict,
+        "parked_at": iso_now(),
+    }
+    target = parked_dir / f"{gate_id}.json"
+    write_atomic(target, canonical_json(record) + "\n")
+    if audit_policy is not None and audit_path is not None:
+        emit_gate_audit(
+            audit_policy,
+            audit_path,
+            GateParkedAudit(
+                gate_id=gate_id,
+                story_key=story_key,
+                reason=reason,
+                overall_verdict=overall_verdict,
+            ),
+        )
+    return target
+
+
+def list_parked(
+    project_root: str | Path,
+    *,
+    state_filter: str | None = None,
+) -> list[dict[str, Any]]:
+    """List parked stories, optionally filtered by reason."""
+    parked_dir = Path(project_root) / "_bmad" / "gate" / "parked"
+    if not parked_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(parked_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if state_filter is not None and data.get("reason") != state_filter:
+            continue
+        records.append(data)
+    return records
+
+
+def resume_story(
+    project_root: str | Path,
+    gate_id: str,
+) -> dict[str, Any] | None:
+    """Resume a parked story: remove and return its record."""
+    assert_host_context("resume_story")
+    target = Path(project_root) / "_bmad" / "gate" / "parked" / f"{gate_id}.json"
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    target.unlink(missing_ok=True)
+    return data if isinstance(data, dict) else None
