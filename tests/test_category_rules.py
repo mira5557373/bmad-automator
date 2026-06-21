@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from story_automator.core.category_rules import (
+    correctness_rule,
     coverage_verdict,
     risk_to_requirements,
     worst_evidence_status,
@@ -118,6 +119,85 @@ class WorstEvidenceStatusTests(unittest.TestCase):
 
     def test_empty_list_fail_closed(self) -> None:
         self.assertEqual(worst_evidence_status([]), "error")
+
+
+class CorrectnessRuleTests(unittest.TestCase):
+    PROFILE = {
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": ["unit", "integration", "contract", "e2e"]},
+            "P1": {"coverage_pct": 90, "levels": ["unit", "integration", "api"]},
+            "P2": {"coverage_pct": 50, "levels": ["unit"]},
+            "P3": {"coverage_pct": 20, "levels": ["smoke"]},
+        },
+    }
+    REQUIRED_P1 = {"coverage_pct": 90, "levels": ["unit", "integration", "api"], "priority": "P1"}
+
+    def test_all_green_above_threshold_passes(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_coverage_below_target_above_80_concerns_for_p1(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 85, "regressions": 0},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "CONCERNS")
+
+    def test_coverage_below_80_fails_for_p1(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 70, "regressions": 0},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_regressions_cause_fail(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 2},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_error_status_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="error", findings=["crash"],
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_timeout_status_fail_closed(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="timeout", findings=["TIMEOUT: pytest exceeded 1800s"],
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_no_coverage_metric_uses_zero(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_result_has_required_and_actual(self) -> None:
+        evidence = [make_evidence_record(
+            collector="runner", tool="pytest", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        result = correctness_rule(evidence, self.PROFILE, self.REQUIRED_P1)
+        self.assertIn("required", result)
+        self.assertIn("actual", result)
+        self.assertIn("rationale", result)
+        self.assertEqual(result["actual"]["coverage_pct"], 95)
 
 
 if __name__ == "__main__":

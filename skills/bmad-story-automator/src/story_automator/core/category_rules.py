@@ -57,3 +57,50 @@ def worst_evidence_status(records: list[dict[str, Any]]) -> str:
             worst_sev = sev
             worst = status
     return worst
+
+
+def _aggregate_metrics(
+    evidence: list[dict[str, Any]], key: str, default: Any = 0,
+) -> Any:
+    """Extract a metric from the first evidence record that has it."""
+    for record in evidence:
+        metrics = record.get("metrics") or {}
+        if key in metrics:
+            return metrics[key]
+    return default
+
+
+def _make_category_result(
+    verdict: str, required: dict[str, Any], actual: dict[str, Any], rationale: str,
+) -> dict[str, Any]:
+    return {"verdict": verdict, "required": required, "actual": actual, "rationale": rationale}
+
+
+def correctness_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: all tiers green, 0 regressions, coverage >= risk-required."""
+    status = worst_evidence_status(evidence)
+    actual_coverage = float(_aggregate_metrics(evidence, "coverage_pct", 0))
+    regressions = int(_aggregate_metrics(evidence, "regressions", 0))
+    target = int(required.get("coverage_pct", 0))
+    priority = str(required.get("priority", "P1"))
+
+    actual = {"coverage_pct": actual_coverage, "regressions": regressions, "status": status}
+    req = {"coverage_pct": target, "regressions": 0}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "test failures detected")
+    if regressions > 0:
+        return _make_category_result("FAIL", req, actual, f"{regressions} regression(s)")
+
+    cov_verdict = coverage_verdict(actual_coverage, target, priority)
+    if cov_verdict != "PASS":
+        rationale = f"coverage {actual_coverage}% vs required {target}%"
+        return _make_category_result(cov_verdict, req, actual, rationale)
+
+    return _make_category_result("PASS", req, actual, "all checks passed")
