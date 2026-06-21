@@ -10,6 +10,7 @@ bounds prevent runaway calibration.
 """
 from __future__ import annotations
 
+import copy as _copy
 import dataclasses
 from typing import Any
 
@@ -118,3 +119,39 @@ def propose_all_calibrations(
     proposals.extend(propose_timeout_calibrations(metrics, profile))
     proposals.extend(propose_burnin_calibrations(metrics, profile))
     return proposals
+
+
+def apply_calibrations(
+    profile: dict[str, Any],
+    proposals: list[CalibrationProposal],
+    *,
+    auto_apply_breaking: bool = False,
+) -> tuple[dict[str, Any], list[CalibrationProposal], list[CalibrationProposal]]:
+    """Apply calibration proposals to a profile copy.
+
+    Feature-type proposals auto-apply. Breaking-type proposals are
+    deferred unless auto_apply_breaking is True. Returns
+    (updated_profile, applied_proposals, deferred_proposals).
+    """
+    result = _copy.deepcopy(profile)
+    applied: list[CalibrationProposal] = []
+    deferred: list[CalibrationProposal] = []
+
+    for proposal in proposals:
+        if proposal.change_type == "breaking" and not auto_apply_breaking:
+            deferred.append(proposal)
+            continue
+        _set_nested(result, proposal.field_path, proposal.new_value)
+        applied.append(proposal)
+
+    return result, applied, deferred
+
+
+def _set_nested(obj: dict[str, Any], path: str, value: Any) -> None:
+    """Set a value at a dotted path in a nested dict, creating intermediates."""
+    parts = path.split(".")
+    for part in parts[:-1]:
+        if part not in obj or not isinstance(obj[part], dict):
+            obj[part] = {}
+        obj = obj[part]
+    obj[parts[-1]] = value

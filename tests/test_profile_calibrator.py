@@ -3,6 +3,7 @@ import unittest
 
 from story_automator.core.profile_calibrator import (
     CalibrationProposal,
+    apply_calibrations,
     propose_all_calibrations,
     propose_burnin_calibrations,
     propose_timeout_calibrations,
@@ -155,6 +156,73 @@ class ProposeAllCalibrationsTests(unittest.TestCase):
         }
         proposals = propose_all_calibrations(metrics, _BASE_PROFILE)
         self.assertEqual(proposals, [])
+
+
+class ApplyCalibrationsTests(unittest.TestCase):
+    def test_apply_feature_change(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        proposal = CalibrationProposal(
+            category="security",
+            field_path="timeouts.security",
+            old_value=300, new_value=450,
+            rationale="timeout rate", confidence=0.85,
+            change_type="feature",
+        )
+        updated, applied, deferred = apply_calibrations(profile, [proposal])
+        self.assertEqual(updated["timeouts"]["security"], 450)
+        self.assertEqual(len(applied), 1)
+        self.assertEqual(len(deferred), 0)
+
+    def test_defer_breaking_change_by_default(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        profile["rules"]["test_quality"] = {"burn_in_runs": 5}
+        proposal = CalibrationProposal(
+            category="correctness",
+            field_path="rules.test_quality.burn_in_runs",
+            old_value=5, new_value=7,
+            rationale="flaky", confidence=0.8,
+            change_type="breaking",
+        )
+        updated, applied, deferred = apply_calibrations(profile, [proposal])
+        self.assertEqual(updated["rules"]["test_quality"]["burn_in_runs"], 5)
+        self.assertEqual(len(applied), 0)
+        self.assertEqual(len(deferred), 1)
+
+    def test_apply_breaking_when_allowed(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        profile["rules"]["test_quality"] = {"burn_in_runs": 5}
+        proposal = CalibrationProposal(
+            category="correctness",
+            field_path="rules.test_quality.burn_in_runs",
+            old_value=5, new_value=7,
+            rationale="flaky", confidence=0.8,
+            change_type="breaking",
+        )
+        updated, applied, deferred = apply_calibrations(
+            profile, [proposal], auto_apply_breaking=True,
+        )
+        self.assertEqual(updated["rules"]["test_quality"]["burn_in_runs"], 7)
+        self.assertEqual(len(applied), 1)
+
+    def test_original_not_mutated(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        proposal = CalibrationProposal(
+            category="security",
+            field_path="timeouts.security",
+            old_value=300, new_value=450,
+            rationale="timeout", confidence=0.85,
+            change_type="feature",
+        )
+        original = copy.deepcopy(profile)
+        apply_calibrations(profile, [proposal])
+        self.assertEqual(profile, original)
+
+    def test_empty_proposals(self) -> None:
+        profile = copy.deepcopy(_BASE_PROFILE)
+        updated, applied, deferred = apply_calibrations(profile, [])
+        self.assertEqual(updated, profile)
+        self.assertEqual(applied, [])
+        self.assertEqual(deferred, [])
 
 
 if __name__ == "__main__":
