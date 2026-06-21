@@ -84,8 +84,8 @@ Tracking artifact for the bmad-auto pattern ports. Each phase is its own milesto
 |---|---|---|
 | 0 | Audit-floor regression net + this frozen-surface doc | done (`phase-0-audit-floor`) |
 | 1 | VerifyOutcome + git_utils + baseline-commit lie detector + collector try/except wrapping | done (`phase-1-defensive-primitives`) |
-| 2 | result.json schema + worktree_recovery + fail_closed flag + api_version stamp | in progress |
-| 3 | Pre-gate verifier module wiring 6 inline checks (feature-flagged off by default) | after 2 |
+| 2 | result.json schema + worktree_recovery + fail_closed flag + api_version stamp | done (`phase-2-result-schema-and-policy`) |
+| 3 | Pre-gate verifier module wiring 6 inline checks (feature-flagged off by default) | next |
 | 4 | TUI watcher + optional Textual extras group | deferred — open question on pyproject location |
 | 5 | CLIProfile dataclass + stop_hooks dispatch | deferred — open question on Codex/Gemini timing |
 | 6 | Action enum + plugin settings overlay | deferred — pairs with 5 |

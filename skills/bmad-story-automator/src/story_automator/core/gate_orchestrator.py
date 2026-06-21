@@ -16,6 +16,7 @@ from .evidence_io import (
     GateMarkerCorruptedError,
     can_reuse_gate_file,
     clear_gate_marker,
+    load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
     write_gate_marker,
@@ -296,6 +297,30 @@ def _run_collectors(
     )
 
 
+def _collect_error_evidence(
+    project_root: str | Path, gate_id: str,
+) -> list[str]:
+    """Return ``"<category>/<collector>"`` labels for every error-status
+    evidence record persisted under ``gate_id``. Used by the
+    ``fail_closed`` policy to decide whether to override the verdict to
+    FAIL. Returns ``[]`` if the evidence dir is missing — fail_closed
+    cannot meaningfully fire without persisted evidence.
+    """
+    try:
+        bundle = load_evidence_bundle(project_root, gate_id)
+    except FileNotFoundError:
+        return []
+    labels: list[str] = []
+    for record in bundle:
+        if not isinstance(record, dict):
+            continue
+        if record.get("status") == "error":
+            cat = record.get("category", "?")
+            collector = record.get("collector", "?")
+            labels.append(f"{cat}/{collector}")
+    return labels
+
+
 def run_production_gate(
     project_root: str | Path,
     gate_id: str,
@@ -312,6 +337,7 @@ def run_production_gate(
     audit_path: Path | None = None,
     enable_lie_detector: bool = False,
     baseline_sha: str | None = None,
+    fail_closed: bool = False,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -328,6 +354,18 @@ def run_production_gate(
     ``baseline_sha`` is the commit the session started from; when
     provided, the lie-detector distinguishes "no commit was made" from
     "branched somewhere unexpected" (see :func:`detect_baseline_drift`).
+
+    ``fail_closed`` (Phase 2, default ``False``) — when True, any
+    evidence record with ``status="error"`` forces ``overall=FAIL``
+    regardless of the verdict_engine's decision. The override is
+    auditable: the returned gate file gains
+    ``fail_closed_triggered=True`` and a sorted
+    ``fail_closed_categories`` list. ``status="error"`` is what the
+    collector_runner stamps on a crashed collector (Phase 1) and what
+    timeouts produce — both situations where fail-open might
+    let a real bug ship. ``False`` (default) preserves prior behavior:
+    error-evidence is still surfaced in categories but the
+    verdict_engine decides whether it sinks the gate.
     """
     assert_host_context("run_production_gate")
 
@@ -379,6 +417,17 @@ def run_production_gate(
         )
     finally:
         clear_gate_marker(project_root)
+
+    if fail_closed:
+        error_labels = _collect_error_evidence(project_root, gate_id)
+        if error_labels:
+            # Audit trail: we always emit the markers when fail_closed
+            # is on AND error evidence exists, even if the verdict
+            # engine had already sunk the gate to FAIL — the operator
+            # needs to see that fail_closed was a factor.
+            gate_file["fail_closed_triggered"] = True
+            gate_file["fail_closed_categories"] = sorted(set(error_labels))
+            gate_file["overall"] = "FAIL"
 
     return gate_file
 
