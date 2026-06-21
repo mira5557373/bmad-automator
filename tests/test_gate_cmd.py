@@ -150,6 +150,55 @@ class GateDispatchTests(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
+class GateListActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def _create_gate(self, gate_id: str, target_id: str, overall: str) -> None:
+        gate = make_gate_file(
+            gate_id=gate_id,
+            target={"kind": "story", "id": target_id},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={"c": {"verdict": overall, "required": {}, "actual": {}, "rationale": "ok"}},
+            overall=overall,
+        )
+        persist_gate_file(self.tmp, gate)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_list_all(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        self._create_gate("g1", "s1", "PASS")
+        self._create_gate("g2", "s2", "FAIL")
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_dispatch(["list"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(len(output["verdicts"]), 2)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_list_filter_by_verdict(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        self._create_gate("g1", "s1", "PASS")
+        self._create_gate("g2", "s2", "FAIL")
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            gate_dispatch(["list", "--verdict=FAIL"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(len(output["verdicts"]), 1)
+        self.assertEqual(output["verdicts"][0]["overall"], "FAIL")
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_list_filter_by_target(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        self._create_gate("g1", "s1", "PASS")
+        self._create_gate("g2", "s2", "PASS")
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            gate_dispatch(["list", "--target=s1"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(len(output["verdicts"]), 1)
+
+
 class GateDoctorActionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()

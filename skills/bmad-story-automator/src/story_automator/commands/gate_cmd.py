@@ -9,7 +9,10 @@ import sys
 from typing import Any
 
 from story_automator.core.evidence_io import read_gate_marker
-from story_automator.core.gate_ops import gate_doctor as _gate_doctor_fn
+from story_automator.core.gate_ops import (
+    gate_doctor as _gate_doctor_fn,
+    list_verdicts as _list_verdicts_fn,
+)
 from story_automator.core.gate_status import (
     invalidate_gates_for_target,
     list_parked,
@@ -93,6 +96,24 @@ def gate_invalidate_action(args: list[str]) -> int:
     return 0
 
 
+def gate_list_action(args: list[str]) -> int:
+    project_root = _project_root()
+    target_filter = None
+    verdict_filter = None
+    for arg in args:
+        if arg.startswith("--target="):
+            target_filter = arg.split("=", 1)[1]
+        elif arg.startswith("--verdict="):
+            verdict_filter = arg.split("=", 1)[1]
+    verdicts = _list_verdicts_fn(
+        project_root,
+        target_filter=target_filter,
+        verdict_filter=verdict_filter,
+    )
+    print_json({"ok": True, "verdicts": verdicts, "count": len(verdicts)})
+    return 0
+
+
 def gate_doctor_action(args: list[str]) -> int:
     project_root = _project_root()
     result = _gate_doctor_fn(project_root)
@@ -110,6 +131,7 @@ def gate_dispatch(args: list[str]) -> int:
         "resume": gate_resume_action,
         "invalidate": gate_invalidate_action,
         "doctor": gate_doctor_action,
+        "list": gate_list_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -126,3 +148,4 @@ def _gate_usage() -> None:
     print("  gate resume <gate_id>", file=sys.stderr)
     print("  gate invalidate <story|epic>", file=sys.stderr)
     print("  gate doctor", file=sys.stderr)
+    print("  gate list [--target=<id>] [--verdict=<PASS|FAIL|...>]", file=sys.stderr)
