@@ -8,9 +8,14 @@ Evaluates whether a story is ready to enter ready-for-dev:
 from __future__ import annotations
 
 import fnmatch
+import json
+from pathlib import Path
 from typing import Any
 
+from .gate_schema import canonical_json
 from .product_profile import required_for_priority
+from .trust_boundary import assert_host_context
+from .utils import ensure_dir, iso_now, write_atomic
 from .risk_profile import (
     aggregate_risk_priority,
     has_unmitigated_risk_9,
@@ -102,3 +107,42 @@ def check_readiness(
         "requirements": requirements,
         "reason": f"ready for dev at priority {priority}",
     }
+
+
+_READINESS_DIR = "readiness"
+
+
+def _readiness_dir(project_root: str | Path) -> Path:
+    return Path(project_root) / "_bmad" / "gate" / _READINESS_DIR
+
+
+def persist_readiness_result(
+    project_root: str | Path,
+    story_id: str,
+    result: dict[str, Any],
+) -> Path:
+    assert_host_context("persist_readiness_result")
+    readiness_d = _readiness_dir(project_root)
+    ensure_dir(readiness_d)
+    record: dict[str, Any] = {
+        "story_id": story_id,
+        "checked_at": iso_now(),
+    }
+    record.update(result)
+    target = readiness_d / f"{story_id}.json"
+    write_atomic(target, canonical_json(record) + "\n")
+    return target
+
+
+def load_readiness_result(
+    project_root: str | Path,
+    story_id: str,
+) -> dict[str, Any] | None:
+    path = _readiness_dir(project_root) / f"{story_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError):
+        return None

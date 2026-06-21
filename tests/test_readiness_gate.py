@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 
 from story_automator.core.readiness_gate import (
     READINESS_VERDICTS,
     check_readiness,
     format_blocker_summary,
+    load_readiness_result,
+    persist_readiness_result,
     resolve_story_blockers,
 )
 from story_automator.core.risk_profile import make_risk_entry
@@ -168,6 +172,47 @@ class CheckReadinessTests(unittest.TestCase):
             risk_entries=entries, thresholds=custom,
         )
         self.assertEqual(result["priority"], "P1")
+
+
+class PersistReadinessResultTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+        }
+
+    def test_persist_creates_file(self) -> None:
+        entries = [make_risk_entry("TECH", 2, 2)]
+        result = check_readiness("E1-001", profile=self.profile, risk_entries=entries)
+        path = persist_readiness_result(self.tmp, "E1-001", result)
+        self.assertTrue(path.is_file())
+        data = json.loads(path.read_text())
+        self.assertEqual(data["story_id"], "E1-001")
+        self.assertEqual(data["verdict"], "READY")
+
+    def test_persist_path_under_readiness(self) -> None:
+        result = check_readiness("E1-001", profile=self.profile)
+        path = persist_readiness_result(self.tmp, "E1-001", result)
+        self.assertIn("_bmad/gate/readiness", path.as_posix())
+
+    def test_load_returns_persisted(self) -> None:
+        entries = [make_risk_entry("SEC", 3, 2)]
+        result = check_readiness("E1-001", profile=self.profile, risk_entries=entries)
+        persist_readiness_result(self.tmp, "E1-001", result)
+        loaded = load_readiness_result(self.tmp, "E1-001")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["verdict"], "READY")
+
+    def test_load_missing_returns_none(self) -> None:
+        self.assertIsNone(load_readiness_result(self.tmp, "no-such"))
 
 
 if __name__ == "__main__":
