@@ -15,6 +15,7 @@ from story_automator.core.seed_template import (
     load_template_manifest,
     resolve_bundle_dir,
     resolve_template_ref,
+    seed_template_for_profile,
     validate_bundle,
     validate_manifest,
     version_satisfies,
@@ -403,6 +404,34 @@ class MsmeErpBundleIntegrityTests(unittest.TestCase):
     def test_bundle_dir_resolves(self):
         bundle_dir = resolve_bundle_dir("msme-erp-golden-template")
         self.assertTrue(bundle_dir.is_dir())
+
+
+class SeedTemplateForProfileTests(unittest.TestCase):
+    def test_profile_with_ref(self):
+        from story_automator.core.product_profile import load_bundled_profile
+
+        profile = load_bundled_profile("msme-erp")
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        self.assertIsNotNone(manifest)
+        self.assertIsNotNone(bundle_dir)
+        self.assertEqual(manifest["template_id"], "msme-erp-golden-template")
+
+    def test_profile_empty_ref(self):
+        profile = {"seed_template": {"ref": ""}}
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        self.assertIsNone(manifest)
+        self.assertIsNone(bundle_dir)
+
+    def test_profile_no_seed_template(self):
+        profile = {}
+        manifest, bundle_dir = seed_template_for_profile(profile)
+        self.assertIsNone(manifest)
+        self.assertIsNone(bundle_dir)
+
+    def test_profile_invalid_ref(self):
+        profile = {"seed_template": {"ref": "../evil@1.0"}}
+        with self.assertRaises(SeedTemplateError):
+            seed_template_for_profile(profile)
 
 
 if __name__ == "__main__":

@@ -204,3 +204,28 @@ def validate_bundle(bundle_dir: Path, manifest: dict) -> list[str]:
             if not src_path.is_file():
                 missing.append(entry["src"])
     return missing
+
+
+def seed_template_for_profile(
+    profile: dict, project_root: str | None = None
+) -> tuple[dict | None, Path | None]:
+    """Read ``profile.seed_template.ref`` and load the template bundle.
+
+    Returns ``(manifest, bundle_dir)`` or ``(None, None)`` if no seed
+    template is configured.
+    """
+    seed_cfg = profile.get("seed_template")
+    if not seed_cfg or not isinstance(seed_cfg, dict):
+        return (None, None)
+
+    ref = seed_cfg.get("ref", "").strip()
+    if not ref:
+        return (None, None)
+
+    manifest = load_template_manifest(ref, project_root)
+    if manifest is None:
+        return (None, None)
+
+    template_id, _ = resolve_template_ref(ref)
+    bundle_dir = resolve_bundle_dir(template_id, project_root)
+    return (manifest, bundle_dir)
