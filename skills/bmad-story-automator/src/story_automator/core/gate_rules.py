@@ -214,3 +214,64 @@ def _parse_iso(value: str) -> datetime:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     return datetime.fromisoformat(text)
+
+
+# ===========================================================================
+# M26: TEA priority threshold + gate eligibility
+# ===========================================================================
+
+PRIORITY_THRESHOLDS: dict[str, tuple[int, int]] = {
+    "P0": (100, 100),  # required_pct, fail_floor
+    "P1": (95, 90),
+    "P2": (85, 80),
+    "P3": (70, 0),
+}
+
+COLLECTION_STATUSES: frozenset[str] = frozenset(
+    {"COLLECTED", "MISSING", "ERROR", "TIMEOUT"}
+)
+
+
+def evaluate_priority_threshold(coverage_pct: float, priority: str) -> str:
+    """Return PASS/CONCERNS/FAIL for the given coverage and priority."""
+    if priority not in PRIORITY_THRESHOLDS:
+        raise ValueError(
+            f"unknown priority {priority!r}; expected one of "
+            f"{sorted(PRIORITY_THRESHOLDS)}"
+        )
+    if not isinstance(coverage_pct, (int, float)) or isinstance(coverage_pct, bool):
+        raise TypeError(f"coverage_pct must be numeric, got {type(coverage_pct).__name__}")
+    if coverage_pct < 0 or coverage_pct > 100:
+        raise ValueError(f"coverage_pct out of range [0, 100]: {coverage_pct}")
+    required_pct, fail_floor = PRIORITY_THRESHOLDS[priority]
+    if coverage_pct >= required_pct:
+        return "PASS"
+    if coverage_pct >= fail_floor:
+        return "CONCERNS"
+    return "FAIL"
+
+
+def gate_eligible(
+    category_collection_status: dict[str, str],
+    required_categories: set[str] | frozenset[str],
+) -> tuple[bool, str]:
+    """Fail-closed: every required category must report COLLECTED."""
+    if not isinstance(category_collection_status, dict):
+        raise TypeError("category_collection_status must be a dict")
+    if not isinstance(required_categories, (set, frozenset)):
+        raise TypeError("required_categories must be a set or frozenset")
+    missing = []
+    not_collected = []
+    for cat in sorted(required_categories):
+        status = category_collection_status.get(cat)
+        if status is None:
+            missing.append(cat)
+        elif status not in COLLECTION_STATUSES:
+            return False, f"unknown collection status {status!r} for {cat}"
+        elif status != "COLLECTED":
+            not_collected.append((cat, status))
+    if missing:
+        return False, f"missing categories: {missing}"
+    if not_collected:
+        return False, f"non-COLLECTED categories: {not_collected}"
+    return True, ""

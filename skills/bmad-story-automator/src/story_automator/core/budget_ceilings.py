@@ -25,7 +25,7 @@ import json
 import math
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .telemetry_events import parse_event
@@ -398,3 +398,63 @@ def bypass_allowed() -> bool:
         return bool(stdin.isatty())
     except (ValueError, OSError):
         return False
+
+
+# ===========================================================================
+# M59: Phase-shaped budget classification helpers
+# ===========================================================================
+
+def classify_overspend(
+    *,
+    spent: float,
+    ceiling: float,
+    phase: str,
+    persona: str = "",
+) -> str:
+    """Classify overspend as 'within' | 'retry-cheap' | 'pause' per phase rules.
+
+    - dev-running overspend -> retry-cheap (demote to smaller model)
+    - review-verify overspend -> pause (verification overspend is a smell)
+    - others -> generic overspend classification
+    """
+    if not isinstance(spent, (int, float)) or isinstance(spent, bool):
+        raise TypeError("spent must be numeric")
+    if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool):
+        raise TypeError("ceiling must be numeric")
+    if spent <= ceiling:
+        return "within"
+    if phase == "dev-running":
+        return "retry-cheap"
+    if phase == "review-verify":
+        return "pause"
+    return "pause"  # default for unknown phases
+
+
+# M59 BudgetLedger dataclass (from compat-m59 milestone)
+
+from dataclasses import dataclass, field
+from typing import Mapping
+
+
+@dataclass
+class BudgetLedger:
+    """Mutable, in-memory tally of spend by string key.
+
+    The key shape is up to the caller — phase_budget uses
+    ``"<phase>::<persona>"``. ``record`` is additive; there is no
+    decrement on purpose (refunds would mask leaks).
+    """
+
+    spend: dict[str, int] = field(default_factory=dict)
+
+    def record(self, key: str, amount: int) -> int:
+        if amount < 0:
+            raise ValueError(f"BudgetLedger.record amount must be >= 0, got {amount}")
+        self.spend[key] = self.spend.get(key, 0) + int(amount)
+        return self.spend[key]
+
+    def total(self, key: str) -> int:
+        return int(self.spend.get(key, 0))
+
+    def snapshot(self) -> Mapping[str, int]:
+        return dict(self.spend)

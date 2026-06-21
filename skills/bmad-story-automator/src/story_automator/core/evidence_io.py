@@ -331,3 +331,21 @@ def clear_gate_marker(project_root: str | Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+# ===========================================================================
+# M54: extensions ported from compat-m54 tag
+# ===========================================================================
+
+def compute_evidence_bundle_merkle_root(records: list[dict[str, Any]]) -> str:
+    """M54: Merkle root (64-hex) over the evidence bundle.
+
+    Thin alias for ``story_automator.core.innovation.ledger.compute_merkle_root``
+    kept here so callers that already import from ``evidence_io`` can opt
+    into Merkle proofs without learning the innovation namespace.
+    """
+    # Imported lazily so evidence_io stays the lower-level module.
+    from .innovation.ledger import compute_merkle_root
+
+    return compute_merkle_root(records)
+
+

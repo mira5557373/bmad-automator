@@ -243,3 +243,70 @@ def _validate_int_range(
             f"risk entry {key} must be {valid_range.start}–"
             f"{valid_range.stop - 1}; got {val}"
         )
+
+# ===========================================================================
+# M37: extensions ported from compat-m37 tag
+# ===========================================================================
+
+ACTION_BANDS: tuple[str, str, str, str] = (
+    "DOCUMENT",
+    "MONITOR",
+    "MITIGATE",
+    "BLOCK",
+)
+
+_BLOCKING_BAND = "BLOCK"
+
+_VALID_BANDS = frozenset(ACTION_BANDS)
+
+def risk_score_to_action(score: Any) -> str:
+    """Map an integer risk score in ``[1, 9]`` to its action band.
+
+    Boolean inputs are rejected explicitly even though ``bool`` is an
+    ``int`` subclass in Python — silently mapping ``True`` to score ``1``
+    would mask upstream bugs.
+
+    Raises:
+        RiskProfileError: if ``score`` is not a real ``int``, or if it is
+        outside ``[1, 9]``.
+    """
+    if isinstance(score, bool) or not isinstance(score, int):
+        raise RiskProfileError(
+            f"risk score must be an int in [1, 9]; got {type(score).__name__}"
+        )
+    if score < 1 or score > 9:
+        raise RiskProfileError(
+            f"risk score must be in [1, 9]; got {score}"
+        )
+    if score <= 3:
+        return "DOCUMENT"
+    if score <= 5:
+        return "MONITOR"
+    if score <= 8:
+        return "MITIGATE"
+    return _BLOCKING_BAND
+
+
+
+def action_blocks_release(action: Any) -> bool:
+    """Return ``True`` iff ``action`` hard-blocks the release.
+
+    Only the exact literal ``"BLOCK"`` is release-blocking. ``DOCUMENT``,
+    ``MONITOR``, and ``MITIGATE`` are advisory bands that do not, on their
+    own, prevent shipping.
+
+    Raises:
+        RiskProfileError: if ``action`` is not a string, or is not one of
+        the four bands in :data:`ACTION_BANDS`. Case and whitespace are
+        significant — callers must canonicalize before calling.
+    """
+    if not isinstance(action, str):
+        raise RiskProfileError(
+            f"action band must be a string; got {type(action).__name__}"
+        )
+    if action not in _VALID_BANDS:
+        raise RiskProfileError(
+            f"unknown action band: {action!r}; expected one of {ACTION_BANDS}"
+        )
+    return action == _BLOCKING_BAND
+

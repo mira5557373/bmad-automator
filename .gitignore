@@ -56,3 +56,4 @@ htmlcov/
 .claude/sw-final-result.json
 .claude/sw-monitor-and-test.sh
 .claude/sw-monitor-stdout.log
+.claude/worktrees/

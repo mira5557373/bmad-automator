@@ -251,3 +251,94 @@ def preference_escalations(payload: dict[str, Any] | None) -> list[dict[str, str
         e for e in payload.get("escalations", [])
         if isinstance(e, dict) and e.get("severity") == "PREFERENCE"
     ]
+
+
+# ===========================================================================
+# M40: bmad-auto result.json wire format (alongside v1)
+# ===========================================================================
+
+BAUTO_API_VERSION = 1
+
+_BAUTO_REQUIRED_KEYS = {"api_version", "claims", "spec_file", "task_id", "phase"}
+_BAUTO_OPTIONAL_KEYS = {"escalations"}
+_BAUTO_ALLOWED_KEYS = _BAUTO_REQUIRED_KEYS | _BAUTO_OPTIONAL_KEYS
+
+
+def emit_bauto_result(
+    *,
+    commit_sha: str,
+    files_changed: list[str],
+    summary: str,
+    spec_file: str = "",
+    escalations: list[dict[str, str]] | None = None,
+    task_id: str = "",
+    phase: str = "",
+) -> dict[str, Any]:
+    """Build a bmad-auto-shaped result.json payload."""
+    if escalations is None:
+        escalations = []
+    payload: dict[str, Any] = {
+        "api_version": BAUTO_API_VERSION,
+        "claims": {
+            "commit_sha": commit_sha,
+            "files_changed": list(files_changed),
+            "summary": summary,
+        },
+        "escalations": list(escalations),
+        "spec_file": spec_file,
+        "task_id": task_id,
+        "phase": phase,
+    }
+    validate_bauto_result(payload)
+    return payload
+
+
+def validate_bauto_result(payload: Any) -> None:
+    """Validate a bauto-shaped result.json payload."""
+    if not isinstance(payload, dict):
+        raise ResultJsonError(f"bauto result.json must be a JSON object, got {type(payload).__name__}")
+    keys = set(payload.keys())
+    missing = _BAUTO_REQUIRED_KEYS - keys
+    if missing:
+        raise ResultJsonError(f"bauto result.json missing required keys: {sorted(missing)}")
+    extra = keys - _BAUTO_ALLOWED_KEYS
+    if extra:
+        raise ResultJsonError(f"bauto result.json has unknown keys: {sorted(extra)}")
+    if payload["api_version"] != BAUTO_API_VERSION:
+        raise ResultJsonApiVersionError(
+            f"bauto api_version mismatch: file has {payload['api_version']}, "
+            f"reader expects {BAUTO_API_VERSION}"
+        )
+    if not isinstance(payload["task_id"], str):
+        raise ResultJsonError("task_id must be str")
+    if not isinstance(payload["phase"], str):
+        raise ResultJsonError("phase must be str")
+    _validate_claims(payload["claims"])
+    _validate_escalations(payload.get("escalations", []))
+
+
+def write_bauto_result(path: str | Path, payload: dict[str, Any]) -> Path:
+    """Atomically write a bauto-shaped payload."""
+    validate_bauto_result(payload)
+    import json as _json
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = _json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    write_atomic_text(target, text)
+    return target
+
+
+def read_bauto_result(path: str | Path) -> dict[str, Any]:
+    """Read + validate a bauto-shaped result.json."""
+    import json as _json
+    raw = Path(path).read_text(encoding="utf-8")
+    payload = _json.loads(raw)
+    validate_bauto_result(payload)
+    return payload
+
+
+def is_bauto_result(payload: dict[str, Any]) -> bool:
+    """Detect bauto shape via task_id+phase presence."""
+    if not isinstance(payload, dict):
+        return False
+    return "task_id" in payload and "phase" in payload

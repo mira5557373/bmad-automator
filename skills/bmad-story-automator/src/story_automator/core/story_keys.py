@@ -262,3 +262,61 @@ def _epic_file_exists(project_root: str, epic: str) -> bool:
         if (base / f"epic-{epic}.md").is_file() or next(base.glob(f"epic-{epic}-*.md"), None) is not None:
             return True
     return False
+
+# ===========================================================================
+# M27: extensions ported from compat-m27 tag
+# ===========================================================================
+
+EPIC_KEY_RE = re.compile(r"^epic-(\d+)$")
+
+RETRO_KEY_RE = re.compile(r"^epic-(\d+)-retrospective$")
+
+def classify_key(key: str) -> str:
+    """Classify ``key`` as one of ``"story"``, ``"epic"``, ``"retrospective"``, or ``"unknown"``.
+
+    Retrospective keys (``epic-N-retrospective``) take precedence over plain
+    epic keys (``epic-N``). Story classification accepts any value that matches
+    a story-shaped pattern (e.g. ``1.2``, ``1-2``, ``1-2-some-slug``,
+    ``multi-leg.3``); filesystem state is not consulted, since classification
+    is purely syntactic.
+    """
+
+    if not isinstance(key, str) or not key:
+        return "unknown"
+    if RETRO_KEY_RE.fullmatch(key):
+        return "retrospective"
+    if EPIC_KEY_RE.fullmatch(key):
+        return "epic"
+    if _matches_story_shape(key):
+        return "story"
+    return "unknown"
+
+
+
+def epic_number(key: str) -> int | None:
+    """Return the integer epic number embedded in ``key`` if it is an epic or
+    retrospective key, otherwise ``None``."""
+
+    if not isinstance(key, str) or not key:
+        return None
+    match = RETRO_KEY_RE.fullmatch(key) or EPIC_KEY_RE.fullmatch(key)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+
+def _matches_story_shape(value: str) -> bool:
+    return any(
+        re.fullmatch(pattern, value)
+        for pattern in (
+            r"\d+\.\d+",
+            r"\d+-\d+",
+            r"\d+-\d+-.+",
+            r"[A-Za-z][\w-]*\.\d+",
+            r"[A-Za-z][\w-]*-\d+",
+            r"[A-Za-z][\w-]*-\d+-.+",
+        )
+    )
+
+

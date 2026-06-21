@@ -54,3 +54,34 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ===========================================================================
+# M51 (partial): 29-criterion ADR rubric — additive constants only
+# Full M51 implementation deferred; this exposes the closed criterion set
+# so downstream collectors and adjudicator can begin honoring it.
+# ===========================================================================
+
+ADR_CRITERIA: tuple[str, ...] = (
+    "title-present", "status-present", "status-canonical",
+    "context-present", "context-substantive", "decision-present",
+    "decision-explicit", "consequences-present", "consequences-substantive",
+    "alternatives-considered", "alternatives-rejected-with-reason",
+    "tradeoffs-named", "deciders-named", "date-present", "date-iso8601",
+    "tags-present", "supersedes-or-superseded-by", "related-adrs-linked",
+    "evidence-cited", "metrics-defined", "review-triggers", "rollback-plan",
+    "telemetry-required", "approval-recorded", "risk-acknowledged",
+    "non-goals-named", "scope-bounded", "owner-named", "renewal-cadence",
+)
+
+assert len(ADR_CRITERIA) == 29
+
+OPTIONAL_CRITERIA: frozenset[str] = frozenset({
+    "supersedes-or-superseded-by", "related-adrs-linked", "renewal-cadence",
+})
+
+CRITERION_VERDICTS: tuple[str, str, str] = ("PASS", "FAIL", "NOT_APPLICABLE")
+
+
+class AdrCriterionError(ValueError):
+    pass
