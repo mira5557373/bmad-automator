@@ -46,3 +46,45 @@ class CorrectnessCollectorListTests(unittest.TestCase):
 
         ids = [c.collector_id for c in COLLECTORS]
         self.assertEqual(len(ids), len(set(ids)))
+
+
+class VitestCollectorTests(unittest.TestCase):
+    def test_config_fields(self) -> None:
+        from story_automator.core.collectors.correctness import VITEST
+
+        self.assertEqual(VITEST.collector_id, "vitest-correctness")
+        self.assertEqual(VITEST.tool, "vitest")
+        self.assertEqual(VITEST.category, "correctness")
+        self.assertIn("*.ts", VITEST.file_patterns)
+
+    def test_build_cmd(self) -> None:
+        from story_automator.core.collectors.correctness import VITEST
+
+        cmd = VITEST.build_cmd("/tmp/checkout", {})
+        self.assertEqual(cmd, ["npx", "vitest", "run"])
+
+
+class PlaywrightCollectorTests(unittest.TestCase):
+    def test_config_fields(self) -> None:
+        from story_automator.core.collectors.correctness import PLAYWRIGHT
+
+        self.assertEqual(PLAYWRIGHT.collector_id, "playwright-correctness")
+        self.assertEqual(PLAYWRIGHT.tool, "playwright")
+        self.assertEqual(PLAYWRIGHT.category, "correctness")
+        self.assertIn("*.ts", PLAYWRIGHT.file_patterns)
+
+    def test_build_cmd(self) -> None:
+        from story_automator.core.collectors.correctness import PLAYWRIGHT
+
+        cmd = PLAYWRIGHT.build_cmd("/tmp/checkout", {})
+        self.assertEqual(cmd, ["npx", "playwright", "test"])
+
+
+class CorrectnessThreeCollectorsTests(unittest.TestCase):
+    def test_three_collectors(self) -> None:
+        from story_automator.core.collectors.correctness import COLLECTORS
+
+        ids = {c.collector_id for c in COLLECTORS}
+        self.assertIn("pytest-correctness", ids)
+        self.assertIn("vitest-correctness", ids)
+        self.assertIn("playwright-correctness", ids)
