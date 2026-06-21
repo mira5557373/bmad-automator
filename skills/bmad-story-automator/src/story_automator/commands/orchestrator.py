@@ -116,6 +116,7 @@ def cmd_orchestrator_helper(args: list[str]) -> int:
         "agents-build": agents_build_action,
         "agents-resolve": agents_resolve_action,
         "retro-agent": retro_agent_action,
+        "gate": _gate,
     }
     handler = dispatch.get(action)
     if handler is None:
@@ -165,7 +166,15 @@ def _usage(code: int) -> int:
         file=target,
     )
     print("  retro-agent --state-file path", file=target)
+    print("  gate status [--state=<reason>]", file=target)
+    print("  gate resume <gate_id>", file=target)
+    print("  gate invalidate <story|epic>", file=target)
     return code
+
+
+def _gate(args: list[str]) -> int:
+    from .gate_cmd import gate_dispatch
+    return gate_dispatch(args)
 
 
 def _sprint_status(args: list[str]) -> int:
