@@ -280,7 +280,7 @@ class FullPipelineTests(unittest.TestCase):
 
 
 class SecurityCategoryPipelineTests(unittest.TestCase):
-    """Pipeline tests with security, license, compliance, supply_chain categories."""
+    """Pipeline tests with security, license, compliance, supply_chain, invariants."""
 
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="sa-sec-integration-")
@@ -299,7 +299,10 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
     def _security_profile(self) -> dict[str, Any]:
         return {
             "categories": {
-                "code": ["security", "license", "compliance", "supply_chain"],
+                "code": [
+                    "security", "license", "compliance",
+                    "supply_chain", "invariants",
+                ],
                 "system": [],
             },
             "categories_na": [],
@@ -308,6 +311,7 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
                 "license": {"forbidden": ["BSL-1.1"], "boundary": {}},
                 "compliance": {},
                 "supply_chain": {},
+                "invariants": {"registry": []},
             },
             "timeouts": {},
         }
@@ -338,6 +342,12 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
             category="supply_chain",
             build_cmd=_ok_cmd,
         ))
+        reg.register(CollectorConfig(
+            collector_id="invariant-semgrep-invariants",
+            tool="python3",
+            category="invariants",
+            build_cmd=_ok_cmd,
+        ))
         return reg
 
     def test_all_security_categories_pass(self) -> None:
@@ -348,7 +358,7 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
                 self.project_root, "gate-sec-pass", self.base_sha,
                 profile, reg,
             )
-        self.assertEqual(len(outcomes), 4)
+        self.assertEqual(len(outcomes), 5)
         for outcome in outcomes:
             self.assertEqual(outcome.evidence["status"], "ok")
         records = load_evidence_bundle(self.project_root, "gate-sec-pass")
@@ -356,6 +366,7 @@ class SecurityCategoryPipelineTests(unittest.TestCase):
             r["category"]: verdict_for_collector_status(r["status"])
             for r in records
         }
+        self.assertIn("invariants", verdicts)
         self.assertEqual(aggregate_verdicts(verdicts), "PASS")
 
     def test_security_fail_propagates(self) -> None:

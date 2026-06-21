@@ -30,6 +30,8 @@ _EXPECTED_IDS = frozenset(
         "cosign-supply_chain",
         "provenance-supply_chain",
         "trivy-sbom-supply_chain",
+        "invariant-semgrep-invariants",
+        "invariant-conftest-invariants",
     }
 )
 
@@ -43,6 +45,7 @@ _EXPECTED_CATEGORIES = frozenset(
         "license",
         "compliance",
         "supply_chain",
+        "invariants",
     }
 )
 
@@ -89,7 +92,7 @@ class RegisterCoreCollectorsTests(unittest.TestCase):
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 25)
+        self.assertEqual(len(reg.all_collectors()), 27)
 
     def test_exported_id_set(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS

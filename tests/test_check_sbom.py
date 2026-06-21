@@ -23,8 +23,9 @@ class ValidateSbomTests(unittest.TestCase):
             ],
         })
         ok, msg = validate_sbom(sbom, "spdx-json")
-        self.assertTrue(ok)
-        self.assertIn("1", msg)
+        self.assertEqual(ok, True)
+        self.assertIn("1 package(s) found", msg)
+        self.assertIn("SPDX", msg)
 
     def test_valid_cyclonedx_json(self) -> None:
         from story_automator.core.checks.sbom_check import validate_sbom
@@ -37,20 +38,23 @@ class ValidateSbomTests(unittest.TestCase):
             ],
         })
         ok, msg = validate_sbom(sbom, "cyclonedx-json")
-        self.assertTrue(ok)
-        self.assertIn("1", msg)
+        self.assertEqual(ok, True)
+        self.assertIn("1 component(s) found", msg)
+        self.assertIn("CycloneDX", msg)
 
     def test_empty_json_fails(self) -> None:
         from story_automator.core.checks.sbom_check import validate_sbom
 
         ok, msg = validate_sbom("{}", "spdx-json")
-        self.assertFalse(ok)
+        self.assertEqual(ok, False)
+        self.assertIn("spdxVersion", msg)
 
     def test_invalid_json_fails(self) -> None:
         from story_automator.core.checks.sbom_check import validate_sbom
 
         ok, msg = validate_sbom("not json", "spdx-json")
-        self.assertFalse(ok)
+        self.assertEqual(ok, False)
+        self.assertIn("not valid JSON", msg)
 
     def test_empty_packages_fails(self) -> None:
         from story_automator.core.checks.sbom_check import validate_sbom
@@ -61,4 +65,5 @@ class ValidateSbomTests(unittest.TestCase):
             "packages": [],
         })
         ok, msg = validate_sbom(sbom, "spdx-json")
-        self.assertFalse(ok)
+        self.assertEqual(ok, False)
+        self.assertIn("no packages", msg)

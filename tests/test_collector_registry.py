@@ -264,13 +264,25 @@ class SecurityCategoryRegistrationTests(unittest.TestCase):
             "provenance-supply_chain", "trivy-sbom-supply_chain",
         })
 
+    def test_register_includes_invariants_collectors(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        invariants = reg.get_for_category("invariants")
+        ids = {c.collector_id for c in invariants}
+        self.assertEqual(ids, {
+            "invariant-semgrep-invariants", "invariant-conftest-invariants",
+        })
+
     def test_total_collector_count(self) -> None:
         from story_automator.core.collector_registry import CollectorRegistry
         from story_automator.core.collectors import register_core_collectors
 
         reg = CollectorRegistry()
         register_core_collectors(reg)
-        self.assertEqual(len(reg.all_collectors()), 25)
+        self.assertEqual(len(reg.all_collectors()), 27)
 
     def test_all_categories_present(self) -> None:
         from story_automator.core.collector_registry import CollectorRegistry
@@ -279,19 +291,21 @@ class SecurityCategoryRegistrationTests(unittest.TestCase):
         reg = CollectorRegistry()
         register_core_collectors(reg)
         cats = reg.all_categories()
-        for expected in ("security", "license", "compliance", "supply_chain"):
+        for expected in ("security", "license", "compliance", "supply_chain", "invariants"):
             self.assertIn(expected, cats)
 
     def test_core_collector_ids_frozenset(self) -> None:
         from story_automator.core.collectors import CORE_COLLECTOR_IDS
 
-        self.assertEqual(len(CORE_COLLECTOR_IDS), 25)
+        self.assertEqual(len(CORE_COLLECTOR_IDS), 27)
         self.assertIn("semgrep-security", CORE_COLLECTOR_IDS)
         self.assertIn("license-check-license", CORE_COLLECTOR_IDS)
         self.assertIn("compliance-rules-compliance", CORE_COLLECTOR_IDS)
         self.assertIn("conftest-compliance", CORE_COLLECTOR_IDS)
         self.assertIn("sbom-supply_chain", CORE_COLLECTOR_IDS)
         self.assertIn("trivy-sbom-supply_chain", CORE_COLLECTOR_IDS)
+        self.assertIn("invariant-semgrep-invariants", CORE_COLLECTOR_IDS)
+        self.assertIn("invariant-conftest-invariants", CORE_COLLECTOR_IDS)
 
 
 if __name__ == "__main__":

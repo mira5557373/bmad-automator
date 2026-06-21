@@ -93,7 +93,7 @@ class ProvenanceCollectorTests(unittest.TestCase):
         self.assertEqual(cmd[2], "/tmp/checkout")
         files = json.loads(cmd[3])
         self.assertIsInstance(files, list)
-        self.assertTrue(len(files) > 0)
+        self.assertEqual(len(files), 2)
 
     def test_build_cmd_custom_files(self) -> None:
         from story_automator.core.collectors.supply_chain import PROVENANCE
