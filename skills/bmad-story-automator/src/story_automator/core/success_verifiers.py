@@ -313,6 +313,48 @@ def _sanitize_string_list(values: list[str]) -> list[str]:
     return [value.strip() for value in values if value.strip()]
 
 
+def production_ready_gate(
+    *,
+    project_root: str,
+    story_key: str = "",
+    output_file: str = "",
+    contract: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    from .evidence_io import load_gate_file
+    from .gate_schema import GateSchemaError
+    config = _success_config(contract)
+    gate_id = str(config.get("gate_id") or "").strip()
+    if not gate_id:
+        return {"verified": False, "reason": "gate_file_absent", "source": "production_ready_gate"}
+    try:
+        gate_file = load_gate_file(project_root, gate_id)
+    except (GateSchemaError, FileNotFoundError):
+        return {"verified": False, "reason": "gate_file_absent", "source": "production_ready_gate"}
+    overall = gate_file.get("overall", "FAIL")
+    if overall == "FAIL":
+        return {
+            "verified": False,
+            "reason": "gate_verdict_fail",
+            "overall": overall,
+            "source": "production_ready_gate",
+            "gate_id": gate_id,
+        }
+    payload: dict[str, object] = {
+        "verified": True,
+        "overall": overall,
+        "source": "production_ready_gate",
+        "gate_id": gate_id,
+        "story": story_key,
+    }
+    if overall == "CONCERNS":
+        failing = [
+            cat for cat, info in gate_file.get("categories", {}).items()
+            if isinstance(info, dict) and info.get("verdict") == "CONCERNS"
+        ]
+        payload["mitigation_debt"] = failing
+    return payload
+
+
 VerifierFn = Callable[..., dict[str, object]]
 
 VERIFIERS: dict[str, VerifierFn] = {
@@ -320,4 +362,5 @@ VERIFIERS: dict[str, VerifierFn] = {
     "session_exit": session_exit,
     "review_completion": review_completion,
     "epic_complete": epic_complete,
+    "production_ready_gate": production_ready_gate,
 }

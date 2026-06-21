@@ -1523,5 +1523,91 @@ class patch_env:
                 os.environ[key] = value
 
 
+class ProductionReadyGateVerifierTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def _write_gate_file(self, overall: str) -> None:
+        from story_automator.core.gate_schema import make_gate_file
+        from story_automator.core.evidence_io import persist_gate_file
+        categories = {"correctness": {
+            "verdict": overall, "required": {}, "actual": {},
+            "rationale": "test",
+        }}
+        gate = make_gate_file(
+            gate_id="test-gate",
+            target={"kind": "story", "id": "E1-001-my-story"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "x"},
+            factory_version="1.15.0",
+            categories=categories,
+            overall=overall,
+        )
+        persist_gate_file(self.tmp, gate)
+
+    def test_absent_gate_file_fails_closed(self) -> None:
+        from story_automator.core.success_verifiers import production_ready_gate
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "gate_file_absent")
+
+    def test_pass_verdict_succeeds(self) -> None:
+        from story_automator.core.success_verifiers import production_ready_gate
+        self._write_gate_file("PASS")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["overall"], "PASS")
+
+    def test_concerns_verdict_succeeds_with_note(self) -> None:
+        from story_automator.core.success_verifiers import production_ready_gate
+        self._write_gate_file("CONCERNS")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["overall"], "CONCERNS")
+        self.assertIn("mitigation_debt", result)
+
+    def test_fail_verdict_fails(self) -> None:
+        from story_automator.core.success_verifiers import production_ready_gate
+        self._write_gate_file("FAIL")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "gate_verdict_fail")
+
+    def test_waived_verdict_succeeds(self) -> None:
+        from story_automator.core.success_verifiers import production_ready_gate
+        self._write_gate_file("WAIVED")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["overall"], "WAIVED")
+
+    def test_registered_in_verifiers(self) -> None:
+        from story_automator.core.success_verifiers import VERIFIERS
+        self.assertIn("production_ready_gate", VERIFIERS)
+
+    def test_registered_in_valid_verifiers(self) -> None:
+        from story_automator.core.runtime_policy import VALID_VERIFIERS
+        self.assertIn("production_ready_gate", VALID_VERIFIERS)
+
+
 if __name__ == "__main__":
     unittest.main()
