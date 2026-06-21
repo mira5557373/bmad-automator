@@ -51,3 +51,8 @@ htmlcov/
 .claude/sw-run-stdout.log
 # sw init outputs
 .claude/sw-run.pid
+
+# sw monitor artifacts (operator-local, ignored)
+.claude/sw-final-result.json
+.claude/sw-monitor-and-test.sh
+.claude/sw-monitor-stdout.log
