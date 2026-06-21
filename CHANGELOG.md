@@ -1,5 +1,20 @@
 ### Features
 
+- feat(gate): add evaluate_gate end-to-end entry point with audit events (720b1d6)
+- feat(gate): add GateDecision and GateRendered audit events (8e058f9)
+- feat(gate): add build_gate_file from adjudication results (c332aa1)
+- feat(gate): add waiver validation and application in verdict engine (f8aa85d)
+- feat(gate): add core adjudicate() verdict engine with section 6.3 aggregation (95410cf)
+- feat(gate): add compute_all_verdicts with NA handling and fail-closed (777eaf7)
+- feat(gate): add single category verdict computation with LLM confidence gate (5695314)
+- feat(gate): add generic fallback rule and category dispatch (c5d790c)
+- feat(gate): add license category rule with boundary-aware checking (735d612)
+- feat(gate): add static analysis category rule (27191e3)
+- feat(gate): add security category rule with threshold checking (01110f4)
+- feat(gate): add correctness category rule with coverage thresholds (4065dd0)
+- feat(gate): add evidence status helpers and grouping for verdict engine (1b4daee)
+- feat(gate): add risk-to-requirements mapping from profile matrix (9ff1251)
+- feat(gate): add coverage threshold verdict helper per TEA section 12 (27fdadf)
 - feat(collector): register integration collectors in core registry (c24943a)
 - feat(collector): add observability collector module (d61941c)
 - feat(collector): add health probe check script (c1f40f6)
@@ -264,6 +279,7 @@
 
 ### Bug Fixes
 
+- fix(gate): use actual category name in generic rule rationale and add audit integration tests (6a2aaf0)
 - fix(collector): update hardcoded collector count in registry tests (28e75e0)
 - fix(collector): add invariants category and review fixes for collection-m6 (54d1804)
 - fix(collector): handle multi-license artifacts in license check (2ae7236)
@@ -363,6 +379,9 @@
 
 ### Documentation
 
+- docs(gate): add M9 verdict engine TDD plan with gap fixes (997af37)
+- docs(claude-md): module-map for gate subsystem (m1-m7) + parallel-run note (e6a28ae)
+- docs: update generated documentation (6e2acf3)
 - docs: write TDD plan for collection-m7-integration-collectors (610d7c3)
 - docs: update generated documentation (9b2acff)
 - docs: write gap report for collection-m6-security-collectors (27a5bb2)
@@ -496,6 +515,8 @@
 
 ### Tests
 
+- test(gate): add end-to-end round-trip and gate reuse validation tests (9939805)
+- test(gate): add edge case and determinism integration tests for verdict engine (cb3fbcb)
 - test(collector): add integration category pipeline tests (e849b4a)
 - test(collector): add security category pipeline integration tests (2bfc5e8)
 - test(collector): add core collectors pipeline integration tests (c331bbb)
@@ -661,6 +682,7 @@
 
 ### Chores
 
+- chore(gate): add Phase C gap report for m9 verdict engine (ad8a1a5)
 - chore(gitignore): ignore .claude/sw-run.pid (sw runtime pidfile) (212d568)
 - chore(deps): add external/ submodules for contract verification + reference repos (b5c66f3)
 - chore(quality,packaging): lint gate, dead-code removal, real README, leaner package (4ec53f0)

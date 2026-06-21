@@ -1,1 +1,1 @@
-README.md updated with all four sections (overview, quickstart, architecture, contributing). Stats reflect the current codebase: v1.15.0, 96 source files / ~18k LOC, 109 test files / ~35k LOC, 2,297 test methods, and 41 evidence collectors across 15 categories.
+README.md updated with all four sections. Stats reflect the current codebase: v1.15.0, 97 source files / ~18.7k LOC, 110 test files / ~36k LOC, 2,258 tests, and 15 evidence collectors. The gate pipeline architecture is documented with an ASCII diagram showing the flow from profile through collectors to verdict.
