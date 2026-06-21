@@ -9,6 +9,8 @@ from story_automator.core.category_rules import (
     resilience_rule,
     blast_radius_rule,
     durable_hitl_rule,
+    cost_to_serve_rule,
+    progressive_delivery_rule,
 )
 
 
@@ -145,6 +147,76 @@ class DurableHitlRuleTests(unittest.TestCase):
         result = durable_hitl_rule(evidence, profile, {})
         self.assertEqual(result["verdict"], "FAIL")
         self.assertIn("signal", result["rationale"].lower())
+
+
+class CostToServeRuleTests(unittest.TestCase):
+    def test_concerns_when_dg2_undefined(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "", "arpu_monthly": 0, "max_pod_cost_per_tenant": 0}
+        profile["forbidden_until"] = {"DG-2": ["*.cost-to-serve"]}
+        evidence = [_evidence("cost_to_serve", pod_cost_per_tenant=5.0)]
+        result = cost_to_serve_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "CONCERNS")
+
+    def test_pass_cost_within_budget(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "starter", "arpu_monthly": 100, "max_pod_cost_per_tenant": 10}
+        profile["forbidden_until"] = {}
+        evidence = [_evidence("cost_to_serve", pod_cost_per_tenant=5.0)]
+        result = cost_to_serve_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_fail_cost_exceeds_budget(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "starter", "arpu_monthly": 100, "max_pod_cost_per_tenant": 10}
+        profile["forbidden_until"] = {}
+        evidence = [_evidence("cost_to_serve", pod_cost_per_tenant=15.0)]
+        result = cost_to_serve_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_concerns_no_sku_defined(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "", "arpu_monthly": 0, "max_pod_cost_per_tenant": 0}
+        profile["forbidden_until"] = {}
+        evidence = [_evidence("cost_to_serve", pod_cost_per_tenant=5.0)]
+        result = cost_to_serve_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "CONCERNS")
+
+    def test_fail_closed_on_error(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "starter", "arpu_monthly": 100, "max_pod_cost_per_tenant": 10}
+        profile["forbidden_until"] = {}
+        evidence = [_evidence("cost_to_serve", status="error")]
+        result = cost_to_serve_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_dispatch_via_apply(self) -> None:
+        profile = _sys_profile()
+        profile["cost_tier"] = {"sku_id": "", "arpu_monthly": 0, "max_pod_cost_per_tenant": 0}
+        profile["forbidden_until"] = {"DG-2": ["*.cost-to-serve"]}
+        evidence = [_evidence("cost_to_serve")]
+        result = apply_category_rule("cost_to_serve", evidence, profile, {})
+        self.assertEqual(result["verdict"], "CONCERNS")
+
+
+class ProgressiveDeliveryRuleTests(unittest.TestCase):
+    def test_pass_rollout_complete(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("progressive_delivery", rollout_completed=True, strategy="blue-green")]
+        result = progressive_delivery_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_fail_rollout_incomplete(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("progressive_delivery", rollout_completed=False, strategy="canary")]
+        result = progressive_delivery_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_fail_closed_on_error(self) -> None:
+        profile = _sys_profile()
+        evidence = [_evidence("progressive_delivery", status="timeout")]
+        result = progressive_delivery_rule(evidence, profile, {})
+        self.assertEqual(result["verdict"], "FAIL")
 
 
 if __name__ == "__main__":

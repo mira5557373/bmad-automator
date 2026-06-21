@@ -301,6 +301,53 @@ def durable_hitl_rule(
     return _make_category_result("PASS", req, actual, "durable HITL check passed")
 
 
+def cost_to_serve_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10/HR6(f): cost_to_serve with DG-2 degradation path."""
+    from .gate_rules import verdict_for_cost_tier
+
+    status = worst_evidence_status(evidence)
+    cost_tier = profile.get("cost_tier")
+    forbidden = profile.get("forbidden_until")
+    pod_cost = float(_aggregate_metrics(evidence, "pod_cost_per_tenant", 0))
+    max_cost = float((cost_tier or {}).get("max_pod_cost_per_tenant", 0))
+    actual = {"pod_cost_per_tenant": pod_cost, "status": status}
+    req = {"max_pod_cost_per_tenant": max_cost}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    tier_verdict = verdict_for_cost_tier(cost_tier, forbidden)
+    if tier_verdict == "CONCERNS":
+        return _make_category_result("CONCERNS", req, actual, "cost_to_serve degraded: DG-2/SKU undefined")
+    if max_cost > 0 and pod_cost > max_cost:
+        return _make_category_result("FAIL", req, actual, f"pod cost {pod_cost} > max {max_cost}")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "cost-to-serve check passed")
+
+
+def progressive_delivery_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """§10: progressive-delivery rollout evidence (Argo Rollouts)."""
+    status = worst_evidence_status(evidence)
+    completed = bool(_aggregate_metrics(evidence, "rollout_completed", False))
+    strategy = str(_aggregate_metrics(evidence, "strategy", ""))
+    actual = {"rollout_completed": completed, "strategy": strategy, "status": status}
+    req = {"rollout_completed": True}
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if not completed:
+        return _make_category_result("FAIL", req, actual, "progressive delivery rollout did not complete")
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "progressive delivery check passed")
+
+
 CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "correctness": correctness_rule,
     "security": security_rule,
@@ -310,6 +357,8 @@ CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "resilience": resilience_rule,
     "blast_radius": blast_radius_rule,
     "durable_hitl": durable_hitl_rule,
+    "cost_to_serve": cost_to_serve_rule,
+    "progressive_delivery": progressive_delivery_rule,
 }
 
 
