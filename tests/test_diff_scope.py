@@ -114,6 +114,28 @@ class ComputeChangedFilesTests(unittest.TestCase):
             with self.assertRaises(DiffScopeError):
                 compute_changed_files(td, "abc123")
 
+    def test_detects_deleted_file(self) -> None:
+        _add_commit(self.repo, "doomed.py", "x = 1\n")
+        sha_with_file = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        (self.repo / "doomed.py").unlink()
+        subprocess.run(
+            ["git", "-C", str(self.repo), "add", "doomed.py"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-m", "delete doomed"],
+            capture_output=True, check=True,
+        )
+        sha_deleted = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        changed = compute_changed_files(self.repo, sha_with_file, sha_deleted)
+        self.assertIn("doomed.py", changed)
+
     def test_default_current_sha_is_head(self) -> None:
         _add_commit(self.repo, "head.py", "h\n")
         changed = compute_changed_files(self.repo, self.base_sha)

@@ -111,6 +111,17 @@ class PreflightCheckTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(results, [])
 
+    def test_deduplicates_same_tool(self) -> None:
+        reg = CollectorRegistry()
+        reg.register(_make_config("a", "python3", "correctness"))
+        reg.register(_make_config("b", "python3", "correctness"))
+        ok, results = preflight_check(
+            reg, self._profile(["correctness"]),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].tool, "python3")
+
     def test_skips_non_applicable_collectors(self) -> None:
         reg = CollectorRegistry()
         reg.register(_make_config("a", "nonexistent-xyz", "performance"))

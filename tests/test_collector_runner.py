@@ -157,6 +157,35 @@ class RunSingleCollectorTests(unittest.TestCase):
             )
         self.assertFalse(audit_path.exists())
 
+    def test_nondeterministic_flag_propagated(self) -> None:
+        cfg = CollectorConfig(
+            collector_id="test-nondet",
+            tool="python3",
+            category="correctness",
+            build_cmd=_ok_cmd,
+            deterministic=False,
+        )
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcome = run_single_collector(
+                cfg, self.tmpdir, _profile(),
+                "gate-001", self.project_root,
+            )
+        self.assertFalse(outcome.evidence["deterministic"])
+
+    def test_deterministic_flag_default_true(self) -> None:
+        cfg = CollectorConfig(
+            collector_id="test-det",
+            tool="python3",
+            category="correctness",
+            build_cmd=_ok_cmd,
+        )
+        with patch.dict(os.environ, _host_env(), clear=True):
+            outcome = run_single_collector(
+                cfg, self.tmpdir, _profile(),
+                "gate-001", self.project_root,
+            )
+        self.assertTrue(outcome.evidence["deterministic"])
+
     def test_trust_boundary_enforced(self) -> None:
         from story_automator.core.trust_boundary import TrustBoundaryError
 

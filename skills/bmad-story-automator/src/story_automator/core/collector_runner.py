@@ -82,6 +82,8 @@ def run_single_collector(
         timeout_s=timeout,
         cwd=checkout_path,
     )
+    if not config.deterministic:
+        evidence["deterministic"] = False
 
     persisted_path = persist_evidence_record(project_root, gate_id, evidence)
 
