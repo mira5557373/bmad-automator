@@ -1608,6 +1608,83 @@ class ProductionReadyGateVerifierTests(unittest.TestCase):
         from story_automator.core.runtime_policy import VALID_VERIFIERS
         self.assertIn("production_ready_gate", VALID_VERIFIERS)
 
+    # WIRING-001 + WIRING-002: on FAIL the verifier must persist
+    # [AI-Review] tasks into the dev-story file and return a rich
+    # remediation descriptor so the orchestrator can drive the
+    # bmad code-review → review_continuation loop.
+
+    def _seed_story_artifact(self, body: str = "") -> Path:
+        """Place a dev-story file under the BMAD-default artifacts dir."""
+        artifacts = Path(self.tmp) / "_bmad-output" / "implementation-artifacts"
+        artifacts.mkdir(parents=True)
+        story = artifacts / "E1-001-my-story.md"
+        story.write_text(
+            body or "# Story E1-001\n\n## Tasks\n\n- [x] existing dev task\n",
+            encoding="utf-8",
+        )
+        return story
+
+    def test_fail_persists_ai_review_tasks_into_story(self) -> None:
+        """FAIL → [AI-Review] tasks land in story file's Tasks section."""
+        from story_automator.core.success_verifiers import production_ready_gate
+        story = self._seed_story_artifact()
+        self._write_gate_file("FAIL")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertFalse(result["verified"])
+        # The verifier exposes the route_gate_verdict descriptor so the
+        # orchestrator/operator can see what happened.
+        self.assertIn("remediation", result)
+        self.assertEqual(result["remediation"]["action"], "remediate")
+        self.assertTrue(result["remediation"]["tasks_persisted"])
+        # Pre-existing task is preserved; new [AI-Review] tasks added.
+        content = story.read_text(encoding="utf-8")
+        self.assertIn("existing dev task", content)
+        self.assertGreater(content.count("- [ ]"), 0)
+
+    def test_fail_without_resolvable_story_path_still_returns_descriptor(self) -> None:
+        """No story file present → no persistence, but descriptor flags
+        the situation (loud, not silent)."""
+        from story_automator.core.success_verifiers import production_ready_gate
+        # Note: no _seed_story_artifact() — story file is missing
+        self._write_gate_file("FAIL")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {"gate_id": "test-gate"}},
+        )
+        self.assertFalse(result["verified"])
+        self.assertIn("remediation", result)
+        # tasks not persisted (no story file)
+        self.assertFalse(result["remediation"]["tasks_persisted"])
+
+    def test_fail_at_max_cycles_parks_via_descriptor(self) -> None:
+        """When contract.config carries remediation_cycle == max_cycles,
+        the descriptor shows action=park and the story is recorded as
+        parked (closes the bounded-retry loop the orchestrator owns)."""
+        from story_automator.core.success_verifiers import production_ready_gate
+        from story_automator.core.gate_status import list_parked
+        self._seed_story_artifact()
+        self._write_gate_file("FAIL")
+        result = production_ready_gate(
+            project_root=self.tmp,
+            story_key="E1-001-my-story",
+            contract={"config": {
+                "gate_id": "test-gate",
+                "remediation_cycle": 3,
+                "max_cycles": 3,
+            }},
+        )
+        self.assertFalse(result["verified"])
+        self.assertIn("remediation", result)
+        self.assertEqual(result["remediation"]["action"], "park")
+        self.assertEqual(result["remediation"]["reason"], "exhausted")
+        parked = list_parked(self.tmp)
+        self.assertTrue(any(p["story_key"] == "E1-001-my-story" for p in parked))
+
 
 class ReadinessGateVerifierTests(unittest.TestCase):
     def setUp(self) -> None:

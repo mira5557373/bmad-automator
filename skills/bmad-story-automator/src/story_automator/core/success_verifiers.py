@@ -320,7 +320,18 @@ def production_ready_gate(
     output_file: str = "",
     contract: dict[str, Any] | None = None,
 ) -> dict[str, object]:
+    """§9.1+§9.2: terminal verifier for review→done.
+
+    On FAIL, drives the BMAD review_continuation loop (WIRING-001/-002):
+    resolves the dev-story path from story_key, calls route_gate_verdict
+    which persists [AI-Review] tasks into the story file's Tasks section
+    (honoring edit-authorization). The verifier still returns
+    verified=False so the orchestrator's existing review-cycle re-runs
+    bmad-dev-story — which then picks up the new [AI-Review] tasks.
+    """
+    from .artifact_paths import resolve_story_artifact_path
     from .evidence_io import load_gate_file
+    from .gate_orchestrator import route_gate_verdict
     from .gate_schema import GateSchemaError
     config = _success_config(contract)
     gate_id = str(config.get("gate_id") or "").strip()
@@ -332,13 +343,46 @@ def production_ready_gate(
         return {"verified": False, "reason": "gate_file_absent", "source": "production_ready_gate"}
     overall = gate_file.get("overall", "FAIL")
     if overall == "FAIL":
-        return {
+        # WIRING: persist [AI-Review] tasks into the story file so the
+        # next bmad-dev-story cycle picks them up. Best-effort — the
+        # verifier still returns verified=False either way; the loud
+        # state lives in remediation_descriptor for the orchestrator
+        # and operator to inspect.
+        remediation_descriptor: dict[str, Any] | None = None
+        story_path = (
+            resolve_story_artifact_path(project_root, story_key)
+            if story_key else None
+        )
+        remediation_cycle = int(config.get("remediation_cycle") or 0)
+        max_cycles = int(config.get("max_cycles") or 3)
+        has_unmitigated_risk_9 = bool(config.get("has_unmitigated_risk_9") or False)
+        try:
+            remediation_descriptor = route_gate_verdict(
+                project_root,
+                gate_file,
+                story_key=story_key,
+                remediation_cycle=remediation_cycle,
+                max_cycles=max_cycles,
+                has_unmitigated_risk_9=has_unmitigated_risk_9,
+                story_path=story_path,
+            )
+        except Exception as exc:  # noqa: BLE001 — verifier must not crash the orchestrator
+            remediation_descriptor = {
+                "action": "remediate",
+                "tasks_persisted": False,
+                "persist_error": str(exc),
+            }
+        payload_fail: dict[str, object] = {
             "verified": False,
             "reason": "gate_verdict_fail",
             "overall": overall,
             "source": "production_ready_gate",
             "gate_id": gate_id,
+            "story": story_key,
         }
+        if remediation_descriptor is not None:
+            payload_fail["remediation"] = remediation_descriptor
+        return payload_fail
     payload: dict[str, object] = {
         "verified": True,
         "overall": overall,
