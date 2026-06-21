@@ -1,5 +1,13 @@
 ### Features
 
+- feat(gate): add full gate collector loop (431a5c5)
+- feat(gate): add collector runner — single collector execution (11161e9)
+- feat(gate): add collector doctor — preflight tool checks (40da393)
+- feat(gate): add file→category mapping and diff scope computation (fda1c3b)
+- feat(gate): add diff scope — changed file detection (1b53966)
+- feat(gate): add profile-aware filtering and kill-switch to registry (41e62bc)
+- feat(gate): add CollectorRegistry — registration and lookup (9da0ed6)
+- feat(gate): add CollectorConfig and CollectorOutcome dataclasses (573b703)
 - feat(gate): add trust boundary guard to evidence I/O (781b45b)
 - feat(gate): add trust boundary guard to adjudicator (c693810)
 - feat(gate): add gate audit emitter (4ea9880)
@@ -226,6 +234,8 @@
 
 ### Bug Fixes
 
+- fix(collector): post-impl review fixes for collection-m4-collector-framework (b13925a)
+- fix(collector): update stale docstrings and deduplicate preflight checks (8753287)
 - fix(gate): enforce sandbox_env ordering so extras cannot override security vars (19d0568)
 - fix(gate): tighten validation and add invariant/cost/NA verdict rules (aa61291)
 - fix(profile): deep-copy accessors + validate profile_id path (467769f)
@@ -317,6 +327,8 @@
 
 ### Documentation
 
+- docs(gate): write Phase A plan for collection-m4-collector-framework (6049ff4)
+- docs: update generated documentation (8854fb0)
 - docs(gate): write Phase C gap report for foundation-m3-factory-self-trust (0722266)
 - docs(gate): write Phase A plan + gap report for foundation-m3-factory-self-trust (51ec73f)
 - docs: update generated documentation (7aa7571)
@@ -441,6 +453,8 @@
 
 ### Tests
 
+- test(gate): add full collector pipeline integration tests (1c6263c)
+- test(gate): add diff-scoped mode and edge case tests for runner (d21b8cf)
 - test(gate): add trust pipeline round-trip integration tests (a2376ee)
 - test(gate): add Blind Hunter enforcement integration tests (439e2c2)
 - test(gate): add round-trip determinism and pipeline integration tests (1f1ad5a)
