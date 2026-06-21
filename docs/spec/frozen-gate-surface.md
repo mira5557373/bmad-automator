@@ -86,6 +86,6 @@ Tracking artifact for the bmad-auto pattern ports. Each phase is its own milesto
 | 1 | VerifyOutcome + git_utils + baseline-commit lie detector + collector try/except wrapping | done (`phase-1-defensive-primitives`) |
 | 2 | result.json schema + worktree_recovery + fail_closed flag + api_version stamp | done (`phase-2-result-schema-and-policy`) |
 | 3 | Pre-gate verifier module wiring 6 inline checks (feature-flagged off by default) | done (`phase-3-pre-gate-verifier`) |
-| 4 | TUI watcher + optional Textual extras group | deferred — open question on pyproject location |
-| 5 | CLIProfile dataclass + stop_hooks dispatch | deferred — open question on Codex/Gemini timing |
-| 6 | Action enum + plugin settings overlay | deferred — pairs with 5 |
+| 4 | TUI watcher + optional Textual extras group | deferred → see [docs/spec/2026-06-21-phases-4-6-deferral.md](./2026-06-21-phases-4-6-deferral.md) |
+| 5 | CLIProfile dataclass + stop_hooks dispatch | deferred → see [docs/spec/2026-06-21-phases-4-6-deferral.md](./2026-06-21-phases-4-6-deferral.md) |
+| 6 | Action enum + plugin settings overlay | deferred → see [docs/spec/2026-06-21-phases-4-6-deferral.md](./2026-06-21-phases-4-6-deferral.md) |
