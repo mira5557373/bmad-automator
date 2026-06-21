@@ -9,8 +9,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .evidence_io import read_gate_marker
+
 __all__ = [
     "list_verdicts",
+    "gate_doctor",
 ]
 
 
@@ -51,3 +54,56 @@ def list_verdicts(
             "profile_id": profile.get("id", "") if isinstance(profile, dict) else "",
         })
     return results
+
+
+def gate_doctor(project_root: str | Path) -> dict[str, Any]:
+    """Validate gate infrastructure consistency."""
+    root = Path(project_root)
+    gate_dir = root / "_bmad" / "gate"
+    checks: list[str] = []
+    issues: list[dict[str, str]] = []
+
+    checks.append("orphan_marker")
+    marker = read_gate_marker(project_root)
+    if marker is not None:
+        issues.append({
+            "type": "orphan_marker",
+            "detail": f"gate-in-progress marker exists for gate_id={marker.get('gate_id', '?')}",
+        })
+
+    checks.append("orphan_evidence")
+    evidence_dir = gate_dir / "evidence"
+    verdicts_dir = gate_dir / "verdicts"
+    if evidence_dir.is_dir():
+        for child in sorted(evidence_dir.iterdir()):
+            if child.is_dir():
+                verdict_path = verdicts_dir / f"{child.name}.json"
+                if not verdict_path.is_file():
+                    issues.append({
+                        "type": "orphan_evidence",
+                        "detail": f"evidence dir '{child.name}' has no matching verdict",
+                    })
+
+    checks.append("verdict_validity")
+    if verdicts_dir.is_dir():
+        for path in sorted(verdicts_dir.glob("*.json")):
+            if path.name.endswith(".invalidated.json"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or "gate_id" not in data:
+                    issues.append({
+                        "type": "invalid_verdict",
+                        "detail": f"verdict '{path.name}' missing required fields",
+                    })
+            except (json.JSONDecodeError, OSError):
+                issues.append({
+                    "type": "invalid_verdict",
+                    "detail": f"verdict '{path.name}' contains invalid JSON",
+                })
+
+    return {
+        "healthy": len(issues) == 0,
+        "checks": checks,
+        "issues": issues,
+    }

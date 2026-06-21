@@ -68,5 +68,66 @@ class ListVerdictsTests(unittest.TestCase):
         self.assertIn("profile_id", result[0])
 
 
+class GateDoctorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    def test_healthy_empty_project(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        result = gate_doctor(self.tmp)
+        self.assertTrue(result["healthy"])
+        self.assertEqual(result["issues"], [])
+
+    def test_healthy_with_valid_verdict(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        gate = make_gate_file(
+            gate_id="g1",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"id": "test", "version": 1, "hash": "aabb"},
+            factory_version="1.15.0",
+            categories={"c": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"}},
+            overall="PASS",
+        )
+        persist_gate_file(self.tmp, gate)
+        result = gate_doctor(self.tmp)
+        self.assertTrue(result["healthy"])
+
+    def test_detects_orphan_marker(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        from story_automator.core.evidence_io import write_gate_marker
+        write_gate_marker(self.tmp, "g-orphan", "abc")
+        result = gate_doctor(self.tmp)
+        self.assertFalse(result["healthy"])
+        issues = [i["type"] for i in result["issues"]]
+        self.assertIn("orphan_marker", issues)
+
+    def test_detects_orphan_evidence(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        evidence_dir = Path(self.tmp) / "_bmad" / "gate" / "evidence" / "orphan-gate"
+        evidence_dir.mkdir(parents=True)
+        (evidence_dir / "data.json").write_text("{}")
+        result = gate_doctor(self.tmp)
+        self.assertFalse(result["healthy"])
+        issues = [i["type"] for i in result["issues"]]
+        self.assertIn("orphan_evidence", issues)
+
+    def test_detects_invalid_verdict_json(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        verdicts_dir = Path(self.tmp) / "_bmad" / "gate" / "verdicts"
+        verdicts_dir.mkdir(parents=True)
+        (verdicts_dir / "bad.json").write_text("not json{{{")
+        result = gate_doctor(self.tmp)
+        self.assertFalse(result["healthy"])
+        issues = [i["type"] for i in result["issues"]]
+        self.assertIn("invalid_verdict", issues)
+
+    def test_reports_check_counts(self) -> None:
+        from story_automator.core.gate_ops import gate_doctor
+        result = gate_doctor(self.tmp)
+        self.assertIn("checks", result)
+        self.assertIsInstance(result["checks"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
