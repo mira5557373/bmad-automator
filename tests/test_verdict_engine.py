@@ -7,6 +7,7 @@ from story_automator.core.gate_schema import (
     make_llm_evidence_record,
 )
 from story_automator.core.verdict_engine import (
+    adjudicate,
     compute_all_verdicts,
     compute_category_verdict,
     group_evidence_by_category,
@@ -230,6 +231,87 @@ class ComputeAllVerdictsTests(unittest.TestCase):
         profile["categories"] = {"code": [], "system": []}
         verdicts = compute_all_verdicts(evidence, profile, "P1")
         self.assertIn("docs", verdicts)
+
+
+class AdjudicateTests(unittest.TestCase):
+    PROFILE = {
+        "version": 1,
+        "id": "test",
+        "matrix": {
+            "P0": {"coverage_pct": 100, "levels": []},
+            "P1": {"coverage_pct": 90, "levels": []},
+            "P2": {"coverage_pct": 50, "levels": []},
+            "P3": {"coverage_pct": 20, "levels": []},
+        },
+        "categories": {"code": ["correctness", "security"], "system": []},
+        "categories_na": [],
+    }
+
+    def test_all_pass_overall_pass(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertEqual(result["overall"], "PASS")
+        self.assertEqual(result["categories"]["correctness"]["verdict"], "PASS")
+        self.assertEqual(result["categories"]["security"]["verdict"], "PASS")
+
+    def test_any_fail_overall_fail(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="violation", metrics={"sast_high_count": 3},
+                                 findings=["vuln1", "vuln2", "vuln3"]),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertEqual(result["overall"], "FAIL")
+
+    def test_concerns_without_fail_overall_concerns(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 85, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertEqual(result["overall"], "CONCERNS")
+
+    def test_unmitigated_risk_9_forces_fail(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 100, "regressions": 0}),
+            make_evidence_record(collector="b", tool="t", category="security",
+                                 status="ok", metrics={"sast_high_count": 0}),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1",
+                           has_unmitigated_risk_9=True)
+        self.assertEqual(result["overall"], "FAIL")
+
+    def test_result_includes_evidence_bundle_hash(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertIn("evidence_bundle_hash", result)
+        self.assertEqual(len(result["evidence_bundle_hash"]), 16)
+
+    def test_result_includes_profile_hash(self) -> None:
+        evidence = [
+            make_evidence_record(collector="a", tool="t", category="correctness",
+                                 status="ok", metrics={"coverage_pct": 95, "regressions": 0}),
+        ]
+        result = adjudicate(evidence, self.PROFILE, priority="P1")
+        self.assertIn("profile_hash", result)
+        self.assertTrue(len(result["profile_hash"]) > 0)
+
+    def test_empty_evidence_all_active_fail(self) -> None:
+        result = adjudicate([], self.PROFILE, priority="P1")
+        self.assertEqual(result["overall"], "FAIL")
 
 
 if __name__ == "__main__":

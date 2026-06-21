@@ -103,3 +103,31 @@ def compute_all_verdicts(
             verdicts[cat] = compute_category_verdict(cat, cat_evidence, profile, required)
 
     return verdicts
+
+
+def adjudicate(
+    evidence_bundle: list[dict[str, Any]],
+    profile: dict[str, Any],
+    *,
+    priority: str = "P1",
+    has_unmitigated_risk_9: bool = False,
+) -> dict[str, Any]:
+    """Section 6.3: pure verdict engine.
+
+    evidence -> per-category verdicts -> aggregate -> result.
+    Deterministic: same inputs -> same output.
+    """
+    from .evidence_io import compute_evidence_bundle_hash
+    from .gate_rules import aggregate_verdicts
+    from .product_profile import compute_profile_hash
+
+    categories = compute_all_verdicts(evidence_bundle, profile, priority)
+    flat_verdicts = {cat: info["verdict"] for cat, info in categories.items()}
+    overall = aggregate_verdicts(flat_verdicts, has_unmitigated_risk_9=has_unmitigated_risk_9)
+
+    return {
+        "categories": categories,
+        "overall": overall,
+        "evidence_bundle_hash": compute_evidence_bundle_hash(evidence_bundle),
+        "profile_hash": compute_profile_hash(profile),
+    }
