@@ -5,7 +5,10 @@ Spec references: §5 (template system), §16 M24 (golden seed-template bundle).
 
 from __future__ import annotations
 
+import os
 import string
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 class SeedRenderError(ValueError):
@@ -68,3 +71,49 @@ def render_template_content(
 ) -> str:
     """Render ``$variable`` / ``${variable}`` placeholders via safe_substitute."""
     return string.Template(content).safe_substitute(variables)
+
+
+@dataclass
+class InstantiationResult:
+    """Tracks the outcome of template instantiation."""
+
+    written: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def instantiate_template(
+    bundle_dir: Path,
+    manifest: dict,
+    target_dir: Path,
+    variables: dict[str, str],
+    *,
+    category: str | None = None,
+) -> InstantiationResult:
+    """Instantiate template files from *bundle_dir* into *target_dir*.
+
+    Resolves variables, reads each ``src`` template, renders, and writes
+    to ``target_dir / dst``.  Returns an `InstantiationResult` tracking
+    written, skipped, and errored files.
+    """
+    resolved = resolve_variables(manifest, variables)
+    files = list_template_files(manifest, category=category)
+    result = InstantiationResult()
+
+    for entry in files:
+        src_path = bundle_dir / entry["src"]
+        dst_rel = entry["dst"].replace("/", os.sep)
+        dst_path = (target_dir / dst_rel).resolve()
+
+        if not src_path.is_file():
+            result.errors.append(f"src not found: {entry['src']}")
+            continue
+
+        content = src_path.read_text(encoding="utf-8")
+        rendered = render_template_content(content, resolved)
+
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        dst_path.write_text(rendered, encoding="utf-8")
+        result.written.append(str(dst_path))
+
+    return result

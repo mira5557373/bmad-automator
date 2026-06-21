@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import unittest
 
+import shutil
+import tempfile
+from pathlib import Path
+
 from story_automator.core.seed_renderer import (
+    InstantiationResult,
     SeedRenderError,
+    instantiate_template,
     list_template_files,
     render_template_content,
     resolve_variables,
@@ -167,6 +173,111 @@ class RenderTemplateContentTests(unittest.TestCase):
     def test_no_variables_passthrough(self):
         plain = "no variables here"
         self.assertEqual(render_template_content(plain, {}), plain)
+
+
+class InstantiateTemplateTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._bundle = Path(self._tmp) / "bundle"
+        self._target = Path(self._tmp) / "target"
+        self._bundle.mkdir()
+        self._target.mkdir()
+        self._manifest = {
+            "schema_version": 1,
+            "template_id": "test",
+            "template_version": "1.0.0",
+            "variables": {"product_name": {"required": True}},
+            "categories": {
+                "cat1": {
+                    "description": "Category 1",
+                    "files": [
+                        {"src": "cat1/hello.py.tmpl", "dst": "src/hello.py"},
+                    ],
+                },
+                "cat2": {
+                    "description": "Category 2",
+                    "files": [
+                        {"src": "cat2/world.py.tmpl", "dst": "lib/world.py"},
+                    ],
+                },
+            },
+        }
+        cat1_dir = self._bundle / "cat1"
+        cat1_dir.mkdir()
+        (cat1_dir / "hello.py.tmpl").write_text(
+            '# $product_name\nprint("hello")\n', encoding="utf-8"
+        )
+        cat2_dir = self._bundle / "cat2"
+        cat2_dir.mkdir()
+        (cat2_dir / "world.py.tmpl").write_text(
+            '# $product_name\nprint("world")\n', encoding="utf-8"
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_basic_instantiation(self):
+        instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "MyApp"},
+        )
+        dst = self._target / "src" / "hello.py"
+        self.assertTrue(dst.is_file())
+        self.assertIn("MyApp", dst.read_text(encoding="utf-8"))
+
+    def test_creates_parent_dirs(self):
+        instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "X"},
+        )
+        self.assertTrue((self._target / "src").is_dir())
+        self.assertTrue((self._target / "lib").is_dir())
+
+    def test_multiple_files(self):
+        result = instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "X"}, category="cat1",
+        )
+        self.assertEqual(len(result.written), 1)
+
+    def test_multiple_categories(self):
+        result = instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "X"},
+        )
+        self.assertEqual(len(result.written), 2)
+
+    def test_filter_by_category(self):
+        result = instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "X"}, category="cat2",
+        )
+        self.assertEqual(len(result.written), 1)
+        self.assertIn("lib/world.py", result.written[0])
+
+    def test_rendered_content(self):
+        instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "ACME"},
+        )
+        content = (self._target / "src" / "hello.py").read_text(encoding="utf-8")
+        self.assertIn("ACME", content)
+        self.assertNotIn("$product_name", content)
+
+    def test_result_tracks_written(self):
+        result = instantiate_template(
+            self._bundle, self._manifest, self._target,
+            {"product_name": "X"},
+        )
+        self.assertEqual(len(result.written), 2)
+        self.assertEqual(len(result.skipped), 0)
+        self.assertEqual(len(result.errors), 0)
+
+    def test_instantiation_result_fields(self):
+        r = InstantiationResult()
+        self.assertEqual(r.written, [])
+        self.assertEqual(r.skipped, [])
+        self.assertEqual(r.errors, [])
 
 
 if __name__ == "__main__":
