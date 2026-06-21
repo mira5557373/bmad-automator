@@ -96,5 +96,67 @@ class TestTestQualityRegistered(unittest.TestCase):
         self.assertIs(CATEGORY_RULES["test_quality"], category_rules.test_quality_rule)
 
 
+class TestMutationRule(unittest.TestCase):
+    def _profile(self, **overrides):
+        rules = {"min_score": 60}
+        rules.update(overrides)
+        return {"rules": {"mutation": rules}}
+
+    def test_score_above_threshold(self):
+        evidence = [
+            _make_evidence(
+                category="mutation",
+                metrics={"mutation_score": 75.0, "mutants_total": 20,
+                         "mutants_killed": 15, "mutants_survived": 5},
+            ),
+        ]
+        result = category_rules.mutation_rule(evidence, self._profile(), {})
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_score_below_threshold(self):
+        evidence = [
+            _make_evidence(
+                category="mutation",
+                metrics={"mutation_score": 40.0, "mutants_total": 10,
+                         "mutants_killed": 4, "mutants_survived": 6},
+            ),
+        ]
+        result = category_rules.mutation_rule(evidence, self._profile(), {})
+        self.assertEqual(result["verdict"], "FAIL")
+        self.assertIn("mutation score", result["rationale"])
+
+    def test_error_status_fail_closed(self):
+        evidence = [_make_evidence(status="error", category="mutation")]
+        result = category_rules.mutation_rule(evidence, self._profile(), {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_no_mutants_tool_not_run(self):
+        evidence = [
+            _make_evidence(
+                status="violation", category="mutation",
+                metrics={"mutation_score": 0.0, "mutants_total": 0},
+            ),
+        ]
+        result = category_rules.mutation_rule(evidence, self._profile(), {})
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_custom_threshold(self):
+        evidence = [
+            _make_evidence(
+                category="mutation",
+                metrics={"mutation_score": 55.0, "mutants_total": 20,
+                         "mutants_killed": 11, "mutants_survived": 9},
+            ),
+        ]
+        result = category_rules.mutation_rule(evidence, self._profile(min_score=50), {})
+        self.assertEqual(result["verdict"], "PASS")
+
+
+class TestMutationRegistered(unittest.TestCase):
+    def test_registered_in_category_rules(self):
+        self.assertIn("mutation", CATEGORY_RULES)
+        self.assertIs(CATEGORY_RULES["mutation"], category_rules.mutation_rule)
+
+
 if __name__ == "__main__":
     unittest.main()

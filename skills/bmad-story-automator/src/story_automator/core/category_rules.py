@@ -251,6 +251,44 @@ def test_quality_rule(
     return _make_category_result("PASS", req, actual, "all test-quality checks passed")
 
 
+def mutation_rule(
+    evidence: list[dict[str, Any]],
+    profile: dict[str, Any],
+    required: dict[str, Any],
+) -> dict[str, Any]:
+    """Section 6.2: mutation score >= threshold on changed code."""
+    status = worst_evidence_status(evidence)
+    rules = rule_for(profile, "mutation")
+    min_score = float(rules.get("min_score", 60))
+
+    mutation_score = float(_aggregate_metrics(evidence, "mutation_score", 0))
+    mutants_total = int(_aggregate_metrics(evidence, "mutants_total", 0))
+    mutants_killed = int(_aggregate_metrics(evidence, "mutants_killed", 0))
+    mutants_survived = int(_aggregate_metrics(evidence, "mutants_survived", 0))
+
+    actual = {
+        "mutation_score": mutation_score,
+        "mutants_total": mutants_total,
+        "mutants_killed": mutants_killed,
+        "mutants_survived": mutants_survived,
+        "status": status,
+    }
+    req = {"min_score": min_score}
+
+    if status in ("error", "timeout"):
+        return _make_category_result("FAIL", req, actual, f"fail-closed: collector {status}")
+    if mutants_total == 0 and status != "ok":
+        return _make_category_result("FAIL", req, actual, "mutation tool did not produce results")
+    if mutation_score < min_score:
+        return _make_category_result(
+            "FAIL", req, actual,
+            f"mutation score {mutation_score:.1f}% < {min_score}%",
+        )
+    if status == "violation":
+        return _make_category_result("FAIL", req, actual, "collector reported violation")
+    return _make_category_result("PASS", req, actual, "mutation testing passed")
+
+
 CategoryRuleFn = Callable[[list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 CATEGORY_RULES: dict[str, CategoryRuleFn] = {
@@ -259,6 +297,7 @@ CATEGORY_RULES: dict[str, CategoryRuleFn] = {
     "static": static_rule,
     "license": license_rule,
     "test_quality": test_quality_rule,
+    "mutation": mutation_rule,
 }
 
 
