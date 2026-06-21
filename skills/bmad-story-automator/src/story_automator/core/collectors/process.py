@@ -31,4 +31,21 @@ ADR = CollectorConfig(
     file_patterns=frozenset({"*.md"}),
 )
 
-COLLECTORS: list[CollectorConfig] = [ADR]
+
+def _trace_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    return [
+        sys.executable,
+        str(_CHECKS_DIR / "trace_check.py"),
+        checkout,
+    ]
+
+
+TRACE = CollectorConfig(
+    collector_id="trace-process",
+    tool="python3",
+    category="process",
+    build_cmd=_trace_cmd,
+    file_patterns=frozenset({"*.md"}),
+)
+
+COLLECTORS: list[CollectorConfig] = [ADR, TRACE]

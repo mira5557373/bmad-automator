@@ -36,3 +36,31 @@ class ProcessCollectorListTests(unittest.TestCase):
 
         for c in COLLECTORS:
             self.assertEqual(c.category, "process")
+
+
+class TraceCollectorTests(unittest.TestCase):
+    def test_config_fields(self) -> None:
+        from story_automator.core.collectors.process import TRACE
+
+        self.assertEqual(TRACE.collector_id, "trace-process")
+        self.assertEqual(TRACE.tool, "python3")
+        self.assertEqual(TRACE.category, "process")
+        self.assertIn("*.md", TRACE.file_patterns)
+
+    def test_build_cmd_invokes_trace_script(self) -> None:
+        from story_automator.core.collectors.process import TRACE
+
+        cmd = TRACE.build_cmd("/tmp/checkout", {})
+        self.assertEqual(cmd[0], sys.executable)
+        self.assertIn("trace_check.py", cmd[1])
+        self.assertTrue(Path(cmd[1]).is_file())
+        self.assertEqual(cmd[2], "/tmp/checkout")
+
+
+class ProcessTwoCollectorsTests(unittest.TestCase):
+    def test_two_collectors(self) -> None:
+        from story_automator.core.collectors.process import COLLECTORS
+
+        self.assertEqual(len(COLLECTORS), 2)
+        ids = {c.collector_id for c in COLLECTORS}
+        self.assertEqual(ids, {"adr-process", "trace-process"})
