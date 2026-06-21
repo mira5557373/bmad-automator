@@ -10,6 +10,15 @@ import string
 from dataclasses import dataclass, field
 from pathlib import Path
 
+__all__ = [
+    "SeedRenderError",
+    "resolve_variables",
+    "list_template_files",
+    "render_template_content",
+    "InstantiationResult",
+    "instantiate_template",
+]
+
 
 class SeedRenderError(ValueError):
     """Raised on rendering or instantiation failure."""
@@ -32,6 +41,12 @@ def resolve_variables(manifest: dict, provided: dict[str, str]) -> dict[str, str
             result[var_name] = default
         elif var_def.get("required"):
             raise SeedRenderError(f"required variable {var_name!r} not provided")
+
+    for key, val in result.items():
+        if not isinstance(val, str):
+            raise SeedRenderError(
+                f"variable {key!r} must be a string, got {type(val).__name__}"
+            )
 
     return result
 
@@ -121,11 +136,14 @@ def instantiate_template(
             result.skipped.append(str(dst_path))
             continue
 
-        content = src_path.read_text(encoding="utf-8")
-        rendered = render_template_content(content, resolved)
-
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        dst_path.write_text(rendered, encoding="utf-8")
+        try:
+            content = src_path.read_text(encoding="utf-8")
+            rendered = render_template_content(content, resolved)
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            dst_path.write_text(rendered, encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            result.errors.append(f"{entry['src']}: {exc}")
+            continue
         result.written.append(str(dst_path))
 
     return result

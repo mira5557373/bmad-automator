@@ -73,6 +73,16 @@ class ResolveVariablesTests(unittest.TestCase):
         result = resolve_variables(m, {})
         self.assertEqual(result, {})
 
+    def test_non_string_provided_raises(self):
+        m = _make_manifest_with_vars({"name": {"required": True}})
+        with self.assertRaises(SeedRenderError):
+            resolve_variables(m, {"name": 123})
+
+    def test_non_string_default_raises(self):
+        m = _make_manifest_with_vars({"port": {"default": 8080}})
+        with self.assertRaises(SeedRenderError):
+            resolve_variables(m, {})
+
 
 def _make_multi_category_manifest():
     return {
@@ -360,6 +370,13 @@ class InstantiationSafeguardTests(unittest.TestCase):
         result = instantiate_template(self._bundle, m, self._target, {})
         self.assertEqual(len(result.errors), 1)
         self.assertIn("missing.tmpl", result.errors[0])
+
+    def test_binary_src_recorded_as_error(self):
+        (self._bundle / "bin.tmpl").write_bytes(b"\x80\x81\x82\xff")
+        m = self._manifest_with_file("bin.tmpl", "out.py")
+        result = instantiate_template(self._bundle, m, self._target, {})
+        self.assertEqual(len(result.errors), 1)
+        self.assertEqual(len(result.written), 0)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

@@ -11,6 +11,18 @@ from pathlib import Path
 
 from story_automator.core.runtime_layout import bundled_story_skill_root
 
+__all__ = [
+    "SeedTemplateError",
+    "TEMPLATE_SCHEMA_VERSION",
+    "resolve_template_ref",
+    "validate_manifest",
+    "resolve_bundle_dir",
+    "version_satisfies",
+    "load_template_manifest",
+    "validate_bundle",
+    "seed_template_for_profile",
+]
+
 TEMPLATE_SCHEMA_VERSION = 1
 
 
@@ -33,6 +45,8 @@ def resolve_template_ref(ref: str) -> tuple[str, str]:
 
     if "@" in ref:
         template_id, version = ref.split("@", 1)
+        if not template_id:
+            raise SeedTemplateError(f"invalid template ref (empty template_id): {ref!r}")
     else:
         template_id, version = ref, ""
 
@@ -77,6 +91,12 @@ def validate_manifest(manifest: dict) -> None:
             for key in ("src", "dst"):
                 if not isinstance(entry.get(key), str) or not entry[key]:
                     raise SeedTemplateError(f"category {cat_name!r}: file entry missing {key}")
+            for key in ("src", "dst"):
+                val = entry[key]
+                if ".." in val or val.startswith("/") or val.startswith("\\"):
+                    raise SeedTemplateError(
+                        f"category {cat_name!r}: {key} contains path traversal: {val!r}"
+                    )
             conflict = entry.get("on_conflict")
             if conflict is not None and conflict not in VALID_CONFLICT_MODES:
                 raise SeedTemplateError(f"category {cat_name!r}: invalid on_conflict {conflict!r}")
@@ -178,9 +198,15 @@ def validate_bundle(bundle_dir: Path, manifest: dict) -> list[str]:
     Returns a list of missing file paths (empty means valid).
     """
     missing: list[str] = []
+    resolved_bundle = bundle_dir.resolve()
     for cat in manifest.get("categories", {}).values():
         for entry in cat.get("files", []):
-            src_path = bundle_dir / entry["src"]
+            src_path = (bundle_dir / entry["src"]).resolve()
+            try:
+                src_path.relative_to(resolved_bundle)
+            except ValueError:
+                missing.append(f"{entry['src']} (escapes bundle)")
+                continue
             if not src_path.is_file():
                 missing.append(entry["src"])
     return missing

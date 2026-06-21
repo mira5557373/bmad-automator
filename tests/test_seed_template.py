@@ -65,6 +65,14 @@ class ResolveTemplateRefTests(unittest.TestCase):
     def test_whitespace_ref(self):
         self.assertEqual(resolve_template_ref("  "), ("", ""))
 
+    def test_bare_at_raises(self):
+        with self.assertRaises(SeedTemplateError):
+            resolve_template_ref("@")
+
+    def test_at_version_only_raises(self):
+        with self.assertRaises(SeedTemplateError):
+            resolve_template_ref("@1.0")
+
     def test_schema_version_is_int(self):
         self.assertIsInstance(TEMPLATE_SCHEMA_VERSION, int)
         self.assertEqual(TEMPLATE_SCHEMA_VERSION, 1)
@@ -194,6 +202,32 @@ class ValidateManifestTests(unittest.TestCase):
     def test_variable_name_invalid_identifier(self):
         with self.assertRaises(SeedTemplateError):
             validate_manifest(_make_manifest(variables={"foo-bar": {"required": True}}))
+
+    def test_src_path_traversal_rejected(self):
+        with self.assertRaises(SeedTemplateError):
+            validate_manifest(
+                _make_manifest(
+                    categories={
+                        "c": {
+                            "description": "d",
+                            "files": [{"src": "../../etc/passwd", "dst": "out.py"}],
+                        }
+                    }
+                )
+            )
+
+    def test_dst_path_traversal_rejected(self):
+        with self.assertRaises(SeedTemplateError):
+            validate_manifest(
+                _make_manifest(
+                    categories={
+                        "c": {
+                            "description": "d",
+                            "files": [{"src": "a.tmpl", "dst": "/etc/passwd"}],
+                        }
+                    }
+                )
+            )
 
 
 class ResolveBundleDirTests(unittest.TestCase):
@@ -340,6 +374,12 @@ class ValidateBundleTests(unittest.TestCase):
     def test_empty_manifest_valid(self):
         m = _make_manifest(categories={"c": {"description": "empty", "files": []}})
         self.assertEqual(validate_bundle(self._bundle_dir, m), [])
+
+    def test_src_traversal_reported(self):
+        m = self._manifest_with_files({"c": ["../../etc/passwd"]})
+        result = validate_bundle(self._bundle_dir, m)
+        self.assertEqual(len(result), 1)
+        self.assertIn("escapes bundle", result[0])
 
 
 class MsmeErpManifestTests(unittest.TestCase):
