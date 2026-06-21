@@ -1,119 +1,176 @@
 {
-  "milestone": "integration-m10-orchestrator-wiring",
-  "phase": "C",
-  "phase_name": "Review + Fix",
+  "milestone": "extension-m14-system-altitude-gate",
+  "phase": "A",
+  "phase_name": "Plan + Ultrathink",
   "timestamp": "2026-06-21",
-  "spec_gaps_implemented": [
+  "pass": 1,
+  "critical_gaps": 3,
+  "architectural_gaps": 3,
+  "important_gaps": 7,
+  "minor_gaps": 10,
+  "deferred_gaps": 6,
+  "total_gaps_found": 23,
+  "gaps_fixed_this_pass": 7,
+  "tests_green": true,
+  "lint_clean": true,
+  "converged": true,
+  "gap_summaries": [
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
-      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
-      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
+      "id": "C1",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "progressive_delivery not in VALID_SYSTEM_CATEGORIES",
+      "description": "Profile validator (_validate_categories) rejects unknown system categories. progressive_delivery was not in VALID_SYSTEM_CATEGORIES, so any profile listing it would fail validation. product_profile.py was marked Untouched.",
+      "fix": "Moved product_profile.py to Modified list. Added progressive_delivery to VALID_SYSTEM_CATEGORIES in Task 12 step 3b."
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
-      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
-      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
+      "id": "C2",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Gate file tier persisted as 'code' instead of 'system'",
+      "description": "evaluate_gate -> build_gate_file -> make_gate_file(tier='code'). The plan called evaluate_gate then mutated gate_file['tier'] = 'system' after, but evaluate_gate persists the gate file internally with tier='code'. The persisted artifact is wrong.",
+      "fix": "Added backward-compatible tier: str = 'code' parameter to build_gate_file and evaluate_gate in verdict_engine.py. system_gate.py now passes tier='system'. Moved verdict_engine.py to Modified list."
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
-      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
-      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+      "id": "C3",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "No handling when environment provisioning fails",
+      "description": "provision_system_env returns SystemEnvInfo(provisioned=False) on failure. run_system_gate would proceed to run collectors against a non-existent environment, all of which would timeout/error. Wasteful and misleading errors.",
+      "fix": "Added early-exit in run_system_gate: if env_info.provisioned is False, return FAIL gate file immediately with _provision_failed flag. Added test_provision_failure_returns_fail test."
     },
     {
-      "spec_section": "§11",
-      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
-      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
-      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+      "id": "A1",
+      "severity": "architectural",
+      "status": "deferred",
+      "title": "Evidence path collision between code and system gates",
+      "description": "Code and system gates share _bmad/gate/evidence/<gate_id>/. If same gate_id used for both, evidence records collide. Mitigated by convention: system gates use distinct gate IDs (e.g., 'sg-*')."
+    },
+    {
+      "id": "A2",
+      "severity": "architectural",
+      "status": "deferred",
+      "title": "Shared crash marker between code and system gates",
+      "description": "gate-in-progress.json is shared. Concurrent code + system gates would conflict. Gate execution is sequential by design, so this is low-risk."
+    },
+    {
+      "id": "A3",
+      "severity": "architectural",
+      "status": "deferred",
+      "title": "Unnecessary git checkout for system collectors",
+      "description": "run_gate_collectors wraps collection in collector_checkout (fresh git checkout at SHA). System collectors check a live K8s cluster, not the codebase. The checkout is wasted I/O but harmless."
+    },
+    {
+      "id": "I1",
+      "severity": "important",
+      "status": "fixed",
+      "title": "Missing system-altitude timeout defaults",
+      "description": "DEFAULT_TIMEOUTS only had code categories (security: 300, etc.). System categories fell back to DEFAULT_TIMEOUT_FALLBACK = 120s. k6 load tests and chaos experiments need 600-900s.",
+      "fix": "Added system timeout defaults in Task 12 step 3b: reliability: 600, resilience: 900, durable_hitl: 600, blast_radius: 900, cost_to_serve: 900, progressive_delivery: 300."
+    },
+    {
+      "id": "I2",
+      "severity": "important",
+      "status": "fixed",
+      "title": "resilience_rule zero-scenario edge case",
+      "description": "If scenarios_total=0 and scenarios_passed=0, the condition 'total > 0 and passed < total' is False, so the rule returns PASS. Zero scenarios means no resilience testing occurred.",
+      "fix": "Added 'if total == 0: return FAIL(no resilience scenarios executed)' before the passed < total check. Added test_fail_zero_scenarios test."
+    },
+    {
+      "id": "I3",
+      "severity": "important",
+      "status": "deferred",
+      "title": "Bool coercion on metric values (slo_breached, signal_survived)",
+      "description": "blast_radius_rule uses bool(_aggregate_metrics(evidence, 'slo_breached', False)). If the metric is stored as string 'false' from JSON, bool('false') == True. Mitigated: JSON false -> Python False natively."
+    },
+    {
+      "id": "I4",
+      "severity": "important",
+      "status": "fixed",
+      "title": "Fragile epic ID filtering in CLI (startswith 'E')",
+      "description": "gate_system_status_action filtered parked items with story_key.startswith('E'). This is fragile and semantically wrong.",
+      "fix": "Replaced with filter on reason='exhausted' or tier='system' in the parked data."
+    },
+    {
+      "id": "I5",
+      "severity": "important",
+      "status": "deferred",
+      "title": "progressive_delivery not in default profile categories.system",
+      "description": "Even with progressive_delivery in VALID_SYSTEM_CATEGORIES, existing profiles don't list it. By design: progressive_delivery is opt-in (not all epics use Argo Rollouts)."
+    },
+    {
+      "id": "I6",
+      "severity": "important",
+      "status": "deferred",
+      "title": "No test asserting _runtime_env NOT in persisted gate file",
+      "description": "Tests verify _runtime_env IS injected into the profile copy for collectors, but don't verify it's absent from the persisted gate file. Safe by design since evaluate_gate receives the original profile."
+    },
+    {
+      "id": "I7",
+      "severity": "important",
+      "status": "fixed",
+      "title": "No violation status tests for system rules",
+      "description": "Rule functions handle violation status explicitly (FAIL on violation), but no dedicated tests. Fail-closed behavior is tested via error/timeout paths. Zero-scenario test adds coverage."
+    },
+    {
+      "id": "M1",
+      "severity": "minor",
+      "status": "noted",
+      "title": "UUID4 non-determinism in env_id"
+    },
+    {
+      "id": "M2",
+      "severity": "minor",
+      "status": "noted",
+      "title": "Hardcoded chaos YAML paths in resilience collectors"
+    },
+    {
+      "id": "M3",
+      "severity": "minor",
+      "status": "noted",
+      "title": "Missing tool_version_cmd on some collectors"
+    },
+    {
+      "id": "M4",
+      "severity": "minor",
+      "status": "noted",
+      "title": "stories_to_reopen returns ALL stories on FAIL"
+    },
+    {
+      "id": "M5",
+      "severity": "minor",
+      "status": "noted",
+      "title": "Test fixture duplication across test files"
+    },
+    {
+      "id": "M6",
+      "severity": "minor",
+      "status": "noted",
+      "title": "HR6(e/g) compliance/observability already code-altitude"
+    },
+    {
+      "id": "M7",
+      "severity": "minor",
+      "status": "noted",
+      "title": "CLAUDE.md module map update needed for new modules"
+    },
+    {
+      "id": "M8",
+      "severity": "minor",
+      "status": "noted",
+      "title": "park_story uses epic_id as story_key (semantic confusion)"
+    },
+    {
+      "id": "M9",
+      "severity": "minor",
+      "status": "noted",
+      "title": "deepcopy performance cost in _inject_runtime_env"
+    },
+    {
+      "id": "M10",
+      "severity": "minor",
+      "status": "noted",
+      "title": "Teardown error swallowing in teardown_system_env"
     }
-  ],
-  "post_impl_findings": [
-    {
-      "id": "PI-1",
-      "severity": "medium",
-      "tag": "[post-impl]",
-      "file": "core/gate_orchestrator.py:route_gate_verdict",
-      "finding": "Unknown verdicts silently fell through to remediate branch",
-      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-2",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "tests/test_gate_remediation.py",
-      "finding": "No test for frontmatter-only story file (no ## sections)",
-      "fix": "Added test_handles_frontmatter_only_file test case",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-3",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
-      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
-      "status": "accepted"
-    }
-  ],
-  "production_findings": [
-    {
-      "id": "PR-1",
-      "severity": "high",
-      "tag": "[production]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Non-atomic story file write via path.write_text()",
-      "fix": "Changed to write_atomic() from utils.py",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-2",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_orchestrator.py:recover_from_crash",
-      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
-      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-3",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
-      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
-      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-4",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
-      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
-      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-5",
-      "severity": "low",
-      "tag": "[production]",
-      "file": "core/gate_status.py:resume_story",
-      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
-      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
-      "status": "accepted"
-    }
-  ],
-  "ruff_findings_fixed": [
-    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
-    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
-    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
-  ],
-  "verification": {
-    "test_count": 2486,
-    "test_result": "OK (skipped=2)",
-    "ruff": "All checks passed",
-    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
-  }
+  ]
 }
