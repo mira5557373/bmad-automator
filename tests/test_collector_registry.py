@@ -217,5 +217,82 @@ class KillSwitchTests(unittest.TestCase):
         self.assertFalse(reg.is_kill_switched(cfg, {}))
 
 
+class SecurityCategoryRegistrationTests(unittest.TestCase):
+    def test_register_includes_security_collectors(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        security = reg.get_for_category("security")
+        ids = {c.collector_id for c in security}
+        self.assertEqual(ids, {
+            "semgrep-security", "trivy-vuln-security",
+            "osv-security", "gitleaks-security",
+        })
+
+    def test_register_includes_license_collectors(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        license_colls = reg.get_for_category("license")
+        ids = {c.collector_id for c in license_colls}
+        self.assertEqual(ids, {"license-check-license"})
+
+    def test_register_includes_compliance_collectors(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        compliance = reg.get_for_category("compliance")
+        ids = {c.collector_id for c in compliance}
+        self.assertEqual(ids, {"compliance-rules-compliance", "conftest-compliance"})
+
+    def test_register_includes_supply_chain_collectors(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        sc = reg.get_for_category("supply_chain")
+        ids = {c.collector_id for c in sc}
+        self.assertEqual(ids, {
+            "sbom-supply_chain", "cosign-supply_chain",
+            "provenance-supply_chain", "trivy-sbom-supply_chain",
+        })
+
+    def test_total_collector_count(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        self.assertEqual(len(reg.all_collectors()), 25)
+
+    def test_all_categories_present(self) -> None:
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.collectors import register_core_collectors
+
+        reg = CollectorRegistry()
+        register_core_collectors(reg)
+        cats = reg.all_categories()
+        for expected in ("security", "license", "compliance", "supply_chain"):
+            self.assertIn(expected, cats)
+
+    def test_core_collector_ids_frozenset(self) -> None:
+        from story_automator.core.collectors import CORE_COLLECTOR_IDS
+
+        self.assertEqual(len(CORE_COLLECTOR_IDS), 25)
+        self.assertIn("semgrep-security", CORE_COLLECTOR_IDS)
+        self.assertIn("license-check-license", CORE_COLLECTOR_IDS)
+        self.assertIn("compliance-rules-compliance", CORE_COLLECTOR_IDS)
+        self.assertIn("conftest-compliance", CORE_COLLECTOR_IDS)
+        self.assertIn("sbom-supply_chain", CORE_COLLECTOR_IDS)
+        self.assertIn("trivy-sbom-supply_chain", CORE_COLLECTOR_IDS)
+
+
 if __name__ == "__main__":
     unittest.main()
