@@ -1,176 +1,128 @@
 {
   "milestone": "extension-m14-system-altitude-gate",
-  "phase": "A",
-  "phase_name": "Plan + Ultrathink",
-  "timestamp": "2026-06-21",
-  "pass": 1,
-  "critical_gaps": 3,
-  "architectural_gaps": 3,
-  "important_gaps": 7,
-  "minor_gaps": 10,
-  "deferred_gaps": 6,
-  "total_gaps_found": 23,
-  "gaps_fixed_this_pass": 7,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
+  "review_phase": "C",
+  "base_commit": "f03eb160acf7d75f15bc25c9a9550292d74e5f0d",
+  "head_commit_pre_fix": "0a7c490",
+  "head_commit_post_fix": "8a227a0",
+  "test_results": {
+    "total": 2589,
+    "passed": 2589,
+    "failed": 0,
+    "skipped": 2,
+    "new_tests_added": 11
+  },
+  "verification": {
+    "npm_run_verify": "pass",
+    "ruff_check": "pass",
+    "loc_limits": "pass (max 478 LOC in product_profile.py)"
+  },
   "gap_summaries": [
     {
-      "id": "C1",
-      "severity": "critical",
-      "status": "fixed",
-      "title": "progressive_delivery not in VALID_SYSTEM_CATEGORIES",
-      "description": "Profile validator (_validate_categories) rejects unknown system categories. progressive_delivery was not in VALID_SYSTEM_CATEGORIES, so any profile listing it would fail validation. product_profile.py was marked Untouched.",
-      "fix": "Moved product_profile.py to Modified list. Added progressive_delivery to VALID_SYSTEM_CATEGORIES in Task 12 step 3b."
+      "id": "G1",
+      "tag": "[post-impl]",
+      "title": "seed_data config read but never applied during provisioning",
+      "spec_ref": "§10",
+      "severity": "correctness",
+      "description": "build_env_config reads seed_data from profile.rules.system_env.seed_data and stores it in SystemEnvConfig, but _provision_minimal and _provision_full never applied it. Environments would start empty.",
+      "fix": "Added _apply_seed_data helper called after successful compose-up (minimal) and helm-install (full). For minimal tier, runs docker compose exec; for full tier, runs kubectl apply.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/system_env.py"
+      ],
+      "tests_added": [
+        "test_system_env.py::ProvisionEnvTests::test_minimal_applies_seed_data",
+        "test_system_env.py::SeedDataConfigTests::test_seed_data_from_profile"
+      ]
     },
     {
-      "id": "C2",
-      "severity": "critical",
-      "status": "fixed",
-      "title": "Gate file tier persisted as 'code' instead of 'system'",
-      "description": "evaluate_gate -> build_gate_file -> make_gate_file(tier='code'). The plan called evaluate_gate then mutated gate_file['tier'] = 'system' after, but evaluate_gate persists the gate file internally with tier='code'. The persisted artifact is wrong.",
-      "fix": "Added backward-compatible tier: str = 'code' parameter to build_gate_file and evaluate_gate in verdict_engine.py. system_gate.py now passes tier='system'. Moved verdict_engine.py to Modified list."
+      "id": "G2",
+      "tag": "[post-impl]",
+      "title": "HR6(e) cert-cadence has no rule or category mapping",
+      "spec_ref": "§13/HR6(e)",
+      "severity": "correctness",
+      "description": "cert-cadence is designated as a human/release gate checkpoint per HR6(e). No category rule existed, so profiles listing cert_cadence in system categories would get a generic fallback rule.",
+      "fix": "Added cert_cadence_rule returning CONCERNS (human review required) when no evidence exists, PASS when human sign-off evidence present. Registered in CATEGORY_RULES and added cert_cadence to VALID_SYSTEM_CATEGORIES.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/category_rules.py",
+        "skills/bmad-story-automator/src/story_automator/core/product_profile.py"
+      ],
+      "tests_added": [
+        "test_system_category_rules.py::CertCadenceRuleTests::test_concerns_no_human_signoff",
+        "test_system_category_rules.py::CertCadenceRuleTests::test_concerns_without_evidence",
+        "test_system_category_rules.py::CertCadenceRuleTests::test_dispatch_via_apply",
+        "test_system_category_rules.py::CertCadenceRuleTests::test_fail_closed_on_error"
+      ]
     },
     {
-      "id": "C3",
-      "severity": "critical",
-      "status": "fixed",
-      "title": "No handling when environment provisioning fails",
-      "description": "provision_system_env returns SystemEnvInfo(provisioned=False) on failure. run_system_gate would proceed to run collectors against a non-existent environment, all of which would timeout/error. Wasteful and misleading errors.",
-      "fix": "Added early-exit in run_system_gate: if env_info.provisioned is False, return FAIL gate file immediately with _provision_failed flag. Added test_provision_failure_returns_fail test."
+      "id": "G3",
+      "tag": "[production]",
+      "title": "Namespace not sanitized for K8s compatibility",
+      "spec_ref": "§10",
+      "severity": "hardening",
+      "description": "build_env_config constructed namespace from epic_id + sha prefix without sanitizing. K8s namespaces require lowercase alphanumeric + hyphens, max 63 chars. Uppercase epic IDs or special chars would cause kubectl failures.",
+      "fix": "Added _sanitize_namespace: lowercases, replaces non-[a-z0-9-] with hyphens, truncates to 63 chars, strips trailing hyphens.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/system_env.py"
+      ],
+      "tests_added": [
+        "test_system_env.py::NamespaceSanitizationTests::test_uppercase_lowered",
+        "test_system_env.py::NamespaceSanitizationTests::test_special_chars_replaced",
+        "test_system_env.py::NamespaceSanitizationTests::test_max_length_enforced"
+      ]
     },
     {
-      "id": "A1",
-      "severity": "architectural",
-      "status": "deferred",
-      "title": "Evidence path collision between code and system gates",
-      "description": "Code and system gates share _bmad/gate/evidence/<gate_id>/. If same gate_id used for both, evidence records collide. Mitigated by convention: system gates use distinct gate IDs (e.g., 'sg-*')."
+      "id": "G4",
+      "tag": "[production]",
+      "title": "_provision_full ignores Helm install failures",
+      "spec_ref": "§10",
+      "severity": "hardening",
+      "description": "_provision_full ran helm install but discarded the return code. A failed Helm install returned provisioned=True, letting system collectors run against an unconfigured cluster.",
+      "fix": "Check helm_result.returncode; return provisioned=False on non-zero exit.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/system_env.py"
+      ],
+      "tests_added": [
+        "test_system_env.py::ProvisionEnvTests::test_full_helm_failure_returns_not_provisioned"
+      ]
     },
     {
-      "id": "A2",
-      "severity": "architectural",
-      "status": "deferred",
-      "title": "Shared crash marker between code and system gates",
-      "description": "gate-in-progress.json is shared. Concurrent code + system gates would conflict. Gate execution is sequential by design, so this is low-risk."
-    },
-    {
-      "id": "A3",
-      "severity": "architectural",
-      "status": "deferred",
-      "title": "Unnecessary git checkout for system collectors",
-      "description": "run_gate_collectors wraps collection in collector_checkout (fresh git checkout at SHA). System collectors check a live K8s cluster, not the codebase. The checkout is wasted I/O but harmless."
-    },
-    {
-      "id": "I1",
-      "severity": "important",
-      "status": "fixed",
-      "title": "Missing system-altitude timeout defaults",
-      "description": "DEFAULT_TIMEOUTS only had code categories (security: 300, etc.). System categories fell back to DEFAULT_TIMEOUT_FALLBACK = 120s. k6 load tests and chaos experiments need 600-900s.",
-      "fix": "Added system timeout defaults in Task 12 step 3b: reliability: 600, resilience: 900, durable_hitl: 600, blast_radius: 900, cost_to_serve: 900, progressive_delivery: 300."
-    },
-    {
-      "id": "I2",
-      "severity": "important",
-      "status": "fixed",
-      "title": "resilience_rule zero-scenario edge case",
-      "description": "If scenarios_total=0 and scenarios_passed=0, the condition 'total > 0 and passed < total' is False, so the rule returns PASS. Zero scenarios means no resilience testing occurred.",
-      "fix": "Added 'if total == 0: return FAIL(no resilience scenarios executed)' before the passed < total check. Added test_fail_zero_scenarios test."
-    },
-    {
-      "id": "I3",
-      "severity": "important",
-      "status": "deferred",
-      "title": "Bool coercion on metric values (slo_breached, signal_survived)",
-      "description": "blast_radius_rule uses bool(_aggregate_metrics(evidence, 'slo_breached', False)). If the metric is stored as string 'false' from JSON, bool('false') == True. Mitigated: JSON false -> Python False natively."
-    },
-    {
-      "id": "I4",
-      "severity": "important",
-      "status": "fixed",
-      "title": "Fragile epic ID filtering in CLI (startswith 'E')",
-      "description": "gate_system_status_action filtered parked items with story_key.startswith('E'). This is fragile and semantically wrong.",
-      "fix": "Replaced with filter on reason='exhausted' or tier='system' in the parked data."
-    },
-    {
-      "id": "I5",
-      "severity": "important",
-      "status": "deferred",
-      "title": "progressive_delivery not in default profile categories.system",
-      "description": "Even with progressive_delivery in VALID_SYSTEM_CATEGORIES, existing profiles don't list it. By design: progressive_delivery is opt-in (not all epics use Argo Rollouts)."
-    },
-    {
-      "id": "I6",
-      "severity": "important",
-      "status": "deferred",
-      "title": "No test asserting _runtime_env NOT in persisted gate file",
-      "description": "Tests verify _runtime_env IS injected into the profile copy for collectors, but don't verify it's absent from the persisted gate file. Safe by design since evaluate_gate receives the original profile."
-    },
-    {
-      "id": "I7",
-      "severity": "important",
-      "status": "fixed",
-      "title": "No violation status tests for system rules",
-      "description": "Rule functions handle violation status explicitly (FAIL on violation), but no dedicated tests. Fail-closed behavior is tested via error/timeout paths. Zero-scenario test adds coverage."
-    },
-    {
-      "id": "M1",
-      "severity": "minor",
-      "status": "noted",
-      "title": "UUID4 non-determinism in env_id"
-    },
-    {
-      "id": "M2",
-      "severity": "minor",
-      "status": "noted",
-      "title": "Hardcoded chaos YAML paths in resilience collectors"
-    },
-    {
-      "id": "M3",
-      "severity": "minor",
-      "status": "noted",
-      "title": "Missing tool_version_cmd on some collectors"
-    },
-    {
-      "id": "M4",
-      "severity": "minor",
-      "status": "noted",
-      "title": "stories_to_reopen returns ALL stories on FAIL"
-    },
-    {
-      "id": "M5",
-      "severity": "minor",
-      "status": "noted",
-      "title": "Test fixture duplication across test files"
-    },
-    {
-      "id": "M6",
-      "severity": "minor",
-      "status": "noted",
-      "title": "HR6(e/g) compliance/observability already code-altitude"
-    },
-    {
-      "id": "M7",
-      "severity": "minor",
-      "status": "noted",
-      "title": "CLAUDE.md module map update needed for new modules"
-    },
-    {
-      "id": "M8",
-      "severity": "minor",
-      "status": "noted",
-      "title": "park_story uses epic_id as story_key (semantic confusion)"
-    },
-    {
-      "id": "M9",
-      "severity": "minor",
-      "status": "noted",
-      "title": "deepcopy performance cost in _inject_runtime_env"
-    },
-    {
-      "id": "M10",
-      "severity": "minor",
-      "status": "noted",
-      "title": "Teardown error swallowing in teardown_system_env"
+      "id": "G5",
+      "tag": "[production]",
+      "title": "Context manager calls teardown when provision failed",
+      "spec_ref": "§10",
+      "severity": "hardening",
+      "description": "system_env context manager always called teardown_system_env in finally block, even when provisioned=False. This wasted time and could produce confusing error output from teardown commands against non-existent resources.",
+      "fix": "Added if info.provisioned guard before teardown call.",
+      "files_changed": [
+        "skills/bmad-story-automator/src/story_automator/core/system_env.py"
+      ],
+      "tests_added": [
+        "test_system_env.py::SystemEnvContextManagerTests::test_skips_teardown_when_not_provisioned"
+      ]
     }
+  ],
+  "no_gaps_found": [],
+  "reviewed_files": [
+    "skills/bmad-story-automator/src/story_automator/core/system_env.py",
+    "skills/bmad-story-automator/src/story_automator/core/system_gate.py",
+    "skills/bmad-story-automator/src/story_automator/core/category_rules.py",
+    "skills/bmad-story-automator/src/story_automator/core/system_collector_registry.py",
+    "skills/bmad-story-automator/src/story_automator/core/gate_audit.py",
+    "skills/bmad-story-automator/src/story_automator/core/verdict_engine.py",
+    "skills/bmad-story-automator/src/story_automator/core/product_profile.py",
+    "skills/bmad-story-automator/src/story_automator/commands/gate_cmd.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/reliability.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/resilience.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/durable_hitl.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/blast_radius.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/cost_to_serve.py",
+    "skills/bmad-story-automator/src/story_automator/core/collectors/progressive_delivery.py",
+    "tests/test_system_category_rules.py",
+    "tests/test_system_env.py",
+    "tests/test_system_gate.py",
+    "tests/test_system_collector_registry.py",
+    "tests/test_system_collectors.py",
+    "tests/test_gate_cmd.py",
+    "tests/test_gate_audit.py",
+    "tests/test_system_gate_integration.py"
   ]
 }
