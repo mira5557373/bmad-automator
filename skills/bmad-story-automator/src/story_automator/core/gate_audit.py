@@ -20,6 +20,7 @@ __all__ = [
     "GateRenderedAudit",
     "GateProfileDriftAudit",
     "GateParkedAudit",
+    "GateCompletedAudit",
     "emit_gate_audit",
 ]
 
@@ -156,10 +157,31 @@ class GateParkedAudit:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class GateCompletedAudit:
+    """Audit event: full gate lifecycle completed."""
+    event_name: str = dataclasses.field(default="GateCompleted", init=False)
+    gate_id: str = ""
+    overall: str = ""
+    duration_ms: int = 0
+    commit_sha: str = ""
+    runbook_ref: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "overall": self.overall,
+            "duration_ms": self.duration_ms,
+            "commit_sha": self.commit_sha,
+            "runbook_ref": self.runbook_ref,
+        }
+
+
 _AuditEvent = (
     GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
     | GateDecisionAudit | GateRenderedAudit
     | GateProfileDriftAudit | GateParkedAudit
+    | GateCompletedAudit
 )
 
 

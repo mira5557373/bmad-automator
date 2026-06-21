@@ -255,5 +255,44 @@ class GateParkedAuditTests(unittest.TestCase):
         self.assertEqual(d["overall_verdict"], "FAIL")
 
 
+class GateCompletedAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        from story_automator.core.gate_audit import GateCompletedAudit
+        event = GateCompletedAudit(
+            gate_id="g1", overall="PASS", duration_ms=5000,
+            commit_sha="abc123", runbook_ref="",
+        )
+        self.assertEqual(event.event_name, "GateCompleted")
+
+    def test_to_dict_contains_all_fields(self) -> None:
+        from story_automator.core.gate_audit import GateCompletedAudit
+        event = GateCompletedAudit(
+            gate_id="g1", overall="FAIL", duration_ms=12345,
+            commit_sha="abc123", runbook_ref="section-4",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["gate_id"], "g1")
+        self.assertEqual(d["overall"], "FAIL")
+        self.assertEqual(d["duration_ms"], 12345)
+        self.assertEqual(d["commit_sha"], "abc123")
+        self.assertEqual(d["runbook_ref"], "section-4")
+
+    def test_frozen(self) -> None:
+        from story_automator.core.gate_audit import GateCompletedAudit
+        event = GateCompletedAudit(gate_id="g1", overall="PASS", duration_ms=0, commit_sha="x")
+        with self.assertRaises(AttributeError):
+            event.gate_id = "g2"  # type: ignore[misc]
+
+    def test_satisfies_audit_event_protocol(self) -> None:
+        from story_automator.core.gate_audit import GateCompletedAudit
+        event = GateCompletedAudit(gate_id="g1", overall="PASS", duration_ms=0, commit_sha="x")
+        self.assertIsInstance(event, AuditEventProtocol)
+
+    def test_runbook_ref_defaults_empty(self) -> None:
+        from story_automator.core.gate_audit import GateCompletedAudit
+        event = GateCompletedAudit(gate_id="g1", overall="PASS", duration_ms=0, commit_sha="x")
+        self.assertEqual(event.runbook_ref, "")
+
+
 if __name__ == "__main__":
     unittest.main()
