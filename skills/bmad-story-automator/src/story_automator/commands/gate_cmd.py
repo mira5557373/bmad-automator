@@ -4,6 +4,7 @@ Each action returns an int exit code; output is structured JSON on stdout.
 """
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any
 
@@ -15,6 +16,8 @@ from story_automator.core.gate_status import (
     resume_story,
 )
 from story_automator.core.utils import get_project_root, print_json
+
+_SAFE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 def _project_root() -> str:
@@ -52,6 +55,9 @@ def gate_resume_action(args: list[str]) -> int:
         print_json({"ok": False, "error": "gate_id required"})
         return 1
     gate_id = args[0]
+    if not _SAFE_ID.match(gate_id):
+        print_json({"ok": False, "error": "invalid gate_id format"})
+        return 1
     project_root = _project_root()
     record = resume_story(project_root, gate_id)
     if record is None:
@@ -72,6 +78,9 @@ def gate_invalidate_action(args: list[str]) -> int:
         print_json({"ok": False, "error": "target (story or epic id) required"})
         return 1
     target_id = args[0]
+    if not _SAFE_ID.match(target_id):
+        print_json({"ok": False, "error": "invalid target_id format"})
+        return 1
     project_root = _project_root()
     invalidated = invalidate_gates_for_target(project_root, target_id)
     print_json({

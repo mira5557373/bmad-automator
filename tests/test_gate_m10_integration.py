@@ -35,7 +35,7 @@ from story_automator.core.gate_status import (
 )
 from story_automator.core.product_profile import compute_profile_hash
 from story_automator.core.runtime_policy import VALID_VERIFIERS
-from story_automator.core.success_verifiers import VERIFIERS, production_ready_gate
+from story_automator.core.success_verifiers import VERIFIERS
 
 PROFILE = {
     "id": "test", "version": 1,

@@ -11,6 +11,7 @@ Artifact layout:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 from pathlib import Path
 from typing import Any, Mapping
@@ -185,7 +186,7 @@ def invalidate_gate(
     if not source.is_file():
         return False, f"gate file not found: {gate_id}"
     dest = verdicts_dir / f"{gate_id}.invalidated.json"
-    source.rename(dest)
+    os.replace(source, dest)
     return True, ""
 
 
@@ -215,7 +216,7 @@ def invalidate_gates_for_target(
         target = data.get("target")
         if isinstance(target, dict) and target.get("id") == target_id:
             gate_id = data.get("gate_id", path.stem)
-            dest = verdicts_dir / f"{gate_id}.invalidated.json"
-            path.rename(dest)
+            dest = verdicts_dir / f"{path.stem}.invalidated.json"
+            os.replace(path, dest)
             invalidated.append(gate_id)
     return invalidated

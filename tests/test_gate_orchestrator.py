@@ -337,7 +337,6 @@ class RunProductionGateTests(unittest.TestCase):
         self.assertFalse(marker_path.exists())
 
     def test_reuse_returns_cached_gate(self) -> None:
-        profile_hash = compute_profile_hash(self.profile)
         gate = _make_test_gate_file(
             gate_id="gate-cache",
             commit_sha="abc",

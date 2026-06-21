@@ -1,78 +1,119 @@
 {
   "milestone": "integration-m10-orchestrator-wiring",
-  "plan": "docs/superpowers/plans/2026-06-21-integration-m10-orchestrator-wiring.md",
-  "spec": "docs/superpowers/specs/2026-06-20-production-ready-factory-design.md",
-  "analysed_at": "2026-06-21",
-  "gaps": [
+  "phase": "C",
+  "phase_name": "Review + Fix",
+  "timestamp": "2026-06-21",
+  "spec_gaps_implemented": [
     {
-      "id": "GAP-01",
-      "severity": "critical",
-      "title": "Test mocking strategy causes false passes: evidence not persisted to disk",
-      "description": "run_gate_collectors persists evidence to disk via run_single_collector -> persist_evidence_record. When _run_collectors is mocked, no evidence reaches disk, so evaluate_gate -> load_evidence_bundle finds nothing and fails closed (all FAIL). Tests in Tasks 8, 15, 16 originally set mock_run.return_value to evidence dicts, but the return value is unused by run_production_gate — evidence is consumed from disk by evaluate_gate.",
       "spec_section": "§9.2",
-      "affected_tasks": [8, 15, 16],
-      "fix": "Tests must persist evidence to disk via persist_evidence_record in setUp/arrange, then mock _run_collectors to no-op (preventing real subprocess calls). The mock return value is irrelevant.",
-      "status": "fixed_inline"
+      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
+      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
+      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
     },
     {
-      "id": "GAP-02",
-      "severity": "moderate",
-      "title": "Risk-9 immediate park not handled in route_gate_verdict",
-      "description": "Spec §9.1 says 'exhausted/risk-9 persists -> PARK+escalate'. The original plan only parked when remediation_cycle >= max_cycles (exhaustion), but did not handle the case where has_unmitigated_risk_9 is true — which should park immediately without trying remediation, since risk-9 is a risk assessment issue not fixable by code remediation.",
-      "spec_section": "§9.1, §9.2",
-      "affected_tasks": [9],
-      "fix": "Added has_unmitigated_risk_9 parameter to route_gate_verdict. When true and overall is FAIL, parks immediately with reason 'risk-9' before checking max_cycles. Added test_fail_risk_9_parks_immediately test.",
-      "status": "fixed_inline"
+      "spec_section": "§9.2",
+      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
+      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
+      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
     },
     {
-      "id": "GAP-03",
+      "spec_section": "§9.2",
+      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
+      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
+      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+    },
+    {
+      "spec_section": "§11",
+      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
+      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
+      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+    }
+  ],
+  "post_impl_findings": [
+    {
+      "id": "PI-1",
+      "severity": "medium",
+      "tag": "[post-impl]",
+      "file": "core/gate_orchestrator.py:route_gate_verdict",
+      "finding": "Unknown verdicts silently fell through to remediate branch",
+      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
+      "status": "fixed"
+    },
+    {
+      "id": "PI-2",
       "severity": "low",
-      "title": "_run_collectors wrapper missing diff_categories passthrough",
-      "description": "The _run_collectors wrapper in gate_orchestrator.py omitted the diff_categories parameter that run_gate_collectors accepts. While M10 doesn't use diff-scoping by default, the wrapper should forward it for future callers.",
-      "spec_section": "§9.1",
-      "affected_tasks": [8],
-      "fix": "Added diff_categories=None parameter to _run_collectors wrapper and forward it to run_gate_collectors.",
-      "status": "fixed_inline"
+      "tag": "[post-impl]",
+      "file": "tests/test_gate_remediation.py",
+      "finding": "No test for frontmatter-only story file (no ## sections)",
+      "fix": "Added test_handles_frontmatter_only_file test case",
+      "status": "fixed"
     },
     {
-      "id": "GAP-04",
+      "id": "PI-3",
       "severity": "low",
-      "title": "Task 2 tests missing setUp and _write_gate_file helper",
-      "description": "ProductionReadyGateVerifierTests referenced self.project_root without defining setUp, and used self._write_gate_file without implementing the helper. Tests would fail at runtime.",
-      "spec_section": "§9.2",
-      "affected_tasks": [2],
-      "fix": "Added setUp with tempfile.mkdtemp(), and _write_gate_file helper that uses make_gate_file + persist_gate_file.",
-      "status": "fixed_inline"
-    },
-    {
-      "id": "GAP-05",
-      "severity": "info",
-      "title": "Remediator dispatch is signal-only — no direct invocation",
-      "description": "The plan's route_gate_verdict returns {action: 'remediate'} as a signal to the caller, but does not directly invoke the BMAD review_continuation -> dev-story remediation loop. This is architecturally correct — the existing orchestrator loop in orchestrator.py handles the actual dispatch — but the plan should be explicit that M10 provides the verdict-routing signal, not the full remediation loop.",
-      "spec_section": "§9.2",
-      "affected_tasks": [9],
-      "fix": "No code change needed. The signal-based design is correct — M10 returns the routing decision, the orchestrator loop acts on it.",
-      "status": "accepted"
-    },
-    {
-      "id": "GAP-06",
-      "severity": "info",
-      "title": "run_gate_collectors returns CollectorOutcome, not evidence dicts",
-      "description": "run_gate_collectors returns list[CollectorOutcome] (with .config, .evidence, .persisted_path), not list[dict]. The run_production_gate function correctly ignores the return value — evidence is consumed from disk by evaluate_gate via load_evidence_bundle. No interface mismatch in production code, only in the original test mocks (addressed by GAP-01).",
-      "spec_section": "§9.2",
-      "affected_tasks": [8],
-      "fix": "No production code change needed. Test mocking fixed in GAP-01.",
+      "tag": "[post-impl]",
+      "file": "core/gate_remediation.py:write_remediation_to_story",
+      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
+      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
       "status": "accepted"
     }
   ],
-  "coverage": {
-    "spec_sections_checked": ["§9.1", "§9.2", "§11", "§11.1", "§14"],
-    "total_gaps": 6,
-    "critical": 1,
-    "moderate": 1,
-    "low": 2,
-    "info": 2,
-    "all_critical_fixed": true,
-    "all_moderate_fixed": true
+  "production_findings": [
+    {
+      "id": "PR-1",
+      "severity": "high",
+      "tag": "[production]",
+      "file": "core/gate_remediation.py:write_remediation_to_story",
+      "finding": "Non-atomic story file write via path.write_text()",
+      "fix": "Changed to write_atomic() from utils.py",
+      "status": "fixed"
+    },
+    {
+      "id": "PR-2",
+      "severity": "medium",
+      "tag": "[production]",
+      "file": "core/gate_orchestrator.py:recover_from_crash",
+      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
+      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
+      "status": "fixed"
+    },
+    {
+      "id": "PR-3",
+      "severity": "medium",
+      "tag": "[production]",
+      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
+      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
+      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
+      "status": "fixed"
+    },
+    {
+      "id": "PR-4",
+      "severity": "medium",
+      "tag": "[production]",
+      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
+      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
+      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
+      "status": "fixed"
+    },
+    {
+      "id": "PR-5",
+      "severity": "low",
+      "tag": "[production]",
+      "file": "core/gate_status.py:resume_story",
+      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
+      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
+      "status": "accepted"
+    }
+  ],
+  "ruff_findings_fixed": [
+    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
+    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
+    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
+  ],
+  "verification": {
+    "test_count": 2486,
+    "test_result": "OK (skipped=2)",
+    "ruff": "All checks passed",
+    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
   }
 }

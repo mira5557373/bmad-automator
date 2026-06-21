@@ -5,7 +5,6 @@ import json
 import tempfile
 import unittest
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.gate_cmd import (
@@ -39,7 +38,7 @@ class GateStatusActionTests(unittest.TestCase):
         mock_root.return_value = self.tmp
         park_story(self.tmp, "g1", "E1-001", "exhausted", "FAIL")
         with patch("sys.stdout", new_callable=StringIO) as out:
-            code = gate_status_action(["--state=exhausted"])
+            gate_status_action(["--state=exhausted"])
         output = json.loads(out.getvalue())
         self.assertEqual(len(output["parked"]), 1)
 
@@ -48,7 +47,7 @@ class GateStatusActionTests(unittest.TestCase):
         mock_root.return_value = self.tmp
         write_gate_marker(self.tmp, "g1", "abc123")
         with patch("sys.stdout", new_callable=StringIO) as out:
-            code = gate_status_action([])
+            gate_status_action([])
         output = json.loads(out.getvalue())
         self.assertTrue(output["in_progress"])
         self.assertEqual(output["in_progress_gate_id"], "g1")
@@ -81,8 +80,8 @@ class GateResumeActionTests(unittest.TestCase):
     def test_resume_missing_arg(self) -> None:
         with patch("sys.stdout", new_callable=StringIO) as out:
             code = gate_resume_action([])
-        output = json.loads(out.getvalue())
         self.assertEqual(code, 1)
+        json.loads(out.getvalue())
 
 
 class GateInvalidateActionTests(unittest.TestCase):
@@ -125,8 +124,8 @@ class GateInvalidateActionTests(unittest.TestCase):
     def test_invalidate_missing_arg(self) -> None:
         with patch("sys.stdout", new_callable=StringIO) as out:
             code = gate_invalidate_action([])
-        output = json.loads(out.getvalue())
         self.assertEqual(code, 1)
+        json.loads(out.getvalue())
 
 
 class GateDispatchTests(unittest.TestCase):

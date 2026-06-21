@@ -25,6 +25,11 @@ from .gate_audit import (
     emit_gate_audit,
 )
 from .gate_schema import GateSchemaError
+from .gate_remediation import (
+    failing_categories_from_gate,
+    prepare_remediation_tasks,
+    request_review_continuation,
+)
 from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
@@ -109,7 +114,10 @@ def recover_from_crash(
     if not had_verdict:
         evidence_dir = root / "_bmad" / "gate" / "evidence" / gate_id
         if evidence_dir.is_dir():
-            shutil.rmtree(evidence_dir)
+            try:
+                shutil.rmtree(evidence_dir)
+            except OSError:
+                pass
 
     clear_gate_marker(project_root)
 
@@ -230,6 +238,10 @@ def route_gate_verdict(
             "overall": "CONCERNS", "mitigation_debt": concerns_cats,
         }
 
+    # Fail-closed: unrecognized verdicts are treated as FAIL
+    if overall not in ("FAIL", "PASS", "WAIVED", "CONCERNS"):
+        overall = "FAIL"
+
     if has_unmitigated_risk_9:
         park_story(
             project_root, gate_id, story_key,
@@ -252,9 +264,21 @@ def route_gate_verdict(
             "overall": overall, "gate_id": gate_id,
         }
 
+    failing = failing_categories_from_gate(gate_file)
+    tasks = prepare_remediation_tasks(gate_file)
+    next_cycle = remediation_cycle + 1
+    continuation = request_review_continuation(
+        story_key=story_key,
+        gate_id=gate_id,
+        cycle=next_cycle,
+        failing_categories=failing,
+    )
     return {
         "action": "remediate", "overall": overall,
-        "gate_id": gate_id, "cycle": remediation_cycle + 1,
+        "gate_id": gate_id, "cycle": next_cycle,
+        "failing_categories": failing,
+        "remediation_tasks": tasks,
+        "review_continuation": continuation,
     }
 
 
