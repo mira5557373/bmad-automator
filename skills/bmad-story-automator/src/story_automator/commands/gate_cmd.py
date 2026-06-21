@@ -7,6 +7,7 @@ from __future__ import annotations
 import json as _json
 import re
 import sys
+from pathlib import Path
 from typing import Any
 
 from story_automator.core.evidence_io import read_gate_marker
@@ -95,6 +96,21 @@ def gate_invalidate_action(args: list[str]) -> int:
     return 0
 
 
+def _resolve_audit_args(
+    project_root: str,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    """Best-effort audit config from runtime policy."""
+    try:
+        from story_automator.core.runtime_policy import load_runtime_policy
+        policy = load_runtime_policy(project_root, resolve_assets=False)
+        security = policy.get("security") or {}
+        if security.get("audit_trail"):
+            return policy, Path(project_root) / "_bmad" / "audit" / "audit.jsonl"
+    except (ValueError, OSError):
+        pass
+    return None, None
+
+
 def gate_readiness_action(args: list[str]) -> int:
     if not args or args[0].startswith("--"):
         print("usage: gate readiness <story_id> [--risk=<risk.json>]", file=sys.stderr)
@@ -115,9 +131,12 @@ def gate_readiness_action(args: list[str]) -> int:
                 print_json({"ok": False, "error": str(exc)})
                 return 1
 
+    audit_policy, audit_path = _resolve_audit_args(project_root)
+
     result = run_readiness_gate(
         project_root, story_id,
         profile=profile, risk_entries=risk_entries,
+        audit_policy=audit_policy, audit_path=audit_path,
     )
     print_json(result)
     return 0 if result.get("verdict") == "READY" else 1

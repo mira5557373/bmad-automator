@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.gate_cmd import (
+    _resolve_audit_args,
     gate_dispatch,
     gate_invalidate_action,
     gate_readiness_action,
@@ -209,6 +210,43 @@ class GateReadinessActionTests(unittest.TestCase):
         mock_root.return_value = self.tmp
         code = gate_readiness_action([])
         self.assertEqual(code, 2)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    @patch("story_automator.commands.gate_cmd.load_effective_profile")
+    @patch("story_automator.commands.gate_cmd.run_readiness_gate")
+    @patch("story_automator.commands.gate_cmd._resolve_audit_args")
+    def test_audit_args_forwarded_to_readiness_gate(
+        self, mock_audit, mock_gate, mock_profile, mock_root,
+    ) -> None:
+        mock_root.return_value = self.tmp
+        mock_profile.return_value = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+        audit_policy = {"security": {"audit_trail": True}}
+        audit_path = Path(self.tmp) / "audit.jsonl"
+        mock_audit.return_value = (audit_policy, audit_path)
+        mock_gate.return_value = {"verdict": "NEEDS_RISK", "priority": ""}
+        with patch("sys.stdout", new_callable=StringIO):
+            gate_readiness_action(["E1-001"])
+        _, kwargs = mock_gate.call_args
+        self.assertEqual(kwargs["audit_policy"], audit_policy)
+        self.assertEqual(kwargs["audit_path"], audit_path)
+
+
+class ResolveAuditArgsTests(unittest.TestCase):
+    def test_returns_none_pair_when_policy_unavailable(self) -> None:
+        policy, path = _resolve_audit_args("/nonexistent/project")
+        self.assertIsNone(policy)
+        self.assertIsNone(path)
 
 
 if __name__ == "__main__":

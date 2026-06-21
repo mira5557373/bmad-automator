@@ -189,6 +189,48 @@ def run_readiness_gate(
     return result
 
 
+def run_epic_readiness_gate(
+    project_root: str | Path,
+    epic_id: str,
+    story_ids: list[str],
+    *,
+    profile: dict[str, Any],
+    risk_map: dict[str, list[dict[str, Any]]] | None = None,
+    audit_policy: dict[str, Any] | None = None,
+    audit_path: Path | None = None,
+) -> dict[str, Any]:
+    """§8 M1: Epic-level readiness lifecycle."""
+    from .readiness_gate import check_epic_readiness, persist_readiness_result
+    from .risk_profile import persist_risk_profile
+
+    assert_host_context("run_epic_readiness_gate")
+
+    if risk_map:
+        for story_id, entries in risk_map.items():
+            if entries:
+                persist_risk_profile(project_root, story_id, entries)
+
+    result = check_epic_readiness(
+        epic_id, story_ids, profile=profile, risk_map=risk_map,
+    )
+
+    persist_readiness_result(project_root, epic_id, result)
+
+    if audit_policy is not None and audit_path is not None:
+        emit_gate_audit(
+            audit_policy, audit_path,
+            GateReadinessAudit(
+                story_id=epic_id,
+                verdict=result["verdict"],
+                priority=result.get("priority", ""),
+                blocker_count=len(result.get("blockers", [])),
+                reason=result.get("reason", ""),
+            ),
+        )
+
+    return result
+
+
 def _run_collectors(
     project_root: str | Path,
     gate_id: str,

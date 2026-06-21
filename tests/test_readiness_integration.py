@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch
 
 from story_automator.core.collector_registry import CollectorRegistry
 from story_automator.core.evidence_io import persist_evidence_record
-from story_automator.core.gate_orchestrator import run_production_gate, run_readiness_gate
+from story_automator.core.gate_orchestrator import (
+    run_epic_readiness_gate,
+    run_production_gate,
+    run_readiness_gate,
+)
 from story_automator.core.gate_schema import make_evidence_record
 from story_automator.core.risk_profile import (
     has_unmitigated_risk_9,
@@ -105,6 +109,72 @@ class RunReadinessGateTests(unittest.TestCase):
             profile=self.profile, risk_entries=new_entries,
         )
         self.assertEqual(result["priority"], "P0")
+
+
+class RunEpicReadinessGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+
+    def test_epic_ready_with_risk_map(self) -> None:
+        risk_map = {
+            "E1-001": [make_risk_entry("TECH", 2, 2)],
+            "E1-002": [make_risk_entry("OPS", 1, 1)],
+        }
+        result = run_epic_readiness_gate(
+            self.tmp, "E1", ["E1-001", "E1-002"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["verdict"], "READY")
+        self.assertEqual(result["epic_id"], "E1")
+
+    def test_epic_persists_risk_entries(self) -> None:
+        risk_map = {"E1-001": [make_risk_entry("TECH", 1, 1)]}
+        run_epic_readiness_gate(
+            self.tmp, "E1", ["E1-001"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        loaded = load_risk_profile(self.tmp, "E1-001")
+        self.assertEqual(len(loaded["entries"]), 1)
+
+    def test_epic_persists_readiness_result(self) -> None:
+        from story_automator.core.readiness_gate import load_readiness_result
+        risk_map = {"E1-001": [make_risk_entry("TECH", 1, 1)]}
+        run_epic_readiness_gate(
+            self.tmp, "E1", ["E1-001"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        loaded = load_readiness_result(self.tmp, "E1")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["verdict"], "READY")
+
+    def test_epic_needs_risk_when_no_entries(self) -> None:
+        result = run_epic_readiness_gate(
+            self.tmp, "E1", ["E1-001"],
+            profile=self.profile,
+        )
+        self.assertEqual(result["verdict"], "NEEDS_RISK")
+
+    def test_epic_blocked(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-*"]}
+        risk_map = {"E1-001": [make_risk_entry("TECH", 1, 1)]}
+        result = run_epic_readiness_gate(
+            self.tmp, "E1", ["E1-001"],
+            profile=profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["verdict"], "BLOCKED")
 
 
 class ReadinessToProductionGateBridgeTests(unittest.TestCase):

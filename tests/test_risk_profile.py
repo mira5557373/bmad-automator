@@ -330,6 +330,41 @@ class ComputeRiskProfileRefTests(unittest.TestCase):
         )
 
 
+class ResolveTeaRiskInputsTests(unittest.TestCase):
+    def test_valid_tea_output(self) -> None:
+        from story_automator.core.risk_profile import resolve_tea_risk_inputs
+        tea = {
+            "risk": [
+                {"category": "SEC", "probability": 3, "impact": 3, "score": 9, "rationale": "auth"},
+                {"category": "TECH", "probability": 1, "impact": 1, "score": 1},
+            ],
+            "test_design": {"strategy": "risk-based"},
+        }
+        entries = resolve_tea_risk_inputs(tea)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["category"], "SEC")
+
+    def test_missing_risk_key_raises(self) -> None:
+        from story_automator.core.risk_profile import resolve_tea_risk_inputs
+        with self.assertRaises(RiskProfileError):
+            resolve_tea_risk_inputs({"test_design": {}})
+
+    def test_non_dict_raises(self) -> None:
+        from story_automator.core.risk_profile import resolve_tea_risk_inputs
+        with self.assertRaises(RiskProfileError):
+            resolve_tea_risk_inputs("not a dict")
+
+    def test_invalid_risk_entries_raises(self) -> None:
+        from story_automator.core.risk_profile import resolve_tea_risk_inputs
+        with self.assertRaises(RiskProfileError):
+            resolve_tea_risk_inputs({"risk": "not a list"})
+
+    def test_empty_risk_list_raises(self) -> None:
+        from story_automator.core.risk_profile import resolve_tea_risk_inputs
+        with self.assertRaises(RiskProfileError):
+            resolve_tea_risk_inputs({"risk": []})
+
+
 class RiskProfileEdgeCaseTests(unittest.TestCase):
     def test_all_categories_covered(self) -> None:
         entries = [

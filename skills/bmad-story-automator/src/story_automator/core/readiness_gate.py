@@ -109,6 +109,98 @@ def check_readiness(
     }
 
 
+def check_epic_readiness(
+    epic_id: str,
+    story_ids: list[str],
+    *,
+    profile: dict[str, Any],
+    risk_map: dict[str, list[dict[str, Any]]] | None = None,
+    thresholds: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    """§8 M1: Epic-level implementation-readiness check."""
+    if not story_ids:
+        return {
+            "verdict": "NEEDS_RISK",
+            "epic_id": epic_id,
+            "priority": "",
+            "story_results": {},
+            "blockers": [],
+            "reason": "no stories provided for epic readiness check",
+        }
+
+    _risk_map = risk_map or {}
+    story_results: dict[str, dict[str, Any]] = {}
+    worst_verdict = "READY"
+    worst_priority = "P3"
+    _order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+    all_blockers: list[dict[str, Any]] = []
+
+    for story_id in story_ids:
+        result = check_readiness(
+            story_id, profile=profile,
+            risk_entries=_risk_map.get(story_id),
+            thresholds=thresholds,
+        )
+        story_results[story_id] = result
+        v = result["verdict"]
+        if v == "BLOCKED":
+            worst_verdict = "BLOCKED"
+            all_blockers.extend(result.get("blockers", []))
+        elif v == "NEEDS_RISK" and worst_verdict != "BLOCKED":
+            worst_verdict = "NEEDS_RISK"
+        p = result.get("priority", "")
+        if p and _order.get(p, 3) < _order.get(worst_priority, 3):
+            worst_priority = p
+
+    return {
+        "verdict": worst_verdict,
+        "epic_id": epic_id,
+        "priority": worst_priority if worst_verdict == "READY" else "",
+        "story_results": story_results,
+        "blockers": all_blockers,
+        "reason": _epic_readiness_reason(worst_verdict, story_ids, story_results),
+    }
+
+
+def _epic_readiness_reason(
+    verdict: str,
+    story_ids: list[str],
+    story_results: dict[str, dict[str, Any]],
+) -> str:
+    total = len(story_ids)
+    if verdict == "READY":
+        return f"all {total} stories ready"
+    if verdict == "BLOCKED":
+        blocked = sum(
+            1 for r in story_results.values() if r["verdict"] == "BLOCKED"
+        )
+        return f"{blocked} of {total} stories blocked"
+    needs = sum(
+        1 for r in story_results.values() if r["verdict"] == "NEEDS_RISK"
+    )
+    return f"{needs} of {total} stories need risk assessment"
+
+
+def validate_story_creation(
+    story_id: str,
+    *,
+    profile: dict[str, Any],
+    risk_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """§8 M1: Validate prerequisites for story creation."""
+    result = check_readiness(
+        story_id, profile=profile, risk_entries=risk_entries,
+    )
+    return {
+        "can_create": result["verdict"] == "READY",
+        "verdict": result["verdict"],
+        "reason": result["reason"],
+        "priority": result.get("priority", ""),
+        "requirements": result.get("requirements", {}),
+        "blockers": result.get("blockers", []),
+    }
+
+
 _READINESS_DIR = "readiness"
 
 

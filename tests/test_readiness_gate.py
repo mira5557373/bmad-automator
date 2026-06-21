@@ -6,11 +6,13 @@ import unittest
 
 from story_automator.core.readiness_gate import (
     READINESS_VERDICTS,
+    check_epic_readiness,
     check_readiness,
     format_blocker_summary,
     load_readiness_result,
     persist_readiness_result,
     resolve_story_blockers,
+    validate_story_creation,
 )
 from story_automator.core.risk_profile import make_risk_entry
 
@@ -213,6 +215,149 @@ class PersistReadinessResultTests(unittest.TestCase):
 
     def test_load_missing_returns_none(self) -> None:
         self.assertIsNone(load_readiness_result(self.tmp, "no-such"))
+
+
+class CheckEpicReadinessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+
+    def test_all_stories_ready(self) -> None:
+        risk_map = {
+            "E1-001": [make_risk_entry("TECH", 2, 2)],
+            "E1-002": [make_risk_entry("SEC", 1, 1)],
+        }
+        result = check_epic_readiness(
+            "E1", ["E1-001", "E1-002"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["verdict"], "READY")
+        self.assertEqual(result["epic_id"], "E1")
+        self.assertEqual(result["priority"], "P2")
+
+    def test_one_story_blocked(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-001"]}
+        risk_map = {
+            "E1-001": [make_risk_entry("TECH", 1, 1)],
+            "E1-002": [make_risk_entry("SEC", 1, 1)],
+        }
+        result = check_epic_readiness(
+            "E1", ["E1-001", "E1-002"],
+            profile=profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["verdict"], "BLOCKED")
+        self.assertEqual(len(result["blockers"]), 1)
+
+    def test_one_story_needs_risk(self) -> None:
+        risk_map = {"E1-001": [make_risk_entry("TECH", 1, 1)]}
+        result = check_epic_readiness(
+            "E1", ["E1-001", "E1-002"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["verdict"], "NEEDS_RISK")
+
+    def test_empty_story_list(self) -> None:
+        result = check_epic_readiness(
+            "E1", [], profile=self.profile,
+        )
+        self.assertEqual(result["verdict"], "NEEDS_RISK")
+
+    def test_worst_priority_wins(self) -> None:
+        risk_map = {
+            "E1-001": [make_risk_entry("SEC", 3, 3, rationale="m")],
+            "E1-002": [make_risk_entry("TECH", 1, 1)],
+        }
+        result = check_epic_readiness(
+            "E1", ["E1-001", "E1-002"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        self.assertEqual(result["priority"], "P0")
+
+    def test_per_story_results_included(self) -> None:
+        risk_map = {"E1-001": [make_risk_entry("TECH", 1, 1)]}
+        result = check_epic_readiness(
+            "E1", ["E1-001"],
+            profile=self.profile, risk_map=risk_map,
+        )
+        self.assertIn("E1-001", result["story_results"])
+        self.assertEqual(result["story_results"]["E1-001"]["verdict"], "READY")
+
+    def test_blocked_takes_precedence_over_needs_risk(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-001"]}
+        result = check_epic_readiness(
+            "E1", ["E1-001", "E1-002"],
+            profile=profile,
+        )
+        self.assertEqual(result["verdict"], "BLOCKED")
+
+
+class ValidateStoryCreationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+
+    def test_can_create_when_ready(self) -> None:
+        entries = [make_risk_entry("TECH", 1, 1)]
+        result = validate_story_creation(
+            "E1-001", profile=self.profile, risk_entries=entries,
+        )
+        self.assertTrue(result["can_create"])
+        self.assertEqual(result["verdict"], "READY")
+
+    def test_cannot_create_when_blocked(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-*"]}
+        entries = [make_risk_entry("TECH", 1, 1)]
+        result = validate_story_creation(
+            "E1-001", profile=profile, risk_entries=entries,
+        )
+        self.assertFalse(result["can_create"])
+        self.assertEqual(result["verdict"], "BLOCKED")
+
+    def test_cannot_create_when_needs_risk(self) -> None:
+        result = validate_story_creation(
+            "E1-001", profile=self.profile,
+        )
+        self.assertFalse(result["can_create"])
+        self.assertEqual(result["verdict"], "NEEDS_RISK")
+
+    def test_includes_requirements(self) -> None:
+        entries = [make_risk_entry("SEC", 3, 3, rationale="m")]
+        result = validate_story_creation(
+            "E1-001", profile=self.profile, risk_entries=entries,
+        )
+        self.assertEqual(result["priority"], "P0")
+        self.assertEqual(result["requirements"]["coverage_pct"], 100)
+
+    def test_includes_blockers_list(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-*"]}
+        result = validate_story_creation(
+            "E1-001", profile=profile,
+        )
+        self.assertEqual(len(result["blockers"]), 1)
 
 
 class ReadinessEdgeCaseTests(unittest.TestCase):

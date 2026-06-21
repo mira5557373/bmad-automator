@@ -217,6 +217,21 @@ def compute_risk_profile_ref(
     return md5_hex8(stable)
 
 
+def resolve_tea_risk_inputs(
+    tea_output: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """§8 M1: Normalize TEA *risk/*test-design output to risk entries."""
+    if not isinstance(tea_output, dict):
+        raise RiskProfileError("TEA output must be a dict")
+    risk_entries = tea_output.get("risk")
+    if risk_entries is None:
+        raise RiskProfileError("TEA output missing 'risk' key")
+    if not isinstance(risk_entries, list):
+        raise RiskProfileError("TEA risk entries must be a list")
+    validate_risk_profile(risk_entries)
+    return risk_entries
+
+
 def _validate_int_range(
     obj: dict[str, Any], key: str, valid_range: range,
 ) -> None:
