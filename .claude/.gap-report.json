@@ -1,119 +1,80 @@
 {
-  "milestone": "integration-m10-orchestrator-wiring",
-  "phase": "C",
-  "phase_name": "Review + Fix",
-  "timestamp": "2026-06-21",
-  "spec_gaps_implemented": [
+  "pass": true,
+  "critical_gaps": 0,
+  "architectural_gaps": 0,
+  "important_gaps": 1,
+  "minor_gaps": 2,
+  "deferred_gaps": 0,
+  "total_gaps_found": 7,
+  "gaps_fixed_this_pass": 5,
+  "tests_green": "not_run",
+  "lint_clean": "not_run",
+  "converged": true,
+  "gap_summaries": [
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator writes [AI-Review] tasks → fresh dev-story via review_continuation",
-      "implementation": "core/gate_remediation.py: prepare_remediation_tasks() creates [AI-Review]-tagged tasks from FAIL categories; request_review_continuation() builds descriptor; route_gate_verdict() returns remediation_tasks and review_continuation in remediate action",
-      "tests": "tests/test_gate_remediation.py: PrepareRemediationTasksTests, RequestReviewContinuationTests, RouteVerdictRemediationIntegrationTests"
+      "severity": "critical",
+      "status": "fixed",
+      "lens": "interface_compatibility",
+      "description": "run_readiness_gate with risk_entries=[] crashes: `if resolved_entries is not None:` passes empty list to persist_risk_profile which calls validate_risk_profile([]) raising RiskProfileError.",
+      "task": "9",
+      "fix_applied": "Changed `if resolved_entries is not None:` to `if resolved_entries:` with `elif risk_entries is None and risk_profile_exists(...)` guard"
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Remediator honors dev-story edit-authorization (only Tasks/Subtasks, Dev Agent Record, File List, Change Log, Status, baseline_commit)",
-      "implementation": "core/gate_remediation.py: EDITABLE_SECTIONS frozenset, validate_edit_authorization() raises EditAuthorizationError, write_remediation_to_story() enforces authorization",
-      "tests": "tests/test_gate_remediation.py: EditableSectionsTests, ValidateEditAuthorizationTests, WriteRemediationToStoryTests"
+      "severity": "important",
+      "status": "fixed",
+      "lens": "interface_compatibility",
+      "description": "Task 11 gate_dispatch rewrite replaced existing dict-dispatch pattern with if/elif chain, changing empty-args behavior from _gate_usage()+return 1 to gate_status_action([]). Would break existing CLI behavior.",
+      "task": "11",
+      "fix_applied": "Replaced full gate_dispatch rewrite with dict entry addition `'readiness': gate_readiness_action` and _gate_usage update"
     },
     {
-      "spec_section": "§9.2",
-      "requirement": "Human takeover — all writes are BMAD-native (sprint-status + story file)",
-      "implementation": "core/gate_remediation.py: write_remediation_to_story() writes only to story file Tasks section using atomic writes; gate_status.py: park/resume/debt all write to _bmad/gate/ artifacts; no non-BMAD state mutations",
-      "tests": "tests/test_gate_remediation.py: WriteRemediationToStoryTests verifies story file content preserved"
+      "severity": "important",
+      "status": "fixed",
+      "lens": "interface_compatibility",
+      "description": "Task 11 defined unnecessary _load_profile() helper. Tests mocked it but the indirection was gratuitous. Existing gate_cmd.py imports utils directly.",
+      "task": "11",
+      "fix_applied": "Replaced _load_profile helper with direct load_effective_profile import; updated test mock paths from _load_profile to load_effective_profile"
     },
     {
-      "spec_section": "§11",
-      "requirement": "Honors dev-story edit-authorization and code-review → review_continuation → [AI-Review] loop",
-      "implementation": "route_gate_verdict() returns review_continuation descriptor with trigger='gate-fail', cycle counter, and failing_categories for the orchestrator to drive the BMAD review_continuation loop",
-      "tests": "tests/test_gate_remediation.py: RouteVerdictRemediationIntegrationTests"
+      "severity": "minor",
+      "status": "fixed",
+      "lens": "documentation",
+      "description": "Plan header listed gate_schema.gate_artifact_dir and make_evidence_record as consumed interfaces but no task uses gate_artifact_dir, and the actual function used is make_llm_evidence_record.",
+      "task": "header",
+      "fix_applied": "Corrected consumed interfaces to make_llm_evidence_record"
+    },
+    {
+      "severity": "minor",
+      "status": "fixed",
+      "lens": "implementation_detail",
+      "description": "Task 8 said 'update _AuditEvent union type and __all__' without showing exact code. Implementer could miss the exact lines to edit.",
+      "task": "8",
+      "fix_applied": "Added explicit _AuditEvent union type code and __all__ instruction"
+    },
+    {
+      "severity": "important",
+      "status": "remaining",
+      "lens": "test_coverage",
+      "description": "No test verifies GateReadinessAudit emission in run_readiness_gate when audit_policy and audit_path are provided. The audit conditional path is untested. Low risk (identical pattern to run_production_gate), but a gap.",
+      "task": "9"
+    },
+    {
+      "severity": "minor",
+      "status": "remaining",
+      "lens": "forward_compat",
+      "description": "GATE_ARTIFACT_SUBDIRS does not include 'readiness'. Plan bypasses gate_artifact_dir() with direct path construction (matching gate_status.py pattern for parked/mitigation). No action needed now but noted for consistency.",
+      "task": "7"
     }
   ],
-  "post_impl_findings": [
-    {
-      "id": "PI-1",
-      "severity": "medium",
-      "tag": "[post-impl]",
-      "file": "core/gate_orchestrator.py:route_gate_verdict",
-      "finding": "Unknown verdicts silently fell through to remediate branch",
-      "fix": "Added fail-closed guard: unrecognized overall values normalized to FAIL before routing",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-2",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "tests/test_gate_remediation.py",
-      "finding": "No test for frontmatter-only story file (no ## sections)",
-      "fix": "Added test_handles_frontmatter_only_file test case",
-      "status": "fixed"
-    },
-    {
-      "id": "PI-3",
-      "severity": "low",
-      "tag": "[post-impl]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Not wired into any production code path yet — only returns data in route_gate_verdict",
-      "fix": "By design: orchestrator shell calls write_remediation_to_story; Python provides the data and the function",
-      "status": "accepted"
-    }
+  "analysis_lenses": [
+    "spec_compliance",
+    "interface_compatibility",
+    "tdd_correctness",
+    "architectural_soundness",
+    "edge_cases",
+    "test_coverage"
   ],
-  "production_findings": [
-    {
-      "id": "PR-1",
-      "severity": "high",
-      "tag": "[production]",
-      "file": "core/gate_remediation.py:write_remediation_to_story",
-      "finding": "Non-atomic story file write via path.write_text()",
-      "fix": "Changed to write_atomic() from utils.py",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-2",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_orchestrator.py:recover_from_crash",
-      "finding": "shutil.rmtree without error handling — crash on Windows locked files leaves marker un-cleared",
-      "fix": "Wrapped in try/except OSError with pass to ensure marker is always cleared",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-3",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "core/gate_status.py:invalidate_gate,invalidate_gates_for_target",
-      "finding": "Path.rename() not cross-platform (fails on Windows if dest exists)",
-      "fix": "Changed to os.replace() which is atomic and cross-platform; also derive dest from path.stem in invalidate_gates_for_target",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-4",
-      "severity": "medium",
-      "tag": "[production]",
-      "file": "commands/gate_cmd.py:gate_resume_action,gate_invalidate_action",
-      "finding": "No sanitization of gate_id/target_id from CLI args — path traversal risk",
-      "fix": "Added _SAFE_ID regex validation rejecting traversal patterns",
-      "status": "fixed"
-    },
-    {
-      "id": "PR-5",
-      "severity": "low",
-      "tag": "[production]",
-      "file": "core/gate_status.py:resume_story",
-      "finding": "TOCTOU race in read-then-delete (concurrent resume)",
-      "fix": "Accepted — single-operator threat model per memory [[singleuser-threat-model]]",
-      "status": "accepted"
-    }
-  ],
-  "ruff_findings_fixed": [
-    "tests/test_gate_cmd.py: removed unused import Path, removed 4 unused variable assignments",
-    "tests/test_gate_m10_integration.py: removed unused import production_ready_gate",
-    "tests/test_gate_orchestrator.py: removed unused variable profile_hash"
-  ],
-  "verification": {
-    "test_count": 2486,
-    "test_result": "OK (skipped=2)",
-    "ruff": "All checks passed",
-    "npm_verify": "pass (test:python, pack:dry-run, test:cli, test:smoke)"
-  }
+  "plan_file": "docs/superpowers/plans/2026-06-21-extension-m12-risk-readiness.md",
+  "spec_file": "docs/superpowers/specs/2026-06-20-production-ready-factory-design.md",
+  "analyzed_at": "2026-06-21"
 }
