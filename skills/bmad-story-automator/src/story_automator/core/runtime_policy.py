@@ -20,7 +20,7 @@ VALID_TOP_LEVEL_KEYS = {
     "gate",
 }
 VALID_STEP_NAMES = {"create", "dev", "auto", "review", "retro"}
-VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete", "production_ready_gate"}
+VALID_VERIFIERS = {"create_story_artifact", "session_exit", "review_completion", "epic_complete", "production_ready_gate", "readiness_gate"}
 VALID_ASSET_NAMES = {"skill", "workflow", "instructions", "checklist", "template"}
 VALID_PARSER_PROVIDERS = {"claude"}
 

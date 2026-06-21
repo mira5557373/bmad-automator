@@ -355,6 +355,45 @@ def production_ready_gate(
     return payload
 
 
+def readiness_gate(
+    *,
+    project_root: str,
+    story_key: str = "",
+    output_file: str = "",
+    contract: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    from .readiness_gate import load_readiness_result
+    result = load_readiness_result(project_root, story_key)
+    if result is None:
+        return {
+            "verified": False,
+            "reason": "readiness_not_checked",
+            "source": "readiness_gate",
+        }
+    verdict = result.get("verdict", "")
+    if verdict == "READY":
+        return {
+            "verified": True,
+            "verdict": verdict,
+            "priority": result.get("priority", ""),
+            "source": "readiness_gate",
+        }
+    if verdict == "BLOCKED":
+        return {
+            "verified": False,
+            "reason": "readiness_blocked",
+            "verdict": verdict,
+            "blockers": result.get("blockers", []),
+            "source": "readiness_gate",
+        }
+    return {
+        "verified": False,
+        "reason": f"readiness_{verdict.lower()}" if verdict else "readiness_unknown",
+        "verdict": verdict,
+        "source": "readiness_gate",
+    }
+
+
 VerifierFn = Callable[..., dict[str, object]]
 
 VERIFIERS: dict[str, VerifierFn] = {
@@ -363,4 +402,5 @@ VERIFIERS: dict[str, VerifierFn] = {
     "review_completion": review_completion,
     "epic_complete": epic_complete,
     "production_ready_gate": production_ready_gate,
+    "readiness_gate": readiness_gate,
 }

@@ -1609,5 +1609,73 @@ class ProductionReadyGateVerifierTests(unittest.TestCase):
         self.assertIn("production_ready_gate", VALID_VERIFIERS)
 
 
+class ReadinessGateVerifierTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.project_root = tempfile.mkdtemp()
+
+    def test_absent_readiness_fails_closed(self) -> None:
+        from story_automator.core.success_verifiers import readiness_gate as readiness_gate_verifier
+        result = readiness_gate_verifier(
+            project_root=self.project_root,
+            story_key="E1-001",
+            contract={},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "readiness_not_checked")
+
+    def test_ready_verdict_succeeds(self) -> None:
+        from story_automator.core.readiness_gate import persist_readiness_result
+        from story_automator.core.success_verifiers import readiness_gate as readiness_gate_verifier
+        persist_readiness_result(self.project_root, "E1-001", {
+            "verdict": "READY", "priority": "P2",
+            "blockers": [], "reason": "ready",
+        })
+        result = readiness_gate_verifier(
+            project_root=self.project_root,
+            story_key="E1-001",
+            contract={},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["verdict"], "READY")
+
+    def test_blocked_verdict_fails(self) -> None:
+        from story_automator.core.readiness_gate import persist_readiness_result
+        from story_automator.core.success_verifiers import readiness_gate as readiness_gate_verifier
+        persist_readiness_result(self.project_root, "E1-001", {
+            "verdict": "BLOCKED", "priority": "",
+            "blockers": [{"adr_id": "ADR-1"}], "reason": "blocked",
+        })
+        result = readiness_gate_verifier(
+            project_root=self.project_root,
+            story_key="E1-001",
+            contract={},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "readiness_blocked")
+
+    def test_needs_risk_verdict_fails(self) -> None:
+        from story_automator.core.readiness_gate import persist_readiness_result
+        from story_automator.core.success_verifiers import readiness_gate as readiness_gate_verifier
+        persist_readiness_result(self.project_root, "E1-001", {
+            "verdict": "NEEDS_RISK", "priority": "",
+            "blockers": [], "reason": "no risk",
+        })
+        result = readiness_gate_verifier(
+            project_root=self.project_root,
+            story_key="E1-001",
+            contract={},
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["reason"], "readiness_needs_risk")
+
+    def test_registered_in_verifiers(self) -> None:
+        from story_automator.core.success_verifiers import VERIFIERS
+        self.assertIn("readiness_gate", VERIFIERS)
+
+    def test_registered_in_valid_verifiers(self) -> None:
+        from story_automator.core.runtime_policy import VALID_VERIFIERS
+        self.assertIn("readiness_gate", VALID_VERIFIERS)
+
+
 if __name__ == "__main__":
     unittest.main()
