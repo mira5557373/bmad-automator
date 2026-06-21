@@ -20,6 +20,74 @@ class WaiverError(ValueError):
     pass
 
 
+# TEA priority-threshold semantics (M26).
+# Each entry maps priority → (required_pct, fail_floor).
+#   coverage >= required_pct      → PASS
+#   fail_floor <= coverage < required_pct → CONCERNS
+#   coverage < fail_floor         → FAIL
+# P3 has a 0 floor so coverage below "required" lands at CONCERNS, never FAIL.
+PRIORITY_THRESHOLDS: dict[str, tuple[int, int]] = {
+    "P0": (100, 100),
+    "P1": (95, 90),
+    "P2": (85, 80),
+    "P3": (70, 0),
+}
+
+# Collection statuses reported per category before adjudication.
+# Only COLLECTED categories are eligible to contribute a verdict; the rest
+# block gate eligibility (fail-closed).
+COLLECTION_STATUSES: frozenset[str] = frozenset(
+    {"COLLECTED", "MISSING", "ERROR", "TIMEOUT"},
+)
+
+
+def evaluate_priority_threshold(coverage_pct: float, priority: str) -> str:
+    """Map a coverage percentage to a verdict for a given priority band.
+
+    Returns PASS / CONCERNS / FAIL per :data:`PRIORITY_THRESHOLDS`.
+    Raises ValueError if the priority is not recognized.
+    """
+    try:
+        required_pct, fail_floor = PRIORITY_THRESHOLDS[priority]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown priority {priority!r}; "
+            f"expected one of {sorted(PRIORITY_THRESHOLDS)}"
+        ) from exc
+    if coverage_pct >= required_pct:
+        return "PASS"
+    if coverage_pct >= fail_floor:
+        return "CONCERNS"
+    return "FAIL"
+
+
+def gate_eligible(
+    category_collection_status: dict[str, str],
+    required_categories: set[str],
+) -> tuple[bool, str]:
+    """Return (eligible, reason).
+
+    Every required category must report ``COLLECTED``. A missing entry,
+    a non-COLLECTED status, or an unknown status value blocks gate
+    eligibility (fail-closed). Categories outside ``required_categories``
+    are ignored.
+    """
+    blockers: list[str] = []
+    for category in sorted(required_categories):
+        status = category_collection_status.get(category)
+        if status is None:
+            blockers.append(f"{category}:MISSING")
+            continue
+        if status not in COLLECTION_STATUSES:
+            blockers.append(f"{category}:UNKNOWN({status})")
+            continue
+        if status != "COLLECTED":
+            blockers.append(f"{category}:{status}")
+    if blockers:
+        return False, "; ".join(blockers)
+    return True, ""
+
+
 def verdict_for_collector_status(status: str) -> str:
     """Map a collector evidence status to a verdict contribution.
 
