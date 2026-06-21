@@ -14,6 +14,7 @@ from story_automator.core.gate_audit import (
     GateDecisionAudit,
     GateParkedAudit,
     GateProfileDriftAudit,
+    GateReadinessAudit,
     GateRenderedAudit,
     GateStartedAudit,
     emit_gate_audit,
@@ -253,6 +254,31 @@ class GateParkedAuditTests(unittest.TestCase):
         self.assertEqual(d["story_key"], "E1-001")
         self.assertEqual(d["reason"], "risk-9")
         self.assertEqual(d["overall_verdict"], "FAIL")
+
+
+class GateReadinessAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = GateReadinessAudit(
+            story_id="E1-001", verdict="READY",
+            priority="P1", blocker_count=0, reason="ready",
+        )
+        self.assertEqual(event.event_name, "GateReadinessCheck")
+
+    def test_to_dict_contains_all_fields(self) -> None:
+        event = GateReadinessAudit(
+            story_id="E1-001", verdict="BLOCKED",
+            priority="", blocker_count=2, reason="ADR-0083 blocks E1-001",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["story_id"], "E1-001")
+        self.assertEqual(d["verdict"], "BLOCKED")
+        self.assertEqual(d["blocker_count"], 2)
+        self.assertIn("reason", d)
+
+    def test_frozen(self) -> None:
+        event = GateReadinessAudit(story_id="E1-001")
+        with self.assertRaises(AttributeError):
+            event.story_id = "E1-002"  # type: ignore[misc]
 
 
 if __name__ == "__main__":
