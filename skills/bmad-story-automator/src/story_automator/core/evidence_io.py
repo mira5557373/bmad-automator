@@ -81,6 +81,19 @@ def compute_evidence_bundle_hash(records: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
+def compute_evidence_bundle_merkle_root(records: list[dict[str, Any]]) -> str:
+    """M54: Merkle root (64-hex) over the evidence bundle.
+
+    Thin alias for ``story_automator.core.innovation.ledger.compute_merkle_root``
+    kept here so callers that already import from ``evidence_io`` can opt
+    into Merkle proofs without learning the innovation namespace.
+    """
+    # Imported lazily so evidence_io stays the lower-level module.
+    from .innovation.ledger import compute_merkle_root
+
+    return compute_merkle_root(records)
+
+
 def _sanitize_path_component(s: str) -> str:
     """Replace path separators and traversal sequences with underscores."""
     return s.replace("/", "_").replace("\\", "_").replace("..", "__")
