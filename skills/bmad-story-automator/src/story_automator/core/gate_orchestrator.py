@@ -37,6 +37,7 @@ from .gate_remediation import (
 )
 from .gate_status import park_story, record_mitigation_debt
 from .lie_detector import detect_baseline_drift
+from .pre_gate_verifier import verify_pre_gate
 from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
 from .utils import iso_now
@@ -338,6 +339,8 @@ def run_production_gate(
     enable_lie_detector: bool = False,
     baseline_sha: str | None = None,
     fail_closed: bool = False,
+    enable_pre_gate_verifier: bool = False,
+    result_json_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -366,8 +369,40 @@ def run_production_gate(
     let a real bug ship. ``False`` (default) preserves prior behavior:
     error-evidence is still surfaced in categories but the
     verdict_engine decides whether it sinks the gate.
+
+    ``enable_pre_gate_verifier`` (Phase 3, default ``False``) — when
+    True, the six inline pre-gate checks
+    (``result_present / result_schema / baseline_commit /
+    files_present / no_critical_escalations / claimed_files_in_diff``)
+    run before any other lifecycle step. ``result_json_path`` is
+    required when the verifier is enabled. On the first failing check
+    the call returns a descriptor
+    ``{"action": "pre_gate_failed", "gate_id": ...,
+    "failed_check": "<one of CHECK_NAMES>",
+    "verify": <wire form>}`` and never writes a marker or runs
+    collectors. The default-off behavior preserves every existing call
+    site; flip the default in a future milestone after operator
+    confidence is built.
     """
     assert_host_context("run_production_gate")
+
+    if enable_pre_gate_verifier:
+        if result_json_path is None:
+            raise TypeError(
+                "enable_pre_gate_verifier=True requires result_json_path"
+            )
+        descriptor = verify_pre_gate(
+            project_root,
+            result_path=result_json_path,
+            baseline_sha=baseline_sha,
+        )
+        if not descriptor["ok"]:
+            return {
+                "action": "pre_gate_failed",
+                "gate_id": gate_id,
+                "failed_check": descriptor["failed_check"],
+                "verify": descriptor["verify"],
+            }
 
     recover_from_crash(project_root)
 
