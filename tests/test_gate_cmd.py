@@ -12,6 +12,7 @@ from story_automator.commands.gate_cmd import (
     gate_invalidate_action,
     gate_resume_action,
     gate_status_action,
+    gate_system_status_action,
 )
 from story_automator.core.evidence_io import persist_gate_file, write_gate_marker
 from story_automator.core.gate_schema import make_gate_file
@@ -148,6 +149,28 @@ class GateDispatchTests(unittest.TestCase):
     def test_dispatch_unknown_subcommand(self) -> None:
         code = gate_dispatch(["unknown"])
         self.assertEqual(code, 1)
+
+
+class GateSystemStatusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_system_status_returns_zero(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_system_status_action([])
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertTrue(result["ok"])
+        self.assertIn("system_parked", result)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_dispatch_routes_system_status(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        with patch("sys.stdout", new_callable=StringIO):
+            code = gate_dispatch(["system-status"])
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

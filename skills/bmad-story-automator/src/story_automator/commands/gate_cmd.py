@@ -92,6 +92,35 @@ def gate_invalidate_action(args: list[str]) -> int:
     return 0
 
 
+def gate_system_status_action(args: list[str]) -> int:
+    """Display system-altitude gate status (epics)."""
+    project_root = _project_root()
+    state_filter = None
+    for arg in args:
+        if arg.startswith("--state="):
+            state_filter = arg.split("=", 1)[1]
+
+    parked = list_parked(project_root, state_filter=state_filter)
+    system_parked = [
+        p for p in parked
+        if p.get("reason", "") == "exhausted" or p.get("tier") == "system"
+    ]
+    marker = read_gate_marker(project_root)
+    debt = load_mitigation_debt(project_root)
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "system_parked": system_parked,
+        "system_parked_count": len(system_parked),
+        "in_progress": marker is not None,
+        "mitigation_debt": debt,
+    }
+    if marker is not None:
+        result["in_progress_gate_id"] = marker.get("gate_id", "")
+    print_json(result)
+    return 0
+
+
 def gate_dispatch(args: list[str]) -> int:
     if not args:
         _gate_usage()
@@ -101,6 +130,7 @@ def gate_dispatch(args: list[str]) -> int:
         "status": gate_status_action,
         "resume": gate_resume_action,
         "invalidate": gate_invalidate_action,
+        "system-status": gate_system_status_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -110,9 +140,10 @@ def gate_dispatch(args: list[str]) -> int:
 
 
 def _gate_usage() -> None:
-    print("Usage: orchestrator-helper gate <status|resume|invalidate> [args]",
+    print("Usage: orchestrator-helper gate <status|resume|invalidate|system-status> [args]",
           file=sys.stderr)
     print("", file=sys.stderr)
     print("  gate status [--state=parked]", file=sys.stderr)
     print("  gate resume <gate_id>", file=sys.stderr)
     print("  gate invalidate <story|epic>", file=sys.stderr)
+    print("  gate system-status [--state=parked]", file=sys.stderr)
