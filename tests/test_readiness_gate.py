@@ -215,5 +215,59 @@ class PersistReadinessResultTests(unittest.TestCase):
         self.assertIsNone(load_readiness_result(self.tmp, "no-such"))
 
 
+class ReadinessEdgeCaseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": ["unit", "integration", "contract", "e2e"]},
+                "P1": {"coverage_pct": 90, "levels": ["unit", "integration", "api"]},
+                "P2": {"coverage_pct": 50, "levels": ["unit"]},
+                "P3": {"coverage_pct": 20, "levels": ["smoke"]},
+            },
+            "categories": {"code": ["correctness", "security"], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+
+    def test_empty_risk_entries_list_treated_as_needs_risk(self) -> None:
+        result = check_readiness("E1-001", profile=self.profile, risk_entries=[])
+        self.assertEqual(result["verdict"], "NEEDS_RISK")
+
+    def test_multiple_blockers_all_reported(self) -> None:
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {
+            "ADR-1": ["E1-*"],
+            "ADR-2": ["E1-*"],
+            "ADR-3": ["E2-*"],
+        }
+        entries = [make_risk_entry("TECH", 1, 1)]
+        result = check_readiness(
+            "E1-001", profile=profile, risk_entries=entries,
+        )
+        self.assertEqual(result["verdict"], "BLOCKED")
+        self.assertEqual(len(result["blockers"]), 2)
+
+    def test_readiness_requirements_match_profile_matrix(self) -> None:
+        entries = [make_risk_entry("TECH", 2, 3)]  # score=6 → P1
+        result = check_readiness(
+            "E1-001", profile=self.profile, risk_entries=entries,
+        )
+        self.assertEqual(result["priority"], "P1")
+        self.assertEqual(result["requirements"]["coverage_pct"], 90)
+        self.assertEqual(result["requirements"]["levels"], ["unit", "integration", "api"])
+
+    def test_persist_and_load_blocked_result(self) -> None:
+        tmp = tempfile.mkdtemp()
+        profile = dict(self.profile)
+        profile["forbidden_until"] = {"ADR-1": ["E1-*"]}
+        entries = [make_risk_entry("TECH", 1, 1)]
+        result = check_readiness("E1-001", profile=profile, risk_entries=entries)
+        persist_readiness_result(tmp, "E1-001", result)
+        loaded = load_readiness_result(tmp, "E1-001")
+        self.assertEqual(loaded["verdict"], "BLOCKED")
+        self.assertEqual(len(loaded["blockers"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

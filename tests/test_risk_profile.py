@@ -330,5 +330,53 @@ class ComputeRiskProfileRefTests(unittest.TestCase):
         )
 
 
+class RiskProfileEdgeCaseTests(unittest.TestCase):
+    def test_all_categories_covered(self) -> None:
+        entries = [
+            make_risk_entry(cat, 1, 1)
+            for cat in sorted(VALID_RISK_CATEGORIES)
+        ]
+        validate_risk_profile(entries)
+        self.assertEqual(len(entries), 6)
+
+    def test_single_entry_min_score(self) -> None:
+        entry = make_risk_entry("TECH", 1, 1)
+        self.assertEqual(entry["score"], 1)
+        self.assertEqual(risk_score_to_priority(1), "P3")
+
+    def test_single_entry_max_score(self) -> None:
+        entry = make_risk_entry("SEC", 3, 3)
+        self.assertEqual(entry["score"], 9)
+        self.assertEqual(risk_score_to_priority(9), "P0")
+
+    def test_persist_and_load_roundtrip(self) -> None:
+        tmp = tempfile.mkdtemp()
+        entries = [
+            make_risk_entry("TECH", 2, 3, rationale="complex migration"),
+            make_risk_entry("SEC", 3, 3, rationale="auth rewrite"),
+            make_risk_entry("PERF", 1, 2),
+        ]
+        persist_risk_profile(tmp, "E2-005", entries)
+        loaded = load_risk_profile(tmp, "E2-005")
+        self.assertEqual(len(loaded["entries"]), 3)
+        for orig, loaded_entry in zip(entries, loaded["entries"]):
+            self.assertEqual(orig["category"], loaded_entry["category"])
+            self.assertEqual(orig["score"], loaded_entry["score"])
+
+    def test_evidence_confidence_range(self) -> None:
+        entries = [make_risk_entry("DATA", 2, 2)]
+        for confidence in (1, 5, 10):
+            evidence = risk_profile_to_evidence(entries, "E1-001", confidence=confidence)
+            self.assertEqual(evidence["confidence"], confidence)
+
+    def test_evidence_invalid_confidence_raises(self) -> None:
+        from story_automator.core.gate_schema import GateSchemaError
+        entries = [make_risk_entry("DATA", 2, 2)]
+        with self.assertRaises(GateSchemaError):
+            risk_profile_to_evidence(entries, "E1-001", confidence=0)
+        with self.assertRaises(GateSchemaError):
+            risk_profile_to_evidence(entries, "E1-001", confidence=11)
+
+
 if __name__ == "__main__":
     unittest.main()
