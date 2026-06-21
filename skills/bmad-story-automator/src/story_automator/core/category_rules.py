@@ -6,7 +6,12 @@ Pure functions, no I/O.
 """
 from __future__ import annotations
 
+from typing import Any
+
+from .product_profile import VALID_PRIORITIES, required_for_priority
+
 _P1_CONCERNS_FLOOR = 80
+_DEFAULT_PRIORITY = "P1"
 
 
 def coverage_verdict(actual_pct: float, target_pct: int, priority: str) -> str:
@@ -23,3 +28,14 @@ def coverage_verdict(actual_pct: float, target_pct: int, priority: str) -> str:
     if priority == "P1" and actual_pct >= _P1_CONCERNS_FLOOR:
         return "CONCERNS"
     return "FAIL"
+
+
+def risk_to_requirements(
+    priority: str, profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Map risk priority to coverage/level requirements from profile.matrix."""
+    if priority not in VALID_PRIORITIES:
+        priority = _DEFAULT_PRIORITY
+    req = required_for_priority(profile, priority)
+    req["priority"] = priority
+    return req
