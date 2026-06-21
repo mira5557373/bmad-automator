@@ -51,7 +51,7 @@ VALID_CODE_CATEGORIES = {
 }
 VALID_SYSTEM_CATEGORIES = {
     "reliability", "resilience", "durable_hitl",
-    "blast_radius", "cost_to_serve",
+    "blast_radius", "cost_to_serve", "progressive_delivery",
 }
 DEFAULT_TIMEOUTS: dict[str, int] = {
     "security": 300,
@@ -59,6 +59,12 @@ DEFAULT_TIMEOUTS: dict[str, int] = {
     "accessibility": 180,
     "test_quality": 900,
     "correctness": 1800,
+    "reliability": 600,
+    "resilience": 900,
+    "durable_hitl": 600,
+    "blast_radius": 900,
+    "cost_to_serve": 900,
+    "progressive_delivery": 300,
 }
 DEFAULT_TIMEOUT_FALLBACK = 120
 
