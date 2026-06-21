@@ -20,6 +20,8 @@ __all__ = [
     "GateRenderedAudit",
     "GateProfileDriftAudit",
     "GateParkedAudit",
+    "SystemGateStartedAudit",
+    "EpicGateDecisionAudit",
     "emit_gate_audit",
 ]
 
@@ -156,10 +158,53 @@ class GateParkedAudit:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class SystemGateStartedAudit:
+    """Audit event: system-altitude gate evaluation started."""
+    event_name: str = dataclasses.field(default="SystemGateStarted", init=False)
+    gate_id: str = ""
+    epic_id: str = ""
+    commit_sha: str = ""
+    profile_hash: str = ""
+    env_tier: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "epic_id": self.epic_id,
+            "commit_sha": self.commit_sha,
+            "profile_hash": self.profile_hash,
+            "env_tier": self.env_tier,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class EpicGateDecisionAudit:
+    """Audit event: epic-level gate verdict rendered."""
+    event_name: str = dataclasses.field(default="EpicGateDecision", init=False)
+    gate_id: str = ""
+    epic_id: str = ""
+    overall: str = ""
+    commit_sha: str = ""
+    env_tier: str = ""
+    categories_summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "epic_id": self.epic_id,
+            "overall": self.overall,
+            "commit_sha": self.commit_sha,
+            "env_tier": self.env_tier,
+            "categories_summary": self.categories_summary,
+        }
+
+
 _AuditEvent = (
     GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
     | GateDecisionAudit | GateRenderedAudit
     | GateProfileDriftAudit | GateParkedAudit
+    | SystemGateStartedAudit | EpicGateDecisionAudit
 )
 
 
