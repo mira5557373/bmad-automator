@@ -1,20 +1,23 @@
-"""Gate CLI commands — status, resume, invalidate.
+"""Gate CLI commands — status, resume, invalidate, readiness.
 
 Each action returns an int exit code; output is structured JSON on stdout.
 """
 from __future__ import annotations
 
+import json as _json
 import re
 import sys
 from typing import Any
 
 from story_automator.core.evidence_io import read_gate_marker
+from story_automator.core.gate_orchestrator import run_readiness_gate
 from story_automator.core.gate_status import (
     invalidate_gates_for_target,
     list_parked,
     load_mitigation_debt,
     resume_story,
 )
+from story_automator.core.product_profile import load_effective_profile
 from story_automator.core.utils import get_project_root, print_json
 
 _SAFE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -92,6 +95,34 @@ def gate_invalidate_action(args: list[str]) -> int:
     return 0
 
 
+def gate_readiness_action(args: list[str]) -> int:
+    if not args or args[0].startswith("--"):
+        print("usage: gate readiness <story_id> [--risk=<risk.json>]", file=sys.stderr)
+        return 2
+
+    story_id = args[0]
+    project_root = _project_root()
+    profile = load_effective_profile(project_root)
+
+    risk_entries = None
+    for arg in args[1:]:
+        if arg.startswith("--risk="):
+            risk_path = arg.split("=", 1)[1]
+            try:
+                with open(risk_path, encoding="utf-8") as f:
+                    risk_entries = _json.load(f)
+            except (OSError, _json.JSONDecodeError) as exc:
+                print_json({"ok": False, "error": str(exc)})
+                return 1
+
+    result = run_readiness_gate(
+        project_root, story_id,
+        profile=profile, risk_entries=risk_entries,
+    )
+    print_json(result)
+    return 0 if result.get("verdict") == "READY" else 1
+
+
 def gate_dispatch(args: list[str]) -> int:
     if not args:
         _gate_usage()
@@ -101,6 +132,7 @@ def gate_dispatch(args: list[str]) -> int:
         "status": gate_status_action,
         "resume": gate_resume_action,
         "invalidate": gate_invalidate_action,
+        "readiness": gate_readiness_action,
     }
     handler = dispatch.get(subcommand)
     if handler is None:
@@ -110,9 +142,10 @@ def gate_dispatch(args: list[str]) -> int:
 
 
 def _gate_usage() -> None:
-    print("Usage: orchestrator-helper gate <status|resume|invalidate> [args]",
+    print("Usage: orchestrator-helper gate <status|resume|invalidate|readiness> [args]",
           file=sys.stderr)
     print("", file=sys.stderr)
     print("  gate status [--state=parked]", file=sys.stderr)
     print("  gate resume <gate_id>", file=sys.stderr)
     print("  gate invalidate <story|epic>", file=sys.stderr)
+    print("  gate readiness <story_id> [--risk=<risk.json>]", file=sys.stderr)

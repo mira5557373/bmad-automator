@@ -5,11 +5,13 @@ import json
 import tempfile
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.commands.gate_cmd import (
     gate_dispatch,
     gate_invalidate_action,
+    gate_readiness_action,
     gate_resume_action,
     gate_status_action,
 )
@@ -148,6 +150,65 @@ class GateDispatchTests(unittest.TestCase):
     def test_dispatch_unknown_subcommand(self) -> None:
         code = gate_dispatch(["unknown"])
         self.assertEqual(code, 1)
+
+
+class GateReadinessActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile_path = Path(self.tmp) / "skills" / "bmad-story-automator" / "data" / "profiles"
+        self.profile_path.mkdir(parents=True)
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    @patch("story_automator.commands.gate_cmd.load_effective_profile")
+    def test_needs_risk_exit_1(self, mock_profile, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        mock_profile.return_value = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_readiness_action(["E1-001"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(output["verdict"], "NEEDS_RISK")
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    @patch("story_automator.commands.gate_cmd.load_effective_profile")
+    def test_ready_exit_0(self, mock_profile, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        mock_profile.return_value = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": []},
+                "P1": {"coverage_pct": 90, "levels": []},
+                "P2": {"coverage_pct": 50, "levels": []},
+                "P3": {"coverage_pct": 20, "levels": []},
+            },
+            "categories": {"code": [], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+        from story_automator.core.risk_profile import make_risk_entry, persist_risk_profile
+        persist_risk_profile(self.tmp, "E1-001", [make_risk_entry("TECH", 1, 1)])
+        with patch("sys.stdout", new_callable=StringIO) as out:
+            code = gate_readiness_action(["E1-001"])
+        output = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(output["verdict"], "READY")
+
+    @patch("story_automator.commands.gate_cmd._project_root")
+    def test_missing_story_id_exit_2(self, mock_root) -> None:
+        mock_root.return_value = self.tmp
+        code = gate_readiness_action([])
+        self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":
