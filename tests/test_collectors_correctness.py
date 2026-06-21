@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+from typing import Any
 
 
 class PytestCollectorTests(unittest.TestCase):
@@ -88,3 +91,52 @@ class CorrectnessThreeCollectorsTests(unittest.TestCase):
         self.assertIn("pytest-correctness", ids)
         self.assertIn("vitest-correctness", ids)
         self.assertIn("playwright-correctness", ids)
+
+
+class CoverageCollectorTests(unittest.TestCase):
+    def test_config_fields(self) -> None:
+        from story_automator.core.collectors.correctness import COVERAGE
+
+        self.assertEqual(COVERAGE.collector_id, "coverage-correctness")
+        self.assertEqual(COVERAGE.tool, "python3")
+        self.assertEqual(COVERAGE.category, "correctness")
+
+    def test_build_cmd_invokes_coverage_script(self) -> None:
+        from story_automator.core.collectors.correctness import COVERAGE
+
+        profile: dict[str, Any] = {
+            "matrix": {"P0": {"coverage_pct": 90, "levels": ["unit"]}},
+        }
+        cmd = COVERAGE.build_cmd("/tmp/co", profile)
+        self.assertEqual(cmd[0], sys.executable)
+        self.assertIn("coverage_check.py", cmd[1])
+        self.assertTrue(Path(cmd[1]).is_file())
+        self.assertEqual(cmd[2], "/tmp/co")
+        self.assertEqual(cmd[3], "90")
+
+    def test_build_cmd_default_threshold(self) -> None:
+        from story_automator.core.collectors.correctness import COVERAGE
+
+        cmd = COVERAGE.build_cmd("/tmp/co", {})
+        self.assertEqual(cmd[3], "80")
+
+    def test_build_cmd_uses_p0_coverage(self) -> None:
+        from story_automator.core.collectors.correctness import COVERAGE
+
+        profile: dict[str, Any] = {
+            "matrix": {"P0": {"coverage_pct": 100, "levels": ["unit"]}},
+        }
+        cmd = COVERAGE.build_cmd("/tmp/co", profile)
+        self.assertEqual(cmd[3], "100")
+
+
+class CorrectnessFourCollectorsTests(unittest.TestCase):
+    def test_four_collectors(self) -> None:
+        from story_automator.core.collectors.correctness import COLLECTORS
+
+        self.assertEqual(len(COLLECTORS), 4)
+        ids = {c.collector_id for c in COLLECTORS}
+        self.assertEqual(ids, {
+            "pytest-correctness", "vitest-correctness",
+            "playwright-correctness", "coverage-correctness",
+        })

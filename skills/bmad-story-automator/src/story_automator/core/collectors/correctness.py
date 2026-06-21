@@ -5,6 +5,8 @@ Collectors: pytest-correctness (+ vitest, playwright, coverage added later).
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 from ..collector_config import CollectorConfig
@@ -49,4 +51,27 @@ PLAYWRIGHT = CollectorConfig(
     file_patterns=frozenset({"*.ts", "*.tsx"}),
 )
 
-COLLECTORS: list[CollectorConfig] = [PYTEST, VITEST, PLAYWRIGHT]
+_CHECKS_DIR = Path(__file__).resolve().parent.parent / "checks"
+
+
+def _coverage_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    matrix = profile.get("matrix") or {}
+    p0 = matrix.get("P0") or {}
+    threshold = p0.get("coverage_pct", 80)
+    return [
+        sys.executable,
+        str(_CHECKS_DIR / "coverage_check.py"),
+        checkout,
+        str(int(threshold)),
+    ]
+
+
+COVERAGE = CollectorConfig(
+    collector_id="coverage-correctness",
+    tool="python3",
+    category="correctness",
+    build_cmd=_coverage_cmd,
+    file_patterns=frozenset({"*.py", "*.ts", "*.tsx"}),
+)
+
+COLLECTORS: list[CollectorConfig] = [PYTEST, VITEST, PLAYWRIGHT, COVERAGE]
