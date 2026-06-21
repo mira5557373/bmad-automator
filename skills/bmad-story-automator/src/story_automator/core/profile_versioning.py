@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 from typing import Any
+
+from .utils import md5_hex8
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,3 +61,55 @@ def bump_profile_version(
         new_pv = ProfileVersion(breaking=pv.breaking, feature=pv.feature + 1)
     result["version"] = format_profile_version(new_pv)
     return result
+
+
+BREAKING_FIELDS: frozenset[str] = frozenset({
+    "matrix", "categories", "categories_na", "rules",
+    "invariants", "toolchain", "forbidden_until",
+})
+
+FEATURE_FIELDS: frozenset[str] = frozenset({
+    "timeouts", "cost_tier", "snapshot", "seed_template",
+})
+
+
+def is_breaking_change(
+    old_profile: dict[str, Any],
+    new_profile: dict[str, Any],
+) -> bool:
+    """True if any breaking-sensitive field changed."""
+    for field in BREAKING_FIELDS:
+        old_val = json.dumps(old_profile.get(field), sort_keys=True)
+        new_val = json.dumps(new_profile.get(field), sort_keys=True)
+        if old_val != new_val:
+            return True
+    return False
+
+
+def classify_changes(
+    old_profile: dict[str, Any],
+    new_profile: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """List changed fields with their breaking/feature classification."""
+    changes: list[dict[str, Any]] = []
+    for field in sorted(BREAKING_FIELDS | FEATURE_FIELDS):
+        old_val = json.dumps(old_profile.get(field), sort_keys=True)
+        new_val = json.dumps(new_profile.get(field), sort_keys=True)
+        if old_val != new_val:
+            change_type = "breaking" if field in BREAKING_FIELDS else "feature"
+            changes.append({
+                "field": field,
+                "change_type": change_type,
+                "old_value": old_profile.get(field),
+                "new_value": new_profile.get(field),
+            })
+    return changes
+
+
+def compute_breaking_hash(profile: dict[str, Any]) -> str:
+    """Hash only breaking-sensitive fields for gate reuse comparison."""
+    breaking_data = {
+        field: profile.get(field) for field in sorted(BREAKING_FIELDS)
+    }
+    canonical = json.dumps(breaking_data, sort_keys=True, separators=(",", ":"))
+    return md5_hex8(canonical)
