@@ -99,14 +99,34 @@ def instantiate_template(
     resolved = resolve_variables(manifest, variables)
     files = list_template_files(manifest, category=category)
     result = InstantiationResult()
+    resolved_target = target_dir.resolve()
+    resolved_bundle = bundle_dir.resolve()
 
     for entry in files:
-        src_path = bundle_dir / entry["src"]
+        src_path = (bundle_dir / entry["src"]).resolve()
         dst_rel = entry["dst"].replace("/", os.sep)
         dst_path = (target_dir / dst_rel).resolve()
 
+        try:
+            src_path.relative_to(resolved_bundle)
+        except ValueError:
+            raise SeedRenderError(
+                f"src path escapes bundle dir: {entry['src']!r}"
+            ) from None
+
+        try:
+            dst_path.relative_to(resolved_target)
+        except ValueError:
+            raise SeedRenderError(
+                f"dst path escapes target dir: {entry['dst']!r}"
+            ) from None
+
         if not src_path.is_file():
             result.errors.append(f"src not found: {entry['src']}")
+            continue
+
+        if dst_path.exists() and entry["on_conflict"] == "skip":
+            result.skipped.append(str(dst_path))
             continue
 
         content = src_path.read_text(encoding="utf-8")

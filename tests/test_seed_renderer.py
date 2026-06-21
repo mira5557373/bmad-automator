@@ -280,5 +280,67 @@ class InstantiateTemplateTests(unittest.TestCase):
         self.assertEqual(r.errors, [])
 
 
+class InstantiationSafeguardTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._bundle = Path(self._tmp) / "bundle"
+        self._target = Path(self._tmp) / "target"
+        self._bundle.mkdir()
+        self._target.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _manifest_with_file(self, src, dst, on_conflict="skip"):
+        return {
+            "schema_version": 1,
+            "template_id": "test",
+            "template_version": "1.0.0",
+            "categories": {
+                "c": {
+                    "description": "cat",
+                    "files": [{"src": src, "dst": dst, "on_conflict": on_conflict}],
+                }
+            },
+        }
+
+    def test_skip_existing_file(self):
+        (self._bundle / "a.tmpl").write_text("new", encoding="utf-8")
+        dst = self._target / "a.py"
+        dst.write_text("old", encoding="utf-8")
+        m = self._manifest_with_file("a.tmpl", "a.py", "skip")
+        result = instantiate_template(self._bundle, m, self._target, {})
+        self.assertEqual(dst.read_text(encoding="utf-8"), "old")
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(len(result.written), 0)
+
+    def test_overwrite_existing_file(self):
+        (self._bundle / "a.tmpl").write_text("new", encoding="utf-8")
+        dst = self._target / "a.py"
+        dst.write_text("old", encoding="utf-8")
+        m = self._manifest_with_file("a.tmpl", "a.py", "overwrite")
+        result = instantiate_template(self._bundle, m, self._target, {})
+        self.assertEqual(dst.read_text(encoding="utf-8"), "new")
+        self.assertEqual(len(result.written), 1)
+        self.assertEqual(len(result.skipped), 0)
+
+    def test_dst_path_traversal_blocked(self):
+        (self._bundle / "a.tmpl").write_text("x", encoding="utf-8")
+        m = self._manifest_with_file("a.tmpl", "../../etc/passwd")
+        with self.assertRaises(SeedRenderError):
+            instantiate_template(self._bundle, m, self._target, {})
+
+    def test_src_path_traversal_blocked(self):
+        m = self._manifest_with_file("../../secrets.py", "out.py")
+        with self.assertRaises(SeedRenderError):
+            instantiate_template(self._bundle, m, self._target, {})
+
+    def test_missing_src_recorded_as_error(self):
+        m = self._manifest_with_file("missing.tmpl", "out.py")
+        result = instantiate_template(self._bundle, m, self._target, {})
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("missing.tmpl", result.errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()
