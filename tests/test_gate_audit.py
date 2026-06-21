@@ -12,6 +12,8 @@ from story_automator.core.gate_audit import (
     EvidenceCollectedAudit,
     GateBoundaryViolation,
     GateDecisionAudit,
+    GateParkedAudit,
+    GateProfileDriftAudit,
     GateRenderedAudit,
     GateStartedAudit,
     emit_gate_audit,
@@ -205,6 +207,52 @@ class GateRenderedAuditTests(unittest.TestCase):
         self.assertEqual(d["gate_id"], "g1")
         self.assertEqual(d["gate_file_path"], "verdicts/g1.json")
         self.assertEqual(d["evidence_bundle_hash"], "abcd1234")
+
+
+class GateProfileDriftAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = GateProfileDriftAudit(
+            gate_id="g1", old_hash="aabb", new_hash="ccdd",
+            old_factory_version="1.14.0", new_factory_version="1.15.0",
+            reason="profile.hash mismatch",
+        )
+        self.assertEqual(event.event_name, "GateProfileDrift")
+
+    def test_to_dict_contains_all_fields(self) -> None:
+        event = GateProfileDriftAudit(
+            gate_id="g1", old_hash="aabb", new_hash="ccdd",
+            old_factory_version="1.14.0", new_factory_version="1.15.0",
+            reason="profile.hash mismatch",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["gate_id"], "g1")
+        self.assertEqual(d["old_hash"], "aabb")
+        self.assertEqual(d["new_hash"], "ccdd")
+        self.assertEqual(d["reason"], "profile.hash mismatch")
+
+    def test_frozen(self) -> None:
+        event = GateProfileDriftAudit(gate_id="g1")
+        with self.assertRaises(AttributeError):
+            event.gate_id = "g2"  # type: ignore[misc]
+
+
+class GateParkedAuditTests(unittest.TestCase):
+    def test_event_name(self) -> None:
+        event = GateParkedAudit(
+            gate_id="g1", story_key="E1-001", reason="exhausted",
+            overall_verdict="FAIL",
+        )
+        self.assertEqual(event.event_name, "GateParked")
+
+    def test_to_dict(self) -> None:
+        event = GateParkedAudit(
+            gate_id="g1", story_key="E1-001", reason="risk-9",
+            overall_verdict="FAIL",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["story_key"], "E1-001")
+        self.assertEqual(d["reason"], "risk-9")
+        self.assertEqual(d["overall_verdict"], "FAIL")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ __all__ = [
     "GateBoundaryViolation",
     "GateDecisionAudit",
     "GateRenderedAudit",
+    "GateProfileDriftAudit",
+    "GateParkedAudit",
     "emit_gate_audit",
 ]
 
@@ -114,9 +116,50 @@ class GateRenderedAudit:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class GateProfileDriftAudit:
+    """Audit event: gate reuse rejected due to profile/version drift."""
+    event_name: str = dataclasses.field(default="GateProfileDrift", init=False)
+    gate_id: str = ""
+    old_hash: str = ""
+    new_hash: str = ""
+    old_factory_version: str = ""
+    new_factory_version: str = ""
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "old_hash": self.old_hash,
+            "new_hash": self.new_hash,
+            "old_factory_version": self.old_factory_version,
+            "new_factory_version": self.new_factory_version,
+            "reason": self.reason,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class GateParkedAudit:
+    """Audit event: story parked due to exhaustion or unmitigated risk-9."""
+    event_name: str = dataclasses.field(default="GateParked", init=False)
+    gate_id: str = ""
+    story_key: str = ""
+    reason: str = ""
+    overall_verdict: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_id": self.gate_id,
+            "story_key": self.story_key,
+            "reason": self.reason,
+            "overall_verdict": self.overall_verdict,
+        }
+
+
 _AuditEvent = (
     GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
     | GateDecisionAudit | GateRenderedAudit
+    | GateProfileDriftAudit | GateParkedAudit
 )
 
 
