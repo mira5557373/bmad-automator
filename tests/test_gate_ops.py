@@ -259,5 +259,48 @@ class GateSummaryTests(unittest.TestCase):
         self.assertIsNone(result["avg_duration_ms"])
 
 
+class EnrichRouteWithRunbookTests(unittest.TestCase):
+    def test_pass_gets_empty_ref(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({"action": "done", "overall": "PASS"})
+        self.assertEqual(result["runbook_ref"], "")
+
+    def test_fail_remediate_gets_section_4(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({"action": "remediate", "overall": "FAIL"})
+        self.assertIn("section-4", result["runbook_ref"])
+
+    def test_concerns_gets_section_2(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({"action": "done", "overall": "CONCERNS"})
+        self.assertIn("section-2", result["runbook_ref"])
+
+    def test_park_exhausted_gets_section_3(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({
+            "action": "park", "reason": "exhausted", "overall": "FAIL",
+        })
+        self.assertIn("section-3", result["runbook_ref"])
+
+    def test_park_risk9_gets_section_3(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({
+            "action": "park", "reason": "risk-9", "overall": "FAIL",
+        })
+        self.assertIn("section-3", result["runbook_ref"])
+
+    def test_waived_gets_section_6(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        result = enrich_route_with_runbook({"action": "done", "overall": "WAIVED"})
+        self.assertIn("section-6", result["runbook_ref"])
+
+    def test_original_keys_preserved(self) -> None:
+        from story_automator.core.gate_ops import enrich_route_with_runbook
+        original = {"action": "done", "overall": "PASS", "commit": True}
+        result = enrich_route_with_runbook(original)
+        self.assertTrue(result["commit"])
+        self.assertEqual(result["action"], "done")
+
+
 if __name__ == "__main__":
     unittest.main()

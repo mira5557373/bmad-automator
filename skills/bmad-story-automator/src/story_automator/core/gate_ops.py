@@ -18,7 +18,15 @@ __all__ = [
     "gate_doctor",
     "apply_remediation",
     "gate_summary",
+    "enrich_route_with_runbook",
 ]
+
+
+_RUNBOOK_REFS: dict[str, str] = {
+    "FAIL": "section-4: Partial-FAIL Playbook",
+    "CONCERNS": "section-2: Verdict Interpretation",
+    "WAIVED": "section-6: Waiver SOP",
+}
 
 
 def list_verdicts(
@@ -164,3 +172,17 @@ def apply_remediation(
         "tasks_written": len(tasks),
         "review_continuation": route_result.get("review_continuation", {}),
     }
+
+
+def enrich_route_with_runbook(route_result: dict[str, Any]) -> dict[str, Any]:
+    """Add runbook_ref to route_gate_verdict result per §11.1."""
+    enriched = dict(route_result)
+    action = route_result.get("action", "")
+    overall = route_result.get("overall", "")
+    if action == "park":
+        enriched["runbook_ref"] = "section-3: PARK + Remediation"
+    elif overall in _RUNBOOK_REFS:
+        enriched["runbook_ref"] = _RUNBOOK_REFS[overall]
+    else:
+        enriched["runbook_ref"] = ""
+    return enriched
