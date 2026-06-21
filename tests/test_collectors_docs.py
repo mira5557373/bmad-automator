@@ -59,11 +59,41 @@ class DocusaurusCollectorTests(unittest.TestCase):
         )
 
 
+class ApiDocsCollectorTests(unittest.TestCase):
+    def test_config_fields(self) -> None:
+        from story_automator.core.collectors.docs import API_DOCS
+
+        self.assertEqual(API_DOCS.collector_id, "api-docs-docs")
+        self.assertEqual(API_DOCS.tool, "python3")
+        self.assertEqual(API_DOCS.category, "docs")
+        self.assertTrue(API_DOCS.deterministic)
+        self.assertIn("*.md", API_DOCS.file_patterns)
+        self.assertIn("*.html", API_DOCS.file_patterns)
+
+    def test_build_cmd_invokes_presence_script(self) -> None:
+        from story_automator.core.collectors.docs import API_DOCS
+
+        cmd = API_DOCS.build_cmd("/tmp/checkout", {})
+        self.assertEqual(cmd[0], sys.executable)
+        self.assertIn("presence_check.py", cmd[1])
+        self.assertTrue(Path(cmd[1]).is_file(), f"script not found: {cmd[1]}")
+        self.assertEqual(cmd[2], "/tmp/checkout")
+        files = json.loads(cmd[3])
+        self.assertIn("docs/api/index.md", files)
+
+    def test_build_cmd_returns_list_of_strings(self) -> None:
+        from story_automator.core.collectors.docs import API_DOCS
+
+        cmd = API_DOCS.build_cmd("/tmp/co", {})
+        self.assertIsInstance(cmd, list)
+        self.assertTrue(all(isinstance(s, str) for s in cmd))
+
+
 class DocsCollectorListTests(unittest.TestCase):
     def test_collectors_count(self) -> None:
         from story_automator.core.collectors.docs import COLLECTORS
 
-        self.assertEqual(len(COLLECTORS), 2)
+        self.assertEqual(len(COLLECTORS), 3)
 
     def test_all_docs_category(self) -> None:
         from story_automator.core.collectors.docs import COLLECTORS

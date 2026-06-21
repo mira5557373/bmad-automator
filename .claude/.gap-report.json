@@ -1,33 +1,90 @@
 {
-  "pass": 1,
-  "critical_gaps": 0,
-  "architectural_gaps": 0,
-  "important_gaps": 2,
-  "minor_gaps": 8,
-  "deferred_gaps": 2,
-  "total_gaps_found": 20,
-  "gaps_fixed_this_pass": 8,
-  "tests_green": true,
-  "lint_clean": true,
-  "converged": true,
+  "milestone": "collection-m5-core-collectors",
+  "timestamp": "2026-06-21",
+  "phase": "review",
+  "passes": 1,
+  "convergence": {
+    "critical_gaps": 0,
+    "important_gaps": 0,
+    "tests_green": true,
+    "lint_clean": true,
+    "converged": true
+  },
   "gap_summaries": [
-    "[ultrathink] 🟡 Coverage collector hardcodes P0 threshold — spec says 'risk-required' but collector uses profile.matrix.P0.coverage_pct. Story's risk priority unavailable to collectors. FIXED: documented as Global Constraint; adjudicator (M9) will override.",
-    "[ultrathink] 🟡 Trace checker only verified File List heading presence — spec requires 'File List complete'. FIXED: enhanced _check_story_file to verify non-empty content under heading; added test_empty_file_list_returns_one test case.",
-    "[ultrathink] 🟡 Checker scripts adr_check.py and trace_check.py used open(encoding='utf-8') without errors='replace' — non-UTF-8 files would crash subprocess. FIXED: added errors='replace' to all open() calls.",
-    "[ultrathink] 🟡 KNIP.file_patterns included '*.py' — knip is TypeScript/JS-only analyzer, would trigger unnecessarily on Python-only changes. FIXED: replaced '*.py' with '*.json' (knip analyzes package.json/tsconfig).",
-    "[ultrathink] 🟡 Integration test test_presence_collector_pass only checked status=='ok' — didn't verify collector, tool, category, exit_code fields. FIXED: added specific field assertions for all key evidence fields.",
-    "[ultrathink] 🟡 npx-based tools (tsc, biome, knip, vitest, playwright, docusaurus) fail collector_doctor preflight — shutil.which(config.tool) returns None when binary only accessible via npx. FIXED: documented as Global Constraint; doctor enhancement deferred.",
-    "[ultrathink] 🟡→🔵 tool='python3' may not resolve via shutil.which on Windows — build_cmd uses sys.executable (correct) but doctor reports unavailable. Non-blocking since doctor is advisory.",
-    "[ultrathink] 🟡→🔵 Coverage P0 threshold is conservative default — remaining gap after documentation fix. Full risk-priority-aware coverage deferred to adjudicator (M9).",
-    "[ultrathink] 🔵 No subprocess-level tests for coverage_check.py, adr_check.py, trace_check.py — only presence_check.py has subprocess tests verifying __main__ guard.",
-    "[ultrathink] 🔵 Missing __all__ exports in category modules (docs.py, static.py, correctness.py, process.py) — inconsistent with collector_config.py pattern.",
-    "[ultrathink] 🔵 _coverage_cmd uses str(int(threshold)) — truncates float thresholds (80.5→80). Default profiles use integers so non-blocking.",
-    "[ultrathink] 🔵 No tool_version_cmd for checker-script collectors — DOC_PRESENCE, COVERAGE, ADR, TRACE report no version in doctor output.",
-    "[ultrathink] 🔵 _CHECKS_DIR path resolution duplicated in docs.py, correctness.py, process.py — minor DRY violation, could use shared constant.",
-    "[ultrathink] 🔵 DOCUSAURUS.tool_version_cmd ('npx', 'docusaurus', '--version') may trigger npx download delay during doctor check.",
-    "[ultrathink] 🔵 Docusaurus command doesn't handle nested docs directories — npx docusaurus build assumes config at checkout root.",
-    "[ultrathink] 🔵 COVERAGE.file_patterns includes both *.py and *.ts/*.tsx — may trigger coverage collector when only one language changed but only the other's coverage data exists.",
-    "[ultrathink] 🟢 DEFERRED: Full AC↔task↔test traceability parsing — trace checker currently verifies File List heading+content but not AC-to-test-file mapping. Full trace parser is adjudicator (M9) scope.",
-    "[ultrathink] 🟢 DEFERRED: Doctor preflight enhancement for npx-based tools — could try 'npx <tool> --version' instead of shutil.which. Separate improvement to collector_doctor.py."
-  ]
+    {
+      "id": "I-1",
+      "severity": "important",
+      "tag": "[post-impl]",
+      "file": "tests/test_collectors_docs.py:63-69",
+      "description": "ApiDocsCollectorTests.test_config_fields missing file_patterns assertion for API_DOCS collector",
+      "status": "fixed"
+    },
+    {
+      "id": "I-2",
+      "severity": "important",
+      "tag": "[post-impl]",
+      "file": "tests/test_check_trace.py:33-37",
+      "description": "test_missing_file_list_returns_one not isolating File List check — story missing AC+Tasks sections",
+      "status": "fixed"
+    },
+    {
+      "id": "I-3",
+      "severity": "important",
+      "tag": "[post-impl]",
+      "file": "tests/test_check_trace.py:76-80",
+      "description": "test_empty_file_list_returns_one not isolating empty File List — story missing AC, empty Tasks",
+      "status": "fixed"
+    },
+    {
+      "id": "I-4",
+      "severity": "important",
+      "tag": "[post-impl]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/collectors/docs.py:5",
+      "description": "Module docstring Collectors list missing api-docs-docs",
+      "status": "fixed"
+    },
+    {
+      "id": "I-5",
+      "severity": "important",
+      "tag": "[post-impl]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/checks/trace_check.py:4-5",
+      "description": "Module docstring only mentions File List, not Acceptance Criteria and Tasks sections",
+      "status": "fixed"
+    },
+    {
+      "id": "M-1",
+      "severity": "minor",
+      "tag": "[post-impl]",
+      "file": "tests/test_core_collectors_integration.py:177",
+      "description": "assertTrue(len(bundle_hash) > 0) is a weak assertion — could verify hash format",
+      "status": "accepted"
+    },
+    {
+      "id": "M-2",
+      "severity": "minor",
+      "tag": "[post-impl]",
+      "file": "skills/bmad-story-automator/src/story_automator/core/checks/trace_check.py:22",
+      "description": "_TASKS_RE regex loosely matches headings starting with 'Task' (e.g. 'Task 1')",
+      "status": "accepted"
+    },
+    {
+      "id": "M-3",
+      "severity": "minor",
+      "tag": "[post-impl]",
+      "file": "tests/test_check_trace.py:39-48",
+      "description": "test_mixed_stories S002 tests multiple missing sections, not just a single 'mix'",
+      "status": "accepted"
+    }
+  ],
+  "spec_requirements_implemented": [
+    "docs: API docs generated enforcement (api-docs-docs collector via presence_check.py)",
+    "process/DoD: ACs↔tasks↔tests traced enforcement (trace_check.py checks AC, Tasks, File List sections)"
+  ],
+  "production_readiness": {
+    "security": "pass",
+    "error_resilience": "pass",
+    "testing": "pass",
+    "code_quality": "pass",
+    "cli_conventions": "pass"
+  }
 }

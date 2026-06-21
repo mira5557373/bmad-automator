@@ -22,20 +22,32 @@ class TraceCheckDirectTests(unittest.TestCase):
     def test_all_stories_have_file_list(self) -> None:
         from story_automator.core.checks.trace_check import main
 
-        self._write_story("S001.md", "# Story\n## File List\n- a.py\n")
-        self._write_story("S002.md", "# Story\n## File List\n- b.py\n")
+        complete = (
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n- task\n## File List\n- a.py\n"
+        )
+        self._write_story("S001.md", complete)
+        self._write_story("S002.md", complete.replace("a.py", "b.py"))
         self.assertEqual(main([self.tmpdir]), 0)
 
     def test_missing_file_list_returns_one(self) -> None:
         from story_automator.core.checks.trace_check import main
 
-        self._write_story("S001.md", "# Story\n## Tasks\n- task\n")
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n- task\n",
+        )
         self.assertEqual(main([self.tmpdir]), 1)
 
     def test_mixed_stories(self) -> None:
         from story_automator.core.checks.trace_check import main
 
-        self._write_story("S001.md", "# Story\n## File List\n- a.py\n")
+        complete = (
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n- task\n## File List\n- a.py\n"
+        )
+        self._write_story("S001.md", complete)
         self._write_story("S002.md", "# Story\n## Tasks\n- task\n")
         self.assertEqual(main([self.tmpdir]), 1)
 
@@ -53,7 +65,11 @@ class TraceCheckDirectTests(unittest.TestCase):
     def test_case_insensitive_heading(self) -> None:
         from story_automator.core.checks.trace_check import main
 
-        self._write_story("S001.md", "# Story\n### file list\n- a.py\n")
+        self._write_story(
+            "S001.md",
+            "# Story\n### acceptance criteria\n- AC-1 foo\n"
+            "### tasks\n- task\n### file list\n- a.py\n",
+        )
         self.assertEqual(main([self.tmpdir]), 0)
 
     def test_no_args_returns_two(self) -> None:
@@ -64,7 +80,11 @@ class TraceCheckDirectTests(unittest.TestCase):
     def test_empty_file_list_returns_one(self) -> None:
         from story_automator.core.checks.trace_check import main
 
-        self._write_story("S001.md", "# Story\n## File List\n\n## Tasks\n")
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n- task\n## File List\n\n## Notes\n",
+        )
         self.assertEqual(main([self.tmpdir]), 1)
 
     def test_non_md_files_ignored(self) -> None:
@@ -74,3 +94,52 @@ class TraceCheckDirectTests(unittest.TestCase):
         with open(os.path.join(self.story_dir, "notes.txt"), "w") as f:
             f.write("no file list here")
         self.assertEqual(main([self.tmpdir]), 0)
+
+    def test_missing_acceptance_criteria_returns_one(self) -> None:
+        from story_automator.core.checks.trace_check import main
+
+        self._write_story(
+            "S001.md",
+            "# Story\n## File List\n- a.py\n## Tasks\n- task\n",
+        )
+        self.assertEqual(main([self.tmpdir]), 1)
+
+    def test_has_acceptance_criteria_and_tasks(self) -> None:
+        from story_automator.core.checks.trace_check import main
+
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n- task\n## File List\n- a.py\n",
+        )
+        self.assertEqual(main([self.tmpdir]), 0)
+
+    def test_empty_acceptance_criteria_returns_one(self) -> None:
+        from story_automator.core.checks.trace_check import main
+
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n\n"
+            "## Tasks\n- task\n## File List\n- a.py\n",
+        )
+        self.assertEqual(main([self.tmpdir]), 1)
+
+    def test_missing_tasks_section_returns_one(self) -> None:
+        from story_automator.core.checks.trace_check import main
+
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## File List\n- a.py\n",
+        )
+        self.assertEqual(main([self.tmpdir]), 1)
+
+    def test_empty_tasks_section_returns_one(self) -> None:
+        from story_automator.core.checks.trace_check import main
+
+        self._write_story(
+            "S001.md",
+            "# Story\n## Acceptance Criteria\n- AC-1 foo\n"
+            "## Tasks\n\n## File List\n- a.py\n",
+        )
+        self.assertEqual(main([self.tmpdir]), 1)
