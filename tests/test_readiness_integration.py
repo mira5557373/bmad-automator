@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
-from story_automator.core.gate_orchestrator import run_readiness_gate
+from story_automator.core.collector_registry import CollectorRegistry
+from story_automator.core.evidence_io import persist_evidence_record
+from story_automator.core.gate_orchestrator import run_production_gate, run_readiness_gate
+from story_automator.core.gate_schema import make_evidence_record
 from story_automator.core.risk_profile import (
+    has_unmitigated_risk_9,
     load_risk_profile,
     make_risk_entry,
     persist_risk_profile,
@@ -100,6 +105,109 @@ class RunReadinessGateTests(unittest.TestCase):
             profile=self.profile, risk_entries=new_entries,
         )
         self.assertEqual(result["priority"], "P0")
+
+
+class ReadinessToProductionGateBridgeTests(unittest.TestCase):
+    """Verify readiness priority flows into production gate."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.profile = {
+            "id": "test", "version": 1,
+            "matrix": {
+                "P0": {"coverage_pct": 100, "levels": ["unit", "integration", "contract", "e2e"]},
+                "P1": {"coverage_pct": 90, "levels": ["unit", "integration", "api"]},
+                "P2": {"coverage_pct": 50, "levels": ["unit", "api_happy_path"]},
+                "P3": {"coverage_pct": 20, "levels": ["smoke"]},
+            },
+            "categories": {"code": ["correctness"], "system": []},
+            "categories_na": [],
+            "forbidden_until": {},
+        }
+        self.registry = CollectorRegistry()
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_p0_readiness_drives_100pct_coverage(self, mock_run: MagicMock) -> None:
+        risk_entries = [make_risk_entry("SEC", 3, 3, rationale="mitigated")]
+        readiness = run_readiness_gate(
+            self.tmp, "E1-001",
+            profile=self.profile, risk_entries=risk_entries,
+        )
+        self.assertEqual(readiness["priority"], "P0")
+
+        evidence = make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )
+        persist_evidence_record(self.tmp, "gate-1", evidence)
+        mock_run.return_value = []
+
+        gate = run_production_gate(
+            self.tmp, "gate-1",
+            commit_sha="abc", target={"kind": "story", "id": "E1-001"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry, priority=readiness["priority"],
+        )
+        self.assertEqual(gate["overall"], "FAIL")
+        correctness = gate["categories"]["correctness"]
+        self.assertEqual(correctness["verdict"], "FAIL")
+        self.assertIn("coverage", correctness.get("rationale", ""))
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_p3_readiness_allows_20pct_coverage(self, mock_run: MagicMock) -> None:
+        risk_entries = [make_risk_entry("OPS", 1, 1)]
+        readiness = run_readiness_gate(
+            self.tmp, "E1-001",
+            profile=self.profile, risk_entries=risk_entries,
+        )
+        self.assertEqual(readiness["priority"], "P3")
+
+        evidence = make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 25, "regressions": 0},
+        )
+        persist_evidence_record(self.tmp, "gate-2", evidence)
+        mock_run.return_value = []
+
+        gate = run_production_gate(
+            self.tmp, "gate-2",
+            commit_sha="abc", target={"kind": "story", "id": "E1-001"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry, priority=readiness["priority"],
+        )
+        self.assertEqual(gate["overall"], "PASS")
+
+    def test_unmitigated_risk_9_detection(self) -> None:
+        entries = [make_risk_entry("SEC", 3, 3)]
+        self.assertTrue(has_unmitigated_risk_9(entries))
+
+        entries_mitigated = [make_risk_entry("SEC", 3, 3, rationale="mitigated")]
+        self.assertFalse(has_unmitigated_risk_9(entries_mitigated))
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_unmitigated_risk_9_causes_production_gate_fail(self, mock_run: MagicMock) -> None:
+        risk_entries = [make_risk_entry("SEC", 3, 3)]
+        readiness = run_readiness_gate(
+            self.tmp, "E1-001",
+            profile=self.profile, risk_entries=risk_entries,
+        )
+        self.assertTrue(readiness["risk_summary"]["unmitigated_risk_9"])
+
+        evidence = make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 100, "regressions": 0},
+        )
+        persist_evidence_record(self.tmp, "gate-3", evidence)
+        mock_run.return_value = []
+
+        gate = run_production_gate(
+            self.tmp, "gate-3",
+            commit_sha="abc", target={"kind": "story", "id": "E1-001"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry, priority="P0",
+            has_unmitigated_risk_9=True,
+        )
+        self.assertEqual(gate["overall"], "FAIL")
 
 
 if __name__ == "__main__":
