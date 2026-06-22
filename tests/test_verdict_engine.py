@@ -662,12 +662,14 @@ class VerdictEngineDeterminismTests(unittest.TestCase):
         adj2 = adjudicate([r2, r1], self.PROFILE, priority="P1")
         self.assertEqual(adj1["overall"], adj2["overall"])
 
-    def test_all_na_categories_pass(self) -> None:
+    def test_all_na_categories_fail_closed(self) -> None:
+        # §6.3 fail-closed: a profile that NA's every category cannot
+        # silently produce a PASS gate; nothing was actually adjudicated.
         profile = dict(self.PROFILE)
         profile["categories"] = {"code": [], "system": []}
         profile["categories_na"] = ["correctness", "security"]
         result = adjudicate([], profile, priority="P1")
-        self.assertEqual(result["overall"], "PASS")
+        self.assertEqual(result["overall"], "FAIL")
 
     def test_mixed_na_and_active(self) -> None:
         profile = dict(self.PROFILE)

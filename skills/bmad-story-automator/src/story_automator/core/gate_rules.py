@@ -89,6 +89,10 @@ def aggregate_verdicts(
     }
     if has_unmitigated_risk_9:
         return "FAIL"
+    # §6.3 fail-closed: an empty active set means nothing was evaluated;
+    # never silently return PASS for an un-adjudicated gate.
+    if not active:
+        return "FAIL"
     if any(v == "FAIL" for v in active.values()):
         return "FAIL"
     if any(v == "CONCERNS" for v in active.values()):

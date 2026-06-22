@@ -64,9 +64,15 @@ class AggregateVerdictsTests(unittest.TestCase):
         cats = {"a": "CONCERNS", "b": "FAIL", "c": "PASS"}
         self.assertEqual(aggregate_verdicts(cats), "FAIL")
 
-    def test_all_na_is_pass(self) -> None:
+    def test_all_na_is_fail_closed(self) -> None:
+        # §6.3 fail-closed: if every category is NA there is nothing to
+        # adjudicate; never silently return PASS.
         cats = {"a": "NA", "b": "NA"}
-        self.assertEqual(aggregate_verdicts(cats), "PASS")
+        self.assertEqual(aggregate_verdicts(cats), "FAIL")
+
+    def test_empty_input_is_fail_closed(self) -> None:
+        # §6.3 fail-closed: empty input must never resolve to PASS.
+        self.assertEqual(aggregate_verdicts({}), "FAIL")
 
 
 class WaiverExpiryTests(unittest.TestCase):
