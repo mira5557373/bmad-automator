@@ -59,15 +59,79 @@ def worst_evidence_status(records: list[dict[str, Any]]) -> str:
     return worst
 
 
+def _bool_any(values: list[Any]) -> bool:
+    """Worst-case reducer for booleans where True == bad."""
+    return any(bool(v) for v in values)
+
+
+def _bool_all(values: list[Any]) -> bool:
+    """Worst-case reducer for booleans where False == bad (e.g. signal_survived)."""
+    return all(bool(v) for v in values)
+
+
+def _first(values: list[Any]) -> Any:
+    """Reducer for non-numeric labels (e.g. rollout strategy name)."""
+    return values[0]
+
+
+# Per-metric worst-case reducer table. Multi-collector categories MUST use
+# the most conservative aggregation so a clean record cannot mask a violating
+# one (production-ready gate: worst-of across collectors).
+_METRIC_REDUCERS: dict[str, Callable[[list[Any]], Any]] = {
+    # Counts of bad things -> sum (more bad spread across tools is still more bad).
+    "sast_high_count": sum,
+    "deps_critical_count": sum,
+    "secrets_count": sum,
+    "regressions": sum,
+    "flaky_count": sum,
+    "hard_wait_count": sum,
+    "forbidden_count": sum,
+    "boundary_violations": sum,
+    "mutants_survived": sum,
+    "mutants_total": sum,
+    "mutants_killed": sum,
+    # Percentages / scores where lower is worse -> min (worst tier wins).
+    "coverage_pct": min,
+    "mutation_score": min,
+    "mutation_score_pct": min,
+    "test_review_score": min,
+    "scenarios_passed": min,
+    # Totals / maxima where higher is worse -> max.
+    "rto_seconds": max,
+    "rpo_seconds": max,
+    "pod_cost_per_tenant": max,
+    "scenarios_total": max,
+    # Booleans where True == bad (any failing collector poisons the verdict).
+    "slo_breached": _bool_any,
+    # Booleans where True == good / required (any failing collector fails the gate).
+    "signal_survived": _bool_all,
+    "rollout_completed": _bool_all,
+    # Non-numeric labels: keep the first record's value (informational only).
+    "strategy": _first,
+}
+
+
 def _aggregate_metrics(
     evidence: list[dict[str, Any]], key: str, default: Any = 0,
 ) -> Any:
-    """Extract a metric from the first evidence record that has it."""
+    """Worst-of aggregation of ``key`` across every evidence record.
+
+    Multi-collector categories (security/correctness/test_quality/license/...)
+    fan out to several tools whose evidence records are appended in arbitrary
+    order. A clean record from tool A must never mask a violating record from
+    tool B, so we reduce *all* records that carry ``key`` through a per-metric
+    worst-case reducer (see ``_METRIC_REDUCERS``). Unknown keys default to
+    ``max`` which is the most conservative reduction for numeric counts.
+    """
+    values: list[Any] = []
     for record in evidence:
         metrics = record.get("metrics") or {}
         if key in metrics:
-            return metrics[key]
-    return default
+            values.append(metrics[key])
+    if not values:
+        return default
+    reducer = _METRIC_REDUCERS.get(key, max)
+    return reducer(values)
 
 
 def _make_category_result(
