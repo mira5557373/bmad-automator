@@ -552,7 +552,11 @@ def _emit_tmux_crashed(
         # much the agent produced before dying (best-effort, never raises).
         try:
             last_capture = len(session_paths(session, project_root).output.read_text(encoding="utf-8"))
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            # UnicodeDecodeError: agent dumped raw bytes (binary buffer, half-decoded
+            # utf-16, latin-1 paste). Fail closed — never let a non-UTF-8 output
+            # artifact escalate a child crash into an orchestrator crash that
+            # would orphan the run and block gate routing.
             last_capture = 0
     _telemetry_emitter(project_root).emit(
         TmuxSessionCrashed(
@@ -1576,7 +1580,10 @@ def _output_text(path: Path) -> str:
         return ""
     try:
         return read_text(path)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Same fail-closed contract as _emit_tmux_crashed: a non-UTF-8 capture
+        # artifact must not crash the heartbeat / session_status path that
+        # feeds gate routing. Treat as empty output.
         return ""
 
 

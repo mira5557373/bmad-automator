@@ -91,6 +91,45 @@ class DurationAndCaptureFieldsTests(unittest.TestCase):
         finally:
             paths.output.unlink(missing_ok=True)
 
+    def test_emit_tmux_crashed_survives_non_utf8_output(self) -> None:
+        # Regression: agent died and dumped raw bytes (e.g. binary buffer, latin-1
+        # paste, half-decoded utf-16). _emit_tmux_crashed must not raise — that
+        # would turn a child crash into a gate-routing crash and orphan the run.
+        rec = _RecordingEmitter()
+        session = "sa-yy-8-8-review"
+        paths = tmux_runtime.session_paths(session, None)
+        paths.output.parent.mkdir(parents=True, exist_ok=True)
+        # Write bytes that are NOT valid UTF-8 (lone continuation byte 0x80, etc.)
+        paths.output.write_bytes(b"\x80\xff\xfe\x80hello\xc3\x28")
+        try:
+            with mock.patch.object(
+                tmux_runtime, "emitter_for_project_root", side_effect=lambda _r: rec
+            ):
+                # Must not raise UnicodeDecodeError
+                tmux_runtime._emit_tmux_crashed(session, {"exitCode": 1}, None)
+            self.assertEqual(len(rec.events), 1)
+            # last_capture_chars should be 0 (best-effort, swallowed) — the
+            # critical invariant is that the crash event was emitted.
+            self.assertEqual(rec.events[0].last_capture_chars, 0)
+        finally:
+            paths.output.unlink(missing_ok=True)
+
+
+class OutputTextDecodingTests(unittest.TestCase):
+    def test_output_text_returns_empty_for_non_utf8_file(self) -> None:
+        # Regression: _output_text feeds session_status / _todo_counts; raising
+        # UnicodeDecodeError here would crash the heartbeat loop and block gate
+        # routing. The function must fail closed, returning "" on bad bytes.
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "output.bin"
+            bad.write_bytes(b"\x80\xff\xfe\x80not utf-8\xc3\x28")
+            # Must not raise
+            self.assertEqual(tmux_runtime._output_text(bad), "")
+
+    def test_output_text_returns_empty_for_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(tmux_runtime._output_text(Path(d) / "missing"), "")
+
 
 class GuardedEmitTests(unittest.TestCase):
     def test_emit_safe_swallows_oserror(self) -> None:
