@@ -217,7 +217,22 @@ def cmd_tmux_wrapper(args: list[str]) -> int:
     if action == "name":
         if len(args) < 4:
             return _usage(1)
-        cycle = args[4] if len(args) > 4 else ""
+        # Documented form: ``name <step> <epic> <story_id> [--cycle N]``.
+        # Parse ``--cycle <value>`` from args[4:] like :func:`_spawn` does;
+        # fall back to a positional ``args[4]`` only when the flag is absent
+        # so legacy positional callers keep working. Without this, the flag
+        # form left ``args[4] == "--cycle"`` and produced session names
+        # ending in ``-r--cycle`` instead of ``-rN`` (LENS-C-01).
+        cycle = ""
+        tail = args[4:]
+        cycle_flag_seen = False
+        for idx, arg in enumerate(tail):
+            if arg == "--cycle" and idx + 1 < len(tail):
+                cycle = tail[idx + 1]
+                cycle_flag_seen = True
+                break
+        if not cycle_flag_seen and tail and not tail[0].startswith("--"):
+            cycle = tail[0]
         print(generate_session_name(args[1], args[2], args[3], cycle))
         return 0
     if action == "list":
