@@ -16,6 +16,7 @@ from .evidence_io import (
     GateMarkerCorruptedError,
     can_reuse_gate_file,
     clear_gate_marker,
+    compute_evidence_bundle_merkle_root,
     load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
@@ -452,6 +453,15 @@ def run_production_gate(
         )
     finally:
         clear_gate_marker(project_root)
+
+    # N5 (G5): export Merkle root so auditors can externally verify the
+    # evidence bundle without trusting the factory. Empty bundle returns
+    # an empty-string sentinel — distinguishable from a real 64-hex root.
+    bundle = load_evidence_bundle(project_root, gate_id)
+    if bundle:
+        gate_file["evidence_merkle_root"] = compute_evidence_bundle_merkle_root(bundle)
+    else:
+        gate_file["evidence_merkle_root"] = ""
 
     if fail_closed:
         error_labels = _collect_error_evidence(project_root, gate_id)
