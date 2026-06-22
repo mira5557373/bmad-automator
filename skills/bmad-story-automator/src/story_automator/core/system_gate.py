@@ -13,13 +13,17 @@ from typing import Any
 
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
-from .evidence_io import clear_gate_marker, write_gate_marker
+from .evidence_io import clear_gate_marker, get_gate_lock, write_gate_marker
 from .gate_audit import (
     EpicGateDecisionAudit,
     SystemGateStartedAudit,
     emit_gate_audit,
 )
-from .gate_orchestrator import check_gate_reuse, recover_from_crash
+from .gate_orchestrator import (
+    _recover_from_crash_locked,
+    check_gate_reuse,
+    recover_from_crash,  # noqa: F401  back-compat: existing tests patch this name
+)
 from .gate_remediation import failing_categories_from_gate, prepare_remediation_tasks
 from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
@@ -48,71 +52,88 @@ def run_system_gate(
     crash recovery -> reuse check -> provision env ->
     inject _runtime_env -> run system collectors ->
     evaluate (tier=system) -> teardown env -> return gate file.
+
+    L1 follow-up: the recover -> reuse -> marker -> collectors -> clear
+    window runs under the SAME ``_bmad/gate/.gate.lock`` envelope used by
+    :func:`gate_orchestrator.run_production_gate` (timeout 3600s), so
+    concurrent system + production gate invocations against one
+    ``project_root`` cannot race on ``gate-in-progress.json``. Recovery
+    delegates to :func:`gate_orchestrator._recover_from_crash_locked`
+    because ``filelock`` is not re-entrant across separate ``FileLock``
+    instances.
     """
     assert_host_context("run_system_gate")
 
-    recover_from_crash(project_root)
+    # L1 follow-up: serialize the marker lifecycle under the same lock
+    # the production gate uses. The 3600s timeout matches
+    # run_production_gate — system gates can run for many seconds while
+    # collectors execute against a provisioned environment.
+    with get_gate_lock(project_root, timeout=3600.0):
+        # Recovery runs under the same lock — use the *_locked variant
+        # so we don't try to re-acquire (filelock is not re-entrant
+        # across separate FileLock instances).
+        _recover_from_crash_locked(project_root)
 
-    existing, _ = check_gate_reuse(
-        project_root, gate_id, commit_sha, profile, factory_version,
-        audit_policy=audit_policy, audit_path=audit_path,
-    )
-    if existing is not None:
-        return existing
+        existing, _ = check_gate_reuse(
+            project_root, gate_id, commit_sha, profile, factory_version,
+            audit_policy=audit_policy, audit_path=audit_path,
+        )
+        if existing is not None:
+            return existing
 
-    env_config = build_env_config(
-        str(project_root), commit_sha, epic_metadata, profile,
-    )
-
-    if audit_policy is not None and audit_path is not None:
-        emit_gate_audit(
-            audit_policy, audit_path,
-            SystemGateStartedAudit(
-                gate_id=gate_id, epic_id=epic_id,
-                commit_sha=commit_sha,
-                profile_hash=compute_profile_hash(profile),
-                env_tier=env_config.tier,
-            ),
+        env_config = build_env_config(
+            str(project_root), commit_sha, epic_metadata, profile,
         )
 
-    write_gate_marker(project_root, gate_id, commit_sha)
-    try:
-        with system_env(env_config, str(project_root)) as env_info:
-            if not env_info.provisioned:
-                from .gate_schema import make_gate_file as _make_gate_file
-
-                gate_file = _make_gate_file(
-                    gate_id=gate_id, tier="system",
-                    target={"kind": "epic", "id": epic_id},
+        if audit_policy is not None and audit_path is not None:
+            emit_gate_audit(
+                audit_policy, audit_path,
+                SystemGateStartedAudit(
+                    gate_id=gate_id, epic_id=epic_id,
                     commit_sha=commit_sha,
-                    profile={
-                        "id": profile.get("id", ""),
-                        "version": profile.get("version", 1),
-                        "hash": compute_profile_hash(profile),
-                    },
-                    factory_version=factory_version,
-                    categories={}, overall="FAIL",
-                )
-                gate_file["_provision_failed"] = True
-                return gate_file
-
-            enriched = _inject_runtime_env(profile, env_info)
-            run_gate_collectors(
-                project_root, gate_id, commit_sha, enriched, registry,
-                audit_policy=audit_policy, audit_path=audit_path,
+                    profile_hash=compute_profile_hash(profile),
+                    env_tier=env_config.tier,
+                ),
             )
 
-        target = {"kind": "epic", "id": epic_id}
-        gate_file = evaluate_gate(
-            project_root, gate_id,
-            commit_sha=commit_sha, target=target,
-            profile=profile, factory_version=factory_version,
-            priority=priority, waivers=waivers,
-            audit_policy=audit_policy, audit_path=audit_path,
-            tier="system",
-        )
-    finally:
-        clear_gate_marker(project_root)
+        write_gate_marker(project_root, gate_id, commit_sha)
+        try:
+            with system_env(env_config, str(project_root)) as env_info:
+                if not env_info.provisioned:
+                    from .gate_schema import make_gate_file as _make_gate_file
+
+                    gate_file = _make_gate_file(
+                        gate_id=gate_id, tier="system",
+                        target={"kind": "epic", "id": epic_id},
+                        commit_sha=commit_sha,
+                        profile={
+                            "id": profile.get("id", ""),
+                            "version": profile.get("version", 1),
+                            "hash": compute_profile_hash(profile),
+                        },
+                        factory_version=factory_version,
+                        categories={}, overall="FAIL",
+                    )
+                    gate_file["_provision_failed"] = True
+                    return gate_file
+
+                enriched = _inject_runtime_env(profile, env_info)
+                run_gate_collectors(
+                    project_root, gate_id, commit_sha, enriched, registry,
+                    audit_policy=audit_policy, audit_path=audit_path,
+                )
+
+            target = {"kind": "epic", "id": epic_id}
+            gate_file = evaluate_gate(
+                project_root, gate_id,
+                commit_sha=commit_sha, target=target,
+                profile=profile, factory_version=factory_version,
+                priority=priority, waivers=waivers,
+                audit_policy=audit_policy, audit_path=audit_path,
+                tier="system",
+            )
+        finally:
+            clear_gate_marker(project_root)
 
     if audit_policy is not None and audit_path is not None:
         cats_summary = ",".join(

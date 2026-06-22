@@ -51,7 +51,7 @@ class RunSystemGateTests(unittest.TestCase):
     @patch("story_automator.core.system_gate.system_env")
     @patch("story_automator.core.system_gate.evaluate_gate")
     @patch("story_automator.core.system_gate.run_gate_collectors")
-    @patch("story_automator.core.system_gate.recover_from_crash")
+    @patch("story_automator.core.system_gate._recover_from_crash_locked")
     @patch("story_automator.core.system_gate.check_gate_reuse")
     def test_full_lifecycle(
         self,
