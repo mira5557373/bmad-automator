@@ -190,7 +190,17 @@ def claude_code_invoker(
             f"claude_code_invoker called with cli_id={profile.cli_id!r}"
         )
 
-    # 1. BMAD_AUTO_* env injection — parent process env so tmux inherits.
+    # 1. BMAD_AUTO_* env injection — parent process env so the subprocess
+    # spawned by ``_spawn_session_hook`` (which copies ``os.environ``) sees
+    # the keys when issuing ``tmux new-session -e KEY=VAL ...``.
+    #
+    # Bug E2_C9_D-SEC-04: prior implementation permanently mutated
+    # ``os.environ`` and never restored it, leaking BMAD_AUTO_* across
+    # sequential invocations and contaminating any cleanup/attribution
+    # code that reads the parent env. The fix snapshots prior values,
+    # applies the mutation only across the spawn call, and restores the
+    # parent env in a ``finally`` block (including removing keys that
+    # did not previously exist).
     enriched = tmux_runtime.inject_bmad_auto_env(
         dict(os.environ),
         story_key=intent.story_key,
@@ -198,10 +208,12 @@ def claude_code_invoker(
         cli_id=profile.cli_id,
         commit_sha=intent.baseline_sha,
     )
-    # Apply the BMAD_AUTO_* keys only (don't clobber unrelated vars).
     _bmad_keys = {k: v for k, v in enriched.items() if k.startswith("BMAD_AUTO_")}
-    for k, v in _bmad_keys.items():
-        os.environ[k] = str(v)
+    # Sentinel separates "absent" from "present but empty string".
+    _ENV_ABSENT = object()
+    _prior_env: dict[str, object] = {
+        k: os.environ.get(k, _ENV_ABSENT) for k in _bmad_keys
+    }
 
     session = _session_name_for(intent)
     workspace = intent.workspace
@@ -222,9 +234,24 @@ def claude_code_invoker(
         if bypass
         else f"{binary} {rendered_prompt}".strip()
     )
-    spawn_out, spawn_code = _spawn_session_hook(
-        session, command, "claude", workspace
-    )
+    try:
+        # Apply BMAD_AUTO_* keys only across the spawn call. The spawn
+        # subprocess (run_cmd → subprocess.run(env=os.environ.copy()))
+        # snapshots its env at exec time, so tmux's child shell inherits
+        # the keys without the parent's env staying mutated afterwards.
+        for k, v in _bmad_keys.items():
+            os.environ[k] = str(v)
+        spawn_out, spawn_code = _spawn_session_hook(
+            session, command, "claude", workspace
+        )
+    finally:
+        # Restore parent env regardless of spawn outcome (success, failure,
+        # or exception). Keys that were absent before are removed.
+        for k, prior in _prior_env.items():
+            if prior is _ENV_ABSENT:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior  # type: ignore[assignment]
     if spawn_code != 0:
         return {
             "stdout_tail": "",

@@ -235,9 +235,12 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
 
     def test_uses_inject_bmad_auto_env(self) -> None:
         # 9. claude-code invoker uses inject_bmad_auto_env to populate
-        # BMAD_AUTO_STORY_KEY etc. on the parent process env. We snapshot
-        # os.environ before + after to assert the keys land.
-        # (The function mutates os.environ; we restore.)
+        # BMAD_AUTO_STORY_KEY etc. on the parent process env across the
+        # spawn_session call (so the subprocess inherits them), then
+        # restores the parent env in a finally block to avoid contaminating
+        # subsequent invocations (bug E2_C9_D-SEC-04). We capture os.environ
+        # values from inside the spawn hook to assert "set during spawn",
+        # then assert "restored after return".
         keys = (
             "BMAD_AUTO_STORY_KEY",
             "BMAD_AUTO_PHASE",
@@ -246,17 +249,28 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
             "BMAD_AUTO_TASK_ID",
         )
         saved = {k: os.environ.pop(k, None) for k in keys}
+        observed: dict[str, str | None] = {}
+
+        def _spawn_spy(*_args: Any, **_kwargs: Any) -> tuple[str, int]:
+            for k in keys:
+                observed[k] = os.environ.get(k)
+            return ("ok", 0)
+
         try:
-            with _StubHooks():
+            with _StubHooks(spawn=mock.Mock(side_effect=_spawn_spy)):
                 invokers.claude_code_invoker(
                     profile=claude_default(),
                     intent=_intent(),
                 )
-            self.assertEqual(os.environ.get("BMAD_AUTO_STORY_KEY"), "STORY-1")
-            self.assertEqual(os.environ.get("BMAD_AUTO_PHASE"), "dev-running")
-            self.assertEqual(os.environ.get("BMAD_AUTO_CLI_ID"), "claude-code")
-            self.assertEqual(os.environ.get("BMAD_AUTO_COMMIT_SHA"), "b" * 40)
-            self.assertEqual(os.environ.get("BMAD_AUTO_TASK_ID"), "")
+            # Inside the spawn hook the env is populated (so tmux inherits).
+            self.assertEqual(observed["BMAD_AUTO_STORY_KEY"], "STORY-1")
+            self.assertEqual(observed["BMAD_AUTO_PHASE"], "dev-running")
+            self.assertEqual(observed["BMAD_AUTO_CLI_ID"], "claude-code")
+            self.assertEqual(observed["BMAD_AUTO_COMMIT_SHA"], "b" * 40)
+            self.assertEqual(observed["BMAD_AUTO_TASK_ID"], "")
+            # After the invoker returns the parent env is restored to absent.
+            for k in keys:
+                self.assertNotIn(k, os.environ)
         finally:
             for k, v in saved.items():
                 if v is None:
