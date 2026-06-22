@@ -47,7 +47,11 @@ _BLOCK_END = "<!-- /risk-priorities -->"
 _BLOCK_START_RE = re.compile(
     r"<!--\s*risk-priorities\s+target=[^>]*-->", re.IGNORECASE
 )
-_BLOCK_END_LITERAL = "<!-- /risk-priorities -->"
+# LD-01+LD-12 — mirror IGNORECASE on the close sentinel so a prior block
+# written with upper-cased tags still matches. A case-sensitive literal
+# previously slipped past the find() call, causing the replacement path
+# to silently fall through and append a duplicate block on every rerun.
+_BLOCK_END_RE = re.compile(r"<!--\s*/risk-priorities\s*-->", re.IGNORECASE)
 
 _DAR_HEADING = "## Dev Agent Record"
 _FILE_LIST_HEADING_RE = re.compile(r"^##\s+File List\s*$", re.MULTILINE)
@@ -187,12 +191,16 @@ def _replace_existing_block(content: str, block: str) -> tuple[str, bool]:
     start_match = _BLOCK_START_RE.search(content)
     if not start_match:
         return content, False
-    end_idx = content.find(_BLOCK_END_LITERAL, start_match.end())
-    if end_idx == -1:
-        # Malformed prior block — refuse to silently fix; treat as no match
-        # so the caller falls through to append, avoiding data loss.
-        return content, False
-    end_idx_after = end_idx + len(_BLOCK_END_LITERAL)
+    end_match = _BLOCK_END_RE.search(content, start_match.end())
+    if end_match is None:
+        # Malformed prior block — open sentinel without a matching close.
+        # Refuse to silently "append" (which previously produced duplicate
+        # blocks) and refuse to delete the partial. Raise so the operator
+        # can hand-fix the corrupted DAR section.
+        raise RiskToStoryError(
+            "malformed prior risk-priorities block: missing end sentinel"
+        )
+    end_idx_after = end_match.end()
     # Consume a trailing newline so we don't accumulate blank lines on
     # repeated rewrites.
     if end_idx_after < len(content) and content[end_idx_after] == "\n":

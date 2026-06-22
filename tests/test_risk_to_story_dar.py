@@ -1,6 +1,7 @@
 """Tests for M46 risk-to-story-dar — write risk priorities to Dev Agent Record."""
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,6 +145,118 @@ class WritePrioritiesToDarTests(unittest.TestCase):
             story = self._story_with_dar(tmp)
             with self.assertRaises(RiskToStoryError):
                 write_priorities_to_dar(story, [], target_id="story-1.1")
+
+
+class SentinelCaseInsensitiveTests(unittest.TestCase):
+    """LD-01+LD-12 — close-tag must match case-insensitively like the open tag.
+
+    Prior bug: ``_BLOCK_START_RE`` matched with ``re.IGNORECASE`` while the
+    close sentinel was searched as a case-sensitive literal. A pre-existing
+    upper-cased close tag (e.g. ``<!-- /RISK-PRIORITIES -->``) caused the
+    replacement path to silently fall through to "append", which accumulated
+    duplicate priority blocks on every rerun.
+    """
+
+    def _story_with_dar(self, tmp: Path, prior_block: str) -> Path:
+        story = tmp / "story-case.md"
+        story.write_text(
+            "# Story\n\n## Dev Agent Record\n\n"
+            f"{prior_block}\n"
+            "## File List\n\nfoo.py\n",
+            encoding="utf-8",
+        )
+        return story
+
+    def test_uppercased_close_tag_does_not_produce_duplicate_block(self) -> None:
+        """Re-run with upper-cased prior sentinels must NOT append a duplicate."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            # Prior block written by a tool that upper-cased both sentinels.
+            prior = (
+                "<!-- RISK-PRIORITIES target=story-1.1 -->\n"
+                "Risk priorities for story-1.1 (worst: P0):\n"
+                "- SEC: P0\n"
+                "<!-- /RISK-PRIORITIES -->\n"
+            )
+            story = self._story_with_dar(tmp, prior)
+            entries = [
+                {"category": "TECH", "probability": 1, "impact": 1, "score": 1},
+            ]
+            # Should either successfully replace OR raise — but never silently
+            # append a duplicate sentinel block.
+            try:
+                write_priorities_to_dar(story, entries, target_id="story-1.1")
+            except RiskToStoryError:
+                # Acceptable: malformed prior raises rather than corrupting.
+                return
+            content = story.read_text(encoding="utf-8")
+            # Sentinel count must be exactly one open + one close, regardless
+            # of casing — never two of either.
+            opens = len(re.findall(r"<!--\s*risk-priorities", content, re.IGNORECASE))
+            closes = len(re.findall(r"<!--\s*/risk-priorities", content, re.IGNORECASE))
+            self.assertEqual(opens, 1, f"duplicate open sentinel: {content!r}")
+            self.assertEqual(closes, 1, f"duplicate close sentinel: {content!r}")
+
+    def test_uppercased_close_tag_replaces_in_place(self) -> None:
+        """Idempotent replacement must work even if prior close tag is upper-case."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            prior = (
+                "<!-- RISK-PRIORITIES target=story-1.1 -->\n"
+                "Risk priorities for story-1.1 (worst: P0):\n"
+                "- SEC: P0\n"
+                "<!-- /RISK-PRIORITIES -->\n"
+            )
+            story = self._story_with_dar(tmp, prior)
+            entries = [
+                {"category": "TECH", "probability": 1, "impact": 1, "score": 1},
+            ]
+            write_priorities_to_dar(story, entries, target_id="story-1.1")
+            content = story.read_text(encoding="utf-8")
+            # The new block content replaces the old.
+            self.assertIn("- TECH: P3", content)
+            self.assertNotIn("- SEC: P0", content)
+
+    def test_start_without_end_raises_malformed_error(self) -> None:
+        """Half-matched block (start present, end absent) must raise."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            # Open sentinel without matching close — corrupted prior block.
+            prior = (
+                "<!-- risk-priorities target=story-1.1 -->\n"
+                "Risk priorities for story-1.1 (worst: P0):\n"
+                "- SEC: P0\n"
+                # NOTE: close sentinel intentionally missing
+            )
+            story = self._story_with_dar(tmp, prior)
+            entries = [
+                {"category": "TECH", "probability": 1, "impact": 1, "score": 1},
+            ]
+            with self.assertRaises(RiskToStoryError) as ctx:
+                write_priorities_to_dar(story, entries, target_id="story-1.1")
+            self.assertIn("end sentinel", str(ctx.exception).lower())
+
+    def test_mixed_case_close_tag_replaces_in_place(self) -> None:
+        """Replacement must handle MiXeD-case close sentinels too."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            prior = (
+                "<!-- risk-priorities target=story-1.1 -->\n"
+                "Risk priorities for story-1.1 (worst: P0):\n"
+                "- SEC: P0\n"
+                "<!-- /Risk-Priorities -->\n"
+            )
+            story = self._story_with_dar(tmp, prior)
+            entries = [
+                {"category": "TECH", "probability": 1, "impact": 1, "score": 1},
+            ]
+            write_priorities_to_dar(story, entries, target_id="story-1.1")
+            content = story.read_text(encoding="utf-8")
+            opens = len(re.findall(r"<!--\s*risk-priorities", content, re.IGNORECASE))
+            closes = len(re.findall(r"<!--\s*/risk-priorities", content, re.IGNORECASE))
+            self.assertEqual(opens, 1)
+            self.assertEqual(closes, 1)
+            self.assertIn("- TECH: P3", content)
 
 
 if __name__ == "__main__":
