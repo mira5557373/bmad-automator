@@ -123,9 +123,18 @@ class MarkerCorruptionInvariant(_Mixin, unittest.TestCase):
             read_gate_marker(self.tmp)
 
     def test_recover_from_crash_quarantines_evidence_on_corruption(self) -> None:
+        # The marker is corrupted (broken JSON) BUT still carries a
+        # recognizable ``"gate_id":"..."`` fragment, so the L2-variant
+        # targeted quarantine can scope to just the in-flight gate.
+        # This preserves the original "loud, not silent + preserved as
+        # moved evidence" contract while letting concurrent historical
+        # gates keep their Merkle-verifiable evidence in place.
         marker = self.tmp / "_bmad" / "gate" / "gate-in-progress.json"
         marker.parent.mkdir(parents=True)
-        marker.write_text("{not json", encoding="utf-8")
+        marker.write_text(
+            '{"gate_id": "lost-gate", "commit_sha": "x", not json',
+            encoding="utf-8",
+        )
         evidence_dir = self.tmp / "_bmad" / "gate" / "evidence" / "lost-gate"
         evidence_dir.mkdir(parents=True)
         important = evidence_dir / "important.json"
@@ -141,6 +150,34 @@ class MarkerCorruptionInvariant(_Mixin, unittest.TestCase):
         quar = Path(result["quarantine_dir"])
         self.assertTrue((quar / "evidence" / "lost-gate" / "important.json").is_file(),
                         "important evidence MUST have been quarantined, not deleted")
+
+    def test_recover_from_crash_unreadable_marker_preserves_other_evidence(self) -> None:
+        """L2-variant: when gate_id is NOT salvageable from a corrupted marker,
+        recover_from_crash MUST NOT take down all historical evidence dirs —
+        Merkle reverification of completed gates depends on them. The audit-
+        floor contract (recovered=False / quarantined=True / quarantine_dir /
+        corruption_reason) holds; only the SCOPE of what moves narrows."""
+        marker = self.tmp / "_bmad" / "gate" / "gate-in-progress.json"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("########### unsalvageable ###########", encoding="utf-8")
+        # Historical evidence — must survive.
+        for gid in ("historical-1", "historical-2"):
+            d = self.tmp / "_bmad" / "gate" / "evidence" / gid
+            d.mkdir(parents=True)
+            (d / "audit.json").write_text(f'{{"gate": "{gid}"}}', encoding="utf-8")
+        result = recover_from_crash(self.tmp)
+        self.assertFalse(result["recovered"])
+        self.assertTrue(result["quarantined"])
+        self.assertIn("quarantine_dir", result)
+        # Both historical evidence dirs are STILL in the live tree.
+        for gid in ("historical-1", "historical-2"):
+            self.assertTrue(
+                (self.tmp / "_bmad" / "gate" / "evidence" / gid / "audit.json").is_file(),
+                f"{gid} must NOT be quarantined when gate_id is unsalvageable",
+            )
+        # The corrupted marker IS in quarantine.
+        quar = Path(result["quarantine_dir"])
+        self.assertTrue((quar / "gate-in-progress.json").is_file())
 
 
 # ---------------------------------------------------------------------------

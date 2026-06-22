@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+from filelock import FileLock
 
 from .gate_schema import (
     EVIDENCE_SCHEMA_VERSION,
@@ -252,10 +255,42 @@ def can_reuse_gate_file(
 
 
 _GATE_MARKER_NAME = "gate-in-progress.json"
+GATE_LOCK_NAME = ".gate.lock"
+"""Filename of the file lock that serializes marker lifecycle + recovery.
+
+Lives inside ``_bmad/gate/``. The lock is process-level (filelock) so
+concurrent ``run_production_gate`` and ``recover_from_crash`` calls
+against the same project_root cannot race on the marker (bug L1).
+"""
 
 
 def _gate_marker_path(project_root: str | Path) -> Path:
     return Path(project_root) / "_bmad" / "gate" / _GATE_MARKER_NAME
+
+
+def gate_lock_path(project_root: str | Path) -> Path:
+    """Return the absolute path of the gate-lifecycle file lock."""
+    return Path(project_root) / "_bmad" / "gate" / GATE_LOCK_NAME
+
+
+def get_gate_lock(
+    project_root: str | Path,
+    *,
+    timeout: float = 60.0,
+) -> FileLock:
+    """Return a :class:`filelock.FileLock` for the gate lifecycle.
+
+    Used as a context manager: ``with get_gate_lock(root): ...``.
+    The returned instance has ``timeout`` pre-baked, so a bare
+    ``acquire()`` (which the context-manager protocol invokes
+    implicitly) honors it. The lock file lives at
+    ``<project_root>/_bmad/gate/.gate.lock`` — the parent dir is
+    created if missing so callers can use this from a brand-new
+    project root.
+    """
+    path = gate_lock_path(project_root)
+    ensure_dir(path.parent)
+    return FileLock(str(path), timeout=timeout)
 
 
 def write_gate_marker(
@@ -263,12 +298,20 @@ def write_gate_marker(
     gate_id: str,
     commit_sha: str,
 ) -> Path:
-    """§9.2: atomic marker before collector loop starts."""
+    """§9.2: atomic marker before collector loop starts.
+
+    Payload is additive — ``pid`` and ``started_at`` are recorded so
+    ``recover_from_crash`` can perform a liveness check (bug L1). The
+    public API signature is unchanged; markers written by older
+    versions (no ``pid``) still parse and are treated as legacy/dead
+    on read.
+    """
     assert_host_context("write_gate_marker")
     marker = {
         "gate_id": gate_id,
         "commit_sha": commit_sha,
         "started_at": iso_now(),
+        "pid": os.getpid(),
     }
     path = _gate_marker_path(project_root)
     ensure_dir(path.parent)
@@ -331,6 +374,38 @@ def clear_gate_marker(project_root: str | Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+# L2-variant fix: when the marker is corrupted, parse-by-regex against the
+# raw bytes is the only safe way to recover the gate_id. JSON parsing has
+# already failed by the time the caller hits this path. The regex matches
+# both JSON ("gate_id": "g2") and would-be-JSON (gate_id='g2') shapes; the
+# capture group is a gate-id token (matches _SAFE_GATE_ID).
+_GATE_ID_FROM_CORRUPT_MARKER = re.compile(
+    rb"""['"]?gate_id['"]?\s*[:=]\s*['"]([A-Za-z0-9._-]+)['"]""",
+)
+
+
+def best_effort_extract_gate_id(marker_bytes: bytes) -> str | None:
+    """Salvage a ``gate_id`` from a corrupted gate marker's raw bytes.
+
+    Returns the gate_id string if a recognizable ``"gate_id":"..."``
+    fragment is found; ``None`` otherwise. Used by
+    ``recover_from_crash`` to narrow the quarantine scope on marker
+    corruption — instead of moving every historical evidence dir
+    (which breaks Merkle reverification), we move only the in-flight
+    gate (bug L2 variant).
+    """
+    if not marker_bytes:
+        return None
+    match = _GATE_ID_FROM_CORRUPT_MARKER.search(marker_bytes)
+    if match is None:
+        return None
+    candidate = match.group(1).decode("utf-8", errors="replace")
+    # Honor the same path-safety rule applied to all live gate_ids.
+    if not _SAFE_GATE_ID.match(candidate) or ".." in candidate:
+        return None
+    return candidate
 
 # ===========================================================================
 # M54: extensions ported from compat-m54 tag

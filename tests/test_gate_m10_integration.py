@@ -144,7 +144,19 @@ class FullLifecycleIntegrationTests(unittest.TestCase):
         self.assertEqual(len(parked), 1)
 
     def test_crash_recovery_cleans_partial(self) -> None:
+        import json as _json
         write_gate_marker(self.tmp, "crash-1", "abc")
+        # L1 fix: write_gate_marker now stamps the live PID. To exercise
+        # the post-crash recovery path the marker has to look like its
+        # writer is dead — rewrite with PID 999999 (almost-certainly dead
+        # on every supported platform).
+        marker_path = Path(self.tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+        marker_path.write_text(_json.dumps({
+            "gate_id": "crash-1",
+            "commit_sha": "abc",
+            "started_at": "2026-06-20T00:00:00Z",
+            "pid": 999999,
+        }, sort_keys=True), encoding="utf-8")
         evidence_dir = Path(self.tmp) / "_bmad" / "gate" / "evidence" / "crash-1"
         evidence_dir.mkdir(parents=True)
         (evidence_dir / "partial.json").write_text("{}")

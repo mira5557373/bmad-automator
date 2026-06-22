@@ -204,11 +204,34 @@ class RecoverFromCrashTests(unittest.TestCase):
         result = recover_from_crash(self.project_root)
         self.assertFalse(result["recovered"])
 
+    def _rewrite_marker_with_dead_pid(self, gate_id: str, commit_sha: str) -> None:
+        """Replace the in-flight marker so its ``pid`` is a non-existent one.
+
+        ``write_gate_marker`` now stamps the current process's PID (L1 fix)
+        so ``recover_from_crash`` can perform a liveness check. The
+        recover-orphan-evidence tests want to exercise the post-crash
+        path — i.e. the writer is dead — which we simulate by overwriting
+        the marker after the fact with PID 999999.
+        """
+        import json as _json
+        marker = {
+            "gate_id": gate_id,
+            "commit_sha": commit_sha,
+            "started_at": "2026-06-20T00:00:00Z",
+            "pid": 999999,  # almost-certainly dead
+        }
+        path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        path.write_text(_json.dumps(marker, sort_keys=True), encoding="utf-8")
+
     @patch.dict(os.environ, {}, clear=False)
     def test_marker_without_verdict_cleans_up(self) -> None:
         """Marker present, no verdict -> cleans orphan evidence dir."""
         gate_id = "crash-gate-001"
         write_gate_marker(self.project_root, gate_id, "sha-crash")
+        # Simulate a crashed (dead) writer so the L1 liveness check passes.
+        self._rewrite_marker_with_dead_pid(gate_id, "sha-crash")
 
         # Create orphan evidence directory
         evidence_dir = (
@@ -233,12 +256,21 @@ class RecoverFromCrashTests(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=False)
     def test_corrupted_marker_quarantines_evidence(self) -> None:
         """§9.2 corruption-is-loud: corrupted marker → evidence quarantined,
-        not silently deleted. recover_from_crash must signal it loudly."""
-        # Write a corrupted marker by hand (bypassing write_gate_marker)
+        not silently deleted. recover_from_crash must signal it loudly.
+
+        L2-variant: with an extractable ``"gate_id":"..."`` fragment the
+        scope is the in-flight gate ONLY (historical evidence dirs survive).
+        """
+        # Write a corrupted marker by hand (bypassing write_gate_marker).
+        # The marker is broken JSON but still carries a salvageable
+        # gate_id fragment so the targeted-quarantine scope applies.
         marker_path = (
             self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
         )
-        marker_path.write_text("{not valid json", encoding="utf-8")
+        marker_path.write_text(
+            '{"gate_id": "lost-gate", not valid json',
+            encoding="utf-8",
+        )
 
         # Seed an evidence directory the operator should be able to inspect
         evidence_dir = (
@@ -286,6 +318,8 @@ class RecoverFromCrashTests(unittest.TestCase):
         )
         persist_gate_file(self.project_root, gate_file)
         write_gate_marker(self.project_root, gate_id, "sha-ok")
+        # Simulate a crashed (dead) writer so the L1 liveness check passes.
+        self._rewrite_marker_with_dead_pid(gate_id, "sha-ok")
 
         result = recover_from_crash(self.project_root)
         self.assertTrue(result["recovered"])

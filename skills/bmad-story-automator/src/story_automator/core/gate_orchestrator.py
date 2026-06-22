@@ -10,13 +10,17 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from .evidence_io import (
     GateMarkerCorruptedError,
+    best_effort_extract_gate_id,
     can_reuse_gate_file,
     clear_gate_marker,
     compute_evidence_bundle_merkle_root,
+    get_gate_lock,
     load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
@@ -96,64 +100,105 @@ def check_gate_reuse(
     return None, reason
 
 
-def recover_from_crash(
-    project_root: str | Path,
+def _quarantine_corrupted_marker(
+    root: Path,
+    marker_path: Path,
+    exc: GateMarkerCorruptedError,
 ) -> dict[str, Any]:
-    """Recover from a crashed gate run.
+    """Targeted quarantine for a corrupted gate marker (bug L2 variant).
 
-    Reads the gate-in-progress marker.  If present, checks whether a
-    verdict was already persisted.  Orphan evidence directories (no
-    matching verdict) are removed.  The marker is always cleared.
+    The legacy implementation moved EVERY child of ``_bmad/gate/evidence/``
+    into quarantine — that broke Merkle reverification of all historical
+    gates whenever a single marker went bad. The new policy:
 
-    Corruption (per §9.2 "loud, not silent"): when the marker file
-    exists but cannot be parsed, the partial evidence directory is
-    QUARANTINED under ``_bmad/gate/quarantine/<timestamp>/`` instead
-    of being deleted, the marker is moved to the quarantine alongside
-    it, and the returned dict has ``recovered=False, quarantined=True``
-    so the operator can see something needs investigation.
+    - Best-effort extract ``gate_id`` from the marker's raw bytes.
+    - If extractable: quarantine ONLY ``evidence/<gate_id>/`` (the
+      in-flight gate's bundle).
+    - If not extractable: quarantine ONLY the marker file. Leave the
+      entire evidence/ tree untouched.
 
-    Returns a dict describing what was recovered.
+    Either way, the audit-floor MarkerCorruptionInvariant contract is
+    preserved: ``recovered=False, quarantined=True, quarantine_dir,
+    corruption_reason`` — only the SCOPE of what moves changes.
     """
-    assert_host_context("recover_from_crash")
+    quarantine_root = (
+        root / "_bmad" / "gate" / "quarantine" / iso_now().replace(":", "-")
+    )
 
+    # Try to salvage a gate_id from the corrupted bytes. Errors here are
+    # non-fatal; missing gate_id just means we narrow further (marker only).
+    salvaged_gate_id: str | None = None
+    try:
+        salvaged_gate_id = best_effort_extract_gate_id(marker_path.read_bytes())
+    except OSError:
+        salvaged_gate_id = None
+
+    try:
+        quarantine_root.mkdir(parents=True, exist_ok=True)
+        if marker_path.is_file():
+            marker_path.rename(quarantine_root / "gate-in-progress.json")
+        # Targeted quarantine: only the named gate's evidence dir.
+        if salvaged_gate_id is not None:
+            evidence_dir = (
+                root / "_bmad" / "gate" / "evidence" / salvaged_gate_id
+            )
+            if evidence_dir.is_dir():
+                quar_evidence = quarantine_root / "evidence"
+                quar_evidence.mkdir(exist_ok=True)
+                try:
+                    evidence_dir.rename(quar_evidence / salvaged_gate_id)
+                except OSError:
+                    pass
+    except OSError:
+        # Quarantine itself failing is a separate operator-alertable
+        # situation; still surface the corruption.
+        pass
+
+    return {
+        "recovered": False,
+        "quarantined": True,
+        "quarantine_dir": str(quarantine_root),
+        "corruption_reason": str(exc),
+    }
+
+
+def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
+    """Inner body of :func:`recover_from_crash`, executed under the file lock.
+
+    Split out so the lock acquisition lives in a single context-manager
+    block while keeping the legacy single-function contract for callers.
+    """
     root = Path(project_root)
     marker_path = root / "_bmad" / "gate" / "gate-in-progress.json"
 
     try:
         marker = read_gate_marker(project_root)
     except GateMarkerCorruptedError as exc:
-        # Don't delete anything. Move the corrupted marker plus any
-        # evidence dirs under _bmad/gate/evidence/ into a quarantine
-        # bucket so the operator can investigate.
-        quarantine_root = root / "_bmad" / "gate" / "quarantine" / iso_now().replace(":", "-")
-        try:
-            quarantine_root.mkdir(parents=True, exist_ok=True)
-            if marker_path.is_file():
-                marker_path.rename(quarantine_root / "gate-in-progress.json")
-            evidence_root = root / "_bmad" / "gate" / "evidence"
-            if evidence_root.is_dir():
-                # Move whole evidence root contents under quarantine so the
-                # operator can inspect which gate_id was in flight.
-                quar_evidence = quarantine_root / "evidence"
-                quar_evidence.mkdir(exist_ok=True)
-                for child in evidence_root.iterdir():
-                    try:
-                        (child).rename(quar_evidence / child.name)
-                    except OSError:
-                        pass
-        except OSError:
-            # Quarantine itself failing is a separate operator-alertable
-            # situation; still surface the corruption.
-            pass
-        return {
-            "recovered": False,
-            "quarantined": True,
-            "quarantine_dir": str(quarantine_root),
-            "corruption_reason": str(exc),
-        }
+        return _quarantine_corrupted_marker(root, marker_path, exc)
 
     if marker is None:
         return {"recovered": False}
+
+    # L1 fix: liveness check. If the marker carries a pid that is still
+    # running, the gate is in-flight — DO NOT touch its evidence dir, DO
+    # NOT clear its marker. The owning process will clean up itself.
+    pid = marker.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        try:
+            alive = psutil.pid_exists(pid)
+        except (psutil.Error, OSError):
+            # Fail-closed: if psutil can't answer, assume alive so we don't
+            # wipe a live gate's evidence. (Legacy markers without pid fall
+            # through to the recover path; this branch only runs when pid
+            # is present and an integer.)
+            alive = True
+        if alive:
+            return {
+                "recovered": False,
+                "reason": "live-pid-still-running",
+                "pid": pid,
+                "gate_id": marker.get("gate_id", ""),
+            }
 
     gate_id = marker.get("gate_id", "")
     commit_sha = marker.get("commit_sha", "")
@@ -177,6 +222,41 @@ def recover_from_crash(
         "had_verdict": had_verdict,
         "commit_sha": commit_sha,
     }
+
+
+def recover_from_crash(
+    project_root: str | Path,
+) -> dict[str, Any]:
+    """Recover from a crashed gate run.
+
+    Reads the gate-in-progress marker.  If present, checks whether a
+    verdict was already persisted.  Orphan evidence directories (no
+    matching verdict) are removed.  The marker is always cleared.
+
+    Liveness (bug L1): when the marker carries a ``pid`` and that
+    process is still alive, recovery is refused with
+    ``{recovered: False, reason: "live-pid-still-running", pid: ...}``.
+    The owning process owns its own cleanup. Legacy markers without
+    ``pid`` are treated as dead (the orchestrator was a single-instance
+    affair before this fix).
+
+    Corruption (per §9.2 "loud, not silent"): when the marker file
+    exists but cannot be parsed, only the in-flight gate's evidence
+    dir (if its gate_id is salvageable from the raw bytes) is moved
+    under ``_bmad/gate/quarantine/<timestamp>/``. Historical evidence
+    dirs are NOT touched (bug L2 variant — preserves Merkle
+    reverification of completed gates). The returned dict still
+    carries ``recovered=False, quarantined=True, quarantine_dir,
+    corruption_reason`` per the audit-floor invariant.
+
+    The whole operation runs under ``_bmad/gate/.gate.lock`` so it
+    cannot race a concurrent ``run_production_gate`` (bug L1).
+
+    Returns a dict describing what was recovered.
+    """
+    assert_host_context("recover_from_crash")
+    with get_gate_lock(project_root):
+        return _recover_from_crash_locked(project_root)
 
 
 def run_readiness_gate(
@@ -405,54 +485,64 @@ def run_production_gate(
                 "verify": descriptor["verify"],
             }
 
-    recover_from_crash(project_root)
+    # L1 fix: serialize the full marker → collectors → clear lifecycle
+    # under the gate file lock so concurrent run_production_gate /
+    # recover_from_crash calls cannot race on gate-in-progress.json.
+    # The timeout is generous (collectors may run for many seconds);
+    # callers that need a shorter ceiling can wrap with a shorter
+    # acquired lock externally.
+    with get_gate_lock(project_root, timeout=3600.0):
+        # Recovery runs under the same lock — use the *_locked variant
+        # so we don't try to re-acquire (filelock is not re-entrant
+        # across separate FileLock instances).
+        _recover_from_crash_locked(project_root)
 
-    existing, _ = check_gate_reuse(
-        project_root, gate_id, commit_sha, profile, factory_version,
-        audit_policy=audit_policy, audit_path=audit_path,
-    )
-    if existing is not None:
-        return existing
-
-    if enable_lie_detector:
-        outcome = detect_baseline_drift(
-            project_root,
-            expected_sha=commit_sha,
-            baseline_sha=baseline_sha,
-        )
-        if not outcome.ok:
-            return {
-                "action": "baseline_drift",
-                "gate_id": gate_id,
-                "verify": outcome.to_dict(),
-            }
-
-    if audit_policy is not None and audit_path is not None:
-        emit_gate_audit(
-            audit_policy, audit_path,
-            GateStartedAudit(
-                gate_id=gate_id, commit_sha=commit_sha,
-                profile_hash=compute_profile_hash(profile),
-            ),
-        )
-
-    write_gate_marker(project_root, gate_id, commit_sha)
-    try:
-        _run_collectors(
-            project_root, gate_id, commit_sha, profile, registry,
+        existing, _ = check_gate_reuse(
+            project_root, gate_id, commit_sha, profile, factory_version,
             audit_policy=audit_policy, audit_path=audit_path,
         )
-        gate_file = evaluate_gate(
-            project_root, gate_id,
-            commit_sha=commit_sha, target=target,
-            profile=profile, factory_version=factory_version,
-            priority=priority,
-            has_unmitigated_risk_9=has_unmitigated_risk_9,
-            waivers=waivers,
-            audit_policy=audit_policy, audit_path=audit_path,
-        )
-    finally:
-        clear_gate_marker(project_root)
+        if existing is not None:
+            return existing
+
+        if enable_lie_detector:
+            outcome = detect_baseline_drift(
+                project_root,
+                expected_sha=commit_sha,
+                baseline_sha=baseline_sha,
+            )
+            if not outcome.ok:
+                return {
+                    "action": "baseline_drift",
+                    "gate_id": gate_id,
+                    "verify": outcome.to_dict(),
+                }
+
+        if audit_policy is not None and audit_path is not None:
+            emit_gate_audit(
+                audit_policy, audit_path,
+                GateStartedAudit(
+                    gate_id=gate_id, commit_sha=commit_sha,
+                    profile_hash=compute_profile_hash(profile),
+                ),
+            )
+
+        write_gate_marker(project_root, gate_id, commit_sha)
+        try:
+            _run_collectors(
+                project_root, gate_id, commit_sha, profile, registry,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+            gate_file = evaluate_gate(
+                project_root, gate_id,
+                commit_sha=commit_sha, target=target,
+                profile=profile, factory_version=factory_version,
+                priority=priority,
+                has_unmitigated_risk_9=has_unmitigated_risk_9,
+                waivers=waivers,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+        finally:
+            clear_gate_marker(project_root)
 
     # N5 (G5): export Merkle root so auditors can externally verify the
     # evidence bundle without trusting the factory. Empty bundle returns
