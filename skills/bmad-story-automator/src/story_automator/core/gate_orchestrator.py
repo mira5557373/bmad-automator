@@ -134,10 +134,18 @@ def _quarantine_corrupted_marker(
     except OSError:
         salvaged_gate_id = None
 
+    # Fix C-1 (Lens M): track ACTUAL quarantine progress instead of
+    # blindly returning quarantined=True. The audit-floor
+    # MarkerCorruptionInvariant asserts quarantined=True implies
+    # the evidence has been moved; if mkdir fails we never moved
+    # anything, so claiming True is an operator-misleading lie.
+    quarantine_error: str | None = None
+    marker_moved = False
     try:
         quarantine_root.mkdir(parents=True, exist_ok=True)
         if marker_path.is_file():
             marker_path.rename(quarantine_root / "gate-in-progress.json")
+            marker_moved = True
         # Targeted quarantine: only the named gate's evidence dir.
         if salvaged_gate_id is not None:
             evidence_dir = (
@@ -148,19 +156,27 @@ def _quarantine_corrupted_marker(
                 quar_evidence.mkdir(exist_ok=True)
                 try:
                     evidence_dir.rename(quar_evidence / salvaged_gate_id)
-                except OSError:
-                    pass
-    except OSError:
-        # Quarantine itself failing is a separate operator-alertable
-        # situation; still surface the corruption.
-        pass
+                except OSError as inner_exc:
+                    # Marker is in quarantine; evidence rename failed.
+                    # Surface but do not flip quarantined to False —
+                    # the marker move was the primary obligation.
+                    quarantine_error = (
+                        f"evidence rename failed: {inner_exc}"
+                    )
+    except OSError as outer_exc:
+        # Quarantine setup itself failed (e.g., disk full on mkdir).
+        # Nothing was moved → quarantined=False is the honest answer.
+        quarantine_error = str(outer_exc)
 
-    return {
+    result: dict[str, Any] = {
         "recovered": False,
-        "quarantined": True,
+        "quarantined": marker_moved,
         "quarantine_dir": str(quarantine_root),
         "corruption_reason": str(exc),
     }
+    if quarantine_error is not None:
+        result["quarantine_error"] = quarantine_error
+    return result
 
 
 def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
