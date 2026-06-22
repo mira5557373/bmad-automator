@@ -72,6 +72,23 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 - `_default_invoker` for `claude-code` is read-only-consumer of `core/tmux_runtime.py`'s existing public surface — `core/tmux_runtime.py` is not modified by Path B.
 - Lie-detector fallback when the child reports success without a baseline-commit advance.
 
+### `commands/tmux.py::_spawn` (Path B / N7.1) — feature-flagged dispatcher migration
+- Environment flag: **`BMAD_AUTO_USE_CLI_DISPATCHER`**. Truthy values (case-insensitive, whitespace-trimmed): `1`, `true`, `yes`, `on`. Everything else — including unset, `""`, `0`, `false`, `no` — falls back to legacy `spawn_session`.
+- **Default behavior (flag off): byte-identical to pre-N7.1.** The legacy `spawn_session(session, command, agent, root, mode=runtime_mode())` path runs unchanged. This is the zero-behavior-change shipment contract.
+- **Opt-in behavior (flag on):** the spawn is routed through `cli_dispatcher.dispatch_session` with a `SessionIntent` built from the caller's inputs:
+  - `intent.story_key` ← CLI-argv `story_id`
+  - `intent.phase` ← `<step>-running` (e.g. `dev-running`, `review-running`)
+  - `intent.baseline_sha` ← `git -C <root> rev-parse HEAD` (or `""` on failure; non-fatal)
+  - `intent.prompt` ← `--command` value
+  - `intent.workspace` ← project root
+  - `intent.timeout_s` ← `1800.0` (fixed default; runtime-policy plumbing is a later milestone)
+  - `profile` ← `cli_profile.claude_default()` (policy-driven selection deferred to a later N7 task)
+- **Result translation contract** (`DispatchResult` → legacy `(out, code)` tuple expected by `_spawn`):
+  - `result.ok=True` → `(out="", code=0)` — caller prints the session name on success.
+  - `result.ok=False` → `(out=result.stderr_tail or f"dispatcher stop_reason={result.stop_reason}", code=1)`.
+  - `DispatcherError` (misconfiguration) → `(out=str(exc), code=1)`.
+- **Invariant:** both flag states must yield the same `(str, int)` tuple shape; the migration is a behavior-preserving wrapper, not a contract change.
+
 ### `core/action_enum.py` (Path B / N6.6)
 - `Literal` type for verifier actions consumed by `route_gate_verdict` and `production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`. Adding a value requires a coordinated change in route + verifier + telemetry.
 

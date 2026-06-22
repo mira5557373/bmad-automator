@@ -3,9 +3,17 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 import time
 from pathlib import Path
 
+from story_automator.core.cli_dispatcher import (
+    DispatcherError,
+    DispatchResult,
+    SessionIntent,
+    dispatch_session,
+)
+from story_automator.core.cli_profile import claude_default
 from story_automator.core.prompt_rendering import render_step_prompt
 from story_automator.core.runtime_layout import active_marker_path, runtime_provider
 from story_automator.core.runtime_policy import PolicyError, load_runtime_policy, step_contract
@@ -31,6 +39,148 @@ from story_automator.core.utils import (
     project_hash,
     project_slug,
 )
+
+
+#: Default soft timeout (seconds) for a dispatcher-routed session. Mirrors
+#: :attr:`SessionIntent.timeout_s` default; centralised so the helper and
+#: tests share one source of truth. Operators can raise the ceiling later by
+#: plumbing runtime-policy in a follow-up milestone (N7.x); the flag-off
+#: legacy path is unaffected.
+_DEFAULT_DISPATCHER_TIMEOUT_S: float = 1800.0
+
+
+#: Closed set of truthy values for ``BMAD_AUTO_USE_CLI_DISPATCHER``. Anything
+#: else (including empty string and the var being unset) routes through the
+#: legacy ``spawn_session`` path. This keeps the migration default-off and
+#: byte-identical until the operator explicitly opts in.
+_TRUTHY_FLAG_VALUES: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+
+def _use_cli_dispatcher() -> bool:
+    """Read BMAD_AUTO_USE_CLI_DISPATCHER and decide whether to route via dispatcher.
+
+    Returns:
+        bool: True iff the env var is set to one of :data:`_TRUTHY_FLAG_VALUES`
+        (case-insensitive, whitespace-trimmed). Anything else — including
+        an unset var, ``""``, ``"0"``, ``"false"``, ``"no"`` — falls back
+        to the legacy ``spawn_session`` direct call. Default-off keeps the
+        migration a zero-behavior-change shipment.
+    """
+    raw = os.environ.get("BMAD_AUTO_USE_CLI_DISPATCHER", "")
+    if not raw:
+        return False
+    return raw.strip().lower() in _TRUTHY_FLAG_VALUES
+
+
+def _git_head_sha(cwd: str) -> str:
+    """Resolve current HEAD SHA in ``cwd``; returns ``""`` on any failure.
+
+    Used by the dispatcher path to populate :attr:`SessionIntent.baseline_sha`.
+    Failure is non-fatal because the lie-detector tolerates an empty baseline
+    (it then can only check the HEAD-versus-baseline relationship loosely);
+    callers therefore should not treat ``""`` as an error condition.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "").strip()
+
+
+def _dispatch_via_cli_dispatcher(
+    *,
+    session: str,
+    command: str,
+    root: str,
+    story_key: str,
+    phase: str,
+) -> tuple[str, int]:
+    """Route the spawn through :func:`cli_dispatcher.dispatch_session`.
+
+    Translation contract (DispatchResult → legacy (out, code) tuple):
+
+    * ``result.ok=True`` → ``code=0``, ``out=""`` (legacy callers print the
+      session name on success — they only consult ``out`` on failure).
+    * ``result.ok=False`` → ``code=1``, ``out=result.stderr_tail`` (or a
+      stop-reason marker if stderr_tail is empty, so the caller has *some*
+      diagnostic line to print).
+    * :class:`DispatcherError` from misconfiguration → ``code=1``,
+      ``out=str(exc)`` — same shape as a runtime error, surfaced as stderr
+      by the caller.
+
+    ``session`` is currently unused by the dispatcher itself but kept in the
+    signature so the legacy caller can stay symmetric with ``spawn_session``
+    and so a future invoker (one that wants a deterministic tmux session
+    name) can wire it through. The bundled claude-code invoker derives its
+    own session name from the intent.
+    """
+    baseline_sha = _git_head_sha(root)
+    intent = SessionIntent(
+        story_key=story_key,
+        phase=phase,
+        baseline_sha=baseline_sha,
+        prompt=command,
+        workspace=root,
+        timeout_s=_DEFAULT_DISPATCHER_TIMEOUT_S,
+    )
+    profile = claude_default()
+    try:
+        result: DispatchResult = dispatch_session(intent, profile=profile)
+    except DispatcherError as exc:
+        return (str(exc), 1)
+    if result.ok:
+        return ("", 0)
+    diagnostic = result.stderr_tail or f"dispatcher stop_reason={result.stop_reason}"
+    return (diagnostic, 1)
+
+
+def _spawn_via_runtime(
+    *,
+    session: str,
+    command: str,
+    agent: str,
+    root: str,
+    story_key: str,
+    phase: str,
+) -> tuple[str, int]:
+    """Feature-flagged dispatch for the spawn step.
+
+    Default (flag off): calls :func:`spawn_session` directly — byte-identical
+    to the pre-N7.1 behavior. When ``BMAD_AUTO_USE_CLI_DISPATCHER`` is truthy:
+    routes through :func:`_dispatch_via_cli_dispatcher`. Either way the return
+    value is a ``(out, code)`` tuple matching the legacy contract.
+    """
+    if _use_cli_dispatcher():
+        return _dispatch_via_cli_dispatcher(
+            session=session,
+            command=command,
+            root=root,
+            story_key=story_key,
+            phase=phase,
+        )
+    return spawn_session(session, command, agent, root, mode=runtime_mode())
+
+
+def _phase_for_step(step: str) -> str:
+    """Map a CLI step name (e.g. ``"dev"``, ``"review"``) to a lifecycle phase.
+
+    Best-effort mapping into the bauto Phase vocabulary used by
+    :class:`SessionIntent.phase`. Unknown steps fall back to the literal
+    ``<step>-running`` form so the dispatcher path stays informative for
+    operators even when a non-standard step is invoked.
+    """
+    normalized = (step or "").strip().lower()
+    if not normalized:
+        return "dev-running"
+    return f"{normalized}-running"
 
 
 def _refresh_active_marker_heartbeat(project_root: str | None) -> None:
@@ -175,7 +325,14 @@ def _spawn(args: list[str]) -> int:
         print("--command is required", file=__import__("sys").stderr)
         return 1
     session = generate_session_name(step, epic, story_id, cycle)
-    out, code = spawn_session(session, command, agent, root, mode=runtime_mode())
+    out, code = _spawn_via_runtime(
+        session=session,
+        command=command,
+        agent=agent,
+        root=root,
+        story_key=story_id,
+        phase=_phase_for_step(step),
+    )
     if code != 0:
         print(out.strip(), file=__import__("sys").stderr)
         return 1
