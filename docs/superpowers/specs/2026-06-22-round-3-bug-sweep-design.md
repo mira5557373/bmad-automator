@@ -10,7 +10,7 @@ Catch the bugs that rounds 1 and 2 missed by *changing the lens*, not by re-runn
 
 Concretely:
 
-1. **Surface up to 30 candidate findings** (≈10 per lens) on the production-gate codebase as it stands at HEAD `6a957d2`.
+1. **Surface up to 30 candidate findings** (≈10 per lens) on the production-gate codebase as it stands at the **milestone-C-start SHA** (recorded into §0 of the audit report on Phase 1 entry; gap C-H-03 — DO NOT pin a stale literal SHA, as `6a957d2` was two commits behind the actual branch HEAD at review time).
 2. **Adversarially triage** each finding to (severity, confidence). Severity ∈ {LOW, MED, HIGH}; confidence ∈ {LOW, MED, HIGH}.
 3. **Fix at most 5 findings** that are simultaneously HIGH severity *and* HIGH confidence. Everything else is logged for future sweeps. The cap is non-negotiable — round-2 over-shipped (11 fixes) and burned reviewer attention; round-3 stays surgical.
 4. **Each fix lands as one commit + one tag** matching the established `compat-c-N-<slug>` pattern, with the round-3 milestone tag closing the series.
@@ -159,11 +159,27 @@ The remaining HIGH × HIGH findings move to deferred with a "round-4-priority" a
 
 - **Python deps**: stdlib + `filelock` + `psutil` only. No new package in `package.json` / `setup.py` / `pyproject.toml`.
 - **LOC budget**: each fix ≤ 80 LOC; total fix budget ≤ 400 LOC across all 5 patches. The audit report itself is markdown and not LOC-counted.
-- **Frozen-gate-surface**: no public symbol added, removed, renamed, or signature-changed. Verified by `tests/test_frozen_gate_surface.py` staying green.
+- **Frozen-gate-surface**: no public symbol added, removed, renamed, or signature-changed. Verified by **`git diff <milestone-C-start-sha>..HEAD -- docs/spec/frozen-gate-surface.md | wc -l == 0`** AND an ad-hoc import-roster smoke (a short Python script that imports every symbol listed in `docs/spec/frozen-gate-surface.md` and asserts each is callable / a class / has the expected attribute). The `tests/test_frozen_gate_surface.py` referenced in earlier drafts **does not exist in the repo** (gap C-H-02); authoring it is OUT of round-3 scope (it would be a separate prerequisite milestone for B/C/D all). The ad-hoc smoke is recorded in §0 of the audit report as the canonical verification.
 - **Telemetry**: `core/telemetry_events.py` untouched.
 - **500-LOC soft limit**: any fix that pushes a module past 500 LOC for the *first* time triggers an automatic deferral (split obligation belongs to the next refactor milestone). `gate_orchestrator.py` (718 LOC) and `audit.py` (482 LOC) and `budget_ceilings.py` (523 LOC) are already over and are tracked in the audit-floor; fixes there must add ≤ 20 LOC and live in a tightly-quarantined block.
 
 ## 6. Acceptance criteria
+
+### 6.0 Serialisation constraint (gap C-M-07 / C-H-03)
+
+**C executes either strictly AFTER `milestone-b-operability-batch` (the B closing tag) exists on the branch, OR strictly BEFORE B's first commit lands.** B and C MUST NOT run concurrently. Reason: B's operability batch modifies `core/evidence_io.py` and `core/gate_orchestrator.py` — the same two modules at the centre of Lens K and Lens M. Concurrent execution would either (a) invalidate C's §3.1 LOC snapshots (stale per-module sizes), (b) cause C to "find" findings that B is in the middle of fixing (which the implementer would then mark as `DUPLICATE-OF-B`, wasting triage cycles), or (c) require C to re-read affected modules mid-sweep. The audit report's §0 records `milestone-b-operability-batch` tag presence (or its absence + a "B not yet started" note) so the ordering is auditable post-hoc.
+
+### 6.0.1 Severity rubric — unified across lenses (gap C-M-04)
+
+A single ordinal rubric inherited by all three lenses; per-lens narratives keep their flavour but the floor is shared:
+
+| Severity | Operator-action language | Lens K specialisation | Lens L specialisation | Lens M specialisation |
+|---|---|---|---|---|
+| **HIGH** | "operator would file a P1 ticket today" | visible-incorrect at 100 stories OR data loss at 1000 stories | production-incident-shaped (operator reads docstring, acts, gets surprise) | data loss / audit-chain corruption / unrecoverable state |
+| **MED** | "operator would file a P2 next week" | visible at 1000 stories OR detectable-but-rare at 100 | misleading next maintainer (drift, not surprise) | visible at re-run / resource leak |
+| **LOW** | "cleanup queue" | annoying at scale (≥ 10000) only | cosmetic / wrong word | harmless leak in single-user setting |
+
+If two reviewers disagree on a finding's severity, **resolve to the lower** unless the higher reading is unambiguously the operator-action one.
 
 ### 6.1 Behavioral
 
@@ -187,7 +203,7 @@ The remaining HIGH × HIGH findings move to deferred with a "round-4-priority" a
 - `python3 -m unittest discover -s tests` → all green (4070..4085 passing, 2 skipped).
 - `ruff check skills/` → zero violations on touched files.
 - `tests/test_audit_regression.py` → green; **24 invariants stay at 24** unless a shipped fix legitimately adds a new structural invariant, in which case the audit-floor entry is appended (never removed, never re-numbered).
-- `tests/test_frozen_gate_surface.py` → green; zero diff to the public symbol roster.
+- Ad-hoc frozen-surface import-roster smoke (gap C-H-02 — `tests/test_frozen_gate_surface.py` does NOT exist; authoring it is OUT of scope): a short Python script imports every symbol in `docs/spec/frozen-gate-surface.md` and asserts each resolves. Recorded in §0 of the audit report. Also: `git diff <milestone-C-start-sha>..HEAD -- docs/spec/frozen-gate-surface.md | wc -l == 0`.
 - `core/telemetry_events.py` → zero diff (verified by `git diff HEAD -- skills/bmad-story-automator/src/story_automator/core/telemetry_events.py | wc -l == 0`).
 - `npm run verify` → green end-to-end (test:python, pack:dry-run, test:cli, test:smoke).
 - No commit uses `--amend`, `--no-verify`, or force-push.
@@ -269,3 +285,32 @@ The remaining HIGH × HIGH findings move to deferred with a "round-4-priority" a
 - Round-3 is **not** a milestone for "shipping a lot." Zero fixes is a valid outcome — the audit report alone is the deliverable.
 
 The round-3 sweep's success criterion is *information quality*, not patch volume.
+
+---
+
+## Tracked enhancements (MED/LOW gaps not patched into the spec body)
+
+> Source: `docs/audit/spec-review-2026-06-22-C-round-3-bug-sweep.md`. HIGH gaps C-H-01..C-H-03 are resolved inline above (and across the plan).
+
+| ID | Severity | Disposition | Note |
+|---|---|---|---|
+| C-M-04 | MED | Resolved inline | Unified severity rubric added as §6.0.1 with HIGH/MED/LOW × per-lens table. |
+| C-M-05 | MED | Inline plan polish | Add Phase 2.5 "adversarial-verifier" step in the plan: every `fix-now` candidate gets a 3-line devil's-advocate entry (cheapest counter-argument / simplest alternative fix / evidence the bug isn't a bug); survives only if ≥2 of 3 are refuted in writing. |
+| C-M-06 | MED | Inline spec polish | Spec §6.1: "if `fix-now` is empty, §Triage enumerates the top-3 closest-misses with a per-candidate 'why MED, not HIGH' rationale paragraph". |
+| C-M-07 | MED | Resolved inline | B↔C serialisation constraint in spec §6.0; plan pre-req #2 enforces it via `git tag --list 'milestone-b-operability-batch'` probe. |
+| C-M-08 | MED | Inline plan polish | Plan §C2.5 commits a `docs/audit/round-3-fix-now-list.md` with the chosen ≤5 slugs *before* any fix lands; adding a 6th requires editing that commit. |
+| C-M-09 | MED | Inline spec polish | Spec §3.3 adds M4 (`AuditLog.verify`), M5 (`recover_from_crash` orchestrator wrapper), M6 (`_quarantine_corrupted_marker`) as additional Lens-M target paths. |
+| C-M-10 | MED | Inline spec polish | Spec §5.2: "Lens K + M fixes that touch `gate_orchestrator.py`, `audit.py`, `budget_ceilings.py` are capped at 20-LOC delta and must be lift-and-shift-style refactors; any larger fix becomes a deferred follow-up spec." |
+| C-M-11 | MED | Inline plan polish | Plan §C3.N.1: every Lens-L docstring fix lands a 5-LOC pin-test asserting the new docstring text (frozen-string regression net). |
+| C-M-12 | MED | Inline plan polish | Plan §C3.N.10: commit subject becomes `fix(<module>): C-N — <slug>` with `(lens K/L/M)` in body, matching round-2 convention. |
+| C-L-13 | LOW | Backlog | Add `core/audit.py`, `core/evidence_io.py`, `core/calibration.py` as Lens-L second-tier targets if time permits. |
+| C-L-14 | LOW | Inline polish | Bump wall-clock estimate from "2-6 hours" to "4-10 hours" in §11. |
+| C-L-15 | LOW | Resolved inline | Plan §C4.2 uses `<milestone-C-start-sha>..HEAD` diff (not `HEAD~7`). |
+| C-L-16 | LOW | Inline spec polish | Spec §3.1: HIGH-confidence Lens-K finding must include either (a) a 5-line code excerpt of the offending pattern, or (b) a 10-line `timeit.timeit` snippet — anything else is MED-confidence. |
+| C-L-17 | LOW | Backlog | Allow 3-line rationale for "discarded" findings; add a "verifier" sub-field. |
+
+### Resolved-from-gap-report (HIGH)
+
+- **C-H-01** — Every `unittest discover` invocation in the plan now prefixes `PYTHONPATH=skills/bmad-story-automator/src`. Header note in §Pre-requisites makes the requirement explicit and unmissable.
+- **C-H-02** — `tests/test_frozen_gate_surface.py` removed from all spec/plan references; replaced with an ad-hoc import-roster smoke (a short Python `from story_automator.core import ...` script) recorded in §0 of the audit report, plus a markdown-diff check on `docs/spec/frozen-gate-surface.md`.
+- **C-H-03** — Stale HEAD pin `6a957d2` removed. "Milestone-C-start SHA" is recorded into §0 of the audit report at Phase 1 entry. Plan §C4.2 diffs against that SHA, not `HEAD~7` (also closes C-L-15).

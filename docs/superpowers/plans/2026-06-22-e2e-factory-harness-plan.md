@@ -56,18 +56,61 @@
 
 - [ ] **Step 2.2 — Implement `setUpClass`.** Inside the class, add:
 
+  - Import the specifically-caught exception: `from story_automator.core.trust_boundary import TrustBoundaryError`.
   - Resolve `cls.repo_root = Path(__file__).resolve().parents[2]`.
-  - Detect HEAD via `subprocess.run(["git", "rev-parse", "HEAD"], cwd=cls.repo_root, capture_output=True, text=True, check=False)`; on non-zero exit or `FileNotFoundError`, `raise unittest.SkipTest("git/HEAD unavailable")`.
+  - Detect HEAD via `subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cls.repo_root, text=True).strip()`; the `.strip()` is REQUIRED — `rev-parse` emits `<sha>\n` and a stale newline poisons the gate_id regex `^[a-zA-Z0-9._-]+$`. Empty stdout (some Windows-git-bash configs) → `raise unittest.SkipTest("git rev-parse HEAD produced empty output")`. On `(FileNotFoundError, subprocess.CalledProcessError)` → `raise unittest.SkipTest("git/HEAD unavailable")`.
   - Build `cls._tmp = tempfile.TemporaryDirectory()` + `cls.project_root = Path(cls._tmp.name) / "factory-self-eval"`; `cls.project_root.mkdir(parents=True)`.
-  - Set `os.environ["BMAD_AUDIT_KEY"] = "milestone-a-test-secret"` (preserve prior value for restoration in `tearDownClass`).
-  - `cls.profile = load_bundled_profile("default")`; `cls.profile_hash = compute_profile_hash(cls.profile)`.
+  - **BMAD_AUDIT_KEY save/restore (gap A-05).** Mirror `tests/test_audit_call_sites.py:73`:
+    ```python
+    cls._saved_audit_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+    os.environ["BMAD_AUDIT_KEY"] = "milestone-a-test-secret"
+    ```
+    NEVER bare-overwrite — that would leak the operator's real secret on teardown.
+  - `cls.profile = load_bundled_profile("default")`. **Disable all active categories** (gap A-04) so the empty-registry gate exercises the PASS lifecycle:
+    ```python
+    _all_active = sorted(set().union(*cls.profile.get("categories", {}).values()))
+    cls.profile["categories_na"] = _all_active
+    ```
+    Then `cls.profile_hash = compute_profile_hash(cls.profile)`.
   - `cls.registry = CollectorRegistry()`.
   - `cls.gate_id = f"factory-self-eval-{cls.commit_sha[:12]}"`.
-  - `cls.audit_path = cls.project_root / "audit.jsonl"`; `cls.audit_policy = {"enabled": True, "path": str(cls.audit_path)}`.
-  - Call `run_production_gate(...)` with the args in spec §Design; store `cls.gate_file = result`.
-  - Wrap the whole block in `try/except` that re-raises `SkipTest` unmodified but catches `(FileNotFoundError, PermissionError, RuntimeError)` arising from sandbox limitations → `raise unittest.SkipTest("…")` with a precise reason.
+  - **audit_policy shape (gap A-01).** The wrong shape `{"enabled": True, "path": ...}` silently disables audit:
+    ```python
+    cls.audit_path = cls.project_root / "audit.jsonl"
+    cls.audit_policy = {"security": {"audit_trail": True}}
+    ```
+    `audit_path` is the SOLE path source; the policy carries the enable flag only.
+  - **Gate call wrapped in try/finally** so env restoration is unconditional. Use the full kwarg shape (gap A-03):
+    ```python
+    try:
+        cls.gate_file = run_production_gate(
+            cls.project_root, cls.gate_id,
+            commit_sha=cls.commit_sha,
+            target={"kind": "repo", "id": "bmad-story-automator"},
+            profile=cls.profile,
+            factory_version="milestone-a",   # DELIBERATELY hand-coded — not resolve_factory_version()
+            registry=cls.registry,
+            priority="P1",
+            tier="code",                     # explicit; protects against tier-vocab drift
+            audit_policy=cls.audit_policy,
+            audit_path=cls.audit_path,
+        )
+    except TrustBoundaryError as exc:
+        # SPECIFICALLY caught — bare `except RuntimeError` would swallow real
+        # wiring bugs (gate raises RuntimeError on lock timeouts and marker
+        # corruption that we MUST see).
+        raise unittest.SkipTest(f"host context rejects gate: {exc}") from exc
+    ```
+  - Outer wrap: re-raise `unittest.SkipTest` unmodified; catch only narrowly-scoped sandbox exceptions (`(FileNotFoundError, PermissionError)`) → `raise unittest.SkipTest("…")` with a precise reason. **DO NOT** broaden to `except Exception` or `except RuntimeError` — that swallows real bugs.
 
-- [ ] **Step 2.3 — Implement `tearDownClass`.** Restore the prior `BMAD_AUDIT_KEY` (or delete if it was unset); call `cls._tmp.cleanup()`.
+- [ ] **Step 2.3 — Implement `tearDownClass`.** Restore the prior `BMAD_AUDIT_KEY` via the canonical pattern (gap A-05):
+  ```python
+  os.environ.pop("BMAD_AUDIT_KEY", None)
+  if cls._saved_audit_key is not None:
+      os.environ["BMAD_AUDIT_KEY"] = cls._saved_audit_key
+  cls._tmp.cleanup()
+  ```
+  Avoid `os.environ["BMAD_AUDIT_KEY"] = cls._saved_audit_key` when `_saved_audit_key is None` — that's a `TypeError`.
 
 - [ ] **Step 2.4 — Re-run the test.** Expect PASS in non-sandboxed envs; expect SKIP (with a clear reason) in sandboxes lacking `git` or write-env.
 
@@ -81,7 +124,14 @@
 
 - [ ] **Step 3.4 — Add `test_gate_file_carries_factory_version`.** `self.assertEqual(self.gate_file.get("factory_version"), "milestone-a")`.
 
-- [ ] **Step 3.5 — Add `test_profile_hash_recorded_on_gate_file`.** `self.assertEqual(self.gate_file["profile"]["hash"], self.profile_hash)`.
+- [ ] **Step 3.5 — Add `test_profile_hash_recorded_on_gate_file`.** Anchored to `verdict_engine.evaluate_gate`'s explicit profile-projection rewrite (gap A-02):
+  ```python
+  # verdict_engine rewrites gate_file["profile"] to {"id": ..., "hash": ...}
+  # at evaluation time. DO NOT assert equality on the full input profile dict;
+  # the persisted projection is a 2-key view and full-equality will fail.
+  self.assertEqual(self.gate_file["profile"]["hash"], self.profile_hash)
+  ```
+  If the projection schema ever changes, this assertion and `validate_gate_file` need a coordinated update — they are coupled by design.
 
 ### Task 4 — Assert Merkle export shape
 
@@ -93,7 +143,24 @@
 
 ### Task 6 — Determinism / reuse-path test
 
-- [ ] **Step 6.1 — Add `test_second_invocation_returns_reused_gate_file`.** Inside the test (not setUpClass — this needs a fresh registry but the same args), call `run_production_gate(...)` again with identical inputs. Assert the returned dict's `gate_id` equals `self.gate_id` and `evidence_merkle_root` equals `self.gate_file["evidence_merkle_root"]`. (Reuse path returns the persisted gate file verbatim.)
+- [ ] **Step 6.1 — Add `test_second_invocation_returns_reused_gate_file`.** Inside the test (not setUpClass — this needs the same args, replaying the call). Per gap A-09, gate_id + Merkle equality alone are insufficient (a buggy re-run that recomputed identical bytes would silently pass). Strengthen the assertion by one of:
+  - **Option A — mtime check** (preferred — no mock):
+    ```python
+    gate_path = self.project_root / "_bmad" / "gate" / "verdicts" / f"{self.gate_id}.json"
+    mtime_before = gate_path.stat().st_mtime_ns
+    result = run_production_gate(...)  # same args
+    self.assertEqual(result["gate_id"], self.gate_id)
+    self.assertEqual(result["evidence_merkle_root"], self.gate_file["evidence_merkle_root"])
+    self.assertEqual(gate_path.stat().st_mtime_ns, mtime_before,
+                     "reuse path must not rewrite the persisted gate file")
+    ```
+  - **Option B — mock `_run_collectors`** (use only if Option A flakes on coarse-mtime filesystems):
+    ```python
+    with patch("story_automator.core.gate_orchestrator._run_collectors") as run_cols:
+        run_production_gate(...)
+        run_cols.assert_not_called()
+    ```
+  Pick Option A unless a Windows/WSL CI run shows mtime-granularity flakes.
 
 ### Task 7 — Lint, format, and LOC sanity
 

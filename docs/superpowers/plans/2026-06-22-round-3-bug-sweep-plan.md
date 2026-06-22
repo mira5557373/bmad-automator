@@ -6,19 +6,40 @@
 
 ## Pre-requisites
 
-1. **HEAD pinned**: confirm `git log -1 --oneline` reads `6a957d2` (or later — all D-04 follow-up commits reachable).
-2. **Baseline green**:
+> **All `unittest discover` commands in this plan require `PYTHONPATH=skills/bmad-story-automator/src`** (gap C-H-01). Without it, `unittest` collects 3665 tests with 28 `ModuleNotFoundError: No module named 'story_automator'` errors and the baseline LOOKS LIKE a 405-test regression. Equivalently, `npm run test:python` injects PYTHONPATH automatically.
+
+1. **HEAD recorded into audit report §0** (gap C-H-03 — DO NOT pin a stale literal SHA). Capture the current branch HEAD at Phase 1 entry:
    ```
-   python3 -m unittest discover -s tests          # → 4070 passing, 2 skipped, 0 failing
+   git rev-parse HEAD > /dev/null && git log -1 --oneline
+   ```
+   The reported SHA becomes the "milestone-C-start SHA" referenced throughout the audit report and the per-module LOC snapshot.
+2. **B↔C serialisation gate** (spec §6.0 / gap C-M-07): C executes either *after* `git tag --list 'milestone-b-operability-batch'` returns the tag, OR *before* B's first commit lands. **Never concurrent.** If B is in flight, pause C until B's milestone tag exists.
+3. **Baseline green** (with PYTHONPATH):
+   ```
+   PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests | tail -1
+   # → expected: "OK" with 4070 passing, 2 skipped, 0 failing
    ruff check skills/                              # → clean
-   python3 -m unittest tests.test_audit_regression # → 24 invariants
-   python3 -m unittest tests.test_frozen_gate_surface # → green
+   PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_audit_regression
+   # → 24 invariants
    ```
-3. **No worktree** (CLAUDE.md guardrail for this run); work directly on `bma-d/integration-all`.
-4. **No `--no-verify`, no `--amend`, no force-push** at any step. New commits only.
-5. **Output directories exist**: confirm `docs/audit/` is a real directory (it is — round-2 lives there) and `.claude/workflows/` is a real directory (it is — round-2 workflow lives there).
-6. **Read the round-2 report first** (`docs/audit/round-2-bug-sweep.md`) — so the round-3 lenses are demonstrably different. If a round-3 finding duplicates a round-2 finding, that's a flag the lens wasn't fresh.
-7. **Confirm modules' pre-sweep LOC** (recorded in the spec §3.1):
+   NOTE: `tests/test_frozen_gate_surface.py` does NOT exist in the repo (gap C-H-02). Instead, run an ad-hoc import-roster smoke:
+   ```
+   PYTHONPATH=skills/bmad-story-automator/src python3 -c "
+   from story_automator.core import (
+       gate_orchestrator, evidence_io, audit, product_profile,
+       collector_registry, trust_boundary, gate_schema, gate_audit,
+       readiness_gate, risk_profile, profile_composer, cli_dispatcher,
+       plugins, action_enum,
+   )
+   print('frozen-gate-surface symbols importable')
+   "
+   ```
+   Record stdout into §0 of the audit report.
+4. **No worktree** (CLAUDE.md guardrail for this run); work directly on `bma-d/integration-all`.
+5. **No `--no-verify`, no `--amend`, no force-push** at any step. New commits only.
+6. **Output directories exist**: confirm `docs/audit/` is a real directory (it is — round-2 lives there) and `.claude/workflows/` is a real directory (it is — round-2 workflow lives there).
+7. **Read the round-2 report first** (`docs/audit/bug-sweep-round-2-2026-06-22.md`) — so the round-3 lenses are demonstrably different. If a round-3 finding duplicates a round-2 finding, that's a flag the lens wasn't fresh.
+8. **Confirm modules' pre-sweep LOC** (recorded in the audit report's §0, not in the spec — gap C-H-03; LOC may have drifted from spec §3.1 if B landed before C):
    ```
    wc -l skills/bmad-story-automator/src/story_automator/core/{evidence_io,calibration,audit,budget_ceilings,gate_orchestrator,risk_profile,readiness_gate,profile_composer,cli_dispatcher,plugins,gate_remediation,product_profile}.py
    ```
@@ -174,13 +195,13 @@ For each finding `C-N`:
    - For Lens L fixes: test asserts the *new* documented behavior matches the code OR (if it's a docstring-only fix) re-imports the module and inspects `__doc__`.
    - For Lens M fixes: test injects the failure (via `unittest.mock.patch` or fault-injection helpers) and asserts the end-state is consistent.
 
-- [ ] **C3.N.2** Run `python3 -m unittest discover -s tests -k test_bugfix_c_<n>` — confirm RED.
+- [ ] **C3.N.2** Run `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests -k test_bugfix_c_<n>` — confirm RED.
 
 - [ ] **C3.N.3** Apply the minimal patch in the target module. Per-fix LOC cap: ≤ 80 LOC. If the fix exceeds 80 LOC, **stop**; the finding becomes a follow-up spec, not a round-3 fix. Replace it in the fix-now list with the highest-ranked deferred candidate (if any).
 
-- [ ] **C3.N.4** Re-run `python3 -m unittest discover -s tests -k test_bugfix_c_<n>` — confirm GREEN.
+- [ ] **C3.N.4** Re-run `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests -k test_bugfix_c_<n>` — confirm GREEN.
 
-- [ ] **C3.N.5** Re-run full `python3 -m unittest discover -s tests` — confirm no regression. Audit-floor + frozen-gate-surface still green.
+- [ ] **C3.N.5** Re-run full `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests` — confirm no regression. Audit-floor still green; ad-hoc frozen-surface import-roster smoke (per pre-req #3) still resolves all symbols.
 
 - [ ] **C3.N.6** `ruff check skills/` — confirm clean on touched files.
 
@@ -190,9 +211,19 @@ For each finding `C-N`:
    # → must be 0
    ```
 
-- [ ] **C3.N.8** Verify frozen-gate-surface untouched:
+- [ ] **C3.N.8** Verify frozen-gate-surface untouched (gap C-H-02 — `tests/test_frozen_gate_surface.py` does NOT exist; use the ad-hoc import-roster smoke from pre-req #3 and a markdown-diff check):
    ```
-   python3 -m unittest tests.test_frozen_gate_surface
+   git diff <milestone-C-start-sha>..HEAD -- docs/spec/frozen-gate-surface.md | wc -l
+   # → must be 0 (markdown unchanged)
+   PYTHONPATH=skills/bmad-story-automator/src python3 -c "
+   from story_automator.core import (
+       gate_orchestrator, evidence_io, audit, product_profile,
+       collector_registry, trust_boundary, gate_schema, gate_audit,
+       readiness_gate, risk_profile, profile_composer, cli_dispatcher,
+       plugins, action_enum,
+   )
+   "
+   # → must exit 0 (every symbol importable)
    ```
 
 - [ ] **C3.N.9** Update `docs/audit/round-3-bug-sweep.md §Fix appendix` with the per-fix QA log (RED count → GREEN count, full-suite count before/after, ruff output).
@@ -222,15 +253,26 @@ For each finding `C-N`:
    ```
    Honor M11 closed vocabulary; honor CLAUDE.md changelog guardrails (no whitespace churn; one of the four tags only).
 
-- [ ] **C4.2** Final verification matrix:
+- [ ] **C4.2** Final verification matrix (PYTHONPATH everywhere per gap C-H-01; frozen-surface via ad-hoc smoke per gap C-H-02; diff against the milestone-C-start SHA per gap C-H-03 + C-L-15):
    ```
-   python3 -m unittest discover -s tests              # → 4070 + N passing, 2 skipped
-   ruff check skills/                                  # → clean
-   python3 -m unittest tests.test_audit_regression     # → 24 invariants, green
-   python3 -m unittest tests.test_frozen_gate_surface  # → green
-   git diff HEAD~7 -- skills/bmad-story-automator/src/story_automator/core/telemetry_events.py | wc -l   # → 0
-   npm run verify                                       # → green end-to-end
+   PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests   # → 4070 + N passing, 2 skipped
+   ruff check skills/                                                                  # → clean
+   PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest tests.test_audit_regression
+   #                                                                                   → 24 invariants, green
+   PYTHONPATH=skills/bmad-story-automator/src python3 -c "
+   from story_automator.core import (
+       gate_orchestrator, evidence_io, audit, product_profile,
+       collector_registry, trust_boundary, gate_schema, gate_audit,
+       readiness_gate, risk_profile, profile_composer, cli_dispatcher,
+       plugins, action_enum,
+   )
+   " &&                                                                                # → frozen-surface import-roster smoke green
+   git diff <milestone-C-start-sha>..HEAD -- docs/spec/frozen-gate-surface.md | wc -l  # → 0
+   git diff <milestone-C-start-sha>..HEAD -- skills/bmad-story-automator/src/story_automator/core/telemetry_events.py | wc -l
+   #                                                                                   → 0
+   npm run verify                                                                       # → green end-to-end
    ```
+   Replace `<milestone-C-start-sha>` with the literal SHA recorded into the audit report's §0.
 
 - [ ] **C4.3** Commit the changelog:
    ```
@@ -294,7 +336,7 @@ If the full suite goes red after any C3.N commit, revert *that* commit immediate
 
 If `tests/test_audit_regression.py` goes red after any commit, that's a structural invariant violation — revert immediately and investigate before re-attempting. The audit-floor must stay at 24.
 
-If `tests/test_frozen_gate_surface.py` goes red, a public symbol was accidentally moved — revert immediately. Frozen-surface is non-negotiable.
+If the ad-hoc frozen-surface import-roster smoke fails (gap C-H-02 — `tests/test_frozen_gate_surface.py` does not exist) OR `git diff <milestone-C-start-sha>..HEAD -- docs/spec/frozen-gate-surface.md` is non-empty, a public symbol was accidentally moved/added — revert immediately. Frozen-surface is non-negotiable.
 
 ## Risk monitoring after merge
 
@@ -322,9 +364,9 @@ If C1 finds *zero* candidate findings across all three lenses (extremely unlikel
 - [ ] `.claude/workflows/round-3-bug-sweep.md` exists with per-fix sha references and retrospective paragraph.
 - [ ] 0-5 `compat-c-N-<slug>` tags exist on the branch.
 - [ ] `milestone-c-round-3-bug-sweep` tag exists on the final commit.
-- [ ] Full unittest suite green (4070..4085 passing, 2 skipped, 0 failing).
+- [ ] Full unittest suite green via `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests` (4070..4085 passing, 2 skipped, 0 failing).
 - [ ] `ruff check skills/` clean.
 - [ ] Audit-floor invariants: 24, unchanged.
-- [ ] Frozen-gate-surface: zero diff.
+- [ ] Frozen-gate-surface: zero diff to `docs/spec/frozen-gate-surface.md` AND ad-hoc import-roster smoke (per pre-req #3) resolves every symbol.
 - [ ] `core/telemetry_events.py`: zero diff.
 - [ ] `npm run verify`: green end-to-end.
