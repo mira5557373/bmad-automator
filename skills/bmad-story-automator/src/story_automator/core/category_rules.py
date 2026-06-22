@@ -6,6 +6,7 @@ Pure functions, no I/O.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
 from .product_profile import VALID_PRIORITIES, required_for_priority, rule_for
@@ -126,12 +127,26 @@ def _aggregate_metrics(
     values: list[Any] = []
     for record in evidence:
         metrics = record.get("metrics") or {}
-        if key in metrics:
-            values.append(metrics[key])
+        if not isinstance(metrics, dict) or key not in metrics:
+            continue
+        raw = metrics[key]
+        # Defence-in-depth: schema validation already rejects None/NaN/inf,
+        # but a misbehaving custom collector that skipped validate_evidence_record
+        # must not crash the reducer (TypeError mixing int with None / str).
+        if raw is None:
+            continue
+        if isinstance(raw, float) and (math.isnan(raw) or math.isinf(raw)):
+            continue
+        values.append(raw)
     if not values:
         return default
     reducer = _METRIC_REDUCERS.get(key, max)
-    return reducer(values)
+    try:
+        return reducer(values)
+    except TypeError:
+        # Heterogeneous types (e.g. str mixed with int) — fall back to default
+        # rather than fail-open via traceback.
+        return default
 
 
 def _make_category_result(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -230,8 +231,29 @@ def validate_evidence_record(record: dict[str, Any]) -> None:
     findings = record.get("findings")
     if not isinstance(findings, list):
         raise GateSchemaError("evidence.findings must be a list")
-    if not isinstance(record.get("metrics", {}), dict):
+    metrics = record.get("metrics", {})
+    if not isinstance(metrics, dict):
         raise GateSchemaError("evidence.metrics must be a dict")
+    for mk, mv in metrics.items():
+        if not isinstance(mk, str):
+            raise GateSchemaError(
+                f"evidence.metrics key must be a string; got {mk!r}"
+            )
+        # bool is a subclass of int — allow it explicitly.
+        if isinstance(mv, bool):
+            continue
+        if isinstance(mv, (int, str)):
+            continue
+        if isinstance(mv, float):
+            if math.isnan(mv) or math.isinf(mv):
+                raise GateSchemaError(
+                    f"evidence.metrics[{mk!r}] must be finite; got {mv!r}"
+                )
+            continue
+        raise GateSchemaError(
+            f"evidence.metrics[{mk!r}] must be bool|int|float|str; "
+            f"got {type(mv).__name__}"
+        )
     if not isinstance(record.get("deterministic", True), bool):
         raise GateSchemaError("evidence.deterministic must be a bool")
     tier = record.get("tier", "code")
