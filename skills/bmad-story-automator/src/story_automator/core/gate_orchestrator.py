@@ -7,6 +7,7 @@ and atomic-marker semantics.
 from __future__ import annotations
 
 import shutil
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -179,19 +180,51 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
     if marker is None:
         return {"recovered": False}
 
-    # L1 fix: liveness check. If the marker carries a pid that is still
-    # running, the gate is in-flight — DO NOT touch its evidence dir, DO
-    # NOT clear its marker. The owning process will clean up itself.
+    # L1 + J-03 fix: composite-identity liveness check. If the marker
+    # carries a pid that is still running AND the recorded hostname +
+    # start_time still identify the SAME process, the gate is in-flight —
+    # DO NOT touch its evidence dir, DO NOT clear its marker. The owning
+    # process will clean up itself. Otherwise (PID recycled, foreign
+    # host, or pid dead) the marker is dead and recovery proceeds.
     pid = marker.get("pid")
     if isinstance(pid, int) and pid > 0:
-        try:
-            alive = psutil.pid_exists(pid)
-        except (psutil.Error, OSError):
-            # Fail-closed: if psutil can't answer, assume alive so we don't
-            # wipe a live gate's evidence. (Legacy markers without pid fall
-            # through to the recover path; this branch only runs when pid
-            # is present and an integer.)
-            alive = True
+        marker_host = marker.get("hostname")
+        marker_start_time = marker.get("start_time")
+        # Foreign-host marker: the local PID table is meaningless. The
+        # marker is dead from this host's perspective — recover.
+        if (
+            isinstance(marker_host, str)
+            and marker_host
+            and marker_host != socket.gethostname()
+        ):
+            alive = False
+        else:
+            try:
+                alive = psutil.pid_exists(pid)
+            except (psutil.Error, OSError):
+                # Fail-closed when psutil can't answer about the PID
+                # itself: assume alive so we don't wipe a live gate's
+                # evidence. (Legacy markers without pid fall through to
+                # the recover path; this branch only runs when pid is
+                # present and an integer.)
+                alive = True
+            # PID-recycle defense: when the marker recorded a
+            # start_time, the live PID must ALSO match that
+            # process-creation timestamp (1.0s tolerance bridges the
+            # resolution gap between time.time-derived recordings and
+            # psutil's create_time). Mismatch → PID was recycled by an
+            # unrelated process → original owner is gone → recover.
+            if alive and isinstance(marker_start_time, (int, float)):
+                try:
+                    proc_start = psutil.Process(pid).create_time()
+                    if abs(proc_start - float(marker_start_time)) >= 1.0:
+                        alive = False
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    alive = False
+                except (psutil.Error, OSError):
+                    # Can't inspect the process — keep alive=True to
+                    # stay fail-closed against the L1 wipe scenario.
+                    pass
         if alive:
             return {
                 "recovered": False,

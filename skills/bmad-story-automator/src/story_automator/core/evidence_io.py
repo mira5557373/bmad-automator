@@ -13,9 +13,11 @@ import hashlib
 import json
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Any
 
+import psutil
 from filelock import FileLock
 
 from .gate_schema import (
@@ -300,19 +302,33 @@ def write_gate_marker(
 ) -> Path:
     """§9.2: atomic marker before collector loop starts.
 
-    Payload is additive — ``pid`` and ``started_at`` are recorded so
-    ``recover_from_crash`` can perform a liveness check (bug L1). The
-    public API signature is unchanged; markers written by older
-    versions (no ``pid``) still parse and are treated as legacy/dead
-    on read.
+    Payload is additive — ``pid``, ``started_at``, ``start_time`` (the
+    process's ``create_time()``), and ``hostname`` are recorded so
+    ``recover_from_crash`` can perform a composite-identity liveness
+    check that survives PID recycle and foreign-host markers on shared
+    filesystems (bugs L1 + J-03). The public API signature is
+    unchanged; markers written by older versions (no ``pid`` /
+    ``start_time`` / ``hostname``) still parse and are handled by the
+    legacy code path in ``_recover_from_crash_locked`` (pid_exists alone).
     """
     assert_host_context("write_gate_marker")
-    marker = {
+    # psutil.Process().create_time() — kernel-issued process-creation
+    # timestamp. Wrapped defensively so a flaky /proc never wedges
+    # marker writes: on failure we omit the field and degrade to L1
+    # (pid_exists alone), which is the prior behavior.
+    try:
+        start_time: float | None = psutil.Process().create_time()
+    except (psutil.Error, OSError):
+        start_time = None
+    marker: dict[str, Any] = {
         "gate_id": gate_id,
         "commit_sha": commit_sha,
         "started_at": iso_now(),
         "pid": os.getpid(),
+        "hostname": socket.gethostname(),
     }
+    if start_time is not None:
+        marker["start_time"] = start_time
     path = _gate_marker_path(project_root)
     ensure_dir(path.parent)
     write_atomic(path, canonical_json(marker) + "\n")
