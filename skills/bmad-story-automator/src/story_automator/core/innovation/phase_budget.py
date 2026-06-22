@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ..budget_ceilings import (
-    BudgetCeiling,
+    PhaseBudgetCeiling,
     BudgetLedger,
     OverspendAction,
     classify_overspend,
@@ -53,8 +53,8 @@ class PhasePolicy:
     effectively a no-op safety net.
     """
 
-    persona_ceilings: Mapping[str, BudgetCeiling]
-    phase_total: BudgetCeiling
+    persona_ceilings: Mapping[str, PhaseBudgetCeiling]
+    phase_total: PhaseBudgetCeiling
 
 
 @dataclass(frozen=True)
@@ -107,19 +107,19 @@ def default_phase_budget_config() -> PhaseBudgetConfig:
 
     dev_running = PhasePolicy(
         persona_ceilings={
-            "developer": BudgetCeiling(limit=600, priority="P0"),
-            "qa": BudgetCeiling(limit=300, priority="P1"),
-            "scribe": BudgetCeiling(limit=100, priority="P2"),
+            "developer": PhaseBudgetCeiling(limit=600, priority="P0"),
+            "qa": PhaseBudgetCeiling(limit=300, priority="P1"),
+            "scribe": PhaseBudgetCeiling(limit=100, priority="P2"),
         },
-        phase_total=BudgetCeiling(limit=1000, priority="P0"),
+        phase_total=PhaseBudgetCeiling(limit=1000, priority="P0"),
     )
     review_verify = PhasePolicy(
         persona_ceilings={
-            "reviewer": BudgetCeiling(limit=400, priority="P0"),
-            "qa": BudgetCeiling(limit=200, priority="P1"),
-            "scribe": BudgetCeiling(limit=100, priority="P2"),
+            "reviewer": PhaseBudgetCeiling(limit=400, priority="P0"),
+            "qa": PhaseBudgetCeiling(limit=200, priority="P1"),
+            "scribe": PhaseBudgetCeiling(limit=100, priority="P2"),
         },
-        phase_total=BudgetCeiling(limit=700, priority="P0"),
+        phase_total=PhaseBudgetCeiling(limit=700, priority="P0"),
     )
     return PhaseBudgetConfig(
         phases={
@@ -135,7 +135,7 @@ def _require_phase(config: PhaseBudgetConfig, phase: str) -> PhasePolicy:
     return config.phases[phase]
 
 
-def _require_persona(policy: PhasePolicy, persona: str) -> BudgetCeiling:
+def _require_persona(policy: PhasePolicy, persona: str) -> PhaseBudgetCeiling:
     ceiling = policy.persona_ceilings.get(persona)
     if ceiling is None:
         raise PhaseBudgetError(

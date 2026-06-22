@@ -32,9 +32,14 @@ from .telemetry_events import parse_event
 
 __all__ = [
     "BudgetCeiling",
+    "BudgetLedger",
     "CeilingDecision",
+    "OverspendAction",
+    "PhaseBudgetCeiling",
     "bypass_allowed",
+    "classify_overspend",
     "evaluate_ceilings",
+    "overspend_action_for",
     "parse_ceilings_config",
 ]
 
@@ -403,37 +408,68 @@ def bypass_allowed() -> bool:
 # ===========================================================================
 # M59: Phase-shaped budget classification helpers
 # ===========================================================================
+#
+# The M59 layer (phase-shaped budgets) introduces an opaque-unit ceiling
+# (``PhaseBudgetCeiling``), an in-memory accumulator (``BudgetLedger``),
+# and a policy function (``classify_overspend``) returning
+# ``OverspendAction``. These are deliberately distinct from the M03
+# cost-USD ceiling types above:
+#
+#   - M03 ``BudgetCeiling`` is keyed by gate name and uses ``limit_usd``.
+#   - M59 ``PhaseBudgetCeiling`` is keyed by phase + persona and uses
+#     ``limit`` (opaque units — cents, tokens, seconds; caller's choice).
+#
+# Both layers coexist in this module for import-locality; downstream
+# callers should pick the type that matches their semantics.
 
-def classify_overspend(
-    *,
-    spent: float,
-    ceiling: float,
-    phase: str,
-    persona: str = "",
-) -> str:
-    """Classify overspend as 'within' | 'retry-cheap' | 'pause' per phase rules.
 
-    - dev-running overspend -> retry-cheap (demote to smaller model)
-    - review-verify overspend -> pause (verification overspend is a smell)
-    - others -> generic overspend classification
+class OverspendAction(str, enum.Enum):
+    """Action returned by ``classify_overspend`` / phase budget enforcement.
+
+    - ``ALLOW``: spend is within ceiling, no policy action required.
+    - ``RETRY_CHEAP``: dev-running P0 overspend — demote to a cheaper
+      retry (smaller model, fewer tokens) instead of escalating.
+    - ``PAUSE``: review/verify overspend — pause the story for human
+      re-scope. Verification cannot be safely "retried cheap".
+    - ``ESCALATE``: catch-all for non-P0 dev-running overspend that
+      still exceeds the per-persona ceiling.
     """
-    if not isinstance(spent, (int, float)) or isinstance(spent, bool):
-        raise TypeError("spent must be numeric")
-    if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool):
-        raise TypeError("ceiling must be numeric")
-    if spent <= ceiling:
-        return "within"
-    if phase == "dev-running":
-        return "retry-cheap"
-    if phase == "review-verify":
-        return "pause"
-    return "pause"  # default for unknown phases
+
+    ALLOW = "allow"
+    RETRY_CHEAP = "retry_cheap"
+    PAUSE = "pause"
+    ESCALATE = "escalate"
 
 
-# M59 BudgetLedger dataclass (from compat-m59 milestone)
+# Phase identifiers — duplicated as string constants in phase_budget.py
+# for the caller's convenience; defined here too so this module can
+# classify overspend without importing the higher layer (avoids cycles).
+_PHASE_DEV_RUNNING = "dev-running"
+_PHASE_REVIEW_VERIFY = "review-verify"
 
-from dataclasses import dataclass, field
-from typing import Mapping
+
+@dataclass(frozen=True)
+class PhaseBudgetCeiling:
+    """A single hard ceiling expressed as ``limit`` units for ``priority``.
+
+    The unit is opaque (cents, tokens, seconds) and chosen by the caller;
+    we only require that it be a positive integer so spend math stays
+    exact. Distinct from the M03 ``BudgetCeiling`` above (which is keyed
+    by gate name and uses ``limit_usd``).
+    """
+
+    limit: int
+    priority: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.limit, int) or isinstance(self.limit, bool) or self.limit <= 0:
+            raise ValueError(
+                f"PhaseBudgetCeiling.limit must be a positive int, got {self.limit!r}"
+            )
+        if not isinstance(self.priority, str) or not self.priority:
+            raise ValueError(
+                f"PhaseBudgetCeiling.priority must be a non-empty string, got {self.priority!r}"
+            )
 
 
 @dataclass
@@ -456,5 +492,32 @@ class BudgetLedger:
     def total(self, key: str) -> int:
         return int(self.spend.get(key, 0))
 
-    def snapshot(self) -> Mapping[str, int]:
+    def snapshot(self) -> dict[str, int]:
         return dict(self.spend)
+
+
+def classify_overspend(*, priority: str, phase: str) -> OverspendAction:
+    """Return the policy action for an overspend in ``phase`` at ``priority``.
+
+    Policy (M59):
+    - review-verify   -> always PAUSE  (verification overspend is a smell)
+    - dev-running P0  -> RETRY_CHEAP   (retry with a smaller model)
+    - dev-running !P0 -> ESCALATE      (non-P0 overspend bubbles up)
+
+    Callers may pass an unknown phase string; we default to ESCALATE so
+    that integration mistakes are loud rather than silent.
+    """
+
+    if phase == _PHASE_REVIEW_VERIFY:
+        return OverspendAction.PAUSE
+    if phase == _PHASE_DEV_RUNNING:
+        if priority == "P0":
+            return OverspendAction.RETRY_CHEAP
+        return OverspendAction.ESCALATE
+    return OverspendAction.ESCALATE
+
+
+def overspend_action_for(*, priority: str, phase: str) -> OverspendAction:
+    """Alias of ``classify_overspend`` for naming clarity at the call site."""
+
+    return classify_overspend(priority=priority, phase=phase)

@@ -22,9 +22,9 @@ from __future__ import annotations
 import unittest
 
 from story_automator.core.budget_ceilings import (
-    BudgetCeiling,
     BudgetLedger,
     OverspendAction,
+    PhaseBudgetCeiling,
     classify_overspend,
 )
 from story_automator.core.innovation.phase_budget import (
@@ -44,9 +44,9 @@ from story_automator.core.innovation.phase_budget import (
 class BudgetCeilingsTests(unittest.TestCase):
     def test_ceiling_validates_positive_limit(self) -> None:
         with self.assertRaises(ValueError):
-            BudgetCeiling(limit=0, priority="P0")
+            PhaseBudgetCeiling(limit=0, priority="P0")
         with self.assertRaises(ValueError):
-            BudgetCeiling(limit=-5, priority="P0")
+            PhaseBudgetCeiling(limit=-5, priority="P0")
 
     def test_ledger_tracks_spend_per_key(self) -> None:
         ledger = BudgetLedger()
