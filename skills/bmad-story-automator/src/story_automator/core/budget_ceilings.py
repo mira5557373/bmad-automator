@@ -276,16 +276,50 @@ def _compute_spent(
     all contribute zero. An unparseable ``now_iso`` under a windowed
     mode short-circuits to zero spend (no anchor available).
     """
+    spent = _compute_spent_for_windows(events_path, [window], now_iso)
+    return spent.get(window, 0.0)
+
+
+def _compute_spent_for_windows(
+    events_path: str | Path,
+    windows: list[str],
+    now_iso: str,
+) -> dict[str, float]:
+    """Stream the JSONL ledger ONCE and aggregate spend per window.
+
+    Fix C-2 (Lens K): the legacy ``evaluate_ceilings`` called
+    ``_compute_spent`` inside a loop over applicable ceilings, which
+    re-streamed the ledger K times for K ceilings. This helper does
+    a single pass and tallies per-window totals in one walk so the
+    cost is O(N) instead of O(N·K).
+
+    Returns a ``{window: total}`` dict covering every requested window.
+    Per-window semantics match the legacy ``_compute_spent`` exactly
+    (REQ-08): ``per_run`` sums everything; windowed entries are
+    symmetric about ``now_iso``.
+    """
     path = Path(events_path)
+    totals: dict[str, float] = {w: 0.0 for w in windows}
     if not path.is_file():
-        return 0.0
-    delta_seconds = _WINDOW_SECONDS.get(window, 0)
-    anchor: dt.datetime | None = None
-    if delta_seconds > 0:
-        anchor = _parse_iso_timestamp(now_iso)
-        if anchor is None:
-            return 0.0
-    total = 0.0
+        return totals
+    # Pre-resolve per-window anchor + delta so the hot loop avoids
+    # repeated dict lookups and ISO parses. A windowed entry with an
+    # unparseable ``now_iso`` short-circuits to 0.0 — same as legacy.
+    windowed: list[tuple[str, int, dt.datetime]] = []
+    per_run = False
+    for window in windows:
+        delta_seconds = _WINDOW_SECONDS.get(window, 0)
+        if delta_seconds == 0:
+            per_run = True
+        else:
+            anchor = _parse_iso_timestamp(now_iso)
+            if anchor is None:
+                # Match legacy: an unparseable anchor under a windowed
+                # mode means 0 spend for that window. Leave totals[window]
+                # at its 0.0 init and DO NOT add to ``windowed`` so the
+                # hot loop never tries to compare against a None anchor.
+                continue
+            windowed.append((window, delta_seconds, anchor))
     with path.open("r", encoding="utf-8") as handle:
         for raw in handle:
             line = raw.rstrip("\r\n").strip()
@@ -299,22 +333,20 @@ def _compute_spent(
             if not isinstance(cost, (int, float)) or isinstance(cost, bool):
                 continue
             cost_f = float(cost)
-            # Defense in depth: NaN/Inf would poison `total` and silently
+            # Defense in depth: NaN/Inf would poison ``total`` and silently
             # flip every verdict to ALLOW (NaN comparisons are False).
-            # parse_event accepts these via json.loads, so we filter here.
             if not math.isfinite(cost_f):
                 continue
-            if anchor is not None:
+            if per_run and "per_run" in totals:
+                totals["per_run"] += cost_f
+            if windowed:
                 ts = _parse_iso_timestamp(getattr(event, "timestamp", ""))
                 if ts is None:
                     continue
-                # REQ-08 "within N seconds of now_iso" is symmetric:
-                # past events older than the window AND future events
-                # further out than the window are both excluded.
-                if abs((anchor - ts).total_seconds()) > delta_seconds:
-                    continue
-            total += cost_f
-    return total
+                for window, delta_seconds, anchor in windowed:
+                    if abs((anchor - ts).total_seconds()) <= delta_seconds:
+                        totals[window] += cost_f
+    return totals
 
 
 def _decide(ceiling: BudgetCeiling, spent: float) -> tuple[CeilingDecision, str]:
@@ -362,11 +394,18 @@ def evaluate_ceilings(
     applicable = [c for c in resolved if gate_name in c.gate_names]
     if not applicable:
         return CeilingDecision.ALLOW, "no_ceilings_configured"
-    # Compute every applicable verdict in declaration order so the
-    # tiebreak rule (REQ-10) emerges naturally from iteration order.
+    # Fix C-2 (Lens K): single-pass aggregation over the ledger,
+    # then per-ceiling decide. Replaces the previous O(N·K) per-ceiling
+    # re-scan with O(N) + O(K). Iteration order over ``applicable`` is
+    # preserved so the REQ-10 declaration-order tiebreak is unchanged.
+    spent_by_window = _compute_spent_for_windows(
+        events_path,
+        [c.window for c in applicable],
+        now_iso,
+    )
     verdicts: list[tuple[CeilingDecision, str]] = []
     for ceiling in applicable:
-        spent = _compute_spent(events_path, ceiling.window, now_iso)
+        spent = spent_by_window.get(ceiling.window, 0.0)
         verdicts.append(_decide(ceiling, spent))
     # Manual scan for stability across Python versions — first index
     # with the maximum rank wins (declaration-order tiebreak).
