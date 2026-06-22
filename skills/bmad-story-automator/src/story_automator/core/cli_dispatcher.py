@@ -42,10 +42,13 @@ Dependency injection
 --------------------
 
 Production callers will not pass ``runtime_invoker`` and will get the
-bundled :func:`_default_invoker`, a thin shim that *eventually* hooks
-into ``tmux_runtime`` for ``cli_id="claude-code"``. That wire-up is
-operator-follow-up (N6.5 ships the dispatcher contract; the orchestrator
-edit is out of scope here so the existing tmux surface stays untouched).
+bundled :func:`_default_invoker`, which delegates to
+:mod:`story_automator.core.cli_dispatcher_invokers` — a thin shim over
+the existing :mod:`story_automator.core.tmux_runtime` public surface
+for ``cli_id="claude-code"``. ``codex``, ``gemini-cli``, ``none``, and
+unknown ids currently raise :class:`NotImplementedError` so the
+orchestrator can route the failure cleanly while their built-in
+runners are still being designed.
 
 Tests pass their own ``runtime_invoker`` — a callable returning a dict
 with the keys ``stdout_tail``, ``head_sha``, ``session_id``,
@@ -70,7 +73,9 @@ Hard guardrails honored
   safe to embed in gate-file payloads (per the frozen-gate-surface
   guardrail).
 * No touch to ``tmux_runtime.py`` public surface; the default invoker
-  returns a placeholder for ``claude-code`` until N6.5+ wires it.
+  consumes the existing ``spawn_session`` / ``session_status`` /
+  ``verify_or_create_output`` / ``inject_bmad_auto_env`` entry points
+  via :mod:`cli_dispatcher_invokers`.
 * No touch to ``cli_profile.CLIProfile`` (consumed only).
 * No touch to ``lie_detector.detect_baseline_drift`` (consumed only).
 """
@@ -263,34 +268,25 @@ def adapter_for_stage(policy: dict[str, Any], stage: str) -> str:
 
 
 def _default_invoker(*, profile: CLIProfile, intent: SessionIntent) -> dict[str, Any]:
-    """In-process placeholder invoker used when the caller passes none.
+    """Real default invoker — switches on ``profile.cli_id``.
 
-    For N6.5 scope this is intentionally *not* wired into
-    :mod:`story_automator.core.tmux_runtime`. Returning a placeholder
-    stdout_tail keeps the dispatcher's classifier exercised end-to-end
-    without inventing a tmux dependency we haven't refactored.
+    Delegates to :mod:`story_automator.core.cli_dispatcher_invokers`
+    which holds the concrete tmux shim for ``claude-code``. For
+    ``codex``, ``gemini-cli``, ``none``, and unknown ids this raises
+    :class:`NotImplementedError` with a message naming the cli_id so
+    operators can route the failure.
 
-    The orchestrator-side wire-up (N6.5+/operator-follow-up) will replace
-    this with a real ``tmux_runtime`` call for ``cli_id="claude-code"``
-    and analogous adapters for codex/gemini-cli once those tmux runners
-    land.
-
-    Tests should *always* pass their own ``runtime_invoker`` rather than
-    exercise this placeholder.
+    Tests that want to exercise the dispatcher classifier in isolation
+    should always pass their own ``runtime_invoker``; this default
+    invoker reaches real tmux for the claude-code path.
     """
-    # Use baseline_sha as the placeholder head_sha so the lie-detector
-    # consistently classifies this as baseline_drift — a clear signal in
-    # logs that the placeholder was hit.
-    return {
-        "stdout_tail": (
-            "tmux_runtime path not yet wired for "
-            f"{profile.cli_id} (N6.5 dispatcher placeholder)"
-        ),
-        "head_sha": intent.baseline_sha,
-        "session_id": "",
-        "stderr_tail": "",
-        "timed_out": False,
-    }
+    # Late import avoids the import cycle (cli_dispatcher_invokers
+    # imports cli_dispatcher.SessionIntent via TYPE_CHECKING only) and
+    # keeps tmux_runtime out of cli_dispatcher's import graph when the
+    # default invoker is never called.
+    from .cli_dispatcher_invokers import default_invoker as _impl
+
+    return _impl(profile=profile, intent=intent)
 
 
 # ---------------------------------------------------------------------------
