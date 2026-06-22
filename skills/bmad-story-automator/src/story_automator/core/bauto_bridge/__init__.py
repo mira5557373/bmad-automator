@@ -9,6 +9,12 @@ it only converts between serialization formats.
 
 from __future__ import annotations
 
+from .hookbus_shim import (
+    KNOWN_EVENTS,
+    HookBusShim,
+    HookbusShimError,
+    HookSpec,
+)
 from .policy_translator import (
     KNOWN_BAUTO_TABLES,
     PolicyTranslationError,
@@ -17,7 +23,11 @@ from .policy_translator import (
 )
 
 __all__ = [
+    "HookBusShim",
+    "HookSpec",
+    "HookbusShimError",
     "KNOWN_BAUTO_TABLES",
+    "KNOWN_EVENTS",
     "PolicyTranslationError",
     "policy_toml_to_runtime",
     "runtime_to_policy_toml",
