@@ -38,7 +38,7 @@
 - [ ] **2.1** Create `skills/bmad-story-automator/src/story_automator/core/integration/unified_state.py`. **Required order**: (1) module docstring describing G7 purpose and LWW semantics (≥ 30 lines, matching M48's docstring depth), (2) `from __future__ import annotations`, (3) stdlib imports, (4) `filelock` import, (5) local imports from M48 + `core.sprint` + `core.utils` + `core.artifact_paths` + `core.story_keys`.
 - [ ] **2.2** Add the `UnifiedStateError(ValueError)` class with docstring explaining it is **not** a subclass of M48's `DualStoreError` (they sit side-by-side).
 - [ ] **2.3** Add `unified_state_lock(project_root)` returning `filelock.FileLock(<implementation_artifacts_dir>/.unified-state.lock)`.
-- [ ] **2.4** Add `read_unified_state(project_root, story_key) -> tuple[str, str]` skeleton with **only the happy-path implemented**: read sprint-status, read phase store, if both present and `is_consistent(...)` return `(status, phase.value)`. Raise `UnifiedStateError` for missing sprint row. **Stub** the repair branches with `raise NotImplementedError("phase 3")`.
+- [ ] **2.4** Add `read_unified_state(project_root, story_key, *, observe_only=False, read_lock_timeout=2.0) -> tuple[str, str, bool]` skeleton (gap D-R-01: monomorphic 3-tuple regardless of `observe_only`). Happy-path: read sprint-status, read phase store; if both present and `is_consistent(...)` return `(status, phase.value, False)`. Raise `UnifiedStateError` for missing sprint row. **Stub** the repair branches with `raise NotImplementedError("phase 3")`. Note that `observe_only` and `read_lock_timeout` are accepted but the stub returns the same shape on the happy path; the branching behaviour lands in phase 3.
 - [ ] **2.5** Add `write_unified_state(project_root, story_key, sprint_status, phase, *, lock_timeout=10.0)` skeleton: validate pair via `is_consistent`, acquire lock with timeout (catching `filelock.Timeout` → `UnifiedStateError`), call `write_phase` (M48) for the phase side, **stub** the sprint-status row mutation with `raise NotImplementedError("phase 3")`.
 - [ ] **2.6** Wire `read_unified_state`, `write_unified_state`, `UnifiedStateError`, `unified_state_lock` into the module's `__all__`.
 - [ ] **2.7** Extend `core/integration/__init__.py` to re-export those four symbols. **Do not** remove any existing export.
@@ -55,35 +55,45 @@
    - **Round-trip verification** (replaces the `validate_sprint_status` call from the earlier plan — gap D02): re-parse via `sprint_status_get(project_root, story_key)` and assert `state.status == new_status`; raise `UnifiedStateError` if the round-trip fails (defensive — catches regex / atomicity bugs immediately).
    - **Hold the caller's filelock**; do not re-acquire.
 - [ ] **3.2** Implement `_resolve_lww(project_root, story_key, sprint_state, phase_value)`:
-   - **Same-volume precondition** (gap D03): assert `phase_store_path(root).stat().st_dev == sprint_status_path(root).stat().st_dev`; if not equal, raise `UnifiedStateError("cross-filesystem unified state not supported; phase store and sprint-status must share a volume")`.
+   - **Pre-condition (entry guard)**: `_resolve_lww` is invoked ONLY when both files exist on disk and disagree. The migration path (phase store empty) skips this function entirely.
+   - **Same-volume precondition** (gap D03 + gap D-R-02 — scoped to this function only): assert `phase_store_path(root).stat().st_dev == sprint_status_path(root).stat().st_dev`; if not equal, raise `UnifiedStateError("cross-filesystem unified state not supported; phase store and sprint-status must share a volume")`. Do NOT run this check from any other call site (migration path would hit `FileNotFoundError`).
    - Compare `sprint_status_path(root).stat().st_mtime_ns` vs `phase_store_path(root).stat().st_mtime_ns`; the later-mtime store wins.
    - **Tie-break (gap D08)**: if mtimes are EQUAL, prefer the entry whose status is in `TERMINAL_PHASES`; if neither or both are terminal, phase store wins (legacy default — per spec §2 / R5).
-   - Project the loser via `phase_for_sprint_status` / `sprint_status_for_phase`; acquire lock; write the projection; return the winner's pair.
-- [ ] **3.3** Implement the "missing phase entry" branch in `read_unified_state`: derive via `phase_for_sprint_status`; if `None` (unknown status), return `(raw_status, "pending")` **without writing**; else acquire lock + write phase store via `write_phase` + return projected pair.
+   - **Read-repair self-cancellation guard (gap D-R-09)**: acquire `unified_state_lock(...)` THEN re-read both files under the lock and re-run the conflict check. Project ONLY if the locked re-read still shows a conflict AND the same winner. If the locked re-read shows the state is now consistent (another reader/writer fixed it), release the lock and return the freshly-read pair without writing.
+   - Project the loser via `phase_for_sprint_status` / `sprint_status_for_phase`; under the same lock, write the projection (writer may call `write_phase` or `_write_sprint_status_row` depending on which loses); return the winner's pair.
+- [ ] **3.3** Implement the "missing phase entry" branch in `read_unified_state` (the migration write path — gap D-R-03 mode (c): single-store mutation, ordering immaterial). Derive via `phase_for_sprint_status`; if `None` (unknown status), return `(raw_status, "pending", needs_repair=True)` **without writing** (gap D-R-01: monomorphic 3-tuple); else, if `observe_only=False`: acquire lock + write phase store via `write_phase` + return `(raw_status, derived.value, False)` (post-write coherent). If `observe_only=True`: return `(raw_status, derived.value, True)` (gap D-R-05) **without writing**. Add an inline code comment: `# MIGRATION WRITE — single-store mutation; phase-only; not subject to phase-first/sprint-second ordering.`
 - [ ] **3.4** Implement the "both present but inconsistent" branch in `read_unified_state`: call `_resolve_lww`; return its result.
-- [ ] **3.5** Replace the `NotImplementedError("phase 3")` stub in `write_unified_state` with the full atomic writer (gaps D01, D10):
+- [ ] **3.5** Replace the `NotImplementedError("phase 3")` stub in `write_unified_state` with the full atomic writer (gaps D01, D10, D-R-07):
    - Acquire `unified_state_lock(project_root)` with `timeout=lock_timeout`; catch `filelock.Timeout` → re-raise as `UnifiedStateError("timeout=...")`.
-   - **Slug-key reconciliation** (gap D10): call `sprint_status_get(project_root, story_key)` to resolve to the canonical `sprint.story` key. If the phase store has an entry under a descriptive slug (e.g., `1-1-host-feasibility-probe`) but the canonical id is `1.1`, delete the slug-keyed entry as part of the same write.
+   - **Canonical-key resolution** (gap D10 + gap D-R-07 — corrected source): call `from .story_keys import normalize_story_key; canonical = normalize_story_key(project_root, story_key)`. If `canonical is None`, raise `UnifiedStateError(f"unrecognisable story_key: {story_key!r}")`. The canonical phase-store key is `canonical.id` (the dotted form, e.g. `"1.1"`) — NOT `sprint_status_get(...).story` (which returns the matched-row key, possibly the slug itself, and would persist under the slug — the inverse of the intended reconciliation).
+   - **Slug orphan deletion**: read the current phase store; for every entry whose key normalises (via `normalize_story_key(project_root, existing_key).id`) to `canonical.id` AND whose key != `canonical.id`, delete that entry. Persist the cleaned-up dict (via `_write_phase_store`) before writing the new canonical entry — or fold both into a single rewrite for atomicity.
    - Validate `(sprint_status, phase)` consistency via `is_consistent(...)`; raise `UnifiedStateError` if not.
-   - Write the phase store FIRST via `write_phase(...)` (M48 API), under the canonical key.
+   - Write the phase store FIRST via `write_phase(...)` (M48 API), under `canonical.id`.
    - Write sprint-status SECOND via `_write_sprint_status_row(project_root, story_key, sprint_status)`.
    - Release lock (context-manager exit).
 
-   The write order (phase first, sprint-status second) is REVERSED from read order (sprint-status first, phase second) — gap D05. Both orders must be cited as inline code comments.
-- [ ] **3.6** Implement the `observe_only=True` branch in `read_unified_state` (gap D07): when set, the function NEVER writes — no migration on legacy stores, no LWW repair. Returns a 3-tuple `(sprint_status, phase, needs_repair: bool)` where `needs_repair=True` flags that the on-disk state is divergent. Add the docstring warning: "Calling this function with the default observe_only=False may write to disk; pass observe_only=True for read-only callers." All write paths in `read_unified_state` are gated behind an `if not observe_only:` check.
+   The write order (phase first, sprint-status second) is mode (b) of the gap D-R-03 three-mode model: STEADY-STATE WRITE. Steady-state read (mode a) is sprint→phase REVERSE. Migration write (mode c, inside `read_unified_state`) is single-store. All three must be cited as inline code comments with the gap-D-R-03 mode label.
+- [ ] **3.6** Implement the `observe_only=True` branch in `read_unified_state` (gap D07 + gap D-R-01 + gap D-R-05): the function returns the **same monomorphic 3-tuple shape** `(sprint_status, phase_value, needs_repair: bool)` in all cases — `observe_only` only changes whether writes happen, not the return arity. When `observe_only=True`, ALL write paths are gated (no migration, no LWW repair). When the phase store is empty but the sprint-status row has a known status, return `(raw_status, phase_for_sprint_status(raw_status).value, True)`. When the status is unknown, return `(raw_status, "pending", True)`. When both stores present and consistent, return `(status, phase.value, False)`. When both stores present and inconsistent, return `(status_winner_in_LWW_terms, phase_winner_in_LWW_terms, True)` — observable LWW, no on-disk mutation. Docstring carries the warning: "Calling this function with the default observe_only=False may write to disk; pass observe_only=True for read-only callers." All write paths in `read_unified_state` are gated behind an `if not observe_only:` check.
 
-- [ ] **3.7** Implement the stat-twice-or-retry pattern in `read_unified_state` (gap D04). After reading sprint-status + phase (in that order — gap D05), re-stat both files; if either mtime is newer than the at-read-start stat, restart the read. Cap at 3 attempts; after 3, acquire `unified_state_lock(...)` briefly to take a serialised snapshot under the lock, then release. Document the consistency model in the public docstring.
+- [ ] **3.7** Implement the stat-twice-or-retry pattern in `read_unified_state` (gap D04 + gap D-R-04). After reading sprint-status + phase (in steady-state-read order — gap D05 + gap D-R-03 mode (a)), re-stat both files; if either mtime is newer than the at-read-start stat, restart the read. Cap at 3 attempts; after 3, acquire `unified_state_lock(...)` with the **`read_lock_timeout`** parameter (default 2.0s, distinct from the writer's `lock_timeout=10.0s`) — see gap D-R-04. On read-lock-timeout (`filelock.Timeout`), return the best-effort pair from the third attempt with `needs_repair=True` rather than raising. On successful lock acquisition, take a serialised snapshot under the lock, then release. Document the consistency model in the public docstring with explicit mode labels (gap D-R-03).
 
 - [ ] **3.8** Differentiate the two error subclasses (gap D09): `UnifiedStateFileMissingError(UnifiedStateError)` for file-absent; `UnifiedStateRowMissingError(UnifiedStateError)` for row-absent-in-existing-file. Update all `raise` sites in the module.
 
-- [ ] **3.9** Remove the remaining `@unittest.expectedFailure` decorators from tests #2, #3, #5, #6, #8, #10, plus the new gap-report tests #13-#17 (and the split #4 → #4a/#4b). Run `PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_unified_state -v`; **all 17 tests PASS**.
+- [ ] **3.9** Remove the remaining `@unittest.expectedFailure` decorators from tests #2, #3, #5, #6, #8, #10, plus the new gap-report tests #13-#17, the second-round D-R test #17a (read-repair self-cancellation guard — gap D-R-09), and the split #4 → #4a/#4b. Run `PYTHONPATH=skills/bmad-story-automator/src python -m unittest tests.test_unified_state -v`; **all 18 tests PASS**.
 
 ### Phase 4 — Quality gates + audit-floor invariant
 
 - [ ] **4.1** Run `python -m ruff check skills/bmad-story-automator/src/story_automator/core/integration/unified_state.py tests/test_unified_state.py`; resolve any findings (typical: docstring formatting, import order — fix in-place, do not silence with `# noqa`).
 - [ ] **4.2** Run `python -m ruff format --check skills tests`; if formatting drift, apply `python -m ruff format <files>` and verify the diff is whitespace-only.
 - [ ] **4.3** `wc -l skills/bmad-story-automator/src/story_automator/core/integration/unified_state.py`: confirm ≤ 500. If 480–500, split repair helpers into `core/integration/_unified_state_repair.py` (private sibling). If > 500, **stop** and revisit before commit.
-- [ ] **4.4** Extend `tests/test_audit_regression.py` (only the invariant list; never the harness): add the new invariant string `"unified-state-write-isolation: only unified_state.py writes to both stores in the same call"` so the audit-floor count rises from 24 → 25. Implement the AST/grep check per gap D11 — **re-phrased to give it real teeth**: "any module that imports `write_phase` from `sprint_phase_map` AND `sprint_status_file` from `story_keys` MUST also import `unified_state_lock` OR equal `core/integration/unified_state.py` itself". Add a **positive-failure test** (a fixture module that violates the invariant), confirm the check trips on the fixture, then remove the fixture — this proves the invariant has real coverage rather than being vacuously true.
+- [ ] **4.4** Extend `tests/test_audit_regression.py` (only the invariant list; never the harness): add the new invariant string `"unified-state-write-isolation: only unified_state.py writes to both stores in the same call"` so the audit-floor count rises from 24 → 25. Pin the test class name as `UnifiedStateWriteIsolationInvariant(unittest.TestCase)` (gap D-R-12) — matches the existing `AuditKeyEnvScrubInvariant` / `PluginTrustBoundaryInvariant` convention. Implement the invariant as a **syntactic AST call-pattern check** (gap D-R-08 — re-phrased; the prior import-name match would either false-positive on legitimate sprint-status readers like `validate_dual_store` or false-negative on writers that compute paths via `write_atomic` without naming `sprint_status_file`):
+
+   - Walk every `.py` file under `skills/bmad-story-automator/src/story_automator/core/` (mirroring `AuditKeyEnvScrubInvariant::test_ast_no_unscrubbed_subprocess_in_core`'s AST walker pattern).
+   - For each module, detect:
+     - Call sites to `write_phase(...)` (the M48 writer).
+     - Call sites that mutate sprint-status, i.e., `write_atomic(<expr>, ...)` or `os.replace(<expr>, ...)` where `<expr>` involves `sprint_status_path(...)` or `sprint_status_file(...)`.
+   - If a module contains BOTH patterns AND its `__file__` does NOT equal `unified_state.py` AND it does NOT also contain a call to `unified_state_lock(...)`, the invariant fails for that module.
+   - Add a **positive-failure test**: in the test body, programmatically construct a temporary Python source string violating the pattern, point the AST walker at it via `ast.parse(source)`, assert the walker flags the violation. Then assert the same walker passes when run against the actual `unified_state.py` source. This proves the invariant has real teeth rather than being vacuously true.
 
 - [ ] **4.4b** Append a new `### core/integration/unified_state.py` section to `docs/spec/frozen-gate-surface.md` (gap D06) declaring all four public functions + the two error subclasses:
    ```
@@ -106,8 +116,8 @@
    ```
    Behavioral invariants: (a) read order = reverse of write order; (b) LWW by mtime with `st_dev` same-volume precondition; (c) mtime-tie → terminal phase wins, else phase store wins; (d) observe_only=False may write to disk (migration / repair); observe_only=True never writes; (e) writer is text-only on sprint-status (no YAML re-serialisation).
 - [ ] **4.5** Run `python -m unittest tests.test_audit_regression -v 2>&1 | tail -5`; confirm 25 invariants pass.
-- [ ] **4.6** Run the full suite: `PYTHONPATH=skills/bmad-story-automator/src python -m unittest discover -s tests 2>&1 | tail -3`. Confirm `4070 + 17 = 4087` tests passing, 2 skipped.
-- [ ] **4.7** Run `bash scripts/smoke-test.sh` if present; verify exit 0 (npm-pack smoke). If the script is absent on this branch, **fail and ask for guidance** (gap D27 — do NOT silently skip; `scripts/smoke-test.sh` is part of `npm run verify`, and silently skipping degrades the verify gate).
+- [ ] **4.6** Run the full suite: `PYTHONPATH=skills/bmad-story-automator/src python -m unittest discover -s tests 2>&1 | tail -3`. Confirm `4070 + 18 = 4088` tests passing, 2 skipped.
+- [ ] **4.7** Run `bash scripts/smoke-test.sh` if present; verify exit 0 (npm-pack smoke). If the script is absent on this branch (gap D27 + gap D-R-11 — subagent has no interactive operator; "ask for guidance" was unactionable), **hard-fail the milestone** by writing the absence reason to `docs/audit/g7-smoke-missing.md` and returning halt-status to the parent orchestrator. Do NOT silently skip.
 
 ### Phase 5 — Docs + changelog
 
@@ -163,7 +173,7 @@
 
 ## Test files to author
 
-- **New**: `tests/test_unified_state.py` (~320 LOC, 12 tests; see §6.2 of the spec for exact names).
+- **New**: `tests/test_unified_state.py` (~450 LOC, 18 tests including #17a read-repair-self-cancellation-guard from gap D-R-09; see §6.2 of the spec for exact names).
 - **Modified**: `tests/test_audit_regression.py` (+1 invariant — the 25th — for unified-state write isolation; ~15 LOC delta).
 - **Modified** (declarative only): no other test files. M48's existing `tests/test_sprint_phase_map.py` continues to pass unchanged — this is the proof of frozen-surface preservation.
 
@@ -201,8 +211,8 @@ If the audit-floor invariant in Phase 4.4 turns out to be too brittle (false pos
 
 ## Definition of done
 
-1. `tests/test_unified_state.py` exists and all 12 tests pass.
-2. `python -m unittest discover -s tests 2>&1 | tail -3` reports ≥ 4082 passing, 2 skipped.
+1. `tests/test_unified_state.py` exists and all 18 tests pass (12 from §6.2 + 5 gap-report HIGH tests #13-#17 + #4a/#4b split + #17a from gap D-R-09).
+2. `python -m unittest discover -s tests 2>&1 | tail -3` reports ≥ 4088 passing, 2 skipped.
 3. `python -m ruff check skills tests` exits 0.
 4. `python -m unittest tests.test_audit_regression -v` reports ≥ 25 invariants passing.
 5. `wc -l skills/bmad-story-automator/src/story_automator/core/integration/unified_state.py` ≤ 500.
