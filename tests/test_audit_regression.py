@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -726,6 +727,181 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             offenders, [],
             "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
             + "\n  ".join(offenders),
+        )
+
+
+class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
+    """Pins G7: only ``unified_state.py`` may write to BOTH dual stores in
+    the same module without calling ``unified_state_lock(...)``.
+
+    Any module under ``core/`` that calls ``write_phase(...)`` (the M48
+    writer) AND mutates the sprint-status file (via ``write_atomic`` or
+    ``os.replace`` on a path resolved by ``sprint_status_path`` /
+    ``sprint_status_file``) MUST also acquire ``unified_state_lock`` to
+    serialise the two-store write. ``unified_state.py`` itself is exempt
+    because it is the implementation of the unification surface.
+
+    Gap D-R-08: AST call-pattern check (not import-name match) — catches
+    a future module that re-implements both-store writes without
+    cooperating with the unified-state lock.
+    """
+
+    @staticmethod
+    def _module_violates(tree) -> bool:
+        """Return True iff ``tree`` calls BOTH stores without acquiring
+        ``unified_state_lock``. Pure AST analysis — no string grep.
+
+        Tracks bindings of ``name = sprint_status_path(...) /
+        sprint_status_file(...)`` so callers that hoist the path into a
+        local variable (the realistic case) are still detected.
+        """
+        import ast
+
+        SPRINT_PATH_NAMES = {"sprint_status_path", "sprint_status_file"}
+        calls_write_phase = False
+        mutates_sprint_status = False
+        acquires_unified_lock = False
+        # Names bound to sprint-status path expressions.
+        path_names: set[str] = set()
+
+        def _name_of(node) -> str | None:
+            if isinstance(node, ast.Name):
+                return node.id
+            if isinstance(node, ast.Attribute):
+                return node.attr
+            return None
+
+        def _is_path_expression(expr) -> bool:
+            """True iff ``expr`` involves a call to sprint_status_path/file
+            anywhere in its subtree (handles ``Path(sprint_status_path(r))``
+            and other wrapping patterns).
+            """
+            for sub in ast.walk(expr):
+                if isinstance(sub, ast.Call) and _name_of(sub.func) in SPRINT_PATH_NAMES:
+                    return True
+                if isinstance(sub, ast.Name) and sub.id in path_names:
+                    return True
+            return False
+
+        # First pass — record sprint-status path bindings.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and _is_path_expression(node.value):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        path_names.add(tgt.id)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                if _is_path_expression(node.value) and isinstance(node.target, ast.Name):
+                    path_names.add(node.target.id)
+
+        # Second pass — find write_phase, write_atomic on tracked paths,
+        # and unified_state_lock acquisitions.
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fname = _name_of(node.func)
+            if fname == "write_phase":
+                calls_write_phase = True
+            if fname == "unified_state_lock":
+                acquires_unified_lock = True
+            if fname in {"write_atomic", "replace"}:
+                # First positional arg is the path.
+                if node.args and _is_path_expression(node.args[0]):
+                    mutates_sprint_status = True
+                # Also accept kwarg form path=...
+                for kw in node.keywords:
+                    if kw.arg in {"path", "dst"} and _is_path_expression(kw.value):
+                        mutates_sprint_status = True
+
+        return (
+            calls_write_phase
+            and mutates_sprint_status
+            and not acquires_unified_lock
+        )
+
+    def test_ast_unified_state_module_is_isolated_writer(self) -> None:
+        """Walk every .py under core/; flag two-store writers that miss
+        ``unified_state_lock(...)``. The unified_state module itself is
+        the exempted home for both-store writes.
+        """
+        import ast
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills" / "bmad-story-automator" / "src"
+            / "story_automator"
+        )
+        core_dir = skill_src / "core"
+        offenders: list[str] = []
+        for py_file in sorted(core_dir.rglob("*.py")):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            # Exempt the unified-state module itself — it IS the legal
+            # home for two-store writes. Structural check (top-level
+            # function name) so a rename of the filename does not break
+            # the invariant.
+            owns_unified_writer = any(
+                isinstance(n, ast.FunctionDef) and n.name == "write_unified_state"
+                for n in tree.body
+            )
+            if owns_unified_writer:
+                continue
+            if self._module_violates(tree):
+                offenders.append(str(py_file.relative_to(skill_src)))
+        self.assertEqual(
+            offenders, [],
+            "Modules writing both sprint-status and phase stores without "
+            "unified_state_lock — G7 isolation invariant broken:\n  "
+            + "\n  ".join(offenders),
+        )
+
+    def test_positive_failure_synthetic_violator_is_caught(self) -> None:
+        """Construct a synthetic Python source that violates the
+        invariant and prove the AST walker flags it. This is the
+        positive-failure half of the invariant — without it the test
+        could be vacuously true.
+        """
+        import ast
+
+        synthetic = textwrap.dedent(
+            """
+            from story_automator.core.integration.sprint_phase_map import write_phase
+            from story_automator.core.utils import write_atomic
+            from story_automator.core.story_keys import sprint_status_file
+
+            def bad_writer(root, key, status, phase):
+                write_phase(root, key, phase)
+                path = sprint_status_file(root)
+                write_atomic(path, status)
+            """
+        )
+        tree = ast.parse(synthetic)
+        self.assertTrue(
+            UnifiedStateWriteIsolationInvariant._module_violates(tree),
+            "AST walker FAILED to flag a known violator — invariant is "
+            "vacuously true",
+        )
+        # And the real unified_state.py source must pass — the writer is
+        # exempted by structural recognition (test above), but the same
+        # raw source also acquires the lock so the violation rule would
+        # not fire either.
+        from story_automator.core.integration import unified_state as us_mod
+        real_tree = ast.parse(Path(us_mod.__file__).read_text(encoding="utf-8"))
+        # Strip top-level write_unified_state to exercise the rule itself.
+        stripped = ast.Module(
+            body=[n for n in real_tree.body if not (
+                isinstance(n, ast.FunctionDef) and n.name == "write_unified_state"
+            )],
+            type_ignores=[],
+        )
+        # Even without the exemption, the real module acquires the lock
+        # everywhere it writes — so the violation rule must NOT trip.
+        self.assertFalse(
+            UnifiedStateWriteIsolationInvariant._module_violates(stripped),
+            "unified_state.py raw source trips the violation rule — the "
+            "module is supposed to bracket every two-store write with "
+            "unified_state_lock",
         )
 
 

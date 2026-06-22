@@ -49,6 +49,7 @@ pass "REQ-13 contributor-guide (all four tags present as inline code)"
 # operator-facing audit-trail document added by docs-m2) are excluded from the
 # signature so the gate stays stable as adjacent docs are added.
 EXPECTED="\
+docs/changelog/2026-06-22-g7-unified-state.md:1
 docs/changelog/2026-06-22-operability-batch.md:1
 docs/changelog/2026-06-22-round-3-bug-sweep.md:1
 docs/changelog/260401.md:3,26,61,85

@@ -7,3 +7,21 @@ strictly read-only with respect to TEA state: bridges never mutate gate
 files, evidence records, or telemetry events.
 """
 from __future__ import annotations
+
+from .unified_state import (
+    UnifiedStateError,
+    UnifiedStateFileMissingError,
+    UnifiedStateRowMissingError,
+    read_unified_state,
+    unified_state_lock,
+    write_unified_state,
+)
+
+__all__ = [
+    "UnifiedStateError",
+    "UnifiedStateFileMissingError",
+    "UnifiedStateRowMissingError",
+    "read_unified_state",
+    "unified_state_lock",
+    "write_unified_state",
+]

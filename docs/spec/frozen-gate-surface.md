@@ -115,6 +115,18 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 ### `core/gate_orchestrator.py` (Path B / N5 — Merkle export)
 - `run_production_gate(...)` additionally emits `evidence_merkle_root` on each persisted gate file. Computed over canonical-JSON evidence in sorted order; deterministic across machines.
 
+### `core/integration/unified_state.py` (Milestone D / G7)
+- `read_unified_state(project_root, story_key, *, observe_only=False, read_lock_timeout=2.0) -> tuple[str, str, bool]` — returns the monomorphic `(sprint_status, phase_value, needs_repair)` triple. Read order is REVERSED from the writer's order (sprint-status first, phase second) so a reader observing the new sprint-status also sees the new phase store. With `observe_only=False` (default) the function MAY write to disk (legacy single-store migration; LWW conflict repair). With `observe_only=True` the function NEVER writes; `needs_repair=True` flags on-disk divergence (conflict, migration-pending, or unknown sprint-status string).
+- `write_unified_state(project_root, story_key, sprint_status, phase, *, lock_timeout=10.0) -> None` — atomically writes both stores under `unified_state_lock`. Resolves `story_key` to the canonical dotted id via `normalize_story_key(...).id`; deletes orphan slug-keyed entries from the phase store. Phase store written FIRST, sprint-status SECOND (gap D-R-03 mode (b)).
+- `unified_state_lock(project_root) -> filelock.FileLock` — per-project lock at `<implementation_artifacts_dir>/.unified-state.lock`. Exposed for advanced callers that need to bracket multi-row updates.
+- `UnifiedStateError(ValueError)` — base; raised on consistency/timeout/cross-fs/round-trip failure.
+- `UnifiedStateFileMissingError(UnifiedStateError)` — sprint-status / phase store file absent.
+- `UnifiedStateRowMissingError(UnifiedStateError)` — file present but the requested row is absent.
+
+Behavioral invariants: (a) read order = REVERSE of write order; (b) LWW by `st_mtime_ns` with `st_dev` same-volume precondition that runs ONLY inside the resolver (migration path skips it because the phase store is absent); (c) mtime-tie → terminal phase wins, else phase store wins; (d) `observe_only=False` may write to disk (migration / repair); `observe_only=True` never writes; (e) sprint-status writer is text-only regex mutation — no YAML re-serialisation (no `import yaml`); (f) self-cancellation guard: resolver re-reads both files under the lock and only projects if the locked re-read still shows a conflict with the same winner.
+
+Pinned by `tests/test_audit_regression.py::UnifiedStateWriteIsolationInvariant` — any new module under `core/` that calls `write_phase(...)` AND `write_atomic(...)` on a sprint-status path WITHOUT acquiring `unified_state_lock(...)` fails the audit-floor suite.
+
 ## Frozen behaviors (the four audit invariants + plugin trust-boundary)
 
 These are pinned by `tests/test_audit_regression.py`. Every adoption PR must keep that suite green.
