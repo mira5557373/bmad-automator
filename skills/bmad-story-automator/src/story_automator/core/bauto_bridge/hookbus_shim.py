@@ -303,7 +303,7 @@ class HookBusShim:
                 continue
             try:
                 raw = spec.callback(context)
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 if spec.fail_closed:
                     # An error in a fail-closed blocking hook *is* a veto.
                     return True

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """TEA (Test Evidence Artifact) emitters.
 
 Deterministic writers for the two M30 artifacts:
@@ -9,6 +7,7 @@ Deterministic writers for the two M30 artifacts:
 Both writers emit canonical JSON (sorted keys) via the atomic-write helper in
 ``core.common`` so a re-emit on identical inputs produces a byte-identical file.
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path

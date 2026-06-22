@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Deferred-work log for the bmad-story-automator factory.
 
 Operators occasionally need to record work that the factory cannot complete
@@ -23,6 +21,7 @@ enforced by ``tests/test_no_unauthorized_imports.py``):
 * Severity is a closed vocabulary; unknown values raise ``ValueError``
   fail-fast at the call site rather than poisoning the log.
 """
+from __future__ import annotations
 
 import errno
 import os

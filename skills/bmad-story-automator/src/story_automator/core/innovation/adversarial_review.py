@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Adversarial review assignment + acceptance gate (M57).
 
 Enforces two invariants for the production-ready factory:
@@ -28,6 +26,7 @@ review_taxonomy) can wire it without pulling in heavy dependencies.
 
 Stdlib + typing only — honors the project's hard guardrail on imports.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence

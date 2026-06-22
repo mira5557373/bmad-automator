@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Stack risk weights — folder taxonomy to per-stack risk multiplier.
 
 This module classifies changed paths into a small, stable set of *stack* groups
@@ -32,6 +30,7 @@ Typical usage::
     multiplier = risk_multiplier(changed_paths, strategy="weighted")
     weighted_score = base * multiplier
 """
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from story_automator.core.cli_dispatcher import (
-    KNOWN_STAGES,
     STOP_HOOK_DIALECTS,
     DispatcherError,
     DispatchResult,

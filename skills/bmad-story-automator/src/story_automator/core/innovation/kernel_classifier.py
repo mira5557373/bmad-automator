@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Kernel violation classifier.
 
 Inspects a story kernel and reports which of the four closed violation
@@ -26,6 +24,7 @@ The classifier accepts either Markdown text or an already-parsed
 lightweight (H2 sectioning only) so the classifier stays self-contained
 and runs without dragging in the gate-time kernel schema.
 """
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass

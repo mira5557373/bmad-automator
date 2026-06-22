@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Worktree-aware baseline_commit capture (M49).
 
 When bauto runs under ``scm.isolation=worktree``, the production-gate diff
@@ -26,6 +24,7 @@ Guardrails honoured:
 * Single error type (``WorktreeBaselineError``) so callers can fail-closed
   without parsing free-form ``subprocess.CalledProcessError`` strings.
 """
+from __future__ import annotations
 
 import subprocess
 from pathlib import Path

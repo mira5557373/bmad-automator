@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """TEA Waiver <-> bauto Escalation bidirectional translator (M47).
 
 Two vocabularies meet at this bridge:
@@ -23,6 +21,7 @@ The module is pure (no I/O, no telemetry, no logging) so it can be composed by
 either side without coupling. It deliberately does NOT import from
 core/telemetry_events.py — guardrail compliance.
 """
+from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any

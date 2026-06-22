@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """RAMR — Risk-Aware Model Routing.
 
 Given a BMAD persona, a risk level (P0..P3), and a workflow phase, produce a
@@ -23,6 +21,7 @@ The module is intentionally dependency-light: no imports from other gate
 subsystems. Callers can feed in their own CLI registry to override the
 bundled defaults, e.g. for self-hosted models.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
