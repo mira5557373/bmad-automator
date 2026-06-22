@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -296,6 +297,11 @@ def validate_waiver(waiver: dict[str, Any]) -> None:
     _require_str(waiver, "reason", "waiver")
     _require_str(waiver, "signature", "waiver")
     _require_str(waiver, "profile_hash", "waiver")
+    # Reject naive (no-tz) ISO timestamps at schema-validate time so they
+    # cannot crash the orchestrator later with TypeError when compared to
+    # `datetime.now(timezone.utc)` inside `is_waiver_expired`.
+    _require_tz_aware_iso(waiver, "issued_at")
+    _require_tz_aware_iso(waiver, "expires_at")
     cats = waiver.get("failing_categories")
     if not isinstance(cats, list) or not cats:
         raise GateSchemaError(
@@ -347,6 +353,24 @@ def _require_str(obj: dict[str, Any], key: str, label: str) -> None:
     val = obj.get(key)
     if not isinstance(val, str) or not val:
         raise GateSchemaError(f"{label}.{key} must be a non-empty string")
+
+
+def _require_tz_aware_iso(waiver: dict[str, Any], key: str) -> None:
+    """Reject naive ISO timestamps; they crash orchestrator comparisons."""
+    text = str(waiver.get(key, "")).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise GateSchemaError(
+            f"waiver.{key} is not a valid ISO 8601 timestamp: {exc}"
+        ) from exc
+    if parsed.tzinfo is None:
+        raise GateSchemaError(
+            f"waiver.{key} must include a timezone offset (e.g. 'Z' or '+00:00'); "
+            f"got {waiver.get(key)!r}"
+        )
 
 
 def _require_int(obj: dict[str, Any], key: str, label: str) -> None:

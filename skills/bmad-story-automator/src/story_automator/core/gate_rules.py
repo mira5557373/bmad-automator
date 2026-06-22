@@ -213,11 +213,23 @@ def _check_profile_hash(
 
 
 def _parse_iso(value: str) -> datetime:
-    """Parse ISO 8601 datetime string to timezone-aware datetime."""
+    """Parse ISO 8601 datetime string to timezone-aware datetime.
+
+    Naive datetimes (no tz designator) are rejected with ``ValueError``: comparing
+    them against ``datetime.now(timezone.utc)`` raises ``TypeError`` deep inside
+    the orchestrator (`check_gate_reuse` -> `is_waiver_expired`). Fail loud here
+    so callers' existing ``ValueError`` handlers surface a clean ``WaiverError``
+    / `(False, reason)` instead of crashing the gate runtime.
+    """
     text = value.strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
-    return datetime.fromisoformat(text)
+    result = datetime.fromisoformat(text)
+    if result.tzinfo is None:
+        raise ValueError(
+            f"ISO timestamp must include timezone offset; got {value!r}"
+        )
+    return result
 
 
 # ===========================================================================
