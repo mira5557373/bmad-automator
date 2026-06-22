@@ -106,9 +106,14 @@ def md5_hex8(value: str) -> str:
 
 
 def run_cmd(*args: str, timeout: int = DEFAULT_COMMAND_TIMEOUT, env: dict[str, str] | None = None, cwd: str | Path | None = None) -> tuple[str, int]:
+    from .audit import scrub_env_for_subprocess
+
     proc_env = os.environ.copy()
     if env:
         proc_env.update(env)
+    # D-04: scrub the audit chain key at the trust boundary so a child
+    # process cannot read or forge audit records.
+    proc_env = scrub_env_for_subprocess(proc_env)
     completed = subprocess.run(
         list(args),
         capture_output=True,

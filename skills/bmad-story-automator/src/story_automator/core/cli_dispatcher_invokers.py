@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from . import tmux_runtime
+from .audit import scrub_env_for_subprocess
 from .cli_profile import CLIProfile
 
 if False:  # TYPE_CHECKING — avoid a runtime import cycle.
@@ -99,6 +100,7 @@ def _default_git_head(cwd: str) -> str:
             text=True,
             timeout=15,
             check=False,
+            env=scrub_env_for_subprocess(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""

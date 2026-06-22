@@ -15,6 +15,7 @@ import subprocess
 import time
 from typing import Any, Callable
 
+from .audit import scrub_env_for_subprocess
 from .gate_schema import (
     make_evidence_record,
     make_timeout_evidence,
@@ -81,6 +82,9 @@ def run_collector_with_timeout(
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
+            # D-04: scrub BMAD_AUDIT_KEY at the trust boundary so the
+            # collector cannot forge audit records.
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError:
         duration_ms = _monotonic_ms() - start_ms

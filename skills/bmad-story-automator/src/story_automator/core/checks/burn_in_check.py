@@ -20,6 +20,17 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+# D-04: import the trust-boundary scrub helper for subprocess env hygiene.
+# When this script is invoked directly (e.g. PYTHONPATH not set), fall back
+# to a local no-op — the parent adjudicator already scrubs before launching.
+try:
+    from story_automator.core.audit import scrub_env_for_subprocess
+except ImportError:  # pragma: no cover - defensive fallback
+    def scrub_env_for_subprocess(env=None):  # type: ignore[no-redef]
+        src = dict(os.environ if env is None else env)
+        src.pop("BMAD_AUDIT_KEY", None)
+        return src
+
 
 def _parse_junit_tests(xml_path: str) -> dict[str, str]:
     """Parse JUnit XML, return {test_name: 'pass'|'fail'|'error'|'skip'}."""
@@ -170,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                 test_cmd, cwd=checkout,
                 capture_output=True, text=True, errors="replace",
                 timeout=per_run_timeout,
+                env=scrub_env_for_subprocess(),
             )
         except FileNotFoundError:
             print(f"test command not found: {test_cmd[0]}")

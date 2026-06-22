@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
+from .audit import scrub_env_for_subprocess
+
 __all__ = [
     "CollectorCheckoutError",
     "create_collector_checkout",
@@ -67,6 +69,7 @@ def create_collector_checkout(
             capture_output=True,
             text=True,
             timeout=10,
+            env=scrub_env_for_subprocess(),
         )
     except subprocess.TimeoutExpired as exc:
         raise CollectorCheckoutError(
@@ -99,6 +102,7 @@ def create_collector_checkout(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
+            env=scrub_env_for_subprocess(),
         )
         if result.returncode != 0:
             shutil.rmtree(checkout_dir, ignore_errors=True)
@@ -112,6 +116,7 @@ def create_collector_checkout(
             capture_output=True,
             text=True,
             timeout=10,
+            env=scrub_env_for_subprocess(),
         )
         actual_sha = verify.stdout.strip()
         if actual_sha != resolved_sha:
@@ -145,6 +150,7 @@ def cleanup_collector_checkout(
                 cwd=str(Path(project_root).resolve()),
                 capture_output=True,
                 timeout=_PRUNE_TIMEOUT,
+                env=scrub_env_for_subprocess(),
             )
         except (subprocess.TimeoutExpired, OSError):
             pass

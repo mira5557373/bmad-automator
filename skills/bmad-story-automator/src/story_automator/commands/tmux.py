@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from story_automator.core.audit import scrub_env_for_subprocess
 from story_automator.core.cli_dispatcher import (
     DispatcherError,
     DispatchResult,
@@ -87,6 +88,7 @@ def _git_head_sha(cwd: str) -> str:
             text=True,
             timeout=15,
             check=False,
+            env=scrub_env_for_subprocess(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""

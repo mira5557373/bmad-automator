@@ -15,6 +15,15 @@ import os
 import subprocess
 import sys
 
+# D-04: import the trust-boundary scrub helper for subprocess env hygiene.
+try:
+    from story_automator.core.audit import scrub_env_for_subprocess
+except ImportError:  # pragma: no cover - defensive fallback
+    def scrub_env_for_subprocess(env=None):  # type: ignore[no-redef]
+        src = dict(os.environ if env is None else env)
+        src.pop("BMAD_AUDIT_KEY", None)
+        return src
+
 
 def _run_phase(
     name: str, cmd: list[str], checkout: str, timeout: int,
@@ -24,6 +33,7 @@ def _run_phase(
             cmd, cwd=checkout,
             capture_output=True, text=True, errors="replace",
             timeout=timeout,
+            env=scrub_env_for_subprocess(),
         )
         return {
             "phase": name,

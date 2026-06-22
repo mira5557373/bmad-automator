@@ -51,6 +51,10 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 - `readiness_gate(...)`.
 - `VERIFIERS` dict registration + `runtime_policy.VALID_VERIFIERS` membership.
 
+### `core/audit.py`
+- `AuditKeyMissing`, `AuditLockTimeout`, `AuditLog`, `audit_for_policy`, `derive_key`, `load_key_from_env` — chain-key surface; `load_key_from_env` returns `None` when `BMAD_AUDIT_KEY` is absent (pinned by `LoadKeyFromEnvAbsentContractTests`).
+- `scrub_env_for_subprocess(env: Mapping[str, str] | None = None) -> dict[str, str]` — D-04 trust-boundary helper. Returns a copy of `env` (or `os.environ` when `None`) with `BMAD_AUDIT_KEY` removed. MUST be passed to every `subprocess.run` / `Popen` / `call` invocation under `core/` as `env=scrub_env_for_subprocess(...)`. The structural invariant is pinned by `tests/test_audit_regression.py::AuditKeyEnvScrubInvariant::test_ast_no_unscrubbed_subprocess_in_core` — any new unscrubbed subprocess call site fails the suite at parse time.
+
 ### `data/profiles/`
 - `default.json` and `msme-erp.json` schemas: `{version, id, snapshot, seed_template, toolchain, matrix, categories, categories_na, rules, invariants, cost_tier, timeouts, forbidden_until}` — additive fields only.
 

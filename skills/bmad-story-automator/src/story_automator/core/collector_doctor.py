@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from typing import Any
 
+from .audit import scrub_env_for_subprocess
 from .collector_config import CollectorConfig
 from .collector_registry import CollectorRegistry
 
@@ -60,6 +61,7 @@ def _get_tool_version(cmd: tuple[str, ...]) -> str:
             capture_output=True,
             text=True,
             timeout=_VERSION_TIMEOUT,
+            env=scrub_env_for_subprocess(),
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip().split("\n")[0]

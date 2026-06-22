@@ -31,6 +31,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .audit import scrub_env_for_subprocess
+
 _PRUNE_TIMEOUT_S = 30
 _LIST_TIMEOUT_S = 15
 
@@ -53,6 +55,7 @@ def _registered_worktrees(project_root: str | Path) -> set[str]:
             capture_output=True,
             text=True,
             timeout=_LIST_TIMEOUT_S,
+            env=scrub_env_for_subprocess(),
         )
     except (subprocess.TimeoutExpired, OSError):
         return set()
@@ -72,6 +75,7 @@ def _prune_registry(project_root: str | Path) -> bool:
             ["git", "-C", str(project_root), "worktree", "prune"],
             capture_output=True,
             timeout=_PRUNE_TIMEOUT_S,
+            env=scrub_env_for_subprocess(),
         )
     except (subprocess.TimeoutExpired, OSError):
         return False

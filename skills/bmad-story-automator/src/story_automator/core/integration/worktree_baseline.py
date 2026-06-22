@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+
+from ..audit import scrub_env_for_subprocess
 from typing import Any
 
 __all__ = [
@@ -78,6 +80,7 @@ def _run_git(*args: str, cwd: str | Path) -> str:
             stderr=subprocess.PIPE,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError as exc:
         raise WorktreeBaselineError("git executable not found on PATH") from exc
@@ -103,6 +106,7 @@ def _ref_exists(repo_path: str | Path, ref: str) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=scrub_env_for_subprocess(),
         )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return False

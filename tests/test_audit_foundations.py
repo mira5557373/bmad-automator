@@ -68,6 +68,8 @@ class AuditPublicApiTests(unittest.TestCase):
                     "audit_for_policy",
                     "derive_key",
                     "load_key_from_env",
+                    # D-04 additive — scrub helper at the subprocess trust boundary.
+                    "scrub_env_for_subprocess",
                 ]
             ),
         )
@@ -416,6 +418,42 @@ class DocstringCoverageTests(unittest.TestCase):
         doc = (load_key_from_env.__doc__ or "").lower()
         self.assertIn("none", doc)
         self.assertIn("bmad_audit_key", doc)
+
+
+class ScrubEnvForSubprocessTests(unittest.TestCase):
+    """Unit tests for the D-04 trust-boundary env-scrub helper."""
+
+    def test_helper_exported_in_all(self) -> None:
+        import story_automator.core.audit as audit
+
+        self.assertIn("scrub_env_for_subprocess", audit.__all__)
+
+    def test_helper_returns_copy_not_alias(self) -> None:
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        src = {"BMAD_AUDIT_KEY": "k", "X": "1"}
+        result = scrub_env_for_subprocess(src)
+        result["MUTATE"] = "yes"
+        self.assertNotIn("MUTATE", src,
+                         "scrub_env_for_subprocess must return a fresh copy")
+
+    def test_helper_does_not_mutate_os_environ(self) -> None:
+        import os
+        from unittest.mock import patch
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "v"}, clear=False):
+            scrub_env_for_subprocess()
+            self.assertEqual(os.environ.get("BMAD_AUDIT_KEY"), "v",
+                             "scrub helper must not mutate os.environ")
+
+    def test_helper_has_docstring(self) -> None:
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        self.assertTrue(
+            scrub_env_for_subprocess.__doc__
+            and scrub_env_for_subprocess.__doc__.strip()
+        )
 
 
 if __name__ == "__main__":

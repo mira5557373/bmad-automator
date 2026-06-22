@@ -98,9 +98,14 @@ def run_cmd(
     env: dict[str, str] | None = None,
     timeout: int = DEFAULT_COMMAND_TIMEOUT,
 ) -> CommandResult:
+    from .audit import scrub_env_for_subprocess
+
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
+    # D-04: scrub the audit chain key at the trust boundary so a child
+    # process cannot read or forge audit records.
+    merged_env = scrub_env_for_subprocess(merged_env)
     try:
         completed = subprocess.run(
             args,

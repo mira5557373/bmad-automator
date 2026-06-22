@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .audit import scrub_env_for_subprocess
+
 __all__ = [
     "ComplianceError",
     "ComplianceReport",
@@ -276,7 +278,8 @@ def check_compliance(
     prompt = _render_prompt(spec_text=spec_text, diff_text=diff_text)
 
     effective_cwd = cwd if cwd is not None else Path.cwd()
-    child_env = {**os.environ, "LANG": "C.UTF-8"}
+    # D-04: scrub BMAD_AUDIT_KEY at the trust boundary before adding LANG.
+    child_env = scrub_env_for_subprocess({**os.environ, "LANG": "C.UTF-8"})
 
     try:
         completed = subprocess.run(

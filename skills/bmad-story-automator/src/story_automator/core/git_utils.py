@@ -21,6 +21,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from .audit import scrub_env_for_subprocess
+
 GIT_TIMEOUT_S = 120
 
 
@@ -42,6 +44,7 @@ def _git(repo: str | Path, *args: str) -> tuple[int, str]:
             text=True,
             timeout=GIT_TIMEOUT_S,
             check=False,
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError as exc:  # `git` not on PATH
         raise GitError(f"git executable not found: {exc}") from exc

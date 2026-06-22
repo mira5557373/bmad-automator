@@ -507,5 +507,202 @@ class GateFileDeterminismBaseline(unittest.TestCase):
         self.assertEqual(s1, s2)
 
 
+# ---------------------------------------------------------------------------
+# D-04 — scrub BMAD_AUDIT_KEY from subprocess env at the trust boundary
+# ---------------------------------------------------------------------------
+# The audit-chain key (BMAD_AUDIT_KEY) is loaded once by the parent process
+# via load_key_from_env(); it must NEVER leak into a subprocess environment.
+# A child collector / git / docker invocation that can read the raw key can
+# forge audit records. The fix is to scrub the env at the subprocess call
+# site (a trust boundary), not at the source — load_key_from_env()'s
+# "returns None when absent" contract remains untouched.
+#
+# Invariants pinned here:
+#   1. scrub_env_for_subprocess() removes BMAD_AUDIT_KEY only.
+#   2. parent process can still call load_key_from_env() after scrubbing
+#      (scrub returns a COPY; it does not mutate os.environ).
+#   3. AST scan: every subprocess.run / subprocess.Popen / subprocess.call
+#      in core/ passes env=scrub_env_for_subprocess(...) — fail-closed
+#      structural invariant that future regressions trip immediately.
+
+
+class AuditKeyEnvScrubInvariant(unittest.TestCase):
+    """Pins D-04: BMAD_AUDIT_KEY must never reach a subprocess env."""
+
+    def test_scrub_env_removes_bmad_audit_key(self) -> None:
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        result = scrub_env_for_subprocess({"BMAD_AUDIT_KEY": "secret", "FOO": "1"})
+        self.assertNotIn("BMAD_AUDIT_KEY", result)
+
+    def test_scrub_env_preserves_other_keys(self) -> None:
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        src = {
+            "BMAD_AUDIT_KEY": "secret",
+            "PATH": "/usr/bin",
+            "HOME": "/root",
+            "LANG": "C.UTF-8",
+            "TERM": "xterm",
+            "CI": "true",
+        }
+        result = scrub_env_for_subprocess(src)
+        for key in ("PATH", "HOME", "LANG", "TERM", "CI"):
+            self.assertEqual(result[key], src[key], f"key {key} was mangled")
+        self.assertEqual(len(result), 5)
+
+    def test_scrub_env_idempotent(self) -> None:
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        once = scrub_env_for_subprocess({"BMAD_AUDIT_KEY": "s", "X": "1"})
+        twice = scrub_env_for_subprocess(once)
+        self.assertEqual(once, twice)
+
+    def test_scrub_env_with_none_uses_os_environ(self) -> None:
+        import os
+        from unittest.mock import patch
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        canary = {"BMAD_AUDIT_KEY": "leak-me", "CANARY_VAR": "alive"}
+        with patch.dict(os.environ, canary, clear=False):
+            result = scrub_env_for_subprocess()
+        self.assertNotIn("BMAD_AUDIT_KEY", result)
+        self.assertEqual(result.get("CANARY_VAR"), "alive")
+
+    def test_load_key_from_env_still_returns_key_after_scrub(self) -> None:
+        # The scrub helper must NOT touch the parent's os.environ — it
+        # returns a copy. The parent's load_key_from_env() contract is
+        # unchanged, so a downstream call after scrubbing still resolves
+        # the key.
+        import os
+        from unittest.mock import patch
+        from story_automator.core.audit import (
+            derive_key,
+            load_key_from_env,
+            scrub_env_for_subprocess,
+        )
+
+        with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "still-here"}, clear=False):
+            scrubbed = scrub_env_for_subprocess()
+            self.assertNotIn("BMAD_AUDIT_KEY", scrubbed)
+            # Parent process still sees the key — load_key_from_env works.
+            key = load_key_from_env()
+            self.assertEqual(key, derive_key("still-here"))
+
+    def test_real_subprocess_cannot_see_audit_key(self) -> None:
+        # End-to-end behavioural check: launch a real Python child with
+        # env=scrub_env_for_subprocess() and assert the child does NOT
+        # observe BMAD_AUDIT_KEY in its os.environ.
+        import os
+        import subprocess
+        import sys
+        from unittest.mock import patch
+        from story_automator.core.audit import scrub_env_for_subprocess
+
+        with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "must-not-leak"}, clear=False):
+            scrubbed = scrub_env_for_subprocess()
+            proc = subprocess.run(
+                [sys.executable, "-c",
+                 "import os; print(os.environ.get('BMAD_AUDIT_KEY', 'NONE'))"],
+                env=scrubbed,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        self.assertEqual(proc.returncode, 0, f"child failed: {proc.stderr}")
+        self.assertEqual(proc.stdout.strip(), "NONE")
+
+    def test_ast_no_unscrubbed_subprocess_in_core(self) -> None:
+        """Every subprocess.run / Popen / call in core/ MUST pass
+        env=scrub_env_for_subprocess(...).
+
+        The check accepts:
+          * env=scrub_env_for_subprocess(...) — direct call.
+          * env=<name> where <name> is the result of an earlier
+            scrub_env_for_subprocess(...) assignment in the same function.
+        Anything else (no env=, env=os.environ, env=os.environ.copy(),
+        env=child_env constructed without scrubbing) is rejected.
+        """
+        import ast
+
+        core_dir = (
+            Path(__file__).resolve().parents[1]
+            / "skills" / "bmad-story-automator" / "src"
+            / "story_automator" / "core"
+        )
+        offenders: list[str] = []
+
+        def _is_scrub_call(node: ast.AST) -> bool:
+            if not isinstance(node, ast.Call):
+                return False
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "scrub_env_for_subprocess":
+                return True
+            if isinstance(func, ast.Attribute) and func.attr == "scrub_env_for_subprocess":
+                return True
+            return False
+
+        def _is_subprocess_call(node: ast.Call) -> bool:
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                return (
+                    func.value.id == "subprocess"
+                    and func.attr in {"run", "Popen", "call", "check_call", "check_output"}
+                )
+            return False
+
+        for py_file in sorted(core_dir.rglob("*.py")):
+            # Skip audit.py itself (defines the helper) — it has no
+            # subprocess calls.
+            if py_file.name == "audit.py":
+                continue
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            # Track names bound to scrub_env_for_subprocess(...) per function
+            # scope, so callers may write:
+            #   sandboxed = scrub_env_for_subprocess(env)
+            #   subprocess.run(..., env=sandboxed)
+            class _Visitor(ast.NodeVisitor):
+                def __init__(self) -> None:
+                    self.scrubbed_names: set[str] = set()
+
+                def visit_Assign(self, node: ast.Assign) -> None:
+                    if _is_scrub_call(node.value):
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name):
+                                self.scrubbed_names.add(tgt.id)
+                    self.generic_visit(node)
+
+                def visit_Call(self, node: ast.Call) -> None:
+                    if _is_subprocess_call(node):
+                        env_kw = next(
+                            (kw for kw in node.keywords if kw.arg == "env"), None,
+                        )
+                        ok = False
+                        if env_kw is not None:
+                            val = env_kw.value
+                            if _is_scrub_call(val):
+                                ok = True
+                            elif isinstance(val, ast.Name) and val.id in self.scrubbed_names:
+                                ok = True
+                        if not ok:
+                            offenders.append(
+                                f"{py_file.relative_to(core_dir)}:{node.lineno} — "
+                                f"subprocess call without scrub_env_for_subprocess"
+                            )
+                    self.generic_visit(node)
+
+            _Visitor().visit(tree)
+
+        self.assertEqual(
+            offenders, [],
+            "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
+            + "\n  ".join(offenders),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

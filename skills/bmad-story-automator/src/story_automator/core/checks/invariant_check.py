@@ -11,8 +11,18 @@ Stdlib only — no story_automator imports.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+
+# D-04: import the trust-boundary scrub helper for subprocess env hygiene.
+try:
+    from story_automator.core.audit import scrub_env_for_subprocess
+except ImportError:  # pragma: no cover - defensive fallback
+    def scrub_env_for_subprocess(env=None):  # type: ignore[no-redef]
+        src = dict(os.environ if env is None else env)
+        src.pop("BMAD_AUDIT_KEY", None)
+        return src
 
 
 def filter_registry(
@@ -73,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=120, cwd=checkout,
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError:
         print(f"{check_type} not found")

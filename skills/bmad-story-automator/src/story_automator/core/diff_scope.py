@@ -11,6 +11,8 @@ import fnmatch
 import subprocess
 from pathlib import Path
 
+from .audit import scrub_env_for_subprocess
+
 __all__ = [
     "DiffScopeError",
     "compute_changed_files",
@@ -59,6 +61,7 @@ def compute_changed_files(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
+            env=scrub_env_for_subprocess(),
         )
     except subprocess.TimeoutExpired as exc:
         raise DiffScopeError("git diff timed out") from exc

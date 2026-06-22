@@ -13,6 +13,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any
 
+from .audit import scrub_env_for_subprocess
 from .trust_boundary import assert_host_context
 
 _NS_SANITIZE = re.compile(r"[^a-z0-9-]")
@@ -127,6 +128,7 @@ def _provision_minimal(
     cmd = ["docker", "compose", "-f", compose, "-p", config.namespace, "up", "-d"]
     result = subprocess.run(
         cmd, cwd=project_root, capture_output=True, text=True, timeout=300,
+        env=scrub_env_for_subprocess(),
     )
     if result.returncode != 0:
         return SystemEnvInfo(
@@ -147,6 +149,7 @@ def _provision_full(
     kind_cmd = ["kind", "create", "cluster", "--name", config.namespace]
     result = subprocess.run(
         kind_cmd, capture_output=True, text=True, timeout=300,
+        env=scrub_env_for_subprocess(),
     )
     if result.returncode != 0:
         return SystemEnvInfo(
@@ -160,6 +163,7 @@ def _provision_full(
         ]
         helm_result = subprocess.run(
             helm_cmd, cwd=project_root, capture_output=True, text=True, timeout=600,
+            env=scrub_env_for_subprocess(),
         )
         if helm_result.returncode != 0:
             return SystemEnvInfo(
@@ -182,6 +186,7 @@ def _apply_seed_data(config: SystemEnvConfig, project_root: str) -> None:
                      "-f", config.seed_data]
     subprocess.run(
         seed_cmd, cwd=project_root, capture_output=True, text=True, timeout=300,
+        env=scrub_env_for_subprocess(),
     )
 
 
@@ -195,11 +200,13 @@ def teardown_system_env(
         subprocess.run(
             ["docker", "compose", "-p", env_info.namespace, "down", "-v"],
             cwd=project_root, capture_output=True, text=True, timeout=120,
+            env=scrub_env_for_subprocess(),
         )
     elif env_info.tier == ENV_TIER_FULL:
         subprocess.run(
             ["kind", "delete", "cluster", "--name", env_info.namespace],
             capture_output=True, text=True, timeout=120,
+            env=scrub_env_for_subprocess(),
         )
 
 

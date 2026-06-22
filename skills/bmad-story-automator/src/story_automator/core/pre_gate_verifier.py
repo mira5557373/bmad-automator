@@ -38,6 +38,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .audit import scrub_env_for_subprocess
 from .git_utils import GitError, rev_parse_head, same_commit
 from .lie_detector import detect_baseline_drift
 from .result_json import (
@@ -157,6 +158,7 @@ def _check_claimed_files_in_diff(
             ["git", "-C", str(project_root), "diff", "--name-only",
              f"{baseline_sha}..HEAD"],
             capture_output=True, text=True, timeout=30, check=False,
+            env=scrub_env_for_subprocess(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return VerifyOutcome.escalate(

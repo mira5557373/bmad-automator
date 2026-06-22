@@ -15,6 +15,15 @@ import re
 import subprocess
 import sys
 
+# D-04: import the trust-boundary scrub helper for subprocess env hygiene.
+try:
+    from story_automator.core.audit import scrub_env_for_subprocess
+except ImportError:  # pragma: no cover - defensive fallback
+    def scrub_env_for_subprocess(env=None):  # type: ignore[no-redef]
+        src = dict(os.environ if env is None else env)
+        src.pop("BMAD_AUDIT_KEY", None)
+        return src
+
 VALID_TOOLS = frozenset({"mutmut", "stryker"})
 
 _KILLED_RE = re.compile(r"Killed:\s*(\d+)", re.IGNORECASE)
@@ -65,6 +74,7 @@ def _run_mutmut(checkout: str, changed_files: str) -> tuple[float, int, int, int
         subprocess.run(
             cmd, cwd=checkout, capture_output=True, text=True,
             errors="replace", timeout=600,
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError:
         raise
@@ -75,6 +85,7 @@ def _run_mutmut(checkout: str, changed_files: str) -> tuple[float, int, int, int
         result = subprocess.run(
             ["mutmut", "results"], cwd=checkout,
             capture_output=True, text=True, errors="replace", timeout=30,
+            env=scrub_env_for_subprocess(),
         )
         return _parse_mutmut_score(result.stdout)
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -87,6 +98,7 @@ def _run_stryker(checkout: str) -> tuple[float, int, int, int]:
         subprocess.run(
             ["npx", "stryker", "run"], cwd=checkout,
             capture_output=True, text=True, errors="replace", timeout=600,
+            env=scrub_env_for_subprocess(),
         )
     except FileNotFoundError:
         raise
