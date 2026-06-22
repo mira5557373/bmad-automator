@@ -655,18 +655,36 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 )
             return False
 
+        def _defines_scrub_helper(tree: ast.Module) -> bool:
+            """Return True iff the module's top level defines
+            ``scrub_env_for_subprocess`` — rename-proof signal that this
+            *is* the helper's implementation file (current home:
+            ``audit_env_scrub.py``; ``audit.py`` only re-exports). The
+            invariant must not apply to the file that owns the helper, no
+            matter which filename hosts it.
+            """
+            for node in tree.body:
+                if (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name == "scrub_env_for_subprocess"
+                ):
+                    return True
+            return False
+
         py_files: list[Path] = []
         for d in scan_dirs:
             if d.is_dir():
                 py_files.extend(d.rglob("*.py"))
         for py_file in sorted(py_files):
-            # Skip audit.py itself (defines the helper) — it has no
-            # subprocess calls.
-            if py_file.name == "audit.py":
-                continue
             try:
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))
             except SyntaxError:
+                continue
+            # Skip the helper's implementation file (it defines the helper
+            # and has no subprocess calls). Structural — not filename-based —
+            # so a future rename of audit.py / audit_env_scrub.py / split
+            # cannot break the invariant.
+            if _defines_scrub_helper(tree):
                 continue
             # Track names bound to scrub_env_for_subprocess(...) per function
             # scope, so callers may write:

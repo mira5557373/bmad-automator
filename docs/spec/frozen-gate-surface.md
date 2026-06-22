@@ -53,7 +53,12 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 
 ### `core/audit.py`
 - `AuditKeyMissing`, `AuditLockTimeout`, `AuditLog`, `audit_for_policy`, `derive_key`, `load_key_from_env` — chain-key surface; `load_key_from_env` returns `None` when `BMAD_AUDIT_KEY` is absent (pinned by `LoadKeyFromEnvAbsentContractTests`).
-- `scrub_env_for_subprocess(env: Mapping[str, str] | None = None) -> dict[str, str]` — D-04 trust-boundary helper. Returns a copy of `env` (or `os.environ` when `None`) with `BMAD_AUDIT_KEY` removed. MUST be passed to every `subprocess.run` / `Popen` / `call` invocation under `core/` as `env=scrub_env_for_subprocess(...)`. The structural invariant is pinned by `tests/test_audit_regression.py::AuditKeyEnvScrubInvariant::test_ast_no_unscrubbed_subprocess_in_core` — any new unscrubbed subprocess call site fails the suite at parse time.
+- `scrub_env_for_subprocess` — re-exported from `core/audit_env_scrub.py` (see below) for back-compat with the ~25 existing `from story_automator.core.audit import scrub_env_for_subprocess` call sites. Listed in `audit.__all__`; the implementation is NOT defined here.
+
+### `core/audit_env_scrub.py` (D-04 followup — sibling-module split)
+- `scrub_env_for_subprocess(env: Mapping[str, str] | None = None) -> dict[str, str]` — D-04 trust-boundary helper. Returns a copy of `env` (or `os.environ` when `None`) with `BMAD_AUDIT_KEY` removed. MUST be passed to every `subprocess.run` / `Popen` / `call` invocation under `core/` + `commands/` as `env=scrub_env_for_subprocess(...)`. The structural invariant is pinned by `tests/test_audit_regression.py::AuditKeyEnvScrubInvariant::test_ast_no_unscrubbed_subprocess_in_core` — any new unscrubbed subprocess call site fails the suite at parse time. The AST scan skips whichever module defines a top-level `scrub_env_for_subprocess` function, so this split is rename-proof.
+- `_AUDIT_ENV_KEYS_TO_SCRUB: frozenset[str]` — module-private closed allowlist `{"BMAD_AUDIT_KEY"}`. Widening this set is a security-policy change; do not re-bind from outside.
+- `__all__ = ["scrub_env_for_subprocess"]` — only the helper is public; the allowlist is private.
 
 ### `data/profiles/`
 - `default.json` and `msme-erp.json` schemas: `{version, id, snapshot, seed_template, toolchain, matrix, categories, categories_na, rules, invariants, cost_tier, timeouts, forbidden_until}` — additive fields only.

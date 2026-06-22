@@ -18,6 +18,7 @@ from typing import Any, Iterator, Mapping, Protocol, runtime_checkable
 
 import filelock
 
+from .audit_env_scrub import scrub_env_for_subprocess
 from .common import compact_json, ensure_dir, iso_now
 
 
@@ -28,25 +29,10 @@ __all__ = [
     "audit_for_policy",
     "derive_key",
     "load_key_from_env",
+    # Re-exported from .audit_env_scrub for back-compat with ~25 call sites
+    # that import `from story_automator.core.audit import scrub_env_for_subprocess`.
     "scrub_env_for_subprocess",
 ]
-
-
-_AUDIT_ENV_KEYS_TO_SCRUB: frozenset[str] = frozenset({"BMAD_AUDIT_KEY"})
-
-
-def scrub_env_for_subprocess(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Return a copy of ``env`` with audit-key entries removed (D-04).
-
-    Pass this to ``subprocess.run`` / ``Popen`` ``env=`` so children cannot
-    read or forge the audit chain. Idempotent. If ``env`` is None, copies
-    ``os.environ``. The parent process is never mutated, so
-    ``load_key_from_env()`` keeps working unchanged.
-    """
-    source = dict(os.environ if env is None else env)
-    for key in _AUDIT_ENV_KEYS_TO_SCRUB:
-        source.pop(key, None)
-    return source
 
 
 class AuditLockTimeout(RuntimeError):
