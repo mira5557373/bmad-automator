@@ -6,10 +6,15 @@ Layers an append-only JSONL ledger and a Merkle tree over the existing
 bundles stay byte-stable.
 
 Design notes:
-* Leaf hash = SHA-256 of ``canonical_json(record)`` — order-independent,
-  matches ``compute_evidence_bundle_hash``'s sort key.
-* Internal nodes pair siblings; an odd leaf at any level is duplicated
-  (Bitcoin convention) to keep the tree balanced.
+* Leaf hash = SHA-256 of ``0x00 || canonical_json(record)`` —
+  order-independent, matches ``compute_evidence_bundle_hash``'s sort key.
+* Internal nodes pair siblings as SHA-256 of ``0x01 || left || right``
+  (RFC 6962 domain separation).  This closes two attacks:
+    - CVE-2012-2459 duplicate-leaf forgery (we no longer duplicate the
+      odd-out leaf; it is promoted to the next level unchanged).
+    - Second-preimage forgery where an internal-node hash is presented
+      as a leaf hash — the 0x00/0x01 prefix bytes make the domains
+      disjoint.
 * Proofs are a list of ``{position, sibling}`` steps from leaf to root
   and verify in O(log n) without re-hashing the bundle.
 * Ledger rows carry ``prev_hash`` linking back to the prior row, so a
@@ -34,6 +39,13 @@ from ..utils import ensure_dir
 GENESIS_PREV_HASH = "0" * 64
 LEDGER_SCHEMA_VERSION = 1
 
+# RFC 6962 domain-separation prefixes: ``0x00`` for leaves, ``0x01`` for
+# internal nodes.  Without these, a SHA-256-of-concat tree is vulnerable to
+# CVE-2012-2459 (duplicate-leaf root collision) and second-preimage forgery
+# (passing an internal-node hash off as a leaf hash).
+_LEAF_DOMAIN = b"\x00"
+_NODE_DOMAIN = b"\x01"
+
 
 class MerkleLedgerError(ValueError):
     """Raised for any malformed input or chain integrity failure."""
@@ -52,13 +64,15 @@ def make_merkle_leaf(record: dict[str, Any]) -> str:
     """Return the leaf hash (64-hex SHA-256) for an evidence record.
 
     Uses ``canonical_json`` so equivalent records always hash identically.
+    Prefixes the canonical bytes with ``0x00`` (RFC 6962 leaf domain) so
+    an attacker cannot pass off an internal-node hash as a leaf hash.
     """
     if not isinstance(record, dict):
         raise MerkleLedgerError(
             "merkle leaf requires a dict evidence record, got "
             f"{type(record).__name__}"
         )
-    payload = canonical_json(record).encode("utf-8")
+    payload = _LEAF_DOMAIN + canonical_json(record).encode("utf-8")
     return _sha256_hex(payload)
 
 
@@ -75,14 +89,21 @@ def _sort_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _pair_hash(left: str, right: str) -> str:
-    """Concatenate sibling hashes and SHA-256 the bytes."""
-    return _sha256_hex((left + right).encode("utf-8"))
+    """Hash two child hex-hashes into an internal-node hash.
+
+    Prefixes the concatenated child bytes with ``0x01`` (RFC 6962 internal-node
+    domain) so internal-node hashes can never collide with leaf hashes.
+    """
+    return _sha256_hex(_NODE_DOMAIN + (left + right).encode("utf-8"))
 
 
 def _build_levels(leaves: list[str]) -> list[list[str]]:
-    """Build the Merkle tree bottom-up; duplicate odd-out siblings.
+    """Build the Merkle tree bottom-up; promote odd-out siblings unchanged.
 
     Returns the list of levels (level 0 = leaves, last level = [root]).
+    RFC 6962 promotion (instead of the Bitcoin duplicate-last convention)
+    closes CVE-2012-2459: there is no way to build an alternate record
+    set whose tree shape forces the same root.
     """
     if not leaves:
         raise MerkleLedgerError("cannot build Merkle tree over zero leaves")
@@ -91,9 +112,11 @@ def _build_levels(leaves: list[str]) -> list[list[str]]:
     while len(current) > 1:
         nxt: list[str] = []
         for i in range(0, len(current), 2):
-            left = current[i]
-            right = current[i + 1] if i + 1 < len(current) else current[i]
-            nxt.append(_pair_hash(left, right))
+            if i + 1 < len(current):
+                nxt.append(_pair_hash(current[i], current[i + 1]))
+            else:
+                # Odd-out sibling: promote unchanged rather than duplicate.
+                nxt.append(current[i])
         levels.append(nxt)
         current = nxt
     return levels
@@ -142,23 +165,49 @@ def build_merkle_proof(
     idx = index
     for level in levels[:-1]:
         if idx % 2 == 0:
-            sibling_idx = idx + 1 if idx + 1 < len(level) else idx
-            position = "R"
+            # Even index: look for a right sibling.  If absent (odd-out
+            # tail under RFC 6962 promotion), there is no hashing step at
+            # this level — the node climbs unchanged.
+            if idx + 1 < len(level):
+                proof.append({"position": "R", "sibling": level[idx + 1]})
+            # else: promoted; no proof step emitted.
         else:
-            sibling_idx = idx - 1
-            position = "L"
-        proof.append({"position": position, "sibling": level[sibling_idx]})
+            # Odd index always has a left sibling.
+            proof.append({"position": "L", "sibling": level[idx - 1]})
         idx //= 2
     return proof
 
 
 def verify_merkle_proof(
-    leaf_hash: str,
+    leaf: str | dict[str, Any],
     proof: list[dict[str, str]],
     expected_root: str,
 ) -> bool:
-    """Replay ``proof`` from ``leaf_hash`` and compare to ``expected_root``."""
-    if not isinstance(leaf_hash, str) or len(leaf_hash) != 64:
+    """Replay ``proof`` from ``leaf`` and compare to ``expected_root``.
+
+    ``leaf`` may be either an evidence-record dict (preferred — the leaf
+    hash is computed internally with the ``0x00`` leaf-domain prefix and
+    cannot collide with internal-node hashes) or a 64-hex string (legacy
+    callers).  When a raw hex string is supplied, the verifier insists on
+    a non-empty proof so an attacker cannot pass the root itself off as a
+    leaf hash on an empty-proof "shortcut" — see CVE-2012-2459 and the
+    second-preimage forgery this domain separation closes.
+    """
+    if isinstance(leaf, dict):
+        try:
+            leaf_hash = make_merkle_leaf(leaf)
+        except MerkleLedgerError:
+            return False
+    elif isinstance(leaf, str):
+        if len(leaf) != 64:
+            return False
+        # Reject the empty-proof shortcut for raw-hash callers: there is
+        # no way to distinguish an honest single-leaf tree from an
+        # internal-node-as-leaf forgery without re-hashing the record.
+        if not proof:
+            return False
+        leaf_hash = leaf
+    else:
         return False
     if not isinstance(expected_root, str) or len(expected_root) != 64:
         return False

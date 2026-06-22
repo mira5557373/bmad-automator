@@ -107,10 +107,12 @@ class MerkleProofTests(unittest.TestCase):
         recs = [_ev("only")]
         proof = build_merkle_proof(recs, recs[0])
         self.assertEqual(proof, [])
+        # Pass the record itself; the verifier applies the RFC 6962 leaf
+        # domain prefix internally, which is the only safe way to handle
+        # the empty-proof case (a raw-hash caller would be ambiguous with
+        # an internal-node-as-leaf forgery).
         self.assertTrue(
-            verify_merkle_proof(
-                make_merkle_leaf(recs[0]), proof, compute_merkle_root(recs)
-            )
+            verify_merkle_proof(recs[0], proof, compute_merkle_root(recs))
         )
 
 
