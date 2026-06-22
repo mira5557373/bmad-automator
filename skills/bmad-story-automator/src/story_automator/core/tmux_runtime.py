@@ -198,15 +198,76 @@ def tmux_list_sessions(project_only: bool) -> tuple[list[str], int]:
     return (sessions, 0)
 
 
-def load_session_state(path: str | Path) -> dict[str, object]:
-    target = Path(path)
-    if not target.exists():
-        return {}
+class CorruptSessionStateError(RuntimeError):
+    """Raised by update_session_state when the on-disk file is unparseable.
+
+    Bug R2 / J-04: ``load_session_state`` historically collapsed three states
+    (absent, ok, corrupt) into the single sentinel ``{}``. ``update_session_state``
+    then merged updates into that empty dict and wrote it back, permanently
+    destroying every field that was previously on disk. The new strict loader
+    raises this when invoked transitively from ``update_session_state``, so a
+    corrupt state file is escalated instead of silently overwritten.
+    """
+
+
+def _load_session_state_strict(path: Path) -> tuple[dict[str, object], str]:
+    """Return (state, status) where status is one of {"absent", "ok", "corrupt"}.
+
+    On "corrupt" the offending file is renamed to ``<path>.corrupted-<epoch>``
+    for forensic value AND so the next load sees "absent" instead of repeatedly
+    flapping between corrupt and empty. The caller decides whether corruption
+    is fatal (update_session_state) or tolerable (read-only callers that want
+    {}).
+    """
+    if not path.exists():
+        return ({}, "absent")
     try:
-        raw = json.loads(read_text(target))
+        raw = json.loads(read_text(path))
     except (OSError, json.JSONDecodeError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
+        _quarantine_corrupt_state(path)
+        return ({}, "corrupt")
+    if not isinstance(raw, dict):
+        _quarantine_corrupt_state(path)
+        return ({}, "corrupt")
+    return (raw, "ok")
+
+
+def _quarantine_corrupt_state(path: Path) -> None:
+    """Rename a corrupt state file aside so callers can never re-clobber it.
+
+    Best-effort: on rename failure we drop the file rather than leave the
+    durable leak (the corrupt file would otherwise protect paired artifacts
+    from cleanup forever — the second half of J-04).
+    """
+    suffix = f".corrupted-{int(time.time() * 1000)}"
+    target = path.with_name(path.name + suffix)
+    try:
+        path.rename(target)
+        logger.warning(
+            "session state %s was corrupt; moved aside to %s", path, target
+        )
+    except OSError:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        logger.warning(
+            "session state %s was corrupt and could not be quarantined; removed",
+            path,
+        )
+
+
+def load_session_state(path: str | Path) -> dict[str, object]:
+    """Tolerant loader: returns {} for absent OR corrupt files.
+
+    Corrupt files are renamed aside as a side effect so the bug-J-04 durable
+    leak (corrupt state forever-protecting paired artifacts) cannot occur.
+    Callers that need to distinguish corruption from absence use the strict
+    helper directly; ``update_session_state`` uses the strict path so a
+    corrupt file is escalated rather than silently overwritten.
+    """
+    state, _status = _load_session_state_strict(Path(path))
+    return state
 
 
 def save_session_state(path: str | Path, payload: dict[str, object]) -> None:
@@ -215,7 +276,16 @@ def save_session_state(path: str | Path, payload: dict[str, object]) -> None:
 
 def update_session_state(path: str | Path, **updates: object) -> dict[str, object]:
     target = Path(path)
-    state = load_session_state(target)
+    state, status = _load_session_state_strict(target)
+    if status == "corrupt":
+        # Refuse to merge updates on top of a missing-prior-state. Writing now
+        # would replicate the original J-04 defect (clobber prior session
+        # metadata with partial updates). The corrupt file has already been
+        # quarantined by _load_session_state_strict.
+        raise CorruptSessionStateError(
+            f"refusing to update {target}: prior state was corrupt and has been "
+            f"moved aside; caller must reinitialize via save_session_state"
+        )
     state.update(updates)
     state["updatedAt"] = iso_now()
     save_session_state(target, state)
@@ -258,15 +328,21 @@ def cleanup_stale_terminal_artifacts(
         if not session:
             state_path.unlink(missing_ok=True)
             continue
-        state = load_session_state(state_path)
-        if not _is_terminal_state(state):
+        # Use the strict loader directly so a corrupt state file does NOT
+        # mistakenly join protected_sessions (J-04 leak: corrupt parses as {},
+        # _is_terminal_state({}) == False, so the session was protected forever
+        # — durable artifact leak). The strict loader quarantines the corrupt
+        # file as a side effect, so subsequent passes see "absent" and the
+        # paired artifacts can age out normally.
+        state, status = _load_session_state_strict(state_path)
+        if status == "ok" and not _is_terminal_state(state):
             protected_sessions.add(session)
         try:
-            if state_path.stat().st_mtime > cutoff:
+            if state_path.exists() and state_path.stat().st_mtime > cutoff:
                 continue
         except OSError:
             continue
-        if _is_terminal_state(state):
+        if status == "ok" and _is_terminal_state(state):
             cleanup_runtime_artifacts(session, project_root)
     for pattern in (
         f".sa-{root_hash}-session-*-command.sh",
@@ -283,6 +359,16 @@ def cleanup_stale_terminal_artifacts(
             if session and session in protected_sessions:
                 continue
             path.unlink(missing_ok=True)
+    # Quarantined corrupt state files (renamed aside by _quarantine_corrupt_state)
+    # are not protected by any session — sweep them out on the same TTL so they
+    # do not accumulate in /tmp forever.
+    for path in tmp_dir.glob(f".sa-{root_hash}-session-*-state.json.corrupted-*"):
+        try:
+            if path.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        path.unlink(missing_ok=True)
 
 
 def tmux_kill_session(session: str, project_root: str | None = None) -> None:
