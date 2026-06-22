@@ -81,6 +81,7 @@ def run_single_collector(
         category=config.category,
         timeout_s=timeout,
         cwd=checkout_path,
+        parse_metrics=config.parse_metrics,
     )
     if not config.deterministic:
         evidence["deterministic"] = False

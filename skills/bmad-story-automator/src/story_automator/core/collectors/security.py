@@ -8,6 +8,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..collector_config import CollectorConfig
+from ..metric_parsers import (
+    parse_gitleaks_metrics,
+    parse_osv_metrics,
+    parse_semgrep_metrics,
+    parse_trivy_metrics,
+)
 
 
 def _semgrep_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
@@ -43,6 +49,7 @@ SEMGREP = CollectorConfig(
     build_cmd=_semgrep_cmd,
     tool_version_cmd=("semgrep", "--version"),
     file_patterns=frozenset({"*.py", "*.ts", "*.tsx", "*.js", "*.jsx", "*.yaml", "*.yml"}),
+    parse_metrics=parse_semgrep_metrics,
 )
 
 TRIVY_VULN = CollectorConfig(
@@ -52,6 +59,7 @@ TRIVY_VULN = CollectorConfig(
     build_cmd=_trivy_vuln_cmd,
     tool_version_cmd=("trivy", "--version"),
     file_patterns=frozenset({"*.lock", "*.txt", "*.toml", "*.cfg", "package.json"}),
+    parse_metrics=parse_trivy_metrics,
 )
 
 OSV = CollectorConfig(
@@ -61,6 +69,7 @@ OSV = CollectorConfig(
     build_cmd=_osv_cmd,
     tool_version_cmd=("osv-scanner", "--version"),
     file_patterns=frozenset({"*.lock", "*.txt", "*.toml", "*.cfg", "package.json"}),
+    parse_metrics=parse_osv_metrics,
 )
 
 GITLEAKS = CollectorConfig(
@@ -70,6 +79,7 @@ GITLEAKS = CollectorConfig(
     build_cmd=_gitleaks_cmd,
     tool_version_cmd=("gitleaks", "version"),
     file_patterns=frozenset(),
+    parse_metrics=parse_gitleaks_metrics,
 )
 
 COLLECTORS: list[CollectorConfig] = [SEMGREP, TRIVY_VULN, OSV, GITLEAKS]

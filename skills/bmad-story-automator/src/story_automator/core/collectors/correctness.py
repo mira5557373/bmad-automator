@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..collector_config import CollectorConfig
+from ..metric_parsers import parse_coverage_metrics
 
 
 def _pytest_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
@@ -72,6 +73,7 @@ COVERAGE = CollectorConfig(
     category="correctness",
     build_cmd=_coverage_cmd,
     file_patterns=frozenset({"*.py", "*.ts", "*.tsx"}),
+    parse_metrics=parse_coverage_metrics,
 )
 
 COLLECTORS: list[CollectorConfig] = [PYTEST, VITEST, PLAYWRIGHT, COVERAGE]

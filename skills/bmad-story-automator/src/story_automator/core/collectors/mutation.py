@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..collector_config import CollectorConfig
+from ..metric_parsers import parse_mutation_metrics
 
 _CHECKS_DIR = Path(__file__).resolve().parent.parent / "checks"
 _DEFAULT_MUTATION_THRESHOLD = 60
@@ -30,6 +31,7 @@ MUTMUT = CollectorConfig(
     category="mutation",
     build_cmd=_mutmut_cmd,
     file_patterns=frozenset({"*.py"}),
+    parse_metrics=parse_mutation_metrics,
 )
 
 COLLECTORS: list[CollectorConfig] = [MUTMUT]

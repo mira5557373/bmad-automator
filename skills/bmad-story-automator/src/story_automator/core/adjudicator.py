@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .gate_schema import (
     make_evidence_record,
@@ -43,6 +43,7 @@ def run_collector_with_timeout(
     timeout_s: int,
     cwd: str | None = None,
     tool_version: str = "",
+    parse_metrics: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run a collector subprocess with timeout + psutil SIGKILL on expiry.
 
@@ -50,6 +51,14 @@ def run_collector_with_timeout(
     §6.4: timed-out collector emits {status: timeout,
            findings: ['TIMEOUT: <tool> exceeded <N>s']}.
     §6.4: adjudicator treats timeout as error for aggregation (fail-closed).
+
+    A-01: if ``parse_metrics`` is provided, it is invoked against the
+    collector's captured stdout and its return value populates the
+    ``metrics`` dict on the evidence record. The parser is wrapped in a
+    broad ``except Exception`` for defence-in-depth: a misbehaving custom
+    parser must never crash the gate. Parsers are also only invoked on
+    completed runs (ok / violation) — timeout and error paths skip parsing
+    because their stdout is unreliable.
     """
     assert_host_context("run_collector_with_timeout")
     if not cmd:
@@ -90,12 +99,14 @@ def run_collector_with_timeout(
         duration_ms = _monotonic_ms() - start_ms
         status = "ok" if proc.returncode == 0 else "violation"
         findings = _extract_findings(stdout) if status == "violation" else []
+        metrics = _safe_parse_metrics(parse_metrics, stdout)
         return make_evidence_record(
             collector=collector,
             tool=tool,
             tool_version=tool_version,
             category=category,
             status=status,
+            metrics=metrics or None,
             findings=findings,
             exit_code=proc.returncode,
             duration_ms=duration_ms,
@@ -118,6 +129,48 @@ def run_collector_with_timeout(
             exit_code=-1,
             duration_ms=duration_ms,
         )
+
+
+def _safe_parse_metrics(
+    parser: Callable[[str], dict[str, Any]] | None,
+    stdout: str,
+) -> dict[str, Any]:
+    """Run ``parser(stdout)`` defensively (A-01).
+
+    Any exception, a non-dict return, or a value of an unsupported type
+    (``validate_evidence_record`` accepts bool|int|float|str only) collapses
+    to ``{}``. A misbehaving parser must never propagate — losing one
+    category's metric data is much better than failing the whole gate run.
+    """
+    if parser is None:
+        return {}
+    try:
+        raw = parser(stdout)
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        if isinstance(value, bool):
+            cleaned[key] = value
+            continue
+        if isinstance(value, int):
+            cleaned[key] = value
+            continue
+        if isinstance(value, float):
+            # Reject NaN/inf — schema validation would reject them anyway.
+            if value != value or value in (float("inf"), float("-inf")):
+                continue
+            cleaned[key] = value
+            continue
+        if isinstance(value, str):
+            cleaned[key] = value
+            continue
+        # Drop lists/dicts/None — verdict rules expect scalars.
+    return cleaned
 
 
 def _kill_process_tree(pid: int) -> None:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..collector_config import CollectorConfig
+from ..metric_parsers import parse_burn_in_metrics
 
 _CHECKS_DIR = Path(__file__).resolve().parent.parent / "checks"
 _DEFAULT_BURN_IN_RUNS = 5
@@ -73,6 +74,7 @@ BURN_IN = CollectorConfig(
     category="test_quality",
     build_cmd=_burn_in_cmd,
     file_patterns=frozenset({"*.py", "*.ts", "*.tsx", "*.js", "*.jsx"}),
+    parse_metrics=parse_burn_in_metrics,
 )
 
 HARD_WAIT = CollectorConfig(
