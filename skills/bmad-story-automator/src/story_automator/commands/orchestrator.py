@@ -63,11 +63,83 @@ from story_automator.core.telemetry_events import (
 from story_automator.core.run_identity import current_run_id
 from story_automator.core.run_liveness import run_is_live
 from story_automator.core.common import safe_int
+from story_automator.core.bauto_bridge.hookbus_shim import HookBusShim
 from ._audit_hooks import _audit_path_for, _maybe_audit_event
 from .state import audit_state_change
 
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level HookBusShim singleton (Path B / N6.3). Default-empty so the
+# wiring is a no-op until a plugin (N6.4+) registers against it; tests
+# inject their own bus by monkey-patching ``orchestrator._HOOK_BUS``.
+_HOOK_BUS: HookBusShim = HookBusShim()
+
+
+def get_hook_bus() -> HookBusShim:
+    """Return the orchestrator's HookBusShim singleton.
+
+    A future declarative-plugin layer (N6.4) will resolve manifests and
+    register callbacks on this instance. Today the bus is empty by default
+    so the hook-emit calls in this module are no-ops.
+    """
+    return _HOOK_BUS
+
+
+# Mapping of lifecycle stage name → which "verify-step" verifier triggers
+# the post_dev_phase emit. Today only ``session_exit`` (end of a dev cycle)
+# qualifies; the dict keeps the wiring extensible without touching the
+# call site when new verifier names land.
+_VERIFY_STEP_POST_DEV_PHASE: frozenset[str] = frozenset({"session_exit"})
+
+
+def _emit_hook_or_veto(event: str, context: dict) -> bool:
+    """Emit ``event`` through the shim and return True if a blocking veto
+    fired.
+
+    Behavior is deliberately additive — with no hooks registered (the
+    default) this returns False immediately. The caller is responsible
+    for short-circuiting when True is returned (mirrors
+    ``route_gate_verdict``'s halt-on-veto semantics).
+    """
+    bus = _HOOK_BUS
+    # has_blocking_veto invokes each blocking callback exactly once; the
+    # non-blocking emit below then re-fires the full chain (including
+    # blocking callbacks). Per the shim contract this is intentional —
+    # callbacks are pure observers from the bus's perspective. If a
+    # plugin needs at-most-once semantics it can latch internally.
+    if bus.has_blocking_veto(event, context):
+        return True
+    bus.emit(event, context)
+    return False
+
+
+def _hook_context(*, story_key: str = "", phase: str = "", branch: str = "",
+                  agents: list[str] | None = None) -> dict:
+    """Build a HookContext-shaped dict for shim emits.
+
+    Plugins authored against bmad-auto's HookBus expect a stable, small
+    payload — story_key, phase, branch, agents — so the shape lives in one
+    place rather than scattered across emit sites.
+    """
+    return {
+        "story_key": story_key,
+        "phase": phase,
+        "branch": branch,
+        "agents": list(agents) if agents else [],
+    }
+
+
+def _veto_response(stage: str) -> int:
+    """Print a structured veto error and return a non-zero exit code.
+
+    Used by every emit site so the wire format is consistent across the
+    six lifecycle stages — plugin-driven halts look identical regardless
+    of which transition they intercepted.
+    """
+    print_json({"ok": False, "error": "plugin_veto", "stage": stage})
+    return 1
 
 
 def _telemetry_emitter() -> TelemetryEmitter:
@@ -174,7 +246,14 @@ def _usage(code: int) -> int:
 
 def _gate(args: list[str]) -> int:
     from .gate_cmd import gate_dispatch
-    return gate_dispatch(args)
+
+    ctx = _hook_context(phase="gate")
+    if _emit_hook_or_veto("pre_gate", ctx):
+        return _veto_response("pre_gate")
+    rc = gate_dispatch(args)
+    if _emit_hook_or_veto("post_gate", ctx):
+        return _veto_response("post_gate")
+    return rc
 
 
 def _sprint_status(args: list[str]) -> int:
@@ -653,6 +732,14 @@ def _commit_ready(args: list[str]) -> int:
         print_json({"ready": False, "reason": str(exc), "story": args[0]})
         return 1
     if status.done:
+        # pre_commit fires before we touch git so a plugin can veto a
+        # commit-readiness check without race-conditions against the
+        # working tree. No-op when no hooks are registered.
+        if _emit_hook_or_veto(
+            "pre_commit",
+            _hook_context(story_key=args[0], phase="commit"),
+        ):
+            return _veto_response("pre_commit")
         out, _ = run_cmd("git", "-C", project_root, "status", "--porcelain")
         if out.strip():
             norm = normalize_story_key(project_root, args[0])
@@ -784,9 +871,14 @@ def _verify_code_review(args: list[str]) -> int:
             }
         )
         return 1
+    review_ctx = _hook_context(story_key=args[0], phase="review")
+    if _emit_hook_or_veto("pre_review", review_ctx):
+        return _veto_response("pre_review")
     payload = verify_code_review_completion(
         get_project_root(), args[0], state_file=state_file or None
     )
+    if _emit_hook_or_veto("post_review", review_ctx):
+        return _veto_response("post_review")
     norm = normalize_story_key(get_project_root(), args[0])
     epic = norm.id.rsplit(".", 1)[0] if norm is not None else ""
     _emit_safe(
@@ -844,6 +936,14 @@ def _verify_step(args: list[str]) -> int:
             contract=contract,
         )
         exit_code = 0
+        # post_dev_phase fires only when the dev session-exit verifier
+        # ran successfully; other verifiers (review_completion,
+        # epic_complete, ...) belong to different lifecycle stages or
+        # have their own emit sites.
+        if verifier in _VERIFY_STEP_POST_DEV_PHASE:
+            ctx = _hook_context(story_key=story_key, phase="dev")
+            if _emit_hook_or_veto("post_dev_phase", ctx):
+                return _veto_response("post_dev_phase")
     except (FileNotFoundError, OSError, PolicyError, ValueError) as exc:
         payload = {
             "verified": False,
