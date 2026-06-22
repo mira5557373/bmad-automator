@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# BMAD pre-commit gate — runs the full unittest suite + ruff check
+# + M11 vocabulary gate.
+#
+# Skip with: git commit --no-verify              (preferred; git-native)
+#       or:  BMAD_SKIP_PRECOMMIT=1 git commit ...  (env-var escape)
+#
+# Installed via scripts/install-hooks.sh.
+# Uninstalled via scripts/uninstall-hooks.sh.
+
+set -euo pipefail
+
+if [ "${BMAD_SKIP_PRECOMMIT:-0}" = "1" ]; then
+  echo ">>> SKIPPING: BMAD_SKIP_PRECOMMIT=1 set in env <<<" >&2
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# B-M2: probe for a usable Python — covers Windows git-bash + venvs.
+PYTHON_BIN=""
+for candidate in python3 python py; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+  echo ">>> ERROR: no python3/python/py found on PATH; install Python 3.11+ or set BMAD_SKIP_PRECOMMIT=1" >&2
+  exit 2
+fi
+
+# B-M2: prefer venv-local ruff when available; fall back to PATH ruff.
+RUFF_BIN="ruff"
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/ruff" ]; then
+  RUFF_BIN="$VIRTUAL_ENV/bin/ruff"
+fi
+if ! command -v "$RUFF_BIN" >/dev/null 2>&1; then
+  echo ">>> ERROR: ruff not found ($RUFF_BIN); install ruff or set BMAD_SKIP_PRECOMMIT=1" >&2
+  exit 2
+fi
+
+echo ">>> BMAD pre-commit gate <<<" >&2
+
+echo ">>> running: $PYTHON_BIN -m unittest discover -s tests" >&2
+# B-M3: PREPEND skills/.../src to PYTHONPATH; do not overwrite.
+PYTHONPATH="skills/bmad-story-automator/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON_BIN" -m unittest discover -s tests
+
+echo ">>> running: $RUFF_BIN check skills/" >&2
+"$RUFF_BIN" check skills/
+
+# B-M4: M11 vocabulary gate — closes the "would have caught D-04" gap.
+if [ -x scripts/m11-vocabulary-gates.sh ]; then
+  echo ">>> running: bash scripts/m11-vocabulary-gates.sh" >&2
+  bash scripts/m11-vocabulary-gates.sh
+else
+  echo ">>> note: scripts/m11-vocabulary-gates.sh not executable; skipping M11 gate" >&2
+fi
+
+echo ">>> pre-commit gate passed <<<" >&2

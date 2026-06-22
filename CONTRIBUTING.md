@@ -106,6 +106,40 @@ If the fix later proves incomplete and a second repair lands in `docs/changelog/
 
 The example is illustrative — `260501.md`, `260612.md`, and `260801.md` are fictional in this section, and the anchor slugs follow the GitHub-flavored-markdown auto-slug rule (lowercase, spaces replaced by hyphens) for their corresponding heading text. Landing a real retraction in an actual historical entry is handled by the follow-up sub-milestone M12b.
 
+## Pre-commit hook (optional but recommended)
+
+This repository ships an opt-in pre-commit gate that runs the full
+`unittest` suite, `ruff check`, and the M11 changelog vocabulary gate
+before every commit. It is **not** auto-installed — neither by
+`npm install` nor by `install.sh`. Operators opt in once per clone:
+
+```
+./scripts/install-hooks.sh
+```
+
+This sets the project-local `core.hooksPath` to `.githooks/`. To skip
+the gate for a single commit, prefer the git-native escape:
+
+```
+git commit --no-verify ...
+```
+
+For ad-hoc batches (e.g., a long rebase) the env-var escape is:
+
+```
+BMAD_SKIP_PRECOMMIT=1 git commit ...
+```
+
+To uninstall:
+
+```
+./scripts/uninstall-hooks.sh
+```
+
+The hook does not source `.envrc` or `.env`; direnv users may need to
+arrange their venv activation independently. The hook autodetects
+`python3` / `python` / `py` and a venv-local `ruff` if available.
+
 ## Reporting Bugs
 
 Include:

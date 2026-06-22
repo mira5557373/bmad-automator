@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import shutil
 import socket
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import psutil
+from filelock import Timeout
 
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
@@ -21,12 +23,14 @@ from .evidence_io import (
     can_reuse_gate_file,
     clear_gate_marker,
     compute_evidence_bundle_merkle_root,
+    gate_lock_path,
     get_gate_lock,
     load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
     write_gate_marker,
 )
+from .gate_lock_observability import _handle_gate_lock_timeout
 from .gate_audit import (
     GateProfileDriftAudit,
     GateReadinessAudit,
@@ -48,6 +52,25 @@ from .product_profile import compute_profile_hash
 from .trust_boundary import assert_host_context
 from .utils import iso_now
 from .verdict_engine import evaluate_gate
+
+
+# B1 — legacy-marker PID-reuse hardening constants.
+#
+# When ``_recover_from_crash_locked`` encounters a marker that has
+# ``started_at`` (ISO8601 from ``core/utils.iso_now``) but no
+# ``start_time`` (the post-J-03 ``psutil.Process().create_time()`` field
+# omitted by markers written before the L1+J-03 fix landed), liveness
+# falls back to a two-sided bound on the live PID's ``create_time()``.
+#
+# ISO_TRUNCATION_S covers up to 1.0s of ``iso_now()`` second-precision
+# rounding (``"%Y-%m-%dT%H:%M:%SZ"`` — the recorded value may be up to
+# 1.0s earlier than the actual wall-clock moment).
+ISO_TRUNCATION_S = 1.0
+
+# MAX_ORCHESTRATOR_UPTIME_S — orchestrator processes are not meant to
+# live longer than a day; a PID seen alive for >24h relative to its
+# marker is strong evidence of recycling.
+MAX_ORCHESTRATOR_UPTIME_S = 86400.0
 
 
 def check_gate_reuse(
@@ -241,6 +264,55 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
                     # Can't inspect the process — keep alive=True to
                     # stay fail-closed against the L1 wipe scenario.
                     pass
+            elif alive:
+                # B1 — legacy-marker fallback. Marker has no start_time
+                # (was written before the L1+J-03 fix) but may carry
+                # ``started_at`` (iso_now() wall-clock at marker write).
+                # Use a two-sided bound to defend against PID reuse:
+                #
+                #   proc_start > started_at + ISO_TRUNCATION_S → PID
+                #     started AFTER the marker was stamped → reuse.
+                #   proc_start < started_at - MAX_ORCHESTRATOR_UPTIME_S
+                #     → PID has been alive longer than the longest
+                #     reasonable orchestrator lifetime → recycled.
+                #
+                # The pre-J-03 fast path (just ``start_time``) is wide
+                # of 1.0s; the B1 fallback is conservatively wide of
+                # ``[-24h, +1s]`` because ``started_at`` is wall-clock,
+                # not process-creation time, and the orchestrator may
+                # have been running for any duration <24h before the
+                # marker was written. Markers without either field fall
+                # through to the legacy ``pid_exists``-only path
+                # (full back-compat).
+                marker_started_at = marker.get("started_at")
+                if isinstance(marker_started_at, str) and marker_started_at:
+                    try:
+                        started_at_epoch = datetime.fromisoformat(
+                            marker_started_at.replace("Z", "+00:00")
+                        ).timestamp()
+                        proc_start = psutil.Process(pid).create_time()
+                        if proc_start > started_at_epoch + ISO_TRUNCATION_S:
+                            # Live PID started AFTER marker → reuse.
+                            alive = False
+                        elif proc_start < (
+                            started_at_epoch - MAX_ORCHESTRATOR_UPTIME_S
+                        ):
+                            # Live PID alive >24h before marker → recycled.
+                            alive = False
+                        # else: proc_start within bound → live (no-op).
+                    except (
+                        psutil.NoSuchProcess, psutil.AccessDenied,
+                        psutil.ZombieProcess,
+                    ):
+                        # gap B-M1 — zombies count as dead (the PID
+                        # slot no longer holds gate state). AccessDenied
+                        # matches the start_time branch above.
+                        alive = False
+                    except (psutil.Error, OSError, ValueError):
+                        # ValueError covers a malformed started_at; keep
+                        # alive=True conservatively. Do not crash
+                        # recovery on parse failure.
+                        pass
         if alive:
             return {
                 "recovered": False,
@@ -316,8 +388,14 @@ def recover_from_crash(
     Returns a dict describing what was recovered.
     """
     assert_host_context("recover_from_crash")
-    with get_gate_lock(project_root):
-        return _recover_from_crash_locked(project_root)
+    lock = get_gate_lock(project_root)
+    try:
+        with lock:
+            return _recover_from_crash_locked(project_root)
+    except Timeout as exc:
+        _handle_gate_lock_timeout(
+            project_root, gate_lock_path(project_root), lock.timeout, exc,
+        )
 
 
 def run_readiness_gate(
@@ -552,7 +630,15 @@ def run_production_gate(
     # The timeout is generous (collectors may run for many seconds);
     # callers that need a shorter ceiling can wrap with a shorter
     # acquired lock externally.
-    with get_gate_lock(project_root, timeout=3600.0):
+    _gate_lock = get_gate_lock(project_root, timeout=3600.0)
+    try:
+        _gate_lock.acquire()
+    except Timeout as _exc:
+        _handle_gate_lock_timeout(
+            project_root, gate_lock_path(project_root),
+            _gate_lock.timeout, _exc,
+        )
+    try:
         # Recovery runs under the same lock — use the *_locked variant
         # so we don't try to re-acquire (filelock is not re-entrant
         # across separate FileLock instances).
@@ -604,6 +690,8 @@ def run_production_gate(
             )
         finally:
             clear_gate_marker(project_root)
+    finally:
+        _gate_lock.release()
 
     # N5 (G5): export Merkle root so auditors can externally verify the
     # evidence bundle without trusting the factory. Empty bundle returns

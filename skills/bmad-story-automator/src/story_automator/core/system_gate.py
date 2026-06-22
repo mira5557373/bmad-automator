@@ -13,7 +13,15 @@ from typing import Any
 
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
-from .evidence_io import clear_gate_marker, get_gate_lock, write_gate_marker
+from filelock import Timeout
+
+from .evidence_io import (
+    clear_gate_marker,
+    gate_lock_path,
+    get_gate_lock,
+    write_gate_marker,
+)
+from .gate_lock_observability import _handle_gate_lock_timeout
 from .gate_audit import (
     EpicGateDecisionAudit,
     SystemGateStartedAudit,
@@ -68,7 +76,15 @@ def run_system_gate(
     # the production gate uses. The 3600s timeout matches
     # run_production_gate — system gates can run for many seconds while
     # collectors execute against a provisioned environment.
-    with get_gate_lock(project_root, timeout=3600.0):
+    _gate_lock = get_gate_lock(project_root, timeout=3600.0)
+    try:
+        _gate_lock.acquire()
+    except Timeout as _exc:
+        _handle_gate_lock_timeout(
+            project_root, gate_lock_path(project_root),
+            _gate_lock.timeout, _exc,
+        )
+    try:
         # Recovery runs under the same lock — use the *_locked variant
         # so we don't try to re-acquire (filelock is not re-entrant
         # across separate FileLock instances).
@@ -134,6 +150,8 @@ def run_system_gate(
             )
         finally:
             clear_gate_marker(project_root)
+    finally:
+        _gate_lock.release()
 
     if audit_policy is not None and audit_path is not None:
         cats_summary = ",".join(

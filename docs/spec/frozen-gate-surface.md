@@ -98,6 +98,17 @@ This doc is the authoritative "what not to break" list for any adoption work tha
   - `DispatcherError` (misconfiguration) → `(out=str(exc), code=1)`.
 - **Invariant:** both flag states must yield the same `(str, int)` tuple shape; the migration is a behavior-preserving wrapper, not a contract change.
 
+### `core/gate_lock_observability.py` (Milestone B / B2)
+- `GateLockTimeoutError(filelock.Timeout)` — exception subclass raised when `get_gate_lock(...)` times out. Stable public attributes:
+  - `lock_file: str` (inherited): absolute path of the lock file (NOT a free-form prose message — replaces the broken `raise Timeout(msg)` pattern; gap B-H1).
+  - `holder: dict | None`: marker subset `{pid, started_at, hostname}` when the in-flight gate marker is well-formed, or a `{"_state": "missing" | "corrupt"}` sentinel when the marker is absent or unparseable, or `None` on internal lookup error.
+  - `timeout_s: float`: the timeout the caller passed to `get_gate_lock`.
+- The module's helpers `_describe_lock_holder` and `_handle_gate_lock_timeout` are leading-underscore private (NOT frozen surface); they are used at all three `get_gate_lock` call sites (`gate_orchestrator.py` x2, `system_gate.py` x1) and a future milestone that needs broader observability must promote them explicitly.
+
+### `core/gate_orchestrator.py` (Milestone B / B1 — legacy-marker PID-reuse hardening)
+- Module constants `ISO_TRUNCATION_S = 1.0` and `MAX_ORCHESTRATOR_UPTIME_S = 86400.0` define the two-sided bound used by `_recover_from_crash_locked` to validate liveness for legacy markers carrying `started_at` but no `start_time` (per the v2 rule in `docs/superpowers/specs/2026-06-22-operability-batch-design.md`).
+- **Soft-limit waiver:** `core/gate_orchestrator.py` is currently 746 LOC pre-B / 834 LOC post-B (against the 500-LOC soft limit). The +88 LOC delta is for B1's two-sided bound (with worked-example comments), B2's two `try / acquire / finally release` wraps around the `get_gate_lock` call sites in `recover_from_crash` and `run_production_gate`, and the supporting imports + module constants. The B2 observability helpers are deliberately extracted into `core/gate_lock_observability.py` (~145 LOC) to converge the LOC budget partially — without that extraction the file would have grown another +145 LOC. The next *broad* refactor that touches `gate_orchestrator.py` is expected to split adjudication/lifecycle into sibling modules (target ≤ 500 LOC).
+
 ### `core/action_enum.py` (Path B / N6.6)
 - `Literal` type for verifier actions consumed by `route_gate_verdict` and `production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`. Adding a value requires a coordinated change in route + verifier + telemetry.
 
