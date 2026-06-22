@@ -429,6 +429,27 @@ class EffectiveProfileTests(BundledProfileTests):
             )
             self.assertEqual(profile["id"], "default")
 
+    def test_load_effective_profile_delegates_to_composer(self) -> None:
+        # N4 (compat G6): load_effective_profile must delegate its merge
+        # to profile_composer.compose_profiles so layering policy lives in
+        # a single module.
+        from unittest.mock import patch
+
+        from story_automator.core.product_profile import load_effective_profile
+
+        self._write_override({"id": "custom"})
+
+        with patch(
+            "story_automator.core.product_profile.compose_profiles",
+            wraps=__import__(
+                "story_automator.core.profile_composer",
+                fromlist=["compose_profiles"],
+            ).compose_profiles,
+        ) as spy:
+            profile = load_effective_profile(str(self.project_root))
+            self.assertEqual(profile["id"], "custom")
+            self.assertGreaterEqual(spy.call_count, 1)
+
 
 class AccessorTests(BundledProfileTests):
     def test_required_for_priority_p0(self) -> None:

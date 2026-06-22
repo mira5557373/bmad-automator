@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .profile_composer import compose_profiles
 from .runtime_layout import bundled_story_skill_root
 from .utils import ensure_dir, get_project_root, iso_now, md5_hex8, read_text, write_atomic
 
@@ -324,6 +325,18 @@ def load_effective_profile(
     *,
     profile_id: str | None = None,
 ) -> dict[str, Any]:
+    """Compose the effective product profile.
+
+    Layers are merged left-to-right by :func:`profile_composer.compose_profiles`:
+
+    1. ``bundled`` — the on-disk default (or env-selected) profile;
+    2. ``override`` — optional ``_bmad/bmm/story-automator.profile.json``.
+
+    N4 (compat G6): merge logic now delegates to the composer so layering
+    policy lives in a single module. The signature and return shape are
+    preserved; post-merge validation still runs via
+    :func:`_validate_profile_shape` so override misuse fails loud.
+    """
     root = Path(project_root or get_project_root()).resolve()
     resolved_id = (
         profile_id
@@ -334,24 +347,11 @@ def load_effective_profile(
     override_path = root / _OVERRIDE_PATH
     if override_path.is_file():
         override = _read_json(override_path)
-        merged = _deep_merge(bundled, override)
+        merged = compose_profiles(bundled, override)
     else:
-        merged = bundled
+        merged = compose_profiles(bundled)
     _validate_profile_shape(merged)
     return merged
-
-
-def _deep_merge(base: Any, override: Any) -> Any:
-    if isinstance(base, dict) and isinstance(override, dict):
-        merged = dict(base)
-        for key, value in override.items():
-            merged[key] = (
-                _deep_merge(merged[key], value) if key in merged else value
-            )
-        return merged
-    if isinstance(override, list):
-        return list(override)
-    return override
 
 
 def required_for_priority(
