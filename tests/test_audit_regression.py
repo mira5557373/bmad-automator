@@ -260,6 +260,161 @@ class VerifierRemediationLoopInvariant(_Mixin, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# PATH B (N6.4 + N6.7) — Plugin trust-boundary audit-floor invariant
+# ---------------------------------------------------------------------------
+# The declarative-only plugin registry is the trust boundary between the
+# generation child's sandbox and any operator-supplied extension. A future
+# refactor that re-enables Python-import plugins, widens the manifest
+# allowlist, or introduces ``importlib`` into ``core/plugins.py`` would
+# silently break that boundary. These invariants pin the rules so the suite
+# fails the moment the surface changes.
+
+
+class PluginTrustBoundaryInvariant(unittest.TestCase):
+    """Pins N6.4 trust-boundary rules. See ``docs/spec/2026-06-22-engine-adoption-decision.md``."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.plugin_dir = self.tmp / "_bmad" / "plugins"
+        self.plugin_dir.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_manifest(self, body: str, name: str = "example") -> Path:
+        path = self.plugin_dir / f"{name}.toml"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def _registry(self, allowlist: frozenset[str] | None = None):
+        from story_automator.core.plugins import PluginRegistry
+        if allowlist is None:
+            allowlist = frozenset({"example"})
+        return PluginRegistry(self.plugin_dir, allowlist)
+
+    def test_python_module_key_rejected(self) -> None:
+        """Manifest with ``python_module`` key MUST raise PluginTrustError."""
+        from story_automator.core.plugins import PluginTrustError
+        self._write_manifest(
+            'name = "example"\n'
+            'version = "1.0.0"\n'
+            'python_module = "my_plugin.entry"\n'
+        )
+        with self.assertRaises(PluginTrustError) as ctx:
+            self._registry().load_all()
+        # The error message must name the rule (so a future contributor
+        # reading the traceback can find the trust-boundary doc).
+        self.assertIn("python_module", str(ctx.exception))
+
+    def test_py_module_key_rejected(self) -> None:
+        """Manifest with ``py_module`` key MUST raise PluginTrustError."""
+        from story_automator.core.plugins import PluginTrustError
+        self._write_manifest(
+            'name = "example"\n'
+            'version = "1.0.0"\n'
+            'py_module = "my_plugin"\n'
+        )
+        with self.assertRaises(PluginTrustError) as ctx:
+            self._registry().load_all()
+        self.assertIn("py_module", str(ctx.exception))
+
+    def test_dotted_python_path_in_hook_command_allowed(self) -> None:
+        """Hooks values like ``python -m foo`` are OK — they are subprocess
+        commands, not import paths. The trust-boundary rule rejects Python
+        *import* keys at the manifest top level; it does not police the
+        shell command strings inside ``[hooks]``, which the dispatcher
+        runs in a subprocess anyway.
+        """
+        self._write_manifest(
+            'name = "example"\n'
+            'version = "1.0.0"\n'
+            '\n'
+            '[hooks]\n'
+            'post_gate = "python -m my_plugin.entry --gate-id $BMAD_GATE_ID"\n'
+        )
+        specs = self._registry().load_all()
+        self.assertEqual(len(specs), 1)
+        self.assertEqual(
+            specs[0].hooks["post_gate"],
+            "python -m my_plugin.entry --gate-id $BMAD_GATE_ID",
+        )
+
+    def test_no_import_callable_in_manifest(self) -> None:
+        """Manifest with ``import`` key MUST raise PluginTrustError.
+
+        ``import`` is not in ``PLUGIN_MANIFEST_KEYS`` so the generic
+        unknown-key rule catches it; this test is the explicit pin that
+        the unknown-key path remains fail-closed.
+        """
+        from story_automator.core.plugins import PluginTrustError
+        self._write_manifest(
+            'name = "example"\n'
+            'version = "1.0.0"\n'
+            'import = "my_plugin:run"\n'
+        )
+        with self.assertRaises(PluginTrustError) as ctx:
+            self._registry().load_all()
+        self.assertIn("import", str(ctx.exception))
+
+    def test_plugin_manifest_keys_closed_set(self) -> None:
+        """``PLUGIN_MANIFEST_KEYS`` is exactly the documented closed set.
+
+        Widening this set is a trust-boundary change that requires a
+        spec-level decision; this test forces such a change to be
+        explicit (the test breaks, the contributor has to think).
+        """
+        from story_automator.core.plugins import PLUGIN_MANIFEST_KEYS
+        self.assertEqual(
+            set(PLUGIN_MANIFEST_KEYS),
+            {"name", "version", "hooks", "timeout_s", "fail_closed"},
+        )
+
+    def test_no_python_import_path_in_plugins_module(self) -> None:
+        """``core/plugins.py`` MUST NOT actually use Python-import APIs.
+
+        If a future contributor adds ``importlib`` / ``__import__`` /
+        ``import_module`` to the registry, the declarative-only promise
+        is gone — even if the manifest schema is unchanged. We parse
+        the module's AST (not a substring grep) so the docstring may
+        freely *describe* the rule using the same words without
+        tripping the test.
+        """
+        import ast
+        from story_automator.core import plugins as plugins_mod
+        source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        forbidden_names = {"importlib", "__import__", "import_module"}
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            # ``import importlib`` / ``import importlib.util``
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if root in forbidden_names:
+                        offenders.append(f"import {alias.name}")
+            # ``from importlib import ...`` / ``from foo import import_module``
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".")[0]
+                if root in forbidden_names:
+                    offenders.append(f"from {node.module} import ...")
+                for alias in node.names:
+                    if alias.name in forbidden_names:
+                        offenders.append(f"from {node.module} import {alias.name}")
+            # Bare names: ``__import__(...)``, ``import_module(...)``
+            elif isinstance(node, ast.Name) and node.id in forbidden_names:
+                offenders.append(f"name reference: {node.id}")
+            # Attribute access: ``importlib.import_module(...)``
+            elif isinstance(node, ast.Attribute):
+                if node.attr in forbidden_names:
+                    offenders.append(f"attribute access: .{node.attr}")
+        self.assertEqual(
+            offenders, [],
+            "core/plugins.py uses Python-import APIs — declarative-only "
+            f"trust boundary has been breached; see N6.4 / Path B. Offenders: {offenders}",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Determinism baseline — pin canonical-JSON of representative gate files.
 # A future port that accidentally changes serialization order or field shape
 # will fail this suite immediately.

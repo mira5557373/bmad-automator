@@ -54,7 +54,31 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 ### `data/profiles/`
 - `default.json` and `msme-erp.json` schemas: `{version, id, snapshot, seed_template, toolchain, matrix, categories, categories_na, rules, invariants, cost_tier, timeouts, forbidden_until}` — additive fields only.
 
-## Frozen behaviors (the four audit invariants)
+### `core/profile_composer.py` (Path B / N4)
+- `compose_profiles(base, overlay) -> dict` — the merge authority used by `core/product_profile.load_effective_profile`. Defines union semantics for `categories`, precedence for `timeouts`, and `categories_na` carry-over. Callers must not re-implement profile merging.
+
+### `core/bauto_bridge/hookbus_shim.py` (Path B / N6.2)
+- Public in-process callback bus. `core/gate_orchestrator.run_production_gate` fires it at 6 lifecycle stages: `pre_gate`, `pre_collect`, `post_collect`, `pre_adjudicate`, `post_adjudicate`, `post_gate`. Registration order = dispatch order; listener exceptions are fail-closed.
+
+### `core/plugins.py` (Path B / N6.4)
+- `PLUGIN_MANIFEST_KEYS` — closed allowlist `{name, version, hooks, timeout_s, fail_closed}`; widening requires a spec-level decision.
+- `PluginTrustError` — every rejection (Python-import key, unknown key, malformed TOML, non-allowlisted name) raises this single type.
+- `PluginRegistry(plugin_dir, allowlist).load_all() -> list[PluginSpec]` — sorted-by-stem deterministic load; partial loads are not allowed.
+- `PluginSpec` — frozen dataclass `{name, version, manifest_path, hooks, timeout_s, fail_closed}`.
+- Trust-boundary invariant (pinned by `PluginTrustBoundaryInvariant` in `tests/test_audit_regression.py`): no `importlib` / `__import__` / `import_module` in this module's source.
+
+### `core/cli_dispatcher.py` (Path B / N6.5)
+- Stop-hook dialect resolver per `cli_id` (currently `claude-code`; `codex` / `gemini` / `none` raise `NotImplementedError` until implemented).
+- `_default_invoker` for `claude-code` is read-only-consumer of `core/tmux_runtime.py`'s existing public surface — `core/tmux_runtime.py` is not modified by Path B.
+- Lie-detector fallback when the child reports success without a baseline-commit advance.
+
+### `core/action_enum.py` (Path B / N6.6)
+- `Literal` type for verifier actions consumed by `route_gate_verdict` and `production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`. Adding a value requires a coordinated change in route + verifier + telemetry.
+
+### `core/gate_orchestrator.py` (Path B / N5 — Merkle export)
+- `run_production_gate(...)` additionally emits `evidence_merkle_root` on each persisted gate file. Computed over canonical-JSON evidence in sorted order; deterministic across machines.
+
+## Frozen behaviors (the four audit invariants + plugin trust-boundary)
 
 These are pinned by `tests/test_audit_regression.py`. Every adoption PR must keep that suite green.
 
@@ -64,6 +88,7 @@ These are pinned by `tests/test_audit_regression.py`. Every adoption PR must kee
 | `fcbe17e` | `read_gate_marker` raises `GateMarkerCorruptedError` on malformed JSON / non-object shape. `recover_from_crash` returns `{recovered: False, quarantined: True, quarantine_dir, corruption_reason}` and **moves** evidence under `_bmad/gate/quarantine/<ts>/` rather than deleting it. |
 | `2bf44f3` | `route_gate_verdict(..., story_path=…)` calls `write_remediation_to_story(story_path, tasks)` on FAIL; descriptor carries `tasks_persisted: bool` and surfaces `persist_error` rather than silently dropping tasks. |
 | `1069d86` | `production_ready_gate` on FAIL resolves `story_path` via `artifact_paths.resolve_story_artifact_path`, calls `route_gate_verdict`, and exposes the full descriptor under `result["remediation"]`. Threading of `remediation_cycle` / `max_cycles` / `has_unmitigated_risk_9` from `contract["config"]`. |
+| `N6.4` (Path B) | `core/plugins.py` rejects `python_module` / `py_module` keys with `PluginTrustError`, holds `PLUGIN_MANIFEST_KEYS` to exactly `{name, version, hooks, timeout_s, fail_closed}`, and contains no `importlib` / `__import__` / `import_module` API call in its source. Pinned by `PluginTrustBoundaryInvariant`. |
 
 ## Adoption-PR checklist
 

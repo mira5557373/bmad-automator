@@ -31,7 +31,7 @@
   - `docs/superpowers/plans/` — milestone implementation plans
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` — Claude plugin and marketplace manifests
 
-### Gate subsystem (added by sw run 20260620-191602, m1–m7 complete)
+### Gate subsystem (added by sw run 20260620-191602, m1–m7 + n4/n5/n6.2–n6.7 complete)
 
 The production-ready factory gate. **Read these existing modules before planning any new milestone — interfaces are stable.**
 
@@ -45,6 +45,13 @@ The production-ready factory gate. **Read these existing modules before planning
 
 - **Risk-scored readiness (m12)** `core/risk_profile.py` (`VALID_RISK_CATEGORIES`, `RiskProfileError`, `make_risk_entry`, `validate_risk_entry`, `validate_risk_profile`, `risk_score_to_priority`, `aggregate_risk_priority`, `has_unmitigated_risk_9`, `persist_risk_profile`, `load_risk_profile`, `risk_profile_exists`, `risk_profile_to_evidence`, `compute_risk_profile_ref`, `resolve_tea_risk_inputs`; `DEFAULT_RISK_THRESHOLDS`), `core/readiness_gate.py` (`READINESS_VERDICTS`, `resolve_story_blockers`, `format_blocker_summary`, `check_readiness`, `check_epic_readiness`, `validate_story_creation`, `persist_readiness_result`, `load_readiness_result`). `run_readiness_gate` and `run_epic_readiness_gate` added to `gate_orchestrator.py`; `readiness_gate` verifier registered in `success_verifiers.py` VERIFIERS and `runtime_policy.py` VALID_VERIFIERS; `gate readiness` CLI subcommand added to `gate_cmd.py` with audit passthrough.
 
+- **Profile composer (N4)** `core/profile_composer.py` (`compose_profiles`) — the merge authority used by `core/product_profile.load_effective_profile` when overlaying operator profiles on the bundled default. Single source of truth for category-list union, timeout precedence, and `categories_na` semantics; do not re-implement merging in callers.
+- **Merkle export (N5)** `core/gate_orchestrator.run_production_gate` emits `evidence_merkle_root` alongside each persisted gate file; the root is computed over canonical-JSON evidence in sorted order so audit replay is deterministic across machines.
+- **HookBus (N6.2/N6.3)** `core/bauto_bridge/hookbus_shim.py` is the in-process Python callback bus; `core/gate_orchestrator.py` fires it at 6 lifecycle stages (`pre_gate`, `pre_collect`, `post_collect`, `pre_adjudicate`, `post_adjudicate`, `post_gate`). Registration order = dispatch order; exceptions in a listener are fail-closed per HookBus contract.
+- **Plugin registry (N6.4)** `core/plugins.py` — declarative-only, TOML-manifest plugin index. `PLUGIN_MANIFEST_KEYS` is the closed allowlist `{name, version, hooks, timeout_s, fail_closed}`; `PluginTrustError` rejects any manifest carrying `python_module` / `py_module` (Python-import keys are reserved precisely so an upstream engine cannot silently re-enable them).
+- **CLI dispatcher (N6.5)** `core/cli_dispatcher.py` — resolves stop-hook dialects per `cli_id` (`claude-code`, future `codex`/`gemini`/`none`) and falls back to a lie-detector when the child reports success without a baseline-commit advance. `_default_invoker` for `claude-code` wires into `core/tmux_runtime.py` (read-only consumer of its existing public surface). 500-LOC soft limit watched; split into `core/cli_dispatcher_invokers.py` if approached.
+- **Action enum (N6.6)** `core/action_enum.py` — `Literal` type for verifier actions consumed by `route_gate_verdict` and `success_verifiers.production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`.
+
 **Shared invariants for every collector** (verified by existing tests — don't break them):
 1. Output is `CollectorOutcome` with `status ∈ {ok, violation, error, timeout}` (fail-closed: error/timeout never count as PASS).
 2. Subprocess invocations use `subprocess.run(timeout=…)` honoring `profile.timeouts[category]`; `psutil` SIGKILL on expiry.
@@ -53,6 +60,9 @@ The production-ready factory gate. **Read these existing modules before planning
 5. 500-LOC soft limit per module (split if approaching).
 
 When planning a new milestone, run `grep -rn 'class\\|def ' skills/bmad-story-automator/src/story_automator/core/collectors/ | head` before designing interfaces — chances are the convention already exists.
+
+**Path B compat milestone tags** (engine-adoption-decision; each lands as one tagged commit):
+`compat-n4-*` (profile composer), `compat-n5-*` (Merkle evidence root), `compat-n6-3-*` (HookBus orchestrator wiring), `compat-n6-4-*` (declarative plugin registry), `compat-n6-5-*` (CLI dispatcher + stop-hook dialects), `compat-n6-6-*` (Action enum), `compat-n6-7-docs-and-floor` (this sweep), and `compat-path-b-complete` closes the series.
 
 ## Conventions
 
