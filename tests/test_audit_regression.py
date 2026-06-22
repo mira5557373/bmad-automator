@@ -614,8 +614,8 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), "NONE")
 
     def test_ast_no_unscrubbed_subprocess_in_core(self) -> None:
-        """Every subprocess.run / Popen / call in core/ MUST pass
-        env=scrub_env_for_subprocess(...).
+        """Every subprocess.run / Popen / call in core/ and commands/
+        MUST pass env=scrub_env_for_subprocess(...).
 
         The check accepts:
           * env=scrub_env_for_subprocess(...) — direct call.
@@ -626,11 +626,14 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         """
         import ast
 
-        core_dir = (
+        skill_src = (
             Path(__file__).resolve().parents[1]
             / "skills" / "bmad-story-automator" / "src"
-            / "story_automator" / "core"
+            / "story_automator"
         )
+        # Scan core/ AND commands/ — both are inside the trust boundary
+        # and may spawn subprocesses that inherit env from the parent.
+        scan_dirs = (skill_src / "core", skill_src / "commands")
         offenders: list[str] = []
 
         def _is_scrub_call(node: ast.AST) -> bool:
@@ -652,7 +655,11 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 )
             return False
 
-        for py_file in sorted(core_dir.rglob("*.py")):
+        py_files: list[Path] = []
+        for d in scan_dirs:
+            if d.is_dir():
+                py_files.extend(d.rglob("*.py"))
+        for py_file in sorted(py_files):
             # Skip audit.py itself (defines the helper) — it has no
             # subprocess calls.
             if py_file.name == "audit.py":
@@ -690,7 +697,7 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                                 ok = True
                         if not ok:
                             offenders.append(
-                                f"{py_file.relative_to(core_dir)}:{node.lineno} — "
+                                f"{py_file.relative_to(skill_src)}:{node.lineno} — "
                                 f"subprocess call without scrub_env_for_subprocess"
                             )
                     self.generic_visit(node)
