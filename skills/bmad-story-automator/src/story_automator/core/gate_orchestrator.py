@@ -255,22 +255,34 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
     verdict_path = root / "_bmad" / "gate" / "verdicts" / f"{gate_id}.json"
     had_verdict = verdict_path.is_file()
 
+    # Fix C-3 (Lens M): surface partial rmtree failures instead of
+    # silently swallowing the OSError. A partial cleanup leaves
+    # half-deleted evidence behind; the marker gets cleared
+    # regardless (the recovery contract is "never leave a stale
+    # marker"), but the operator now sees ``cleanup_failed=True``
+    # + ``cleanup_error`` so they can investigate the half-deleted
+    # state.
+    cleanup_error: str | None = None
     if not had_verdict:
         evidence_dir = root / "_bmad" / "gate" / "evidence" / gate_id
         if evidence_dir.is_dir():
             try:
                 shutil.rmtree(evidence_dir)
-            except OSError:
-                pass
+            except OSError as exc:
+                cleanup_error = str(exc)
 
     clear_gate_marker(project_root)
 
-    return {
+    result: dict[str, Any] = {
         "recovered": True,
         "gate_id": gate_id,
         "had_verdict": had_verdict,
         "commit_sha": commit_sha,
     }
+    if cleanup_error is not None:
+        result["cleanup_failed"] = True
+        result["cleanup_error"] = cleanup_error
+    return result
 
 
 def recover_from_crash(
