@@ -27,6 +27,7 @@ import errno
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -63,11 +64,22 @@ _LOCK_WAIT_SECONDS = 10.0
 
 
 class _AppendLock:
-    """Stdlib-only advisory lock backed by ``O_CREAT|O_EXCL``."""
+    """Stdlib-only advisory lock backed by ``O_CREAT|O_EXCL``.
+
+    Each acquisition writes a unique nonce (uuid4 + pid) into the lockfile
+    so ``__exit__`` can tell its *own* lockfile apart from one a peer
+    created after stealing a stale lock. Without this check, a process
+    whose lock was stolen would unlink the new owner's lockfile on the
+    way out, defeating mutual exclusion (LENS-B-01).
+    """
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._held = False
+        self._token = b""
+
+    def _new_token(self) -> bytes:
+        return f"{uuid.uuid4().hex}:{os.getpid()}".encode("utf-8")
 
     def __enter__(self) -> "_AppendLock":
         deadline = time.monotonic() + _LOCK_WAIT_SECONDS
@@ -79,7 +91,11 @@ class _AppendLock:
                     os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                     0o644,
                 )
-                os.close(fd)
+                try:
+                    self._token = self._new_token()
+                    os.write(fd, self._token)
+                finally:
+                    os.close(fd)
                 self._held = True
                 return self
             except OSError as exc:
@@ -106,11 +122,23 @@ class _AppendLock:
                 delay = min(delay * 2, 0.1)
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if self._held:
-            try:
-                self._path.unlink()
-            except FileNotFoundError:
-                pass
+        if not self._held:
+            return
+        # Only unlink if the lockfile still carries OUR token. If a peer
+        # stole our lock, the on-disk file now belongs to them and we must
+        # leave it alone (LENS-B-01).
+        try:
+            current = self._path.read_bytes()
+        except FileNotFoundError:
+            return
+        except OSError:
+            return
+        if current != self._token:
+            return
+        try:
+            self._path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _format_entry(
