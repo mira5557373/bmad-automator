@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from story_automator.core.evidence_io import (
     compute_evidence_bundle_merkle_root,
@@ -168,6 +170,95 @@ class NFRLedgerTests(unittest.TestCase):
             ledger = NFRLedger(Path(td) / "nfr.jsonl")
             with self.assertRaises(MerkleLedgerError):
                 ledger.append({"not": "a-valid-evidence-record"})
+
+
+class NFRLedgerConcurrencyTests(unittest.TestCase):
+    """LENS-H-01+E-09: append must be lock-protected and fsync'd."""
+
+    def test_concurrent_appends_produce_unique_seqs_and_intact_chain(self) -> None:
+        # Without the file lock, concurrent threads race on the read-modify-
+        # write of the tail row, producing duplicate seq values and a chain
+        # whose prev_hash links no longer line up, so verify_chain() fails.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "nfr.jsonl"
+            ledger = NFRLedger(path)
+            num_threads = 8
+            barrier = threading.Barrier(num_threads)
+            errors: list[BaseException] = []
+
+            def worker(idx: int) -> None:
+                try:
+                    barrier.wait()
+                    ledger.append(_ev(f"c-{idx}", category="performance"))
+                except BaseException as exc:  # noqa: BLE001 - capture & report
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(target=worker, args=(i,))
+                for i in range(num_threads)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [], f"worker errors: {errors!r}")
+            rows = ledger.read_all()
+            self.assertEqual(len(rows), num_threads)
+            seqs = [row["seq"] for row in rows]
+            self.assertEqual(seqs, sorted(seqs))
+            self.assertEqual(seqs, list(range(num_threads)))
+            self.assertTrue(
+                ledger.verify_chain(),
+                "verify_chain() must hold after concurrent appends",
+            )
+
+    def test_append_fsyncs_to_disk_before_returning(self) -> None:
+        # Mirrors AuditLog.append: durability requires flush + fsync so a
+        # crash between append() and a later read cannot lose the row.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "nfr.jsonl"
+            ledger = NFRLedger(path)
+            with mock.patch(
+                "story_automator.core.innovation.ledger.os.fsync"
+            ) as fsync_mock:
+                ledger.append(_ev("durable", category="performance"))
+                self.assertGreaterEqual(
+                    fsync_mock.call_count,
+                    1,
+                    "append() must call os.fsync at least once",
+                )
+
+    def test_append_uses_sibling_filelock(self) -> None:
+        # The advisory lock must live next to the ledger (matches the
+        # AuditLog pattern). filelock removes the .lock file on release
+        # on POSIX so we assert by spying on FileLock construction.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "nfr.jsonl"
+            ledger = NFRLedger(path)
+            expected_lock = str(
+                path.with_suffix(path.suffix + ".lock")
+            )
+            seen: list[str] = []
+            import filelock as _filelock_mod
+
+            real_lock = _filelock_mod.FileLock
+
+            def spy_lock(lock_file, *args, **kwargs):  # type: ignore[no-untyped-def]
+                seen.append(str(lock_file))
+                return real_lock(lock_file, *args, **kwargs)
+
+            with mock.patch(
+                "story_automator.core.innovation.ledger.filelock.FileLock",
+                side_effect=spy_lock,
+            ):
+                ledger.append(_ev("locked", category="performance"))
+            self.assertIn(
+                expected_lock,
+                seen,
+                f"append() must construct FileLock at {expected_lock}, "
+                f"got {seen!r}",
+            )
 
 
 class EvidenceIoBundleMerkleTests(unittest.TestCase):

@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+import filelock
 
 from ..gate_schema import (
     GateSchemaError,
@@ -35,6 +38,11 @@ from ..gate_schema import (
     validate_evidence_record,
 )
 from ..utils import ensure_dir
+
+# Lock-acquisition budget for ledger appends. Mirrors AuditLog.append's 5s
+# timeout: long enough to absorb genuine contention from concurrent NFR
+# collectors, short enough to surface a stuck holder rather than hang.
+_LEDGER_LOCK_TIMEOUT_S = 5.0
 
 GENESIS_PREV_HASH = "0" * 64
 LEDGER_SCHEMA_VERSION = 1
@@ -270,6 +278,14 @@ class NFRLedger:
 
         Returns the persisted row dict.  Raises ``MerkleLedgerError`` if
         the evidence record is malformed.
+
+        Concurrency: the entire read-modify-write of the chain tail runs
+        under a per-ledger :class:`filelock.FileLock` (sibling ``.lock``
+        file), so two collectors racing to append cannot read the same
+        ``prev_hash`` and emit duplicate ``seq`` values. The file handle
+        is flushed and ``fsync``'d before lock release so a crash between
+        ``append()`` and a later ``verify_chain()`` cannot lose the row.
+        Mirrors ``core.audit.AuditLog.append``'s lock + fsync contract.
         """
         if not isinstance(evidence, dict):
             raise MerkleLedgerError(
@@ -284,34 +300,50 @@ class NFRLedger:
             ) from exc
 
         ensure_dir(self.path.parent)
-        existing = self._read_lines()
-        if existing:
-            try:
-                last = json.loads(existing[-1])
-            except json.JSONDecodeError as exc:
-                raise MerkleLedgerError(
-                    f"ledger tail unreadable: {exc}"
-                ) from exc
-            prev_hash = last.get("row_hash")
-            if not isinstance(prev_hash, str) or len(prev_hash) != 64:
-                raise MerkleLedgerError("ledger tail missing valid row_hash")
-            seq = int(last.get("seq", 0)) + 1
-        else:
-            prev_hash = GENESIS_PREV_HASH
-            seq = 0
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        lock = filelock.FileLock(str(lock_path))
+        try:
+            lock.acquire(timeout=_LEDGER_LOCK_TIMEOUT_S)
+        except filelock.Timeout as exc:
+            raise MerkleLedgerError(
+                f"could not acquire ledger lock within "
+                f"{_LEDGER_LOCK_TIMEOUT_S}s: {lock_path}"
+            ) from exc
+        try:
+            existing = self._read_lines()
+            if existing:
+                try:
+                    last = json.loads(existing[-1])
+                except json.JSONDecodeError as exc:
+                    raise MerkleLedgerError(
+                        f"ledger tail unreadable: {exc}"
+                    ) from exc
+                prev_hash = last.get("row_hash")
+                if not isinstance(prev_hash, str) or len(prev_hash) != 64:
+                    raise MerkleLedgerError(
+                        "ledger tail missing valid row_hash"
+                    )
+                seq = int(last.get("seq", 0)) + 1
+            else:
+                prev_hash = GENESIS_PREV_HASH
+                seq = 0
 
-        row_hash = _row_hash(prev_hash, evidence)
-        row: dict[str, Any] = {
-            "schema_version": LEDGER_SCHEMA_VERSION,
-            "seq": seq,
-            "prev_hash": prev_hash,
-            "row_hash": row_hash,
-            "evidence": evidence,
-        }
-        encoded = canonical_json(row)
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(encoded + "\n")
-        return row
+            row_hash = _row_hash(prev_hash, evidence)
+            row: dict[str, Any] = {
+                "schema_version": LEDGER_SCHEMA_VERSION,
+                "seq": seq,
+                "prev_hash": prev_hash,
+                "row_hash": row_hash,
+                "evidence": evidence,
+            }
+            encoded = canonical_json(row)
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(encoded + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            return row
+        finally:
+            lock.release()
 
     # ---- reads ----------------------------------------------------------
 
