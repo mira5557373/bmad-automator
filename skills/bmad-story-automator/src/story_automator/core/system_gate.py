@@ -187,6 +187,12 @@ def run_system_gate(
             ),
         )
 
+    # C2 follow-up: symmetry with run_production_gate — embed the disk
+    # lineage root onto the system-gate file too. Empty string sentinel
+    # when no chain exists on disk.
+    from .innovation.lineage_ledger import load_lineage_root
+    gate_file["lineage_root"] = load_lineage_root(project_root)
+
     return gate_file
 
 

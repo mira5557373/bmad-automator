@@ -19,6 +19,9 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 
 ### `core/gate_schema.py`
 - `GateFile` shape: `{gate_id, schema_version, target, tier, commit_sha, scanner_data_snapshot, profile, factory_version, risk_profile_ref, categories, overall, waivers, evidence_bundle_hash}` — **additive fields only**; no rename, no removal.
+- **Additive top-level fields embedded by the orchestrator** (set after `evaluate_gate` returns; consumers must tolerate their presence):
+  - `evidence_merkle_root: str` — sha256 hex (64 chars) of the canonical-JSON evidence bundle, or `""` when the bundle is empty. Pinned by N5 (`run_production_gate`).
+  - `lineage_root: str` — sha256 hex (64 chars) of the on-disk cross-genre lineage Merkle chain at evaluation time, or `""` when no chain exists on disk. Pinned by C2 follow-up (`run_production_gate` + `run_system_gate`). Reference: `core/innovation/lineage_ledger.load_lineage_root`.
 - Factory functions: `make_evidence_record`, `make_timeout_evidence`, `make_llm_evidence_record`, `make_gate_file`, `make_waiver`.
 - Validators: `validate_evidence_record`, `validate_gate_file`, `validate_waiver`, `validate_invariant_entry`, `validate_schema_version`.
 - `compute_waiver_signature(waiver_fields)` — deterministic over canonical-JSON; signature shape is wire-format.
@@ -114,6 +117,14 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 
 ### `core/gate_orchestrator.py` (Path B / N5 — Merkle export)
 - `run_production_gate(...)` additionally emits `evidence_merkle_root` on each persisted gate file. Computed over canonical-JSON evidence in sorted order; deterministic across machines.
+
+### `core/innovation/lineage_ledger.py` (C2 follow-up — disk persistence + gate embed)
+- Disk layout: `_bmad/lineage/index.json` (alpha-sorted `"<genre>/<slug>"` -> `{path, merkle_root, timestamp_iso, seq}`) + per-entry `_bmad/lineage/<genre>/<slug>.json`. The `seq` field tracks insertion order so readers reconstruct the chain via `seq` sort; the on-disk byte layout stays alpha-deterministic across machines.
+- Public additions: `get_lineage_root_dir`, `get_lineage_lock`, `lineage_index_path`, `persist_lineage_entry`, `load_lineage_entry`, `load_lineage_chain`, `load_lineage_root`.
+- Concurrency: `persist_lineage_entry` acquires `get_lineage_lock(...)` (filelock at `_bmad/lineage/.lineage.lock`, 60s timeout) for the full write-entry + rewrite-index sequence.
+- Crash safety: entry JSON written via `core/atomic_io.write_atomic_text`; index update is skipped when the entry write raises, so the index never advertises a missing payload.
+- Corrupt-index policy: `load_lineage_chain` / `load_lineage_root` re-raise `LineageError` (no silent rebuild — audit-chain analog from M04).
+- `core/gate_orchestrator.run_production_gate` and `core/system_gate.run_system_gate` embed `gate_file["lineage_root"]` via `load_lineage_root(project_root)` AFTER `evaluate_gate` (and AFTER fail-closed override on the production path). Empty-string sentinel when no chain exists on disk.
 
 ### `core/integration/unified_state.py` (Milestone D / G7)
 - `read_unified_state(project_root, story_key, *, observe_only=False, read_lock_timeout=2.0) -> tuple[str, str, bool]` — returns the monomorphic `(sprint_status, phase_value, needs_repair)` triple. Read order is REVERSED from the writer's order (sprint-status first, phase second) so a reader observing the new sprint-status also sees the new phase store. With `observe_only=False` (default) the function MAY write to disk (legacy single-store migration; LWW conflict repair). With `observe_only=True` the function NEVER writes; `needs_repair=True` flags on-disk divergence (conflict, migration-pending, or unknown sprint-status string).

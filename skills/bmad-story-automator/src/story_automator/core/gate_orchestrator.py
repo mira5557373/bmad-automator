@@ -808,6 +808,14 @@ def run_production_gate(
             gate_file["fail_closed_categories"] = sorted(set(error_labels))
             gate_file["overall"] = "FAIL"
 
+    # C2 follow-up: embed the disk-derived cross-genre lineage root so
+    # auditors can prove "this gate verdict descends from brief X via
+    # kernel Y". Empty string when no chain exists on disk —
+    # distinguishable from a real 64-hex root, mirroring the
+    # ``evidence_merkle_root`` empty-sentinel convention above.
+    from .innovation.lineage_ledger import load_lineage_root
+    gate_file["lineage_root"] = load_lineage_root(project_root)
+
     return gate_file
 
 
