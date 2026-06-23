@@ -580,5 +580,390 @@ class FactorySmokeProfileTests(unittest.TestCase):
         self.assertGreaterEqual(last_seq, 1)
 
 
+# ---------- A-follow-2: multi-category aggregation (3-cat smoke) ----------
+
+
+# Module-level pass/fail command builders for static + docs fake collectors.
+# ``status=ok`` on subprocess exit 0 ⇒ static_rule / generic_rule ⇒ PASS.
+# ``status=violation`` on non-zero exit ⇒ FAIL. Both rules are status-driven
+# (see core/category_rules.py:_status_based_rule), so we drive the verdict
+# by toggling the subprocess exit code, never by changing rule thresholds.
+
+
+def _smoke_static_pass_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    """Static collector: clean lint run (exit 0)."""
+    return [sys.executable, "-c", "print('SMOKE_STATIC_OK')"]
+
+
+def _smoke_static_fail_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    """Static collector: lint violations detected (exit 1)."""
+    return [
+        sys.executable,
+        "-c",
+        "import sys; print('SMOKE_STATIC_VIOLATION lint=1'); sys.exit(1)",
+    ]
+
+
+def _smoke_docs_pass_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    """Docs collector: docs coverage check passes (exit 0)."""
+    return [sys.executable, "-c", "print('SMOKE_DOCS_OK')"]
+
+
+def _smoke_docs_fail_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    """Docs collector: missing docs detected (exit 1)."""
+    return [
+        sys.executable,
+        "-c",
+        "import sys; print('SMOKE_DOCS_VIOLATION missing=1'); sys.exit(1)",
+    ]
+
+
+def _smoke_static_parse(stdout: str) -> dict[str, Any]:
+    """Return a deterministic metric tag; static_rule is status-driven so
+    the exact key does not affect the verdict — emit something stable for
+    audit-trail / merkle determinism."""
+    return {"lint_violations": 0 if "SMOKE_STATIC_OK" in stdout else 1}
+
+
+def _smoke_docs_parse(stdout: str) -> dict[str, Any]:
+    """Same shape as the static parser — docs_rule falls through to the
+    status-driven generic rule, so the metric is informational only."""
+    return {"doc_coverage_pct": 100 if "SMOKE_DOCS_OK" in stdout else 0}
+
+
+def _drive_smoke_gate(
+    profile: dict[str, Any],
+    *,
+    project_root: Path,
+    commit_sha: str,
+    gate_id: str,
+    audit_path: Path,
+    factory_version: str,
+    static_cmd: Any,
+    docs_cmd: Any,
+) -> dict[str, Any]:
+    """Build a 3-collector registry (correctness PASS, static + docs
+    parameterized) and drive ``run_production_gate`` once.
+    Helper kept at module scope so each test method gets an isolated
+    project_root + audit_path without leaking state across the suite.
+    """
+    registry = CollectorRegistry()
+    registry.register(
+        CollectorConfig(
+            collector_id="smoke-correctness",
+            tool="python3",
+            category="correctness",
+            build_cmd=_smoke_build_cmd,
+            parse_metrics=_smoke_parse_metrics,
+        ),
+    )
+    registry.register(
+        CollectorConfig(
+            collector_id="smoke-static",
+            tool="python3",
+            category="static",
+            build_cmd=static_cmd,
+            parse_metrics=_smoke_static_parse,
+        ),
+    )
+    registry.register(
+        CollectorConfig(
+            collector_id="smoke-docs",
+            tool="python3",
+            category="docs",
+            build_cmd=docs_cmd,
+            parse_metrics=_smoke_docs_parse,
+        ),
+    )
+
+    return run_production_gate(
+        project_root,
+        gate_id,
+        commit_sha=commit_sha,
+        target={"kind": "repo", "id": "smoke-3cat-test"},
+        profile=profile,
+        factory_version=factory_version,
+        registry=registry,
+        priority="P1",
+        audit_policy={"security": {"audit_trail": True}},
+        audit_path=audit_path,
+    )
+
+
+class FactorySmoke3CategoryTests(unittest.TestCase):
+    """Multi-category aggregation harness — closes the gap that the
+    single-category ``FactorySmokeProfileTests`` left open.
+
+    The single-cat smoke only proves that PASS plumbing works end-to-end
+    with one active category. It does NOT exercise:
+      * Merkle root over a multi-record bundle (sort-order determinism).
+      * Per-category verdict rendering when categories disagree.
+      * Audit-chain coverage of N>1 EvidenceCollected events.
+      * Aggregate-verdict downgrade when any single category fails.
+
+    Each test method runs its own gate against a fresh tmp project so
+    the registry + verdict + Merkle root + audit chain are all isolated.
+    The 3-cat profile lives in ``tests/integration/data/profiles/smoke_3cat.json``.
+    The 1-cat ``smoke.json`` profile is kept untouched so the existing
+    happy-path class remains a regression net for the single-category
+    code path.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.repo_root = Path(__file__).resolve().parents[2]
+
+        # Load 3-cat profile fixture once for the class. Each test method
+        # then drives the gate against a per-test tmp project so the
+        # gate-reuse short-circuit (matches on gate_id under
+        # project_root/_bmad/) cannot cross-contaminate cases.
+        profile_path = (
+            Path(__file__).resolve().parent
+            / "data" / "profiles" / "smoke_3cat.json"
+        )
+        cls.profile = json.loads(profile_path.read_text())
+
+        # Canonical save/clear of env vars touched by the gate
+        # (BMAD_AUDIT_KEY for HMAC chain, STORY_AUTOMATOR_CHILD for the
+        # trust boundary). The single-cat class uses the same pattern.
+        cls._saved_audit_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        cls._saved_child = os.environ.pop("STORY_AUTOMATOR_CHILD", None)
+        os.environ["BMAD_AUDIT_KEY"] = "smoke-3cat-test-secret"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if cls._saved_audit_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = cls._saved_audit_key
+        os.environ.pop("STORY_AUTOMATOR_CHILD", None)
+        if cls._saved_child is not None:
+            os.environ["STORY_AUTOMATOR_CHILD"] = cls._saved_child
+
+    def setUp(self) -> None:
+        # Per-method tmp project — guarantees a fresh ``_bmad/`` so the
+        # gate-reuse path never short-circuits across test methods. The
+        # outer cleanup is registered via addCleanup so a SkipTest mid-
+        # method still purges the directory.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project_root = Path(self._tmp.name) / "smoke-3cat-project"
+        self.project_root.mkdir(parents=True)
+        try:
+            self.commit_sha = _git_init_with_commit(self.project_root)
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            raise unittest.SkipTest(
+                f"git unavailable for 3-cat fixture: {exc}",
+            ) from exc
+        self.gate_id = f"smoke3-{self.commit_sha[:12]}"
+        self.audit_path = self.project_root / "audit.jsonl"
+
+    def _run(
+        self,
+        *,
+        static_cmd: Any = _smoke_static_pass_cmd,
+        docs_cmd: Any = _smoke_docs_pass_cmd,
+        gate_id: str | None = None,
+        factory_version: str = "a-follow-2-3cat",
+    ) -> dict[str, Any]:
+        try:
+            return _drive_smoke_gate(
+                self.profile,
+                project_root=self.project_root,
+                commit_sha=self.commit_sha,
+                gate_id=gate_id or self.gate_id,
+                audit_path=self.audit_path,
+                factory_version=factory_version,
+                static_cmd=static_cmd,
+                docs_cmd=docs_cmd,
+            )
+        except TrustBoundaryError as exc:
+            raise unittest.SkipTest(
+                f"host context rejects 3-cat gate: {exc}",
+            ) from exc
+        except (FileNotFoundError, PermissionError) as exc:
+            raise unittest.SkipTest(
+                f"sandbox forbids 3-cat gate IO: {exc}",
+            ) from exc
+
+    # ---------- happy path: all 3 PASS ----------
+
+    def test_3category_all_pass_overall_pass(self) -> None:
+        """Three PASS-shaped collectors ⇒ overall PASS.
+
+        Catches multi-category aggregation regressions where a registry
+        filtering bug, a per-category rule dispatch bug, or an
+        aggregate_verdicts ordering bug would silently demote PASS.
+        """
+        gate_file = self._run()
+        self.assertEqual(
+            gate_file["overall"], "PASS",
+            f"expected PASS, got {gate_file['overall']}: "
+            f"categories={gate_file.get('categories')}",
+        )
+
+    # ---------- negative paths: single category fails ⇒ overall NOT PASS ----------
+
+    def test_3category_static_fails_overall_concerns_or_fail(self) -> None:
+        """One failing category ⇒ aggregate verdict is NOT PASS.
+
+        We assert NOT PASS (rather than pinning FAIL or CONCERNS) so a
+        future tweak to ``aggregate_verdicts`` — for example introducing
+        a CONCERNS tier for static — does not silently regress this test.
+        Current code: any FAIL ⇒ overall FAIL.
+        """
+        gate_file = self._run(static_cmd=_smoke_static_fail_cmd)
+        self.assertNotEqual(
+            gate_file["overall"], "PASS",
+            f"expected NOT PASS, got PASS: "
+            f"categories={gate_file.get('categories')}",
+        )
+        # The static category MUST be the offender — guards against a
+        # bug where the failing collector's evidence is mis-routed to
+        # another category (or dropped entirely).
+        self.assertNotEqual(
+            gate_file["categories"]["static"]["verdict"], "PASS",
+        )
+
+    def test_3category_docs_fails_overall_concerns_or_fail(self) -> None:
+        """Symmetric to the static case: failing docs collector also
+        downgrades the overall verdict. Validates that the failure path
+        is per-category, not hard-coded to one category."""
+        gate_file = self._run(docs_cmd=_smoke_docs_fail_cmd)
+        self.assertNotEqual(
+            gate_file["overall"], "PASS",
+            f"expected NOT PASS, got PASS: "
+            f"categories={gate_file.get('categories')}",
+        )
+        self.assertNotEqual(
+            gate_file["categories"]["docs"]["verdict"], "PASS",
+        )
+
+    # ---------- per-category rendering ----------
+
+    def test_3category_each_category_renders_individual_verdict(self) -> None:
+        """Per-category map carries ALL three active categories.
+
+        Catches the case where ``compute_all_verdicts`` silently drops a
+        category whose evidence is empty (vs the live-spec behaviour of
+        rendering a fail-closed verdict). Each category must produce a
+        dict with a ``verdict`` key in the closed vocabulary.
+        """
+        gate_file = self._run()
+        categories = gate_file.get("categories", {})
+        for cat in ("correctness", "static", "docs"):
+            self.assertIn(cat, categories, f"missing category {cat}")
+            self.assertIn(
+                categories[cat]["verdict"], VALID_VERDICTS,
+                f"{cat} verdict {categories[cat]['verdict']!r} not in "
+                f"{VALID_VERDICTS}",
+            )
+
+    # ---------- Merkle determinism ----------
+
+    def test_3category_merkle_root_changes_with_category_count(self) -> None:
+        """Bundle hash distinguishes a 1-cat run from a 3-cat run.
+
+        The Merkle root is computed over the canonical-JSON evidence
+        records in sorted order (per the gate_orchestrator export). A
+        bundle with three records MUST produce a different root than a
+        bundle with one record — otherwise the export step is dropping
+        records before hashing.
+        """
+        gate_file_3 = self._run(gate_id=f"{self.gate_id}-3cat")
+        root_3 = gate_file_3.get("evidence_merkle_root")
+        # 3-cat bundle: non-empty, 64-hex.
+        self.assertIsInstance(root_3, str)
+        self.assertRegex(root_3, HEX64)
+
+        # Now drive a 1-cat gate against a fresh tmp project (the parent
+        # smoke profile has only correctness active).
+        with tempfile.TemporaryDirectory() as solo_tmp:
+            solo_root = Path(solo_tmp) / "smoke-1cat-project"
+            solo_root.mkdir(parents=True)
+            try:
+                solo_sha = _git_init_with_commit(solo_root)
+            except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+                raise unittest.SkipTest(
+                    f"git unavailable for 1-cat comparison: {exc}",
+                ) from exc
+            solo_audit = solo_root / "audit.jsonl"
+            solo_profile_path = (
+                Path(__file__).resolve().parent
+                / "data" / "profiles" / "smoke.json"
+            )
+            solo_profile = json.loads(solo_profile_path.read_text())
+            solo_registry = CollectorRegistry()
+            solo_registry.register(
+                CollectorConfig(
+                    collector_id="smoke-correctness",
+                    tool="python3",
+                    category="correctness",
+                    build_cmd=_smoke_build_cmd,
+                    parse_metrics=_smoke_parse_metrics,
+                ),
+            )
+            try:
+                gate_file_1 = run_production_gate(
+                    solo_root,
+                    f"smoke1-{solo_sha[:12]}",
+                    commit_sha=solo_sha,
+                    target={"kind": "repo", "id": "smoke-1cat-test"},
+                    profile=solo_profile,
+                    factory_version="a-follow-2-1cat",
+                    registry=solo_registry,
+                    priority="P1",
+                    audit_policy={"security": {"audit_trail": True}},
+                    audit_path=solo_audit,
+                )
+            except TrustBoundaryError as exc:
+                raise unittest.SkipTest(
+                    f"host context rejects 1-cat gate: {exc}",
+                ) from exc
+            root_1 = gate_file_1.get("evidence_merkle_root")
+            self.assertIsInstance(root_1, str)
+            self.assertRegex(root_1, HEX64)
+            self.assertNotEqual(
+                root_1, root_3,
+                "Merkle root must differ between 1-cat and 3-cat bundles; "
+                "identical roots imply records dropped before hashing",
+            )
+
+    # ---------- audit chain coverage ----------
+
+    def test_3category_audit_chain_records_each_collector(self) -> None:
+        """Each of the 3 in-test collectors emits its own
+        ``EvidenceCollected`` audit event.
+
+        Reads the audit JSONL directly (one record per line) and counts
+        the per-collector events by ``payload.collector``. A bug where
+        the runner emits a single batched event, or short-circuits on
+        the first collector, would surface here.
+        """
+        self._run()
+        self.assertTrue(
+            self.audit_path.is_file(),
+            "audit file must exist after a gate run with audit_trail on",
+        )
+        collectors_seen: set[str] = set()
+        with self.audit_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                if record.get("event") != "EvidenceCollected":
+                    continue
+                payload = record.get("payload") or {}
+                collector = payload.get("collector")
+                if collector:
+                    collectors_seen.add(collector)
+        self.assertEqual(
+            collectors_seen,
+            {"smoke-correctness", "smoke-static", "smoke-docs"},
+            f"audit chain missing EvidenceCollected events: "
+            f"saw {collectors_seen}",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
