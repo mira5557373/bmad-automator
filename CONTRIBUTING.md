@@ -106,6 +106,106 @@ If the fix later proves incomplete and a second repair lands in `docs/changelog/
 
 The example is illustrative — `260501.md`, `260612.md`, and `260801.md` are fictional in this section, and the anchor slugs follow the GitHub-flavored-markdown auto-slug rule (lowercase, spaces replaced by hyphens) for their corresponding heading text. Landing a real retraction in an actual historical entry is handled by the follow-up sub-milestone M12b.
 
+## sw-style discipline
+
+Most milestones in this repo ship under a `sw run` workflow whose
+discipline is encoded directly in the codebase. New contributors
+landing changes the manual way should still respect the same
+guardrails — they are what keeps the audit-floor invariants green
+and the frozen gate surface stable.
+
+### TDD pattern
+
+Each milestone lands as a chain of small commits in this order:
+
+1. New behavioral test first (red).
+2. Implementation second (green).
+3. Audit / regression test pinning the invariant.
+4. Doc / status report under `docs/audit/`.
+5. Workflow archive commit (`chore(workflows): ...`).
+
+Tests use `unittest`; invocation is always prefixed with
+`PYTHONPATH=skills/bmad-story-automator/src` because the runtime
+lives inside the installed skill, not at the repo root.
+
+### Conventional Commits + Generated-By trailer
+
+Every commit uses Conventional Commits and carries a `Generated-By:`
+git trailer naming the model. Pairings + the `Co-Authored-By` line
+are kept stable. The trailer is required so the audit log can map
+each commit back to the agent that authored it; reviewers reject
+commits without the trailer.
+
+### Audit-floor invariants (26 green)
+
+`tests/test_audit_regression.py` is the audit-floor regression net.
+Every contribution MUST keep that suite green. The invariants are
+each pinned to a specific frozen-surface behavior — see
+`docs/spec/frozen-gate-surface.md` for the per-invariant mapping.
+Two of the current 26 (`UnifiedStateWriteIsolationInvariant`) were
+added by milestone G7 in this session; future invariants will land
+the same way:
+
+1. Add a new test method to `tests/test_audit_regression.py`.
+2. Reference it in `docs/spec/frozen-gate-surface.md` under
+   "Frozen behaviors" with a single-row description.
+3. Verify the test fails on the pre-fix tree and passes on the
+   post-fix tree before merging.
+
+Once an invariant lands, it MUST NOT be skipped, narrowed, or
+removed; regressing the count below 26 is a release-blocking
+condition.
+
+### Sibling-module pattern (audit_env_scrub, spec_drift_persistence, gate_lock_observability)
+
+When a module approaches the 500-LOC soft limit OR when a new
+behavior is conceptually orthogonal to the parent, extract it into
+a sibling module rather than growing the parent. Three examples
+land this session:
+
+- `core/audit_env_scrub.py` — extracted from `core/audit.py` so the
+  D-04 trust-boundary helper has its own home; `audit.py` re-exports
+  `scrub_env_for_subprocess` for the ~25 existing call sites. The
+  AST audit-floor invariant skips whichever module defines the
+  helper, so the split is rename-proof.
+- `core/innovation/spec_drift_persistence.py` — extracted from
+  `core/innovation/spec_drift_watcher.py` to host the disk-backed
+  baseline + JSONL events writer; keeps the watcher under the
+  500-LOC soft cap.
+- `core/gate_lock_observability.py` — extracted from
+  `core/gate_orchestrator.py` to host the
+  `GateLockTimeoutError` raise + `_describe_lock_holder` helpers;
+  cut a +145 LOC budget excursion to +88.
+
+When extracting, keep the parent module's public surface stable
+(re-export the moved symbol if it is part of the frozen surface or
+has external call sites), add the sibling to the relevant module-map
+section in `CLAUDE.md`, and update the frozen-surface doc.
+
+### Additive-only `gate_file` field rule
+
+`core/gate_schema.GateFile` is frozen. The orchestrator MAY stamp
+additional top-level fields on the dict AFTER `evaluate_gate`
+returns, but every such field MUST be additive: no rename, no
+removal, no signature narrowing. Consumers MUST tolerate the
+presence (or absence) of these fields. Currently four fields are
+embedded by the orchestrator outside the schema:
+
+- `evidence_merkle_root: str` — N5; canonical-JSON sha256 of the
+  evidence bundle (or `""` when empty).
+- `lineage_root: str` — C2 follow-up; sha256 of the cross-genre
+  lineage Merkle chain (or `""` when no chain exists on disk).
+- `cost_total_usd: float` — C3; CONDITIONAL on `session_usage`
+  being supplied AND emission succeeding.
+- `fail_closed_triggered: bool` + `fail_closed_categories: list[str]`
+  — phase-2; CONDITIONAL on `fail_closed=True`.
+
+Adding a fifth field requires (a) a sibling helper that emits it
+best-effort (try/except around the disk write), (b) a frozen-surface
+update under the relevant module section, (c) a per-field
+"CONDITIONAL when…" note in the schema doc, and (d) a regression
+test pinning that the field is absent on the default code path.
+
 ## Pre-commit hook (optional but recommended)
 
 This repository ships an opt-in pre-commit gate that runs the full

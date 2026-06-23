@@ -17,7 +17,11 @@
 
 - `skills/bmad-story-automator/` — installable main skill, contains the Python runtime
   - `src/story_automator/core/` — runtime building blocks (telemetry, tmux runtime, policy, verifiers, common helpers)
-  - `src/story_automator/commands/` — CLI command implementations (orchestrator, orchestrator_parse, state, tmux, validate_story_creation, basic, etc.)
+  - `src/story_automator/core/innovation/` — cross-cutting observability + scoring substrate (spec-drift watcher + persistence, lineage ledger, cost attribution + cost evidence + session usage capture, RAMR, ledger, kernel classifier, adversarial review, replay diff, phase budget, stack risk weights)
+  - `src/story_automator/core/usage_parsers/` — provider-specific session-rollout parsers (`claude_jsonl`, `codex_rollout`, `gemini_chat`, `none`, `types`)
+  - `src/story_automator/core/integration/` — cross-module integration helpers (e.g. `unified_state.py` for the sprint-phase dual-store unification)
+  - `src/story_automator/core/bauto_bridge/` — bmad-auto-pattern compat shims (HookBus shim)
+  - `src/story_automator/commands/` — CLI command implementations (orchestrator, orchestrator_parse, state, tmux, validate_story_creation, basic, gate, lineage, etc.)
   - `src/story_automator/adapters/` — adapters such as tmux
   - `scripts/story-automator` — installed helper CLI wrapper
 - `skills/bmad-story-automator-review/` — bundled adversarial code-review skill (no Python)
@@ -51,6 +55,38 @@ The production-ready factory gate. **Read these existing modules before planning
 - **Plugin registry (N6.4)** `core/plugins.py` — declarative-only, TOML-manifest plugin index. `PLUGIN_MANIFEST_KEYS` is the closed allowlist `{name, version, hooks, timeout_s, fail_closed}`; `PluginTrustError` rejects any manifest carrying `python_module` / `py_module` (Python-import keys are reserved precisely so an upstream engine cannot silently re-enable them).
 - **CLI dispatcher (N6.5)** `core/cli_dispatcher.py` — resolves stop-hook dialects per `cli_id` (`claude-code`, future `codex`/`gemini`/`none`) and falls back to a lie-detector when the child reports success without a baseline-commit advance. `_default_invoker` for `claude-code` wires into `core/tmux_runtime.py` (read-only consumer of its existing public surface). 500-LOC soft limit watched; split into `core/cli_dispatcher_invokers.py` if approached.
 - **Action enum (N6.6)** `core/action_enum.py` — `Literal` type for verifier actions consumed by `route_gate_verdict` and `success_verifiers.production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`.
+
+### Recently shipped (session 2026-06-23)
+
+The following milestones landed in addition to the gate subsystem
+above; all under the additive-only contract (optional kwargs,
+optional `gate_file` fields, optional CLI subcommands).
+
+- **Spec-drift watcher (C1 + follow-up)** `core/innovation/spec_drift_watcher.py` (MVP) + `core/innovation/spec_drift_persistence.py` (disk-backed baseline + JSONL events). New OPTIONAL `drift_watcher` kwarg on `run_production_gate`; polled twice per gate (pre-collect + post-evaluate); failures inside `poll()` are swallowed (drift telemetry can never abort a gate).
+- **Cross-genre lineage ledger (C2 + follow-up + CLI)** `core/innovation/lineage_ledger.py` — brainstorm → gate chain with disk persistence under `_bmad/lineage/`. New additive `lineage_root: str` field on `gate_file`. `lineage` is wired as a top-level CLI command with five read-only subcommands (`show`, `entry`, `stats`, `verify`, `orphans`).
+- **Cost evidence (N7 + C3)** `core/innovation/cost_attribution.py` (helper substrate) + `core/usage_parsers/{claude_jsonl,codex_rollout,gemini_chat,none,types}.py` (provider-rollout parsers) + `core/innovation/cost_evidence.py` (per-collector `summary.json` + `<collector_id>.json` under `_bmad/gate/cost/<gate_id>/`) + `core/innovation/session_usage_capture.py` (automatic session-usage capture closing the cost loop end-to-end). New OPTIONAL `session_usage` kwarg on `run_production_gate` and `run_system_gate`; new CONDITIONAL `cost_total_usd: float` field on `gate_file` (present only when caller opts in AND emission succeeds).
+- **Trust-boundary audit-key scrub (D-04 + follow-up)** `core/audit_env_scrub.py` — sibling module hosting `scrub_env_for_subprocess`; the AST audit-floor invariant skips whichever module defines the helper, so the split is rename-proof. `core/audit.py` re-exports the symbol for the ~25 existing call sites.
+- **Gate-lock observability (L1 + L2 + B)** `core/gate_lock_observability.py` — `GateLockTimeoutError(filelock.Timeout)` carrying `lock_file`, `holder` (PID + started_at + hostname), `timeout_s`; used at all three `get_gate_lock` call sites (`gate_orchestrator.py` x2 + `system_gate.py` x1). PID-reuse hardening via `psutil.create_time()` two-sided bound on legacy markers.
+- **Unified sprint-phase store (G7 / D-implement)** `core/integration/unified_state.py` — `read_unified_state` / `write_unified_state` / `unified_state_lock`; read order is REVERSED from write order so a reader observing the new sprint-status also sees the new phase store. Pinned by `UnifiedStateWriteIsolationInvariant` (audit-floor invariants 24 → 26).
+- **Evidence-bundle memoization (K-2)** memoization with explicit invalidation on persist; observability-only — no behavior change.
+- **Quarantine evidence cleanup (K-5)** quarantine-under-lock + rmtree-outside-lock + startup janitor for orphaned quarantine trees.
+- **N7.1 tmux→dispatcher migration** `commands/tmux.py::_spawn` is feature-flagged behind `BMAD_AUTO_USE_CLI_DISPATCHER`. Flag off (default) ⇒ byte-identical to pre-N7.1; flag on ⇒ routed through `cli_dispatcher.dispatch_session`.
+
+### `run_production_gate` additive kwargs (cumulative)
+
+The six OPTIONAL kwargs accumulated by Path B + the C1/C3
+follow-ups. All default to off / `None`; every existing call site
+keeps its byte-identical behavior:
+
+- `baseline_sha: str | None = None` — for the lie-detector (Phase 1).
+- `fail_closed: bool = False` — phase-2 error-status forces FAIL.
+- `enable_pre_gate_verifier: bool = False` — phase-3 inline checks.
+- `result_json_path: str | Path | None = None` — phase-2 schema-pinned `result.json` output.
+- `drift_watcher: SpecDriftWatcher | None = None` — C1 follow-up.
+- `session_usage: UsageMetrics | None = None` — C3 cost-attribution.
+
+`enable_lie_detector: bool = False` is the seventh Phase-1 kwarg
+predating this session; listed here for completeness.
 
 **Shared invariants for every collector** (verified by existing tests — don't break them):
 1. Output is `CollectorOutcome` with `status ∈ {ok, violation, error, timeout}` (fail-closed: error/timeout never count as PASS).

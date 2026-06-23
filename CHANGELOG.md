@@ -1,3 +1,130 @@
+## 260623 - [FULL] Session rollup — C1/C2/C3 observability + Path B compat + bug-sweep cleanup
+
+### Summary
+
+Session 2026-06-23 closed the cross-genre observability arc (drift
+watcher + lineage ledger + per-collector cost evidence) on top of the
+prior day's operability + bug-sweep cleanup. Every shipped milestone
+landed under the additive-only contract: optional-kwarg surface
+extensions, optional `gate_file` fields, optional CLI subcommands; no
+frozen-surface signature narrowed, no historical changelog rewritten,
+no new Python dependency. Test count rose 4070 → 4348 across the
+session; audit-floor invariants 24 → 26; ruff clean throughout. Each
+bullet below lists the closed M11 vocabulary tag and the
+session-internal milestone tag plus its head commit SHA. The
+detailed per-workflow status reports live under `docs/audit/`.
+
+### Shipped — [FULL]
+
+- L1 + L2 gate-marker concurrency hardening — filelock + targeted
+  quarantine + PID liveness on `_recover_from_crash` and the
+  in-progress marker write (`compat-bugfix-L1-L2-gate-marker-lock`).
+- L1 follow-up — gate-lock now also wraps
+  `system_gate.run_system_gate` so the production and system gate
+  paths share the same lock-holder observability
+  (`compat-bugfix-L1-system-gate-lock`).
+- Round-3 bug sweep — three fix-now defects (`compat-c-1-quarantine-mkdir-honest`
+  `5aa096d`, `compat-c-2-ceilings-single-pass` `b84c026`,
+  `compat-c-3-recover-cleanup-honest` `7086d10`) from a 16-finding
+  K/L/M-lens adversarial survey.
+- M-3 audit-trail durability — `fsync` parent dir after atomic
+  rename (`compat-bugfix-m3-audit-dirfsync` `4d8dde4`).
+- D-04 audit-key trust-boundary scrub — `BMAD_AUDIT_KEY` removed
+  from subprocess env at the trust boundary; sibling helper module
+  `core/audit_env_scrub.py` + structural AST invariant so the rule
+  is rename-proof
+  (`compat-bugfix-d-04-audit-key-env-scrub`).
+- K-5 quarantine evidence — quarantine-under-lock +
+  rmtree-outside-lock + startup janitor for orphaned trees
+  (`compat-bugfix-k5-quarantine-rmtree` `ee215b8`).
+- C2 MVP — cross-genre artifact lineage ledger
+  (`core/innovation/lineage_ledger.py`) with brainstorm → gate chain
+  (`compat-c2-cross-genre-lineage-mvp` `cdb61c7`).
+- C2 follow-up — lineage disk persistence + additive `lineage_root`
+  field on `gate_file` (`compat-c2-followup-disk-and-gate-embed`
+  `ec83a39`).
+- C2 query CLI — read-only `lineage show / entry / stats / verify /
+  orphans` subcommands (`compat-c2-query-cli` `1796b08`); promoted
+  to top-level with polished `--help`
+  (`compat-cli-polish-lineage-top-level` `7302d54`).
+- C1 follow-up — `SpecDriftWatcher` baseline persistence
+  (sibling module `core/innovation/spec_drift_persistence.py`) +
+  additive `drift_watcher` kwarg on `run_production_gate`
+  (`compat-c1-followup-persistence-and-wiring` `445263e`).
+- N7 unblocker — `core/usage_parsers/{claude_jsonl,codex_rollout,
+  gemini_chat,none}.py` plus `core/innovation/cost_attribution.py`
+  substrate (`compat-n7-usage-parsers-and-cost-attribution`
+  `5155851`).
+- C3 cost-attribution wiring — `core/innovation/cost_evidence.py`
+  with `emit_gate_cost_report`; new `session_usage` kwarg on
+  `run_production_gate` + `run_system_gate`; additive
+  `cost_total_usd` field on `gate_file`
+  (`compat-c3-cost-attribution-wiring` `6bf56e4`).
+- C3 auto session-usage capture — closes the cost-tracking loop
+  end-to-end via `core/innovation/session_usage_capture.py`
+  (`compat-c3-auto-session-usage-capture` `d71a8a7`).
+- A — end-to-end factory self-evaluation harness
+  (`tests/integration/test_factory_self_evaluation.py`, `abea3f6`).
+- A-follow — smoke profile + in-test collector producing a real
+  PASS verdict (`5216880`); A-follow-2 — smoke expanded to 3
+  categories with negative-path coverage (`3d462f6`).
+- B — operability batch: psutil `create_time()` bound on legacy
+  markers, `GateLockTimeoutError` carrying holder PID +
+  started_at + hostname, opt-in `.githooks/pre-commit`
+  (`bc79b2b`).
+- G7 / D-implement — sprint-phase dual-store unification
+  (`core/integration/unified_state.py`) with reversed read/write
+  order and self-cancellation guard (`compat-g7-unified-state`
+  `f5c8cdf`); added two new audit-floor invariants (24 → 26).
+
+### Shipped — [LITE]
+
+- C1 MVP — `SpecDriftWatcher` with severity classification
+  (`compat-c1-spec-drift-watcher-mvp` `8a4db9d`). MVP layer ships
+  with full test coverage but persistence + orchestrator wiring
+  shipped as the follow-up commit (now FULL).
+- K-2 evidence-bundle memoization — bundle memoization with
+  explicit invalidation on persist
+  (`compat-k2-evidence-cache` `32032cb`).
+- L-1 + L-2 + L-3 docstring gaps — `forbidden_until`, remediation,
+  risk action bands docstrings expanded (`compat-bugfix-L-docstrings`
+  `c821979`).
+- D-rereview enhancements — 10 HIGH gaps patched on the enhanced D
+  spec (`d3ab4b4`).
+
+### Shipped — [SKELETON]
+
+- (no skeleton-only commits in this session; every milestone shipped
+  with implementation + tests + verification).
+
+### Files
+
+Doc / spec only (this rollup):
+- `README.md` — quick-start + this-session summary refreshed.
+- `CHANGELOG.md` — this entry.
+- `CONTRIBUTING.md` — sw-style discipline + sibling-module pattern +
+  gate-file additive-field rule.
+- `CLAUDE.md` — "Recently shipped" section + module-map refresh + the
+  six additive `run_production_gate` kwargs called out.
+
+Implementation files for the per-milestone deltas are listed in
+their per-workflow status reports under `docs/audit/`. The dated
+M11-vocabulary entry under `docs/changelog/` for each milestone is
+where the file-level diff list lives.
+
+### QA Notes
+
+- `PYTHONPATH=skills/bmad-story-automator/src python3 -m unittest discover -s tests -p "test_*.py"` — 4348 passing (baseline 4070 at session start).
+- `ruff check skills/ tests/` — clean.
+- Audit-floor invariants (`tests/test_audit_regression.py`) — 26 green
+  (`UnifiedStateWriteIsolationInvariant` x2 added by G7).
+- No edits to `core/telemetry_events.py`.
+- No new Python dependency added.
+- No frozen-surface symbol renamed, removed, or signature-narrowed —
+  every signature change was an additive optional kwarg.
+
+---
+
 ### Features
 
 - feat(gate): add gate readiness CLI command with risk file input (af52e03)
