@@ -1,0 +1,299 @@
+"""Cost attribution — distribute a session :class:`UsageMetrics` across
+the collectors that ran inside it.
+
+This module is the substrate for a future per-collector cost-attribution
+milestone (the "C3" follow-up). The full milestone wires
+:func:`attribute_cost_uniform` (or one of its weighted siblings) into
+:mod:`story_automator.core.gate_orchestrator`, so that each
+:class:`CollectorOutcome` can record the share of session cost it was
+responsible for. Today we ship the helpers + tests; the orchestrator
+wiring is intentionally **not** included.
+
+Three attribution modes are supported, in order of fidelity:
+
+* **uniform** — divide session cost equally across the collectors.
+  Cheapest, most defensible, the right default when no per-collector
+  signal is available.
+* **duration-weighted** — divide proportional to per-collector
+  wall-clock duration. Best when collectors differ by an order of
+  magnitude in execution time (e.g. lint vs. an integration test
+  suite).
+* **tool-call-weighted** — divide proportional to per-collector tool
+  call counts. Useful when LLM tool calls dominate cost (RAMR routes
+  P0 collectors to reasoning-strong CLIs that may make many tool
+  calls).
+
+All three modes preserve sum-of-shares == session total *up to
+floating-point rounding*. The final share absorbs any rounding error
+so the invariant holds exactly for ``total_cost_usd``.
+
+The helpers are pure functions: they accept a session :class:`UsageMetrics`
+plus per-collector signals and return a list of :class:`CollectorCostShare`
+records in the same order as the input collector ids. They never read
+from disk, never mutate inputs, and raise :class:`AttributionError` on
+illegal input (e.g. empty collector list).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..usage_parsers import UsageMetrics
+
+
+__all__ = [
+    "AttributionError",
+    "CollectorCostShare",
+    "VALID_ATTRIBUTION_MODES",
+    "attribute_cost_uniform",
+    "attribute_cost_by_duration",
+    "attribute_cost_by_tool_calls",
+]
+
+
+class AttributionError(ValueError):
+    """Raised on invalid inputs to the cost-attribution helpers.
+
+    Examples: an empty ``collector_ids`` list, a duration map with
+    negative values, a tool-call map containing non-integer counts.
+    """
+
+
+VALID_ATTRIBUTION_MODES: tuple[str, ...] = (
+    "uniform",
+    "duration-weighted",
+    "tool-call-weighted",
+)
+"""Closed vocabulary for :attr:`CollectorCostShare.attribution_mode`."""
+
+
+@dataclass(frozen=True)
+class CollectorCostShare:
+    """One collector's share of a session's usage + cost.
+
+    The dataclass is frozen so callers can safely intern or hash a
+    share. ``attribution_mode`` records *how* this share was computed
+    so downstream audit can distinguish a uniform fallback from a
+    duration-weighted estimate.
+    """
+
+    collector_id: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    duration_s: float
+    attribution_mode: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers (internal)
+# ---------------------------------------------------------------------------
+
+
+def _require_collectors(collector_ids: list[str]) -> None:
+    if not collector_ids:
+        raise AttributionError("collector_ids must be non-empty")
+    seen: set[str] = set()
+    for cid in collector_ids:
+        if not isinstance(cid, str) or not cid:
+            raise AttributionError(
+                f"collector_ids entries must be non-empty strings; got {cid!r}"
+            )
+        if cid in seen:
+            raise AttributionError(f"duplicate collector_id: {cid!r}")
+        seen.add(cid)
+
+
+def _split_int(total: int, weights: list[float]) -> list[int]:
+    """Split ``total`` (int) across ``weights`` (sum == 1.0 ideally).
+
+    Uses floor-then-distribute-remainder so the sum of the returned
+    list equals ``total`` exactly. Negative weights are treated as 0.
+    """
+
+    n = len(weights)
+    if total <= 0 or n == 0:
+        return [0] * n
+    clean = [w if w > 0 else 0.0 for w in weights]
+    total_w = sum(clean)
+    if total_w <= 0:
+        # Fall back to uniform when weights are degenerate so the
+        # invariant (sum of shares == total) still holds.
+        return _split_int(total, [1.0] * n)
+    raw = [total * w / total_w for w in clean]
+    floors = [int(x) for x in raw]
+    remainder = total - sum(floors)
+    # Distribute the leftover units to the largest fractional parts.
+    fractions = sorted(
+        range(n),
+        key=lambda i: (raw[i] - floors[i], clean[i]),
+        reverse=True,
+    )
+    for idx in fractions[: max(0, remainder)]:
+        floors[idx] += 1
+    return floors
+
+
+def _split_float(total: float, weights: list[float]) -> list[float]:
+    """Split ``total`` (float) across ``weights``.
+
+    Adjusts the final share so the sum equals ``total`` exactly,
+    absorbing any floating-point drift.
+    """
+
+    n = len(weights)
+    if total <= 0 or n == 0:
+        return [0.0] * n
+    clean = [w if w > 0 else 0.0 for w in weights]
+    total_w = sum(clean)
+    if total_w <= 0:
+        return _split_float(total, [1.0] * n)
+    raw = [total * w / total_w for w in clean]
+    # Absorb floating-point drift into the final non-zero entry so the
+    # sum invariant holds for callers' equality tests.
+    drift = total - sum(raw)
+    if drift:
+        for i in range(n - 1, -1, -1):
+            if clean[i] > 0:
+                raw[i] += drift
+                break
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# Public attribution functions
+# ---------------------------------------------------------------------------
+
+
+def attribute_cost_uniform(
+    session: UsageMetrics,
+    collector_ids: list[str],
+) -> list[CollectorCostShare]:
+    """Divide ``session`` equally across ``collector_ids``.
+
+    Returns one :class:`CollectorCostShare` per id, in the same order.
+    Raises :class:`AttributionError` if ``collector_ids`` is empty or
+    contains duplicates / non-string entries.
+    """
+
+    _require_collectors(collector_ids)
+    n = len(collector_ids)
+    weights = [1.0] * n
+
+    in_shares = _split_int(session.input_tokens, weights)
+    out_shares = _split_int(session.output_tokens, weights)
+    cost_shares = _split_float(session.total_cost_usd, weights)
+    dur_shares = _split_float(session.duration_s, weights)
+
+    return [
+        CollectorCostShare(
+            collector_id=cid,
+            input_tokens=in_shares[i],
+            output_tokens=out_shares[i],
+            cost_usd=cost_shares[i],
+            duration_s=dur_shares[i],
+            attribution_mode="uniform",
+        )
+        for i, cid in enumerate(collector_ids)
+    ]
+
+
+def _check_weight_map(weights: dict[str, float], label: str) -> None:
+    if not weights:
+        raise AttributionError(f"{label} must be non-empty")
+    for cid, val in weights.items():
+        if not isinstance(cid, str) or not cid:
+            raise AttributionError(
+                f"{label} keys must be non-empty strings; got {cid!r}"
+            )
+        try:
+            fval = float(val)
+        except (TypeError, ValueError) as exc:
+            raise AttributionError(
+                f"{label}[{cid!r}] must be numeric; got {val!r}"
+            ) from exc
+        if fval < 0:
+            raise AttributionError(
+                f"{label}[{cid!r}] must be non-negative; got {fval}"
+            )
+
+
+def attribute_cost_by_duration(
+    session: UsageMetrics,
+    durations_s: dict[str, float],
+) -> list[CollectorCostShare]:
+    """Distribute ``session`` weighted by per-collector duration.
+
+    Returns one share per collector_id in ``durations_s``, in the
+    iteration order of the mapping. A collector with zero duration
+    receives a zero share unless *all* durations are zero — in which
+    case the function degrades gracefully to uniform attribution so
+    the sum invariant holds.
+
+    Raises :class:`AttributionError` on empty / negative input.
+    """
+
+    _check_weight_map(durations_s, "durations_s")
+    collector_ids = list(durations_s.keys())
+    _require_collectors(collector_ids)
+    weights = [float(durations_s[cid]) for cid in collector_ids]
+
+    in_shares = _split_int(session.input_tokens, weights)
+    out_shares = _split_int(session.output_tokens, weights)
+    cost_shares = _split_float(session.total_cost_usd, weights)
+    dur_shares = _split_float(session.duration_s, weights)
+
+    return [
+        CollectorCostShare(
+            collector_id=cid,
+            input_tokens=in_shares[i],
+            output_tokens=out_shares[i],
+            cost_usd=cost_shares[i],
+            duration_s=dur_shares[i],
+            attribution_mode="duration-weighted",
+        )
+        for i, cid in enumerate(collector_ids)
+    ]
+
+
+def attribute_cost_by_tool_calls(
+    session: UsageMetrics,
+    tool_calls: dict[str, int],
+) -> list[CollectorCostShare]:
+    """Distribute ``session`` weighted by per-collector tool-call count.
+
+    Mirrors :func:`attribute_cost_by_duration` but uses tool calls as
+    the weight signal. A zero-total tool-call map degrades to uniform
+    attribution.
+
+    Raises :class:`AttributionError` on empty / negative / non-integer
+    input.
+    """
+
+    _check_weight_map(tool_calls, "tool_calls")
+    for cid, val in tool_calls.items():
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise AttributionError(
+                f"tool_calls[{cid!r}] must be an int; got {type(val).__name__}"
+            )
+
+    collector_ids = list(tool_calls.keys())
+    _require_collectors(collector_ids)
+    weights = [float(tool_calls[cid]) for cid in collector_ids]
+
+    in_shares = _split_int(session.input_tokens, weights)
+    out_shares = _split_int(session.output_tokens, weights)
+    cost_shares = _split_float(session.total_cost_usd, weights)
+    dur_shares = _split_float(session.duration_s, weights)
+
+    return [
+        CollectorCostShare(
+            collector_id=cid,
+            input_tokens=in_shares[i],
+            output_tokens=out_shares[i],
+            cost_usd=cost_shares[i],
+            duration_s=dur_shares[i],
+            attribution_mode="tool-call-weighted",
+        )
+        for i, cid in enumerate(collector_ids)
+    ]
