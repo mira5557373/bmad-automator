@@ -16,20 +16,13 @@ This module is intentionally minimal:
 * No background thread, no asyncio, no timers. The caller decides when
   to poll. Tests therefore drive ``poll()`` synchronously and never wait
   on wall-clock time.
-* No persistence. Baseline + watcher state live in memory; persisting
-  the baseline across sessions is a follow-up milestone.
+* In-memory by default; optional disk persistence is opt-in via the
+  ``persistence_key`` kwarg (see ``spec_drift_persistence``).
 * No direct telemetry. ``poll()`` returns a ``SpecDriftEvent`` and the
   caller is expected to log / persist / emit it. We deliberately do
   NOT touch ``core/telemetry_events.py`` — that surface is frozen
   outside its owning milestone.
 * No CLI surface. Drift history viewing is a follow-up milestone.
-
-Out of scope for the MVP (call out so future readers don't expect them):
-
-* Async or thread-based polling cadence.
-* Persistence of baseline / events to disk.
-* Wiring into the orchestrator or telemetry emitter.
-* CLI to view drift history.
 
 Severity classification uses a four-bucket model controlled by
 ``severity_thresholds``:
@@ -263,8 +256,9 @@ class SpecDriftWatcher:
         *,
         baseline_snapshot: SpecDriftSnapshot | None = None,
         severity_thresholds: dict[str, float] | None = None,
+        persistence_key: str | None = None,
     ) -> None:
-        """Construct a watcher; no I/O yet.
+        """Construct a watcher; no I/O unless ``persistence_key`` is set.
 
         Args:
             project_root: Directory used as ``cwd`` for the underlying
@@ -280,6 +274,14 @@ class SpecDriftWatcher:
                 ``{"info", "warning", "critical"}``; unknown keys raise
                 ``SpecDriftError`` so typos do not silently degrade
                 detection.
+            persistence_key: Optional slug used as the directory name
+                under ``<project_root>/_bmad/drift/``. When provided,
+                the watcher loads any persisted baseline at init,
+                persists ``set_baseline`` to ``baseline.json``, and
+                appends each ``poll()`` event to ``events.jsonl``.
+                ``None`` (default) keeps the watcher purely in-memory,
+                byte-identical to the MVP. Slug is restricted to
+                ``[A-Za-z0-9][A-Za-z0-9_-]*`` to block path traversal.
         """
         self._project_root: Path = Path(project_root)
         self._spec_path: Path = Path(spec_path)
@@ -291,6 +293,21 @@ class SpecDriftWatcher:
             else dict(_DEFAULT_THRESHOLDS)
         )
         self._stopped: bool = False
+        self._persistence_key: str | None = persistence_key
+        if persistence_key is not None:
+            # Validate eagerly so a typo raises at construction time
+            # rather than on the first poll(). Local import avoids a
+            # circular at module-load. ``_baseline_ids`` is already
+            # ``set()`` so a loaded on-disk baseline behaves like a
+            # caller-supplied one — id-set is rebuilt on next
+            # ``set_baseline``.
+            from story_automator.core.innovation.spec_drift_persistence import (
+                load_baseline,
+                validate_persistence_key,
+            )
+            validate_persistence_key(persistence_key)
+            if self._baseline is None:
+                self._baseline = load_baseline(self._project_root, persistence_key)
 
     # ------------------------------------------------------------------
     # Snapshot / baseline management
@@ -345,6 +362,11 @@ class SpecDriftWatcher:
             # so a follow-up poll() will discover it on demand.
             self._baseline_ids = set()
         self._baseline = snapshot
+        if self._persistence_key is not None:
+            from story_automator.core.innovation.spec_drift_persistence import (
+                persist_baseline,
+            )
+            persist_baseline(self._project_root, self._persistence_key, snapshot)
 
     def _reread_satisfied_ids(self) -> set[str]:
         """Re-fetch the satisfied-id set from spec_compliance.
@@ -401,7 +423,16 @@ class SpecDriftWatcher:
             # event stream from t=0.
             self._baseline = current_snapshot
             self._baseline_ids = current_ids
-            return SpecDriftEvent(
+            if self._persistence_key is not None:
+                from story_automator.core.innovation.spec_drift_persistence import (
+                    persist_baseline,
+                )
+                persist_baseline(
+                    self._project_root,
+                    self._persistence_key,
+                    current_snapshot,
+                )
+            event = SpecDriftEvent(
                 baseline_score=current_snapshot.score,
                 current_score=current_snapshot.score,
                 delta=0.0,
@@ -409,25 +440,33 @@ class SpecDriftWatcher:
                 requirements_lost=(),
                 timestamp_iso=current_snapshot.timestamp_iso,
             )
+        else:
+            baseline = self._baseline
+            # If the baseline was caller-supplied we never captured an
+            # id set for it. In that case we conservatively treat the
+            # baseline id set as empty so ``requirements_lost`` is
+            # empty too — the score-based severity is still meaningful,
+            # and the caller can take a fresh baseline later if they
+            # want id-level drift.
+            baseline_ids = self._baseline_ids
+            lost = sorted(baseline_ids - current_ids)
+            delta = baseline.score - current_snapshot.score
+            severity = self._classify_severity(delta)
+            event = SpecDriftEvent(
+                baseline_score=baseline.score,
+                current_score=current_snapshot.score,
+                delta=delta,
+                severity=severity,
+                requirements_lost=tuple(lost),
+                timestamp_iso=current_snapshot.timestamp_iso,
+            )
 
-        baseline = self._baseline
-        # If the baseline was caller-supplied we never captured an id
-        # set for it. In that case we conservatively treat the baseline
-        # id set as empty so ``requirements_lost`` is empty too — the
-        # score-based severity is still meaningful, and the caller can
-        # take a fresh baseline later if they want id-level drift.
-        baseline_ids = self._baseline_ids
-        lost = sorted(baseline_ids - current_ids)
-        delta = baseline.score - current_snapshot.score
-        severity = self._classify_severity(delta)
-        return SpecDriftEvent(
-            baseline_score=baseline.score,
-            current_score=current_snapshot.score,
-            delta=delta,
-            severity=severity,
-            requirements_lost=tuple(lost),
-            timestamp_iso=current_snapshot.timestamp_iso,
-        )
+        if self._persistence_key is not None:
+            from story_automator.core.innovation.spec_drift_persistence import (
+                append_drift_event,
+            )
+            append_drift_event(self._project_root, self._persistence_key, event)
+        return event
 
     # ------------------------------------------------------------------
     # Lifecycle

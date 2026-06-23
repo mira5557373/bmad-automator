@@ -12,10 +12,13 @@ import socket
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil
 from filelock import Timeout
+
+if TYPE_CHECKING:
+    from .innovation.spec_drift_watcher import SpecDriftWatcher
 
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
@@ -634,6 +637,7 @@ def run_production_gate(
     fail_closed: bool = False,
     enable_pre_gate_verifier: bool = False,
     result_json_path: str | Path | None = None,
+    drift_watcher: "SpecDriftWatcher | None" = None,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -662,6 +666,15 @@ def run_production_gate(
     let a real bug ship. ``False`` (default) preserves prior behavior:
     error-evidence is still surfaced in categories but the
     verdict_engine decides whether it sinks the gate.
+
+    ``drift_watcher`` (C1 follow-up, default ``None``) — when a
+    :class:`SpecDriftWatcher` is provided, the orchestrator calls
+    ``watcher.poll()`` twice per gate run: once after the in-progress
+    marker is written and once after ``evaluate_gate`` returns but
+    before any ``fail_closed`` override. Both calls are wrapped in
+    ``try/except`` so a drift-detector failure can never abort the
+    gate — drift is strictly advisory telemetry. Default ``None``
+    preserves byte-identical behavior for every existing call site.
 
     ``enable_pre_gate_verifier`` (Phase 3, default ``False``) — when
     True, the six inline pre-gate checks
@@ -759,6 +772,14 @@ def run_production_gate(
             )
 
         write_gate_marker(project_root, gate_id, commit_sha)
+        # C1 follow-up: optional spec-drift watcher polled at lifecycle
+        # start. Failures are strictly advisory and must never abort
+        # the gate — drift is telemetry, not gating.
+        if drift_watcher is not None:
+            try:
+                drift_watcher.poll()
+            except Exception:
+                pass
         try:
             _run_collectors(
                 project_root, gate_id, commit_sha, profile, registry,
@@ -796,6 +817,15 @@ def run_production_gate(
         gate_file["evidence_merkle_root"] = compute_evidence_bundle_merkle_root(bundle)
     else:
         gate_file["evidence_merkle_root"] = ""
+
+    # C1 follow-up: optional spec-drift watcher polled at lifecycle
+    # end (after evaluate_gate, before any fail_closed override).
+    # Failures are non-fatal — see start-of-lifecycle poll above.
+    if drift_watcher is not None:
+        try:
+            drift_watcher.poll()
+        except Exception:
+            pass
 
     if fail_closed:
         error_labels = _collect_error_evidence(project_root, gate_id)
