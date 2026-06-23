@@ -24,11 +24,16 @@ Historically the layering lived as ad-hoc dict update calls inside
 
 This module centralises the policy:
 
-* **scalar top-level fields** (``version``, ``id``, ``forbidden_until``-as-
-  date-string-style scalars) — last layer wins;
+* **scalar top-level fields** (``version``, ``id``) — last layer wins;
 * **dict-valued fields** (``toolchain``, ``matrix``, ``categories``,
   ``rules``, ``timeouts``, ``forbidden_until``, ``cost_tier``,
-  ``invariants``, ``seed_template``, ``snapshot``) — deep-merge per key;
+  ``invariants``, ``seed_template``, ``snapshot``) — deep-merge per key.
+  In particular ``forbidden_until`` is a dict keyed by ADR-id mapping to
+  a list of story-id glob patterns; later layers **union** their ADR-id
+  keys into the merged result rather than replacing it wholesale, so a
+  product layer declaring ``forbidden_until={"ADR-001": ["STORY-1.*"]}``
+  composes with a bauto-overlay declaring
+  ``forbidden_until={"ADR-002": ["STORY-2.*"]}`` to produce both keys;
 * **list-valued fields** (``categories_na``) — union-merge preserving the
   first-seen order, no duplicates.
 

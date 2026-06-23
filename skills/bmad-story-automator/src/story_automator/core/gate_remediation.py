@@ -69,8 +69,14 @@ def write_remediation_to_story(
     """Append [AI-Review] tasks to the Tasks section of a dev-story.
 
     Respects edit-authorization: only the Tasks section is modified.
-    Creates a ``## Tasks`` section before the first non-editable section
-    if one doesn't exist.
+
+    If a ``## Tasks`` section already exists, new task bullets are inserted
+    immediately after its heading. Otherwise a fresh ``## Tasks`` section
+    is inserted **immediately before the first** ``##`` **heading of any
+    kind** (matched by ``r"^##\\s+"``) — note this is "first ``##``", not
+    "first non-editable ``##``", so if the story opens with ``## Status``
+    the new Tasks section will land before ``## Status``. If the story has
+    no ``##`` headings at all, the Tasks section is appended to the end.
     """
     if not tasks:
         return

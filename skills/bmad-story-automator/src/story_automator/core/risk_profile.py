@@ -1,8 +1,25 @@
 """Risk profile schema, validation, and scoring (§6.1, §8 module 1).
 
 Parses the structured risk profile emitted by TEA *risk generators.
-Maps Probability×Impact scores (1–9) to priorities (P0–P3) which
-drive downstream coverage/level requirements via profile.matrix.
+
+Two parallel classification systems are exposed here, both driven by the
+same integer score in ``[1, 9]`` (Probability × Impact):
+
+* **priority bands** (P0/P1/P2/P3) — drive downstream coverage and test-
+  level requirements via ``profile.matrix``. See
+  :func:`risk_score_to_priority` and :func:`aggregate_risk_priority`.
+
+* **action bands** (DOCUMENT/MONITOR/MITIGATE/BLOCK) — layered on top via
+  M37. They name the operator response expected for each score range:
+
+  - ``DOCUMENT``  — score ``1..3``   (record-only; no remediation work owed)
+  - ``MONITOR``   — score ``4..5``   (watch; revisit on next cycle)
+  - ``MITIGATE``  — score ``6..8``   (active remediation expected pre-ship)
+  - ``BLOCK``     — score ``9``      (release-blocking until mitigated)
+
+  See :data:`ACTION_BANDS`, :func:`risk_score_to_action`, and
+  :func:`action_blocks_release`. Only ``BLOCK`` hard-blocks the release;
+  the other three bands are advisory.
 """
 from __future__ import annotations
 
