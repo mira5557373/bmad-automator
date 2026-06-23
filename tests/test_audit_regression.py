@@ -25,6 +25,7 @@ The four fixes pinned here:
    itself (resolving story_path, persisting tasks, returning a rich
    remediation descriptor) — not just return verified=False.
 """
+
 from __future__ import annotations
 
 import json
@@ -75,35 +76,49 @@ class WaiverExpiryOnReuseInvariant(_Mixin, unittest.TestCase):
     """Pins §6.4(e): every reuse re-checks expires_at."""
 
     def test_expired_waiver_blocks_reuse_even_when_sha_profile_factory_match(self) -> None:
-        gate = self._gate(waivers=[{
-            "waiver_id": "01J90000000000000000000W",
-            "operator_id": "mira",
-            "issued_at": "2026-06-01T00:00:00Z",
-            "expires_at": "2026-06-02T00:00:00Z",  # past
-            "failing_categories": ["security"],
-            "reason": "test",
-            "signature": "sig",
-            "profile_hash": "abc123",
-        }])
+        gate = self._gate(
+            waivers=[
+                {
+                    "waiver_id": "01J90000000000000000000W",
+                    "operator_id": "mira",
+                    "issued_at": "2026-06-01T00:00:00Z",
+                    "expires_at": "2026-06-02T00:00:00Z",  # past
+                    "failing_categories": ["security"],
+                    "reason": "test",
+                    "signature": "sig",
+                    "profile_hash": "abc123",
+                }
+            ]
+        )
         ok, reason = can_reuse_gate_file(
-            gate, commit_sha="deadbeef", profile_hash="abc123", factory_version="1.15.0",
+            gate,
+            commit_sha="deadbeef",
+            profile_hash="abc123",
+            factory_version="1.15.0",
         )
         self.assertFalse(ok, "expired waiver MUST block reuse — the audit fix is gone")
         self.assertIn("waiver expired", reason)
 
     def test_unexpired_waiver_allows_reuse(self) -> None:
-        gate = self._gate(waivers=[{
-            "waiver_id": "01J90000000000000000000F",
-            "operator_id": "mira",
-            "issued_at": "2099-01-01T00:00:00Z",
-            "expires_at": "2099-12-31T23:59:59Z",
-            "failing_categories": ["security"],
-            "reason": "infra dependency",
-            "signature": "sig",
-            "profile_hash": "abc123",
-        }])
+        gate = self._gate(
+            waivers=[
+                {
+                    "waiver_id": "01J90000000000000000000F",
+                    "operator_id": "mira",
+                    "issued_at": "2099-01-01T00:00:00Z",
+                    "expires_at": "2099-12-31T23:59:59Z",
+                    "failing_categories": ["security"],
+                    "reason": "infra dependency",
+                    "signature": "sig",
+                    "profile_hash": "abc123",
+                }
+            ]
+        )
         ok, _ = can_reuse_gate_file(
-            gate, commit_sha="deadbeef", profile_hash="abc123", factory_version="1.15.0",
+            gate,
+            commit_sha="deadbeef",
+            profile_hash="abc123",
+            factory_version="1.15.0",
         )
         self.assertTrue(ok)
 
@@ -146,11 +161,15 @@ class MarkerCorruptionInvariant(_Mixin, unittest.TestCase):
         self.assertTrue(result["quarantined"], "marker corruption must surface loud")
         self.assertIn("quarantine_dir", result)
         # Evidence must have been MOVED, not deleted.
-        self.assertFalse(important.exists(),
-                         "the original evidence path must not still exist (it was moved to quarantine)")
+        self.assertFalse(
+            important.exists(),
+            "the original evidence path must not still exist (it was moved to quarantine)",
+        )
         quar = Path(result["quarantine_dir"])
-        self.assertTrue((quar / "evidence" / "lost-gate" / "important.json").is_file(),
-                        "important evidence MUST have been quarantined, not deleted")
+        self.assertTrue(
+            (quar / "evidence" / "lost-gate" / "important.json").is_file(),
+            "important evidence MUST have been quarantined, not deleted",
+        )
 
     def test_recover_from_crash_unreadable_marker_preserves_other_evidence(self) -> None:
         """L2-variant: when gate_id is NOT salvageable from a corrupted marker,
@@ -192,8 +211,11 @@ class AiReviewPersistenceInvariant(_Mixin, unittest.TestCase):
     def test_fail_with_story_path_writes_tasks_into_Tasks_section(self) -> None:
         gate = self._gate(overall="FAIL")
         gate["categories"]["security"] = {
-            "verdict": "FAIL", "required": {}, "actual": {},
-            "rationale": "1 critical CVE", "evidence": [],
+            "verdict": "FAIL",
+            "required": {},
+            "actual": {},
+            "rationale": "1 critical CVE",
+            "evidence": [],
         }
         story = self.tmp / "E1-001.md"
         story.write_text(
@@ -201,8 +223,11 @@ class AiReviewPersistenceInvariant(_Mixin, unittest.TestCase):
             encoding="utf-8",
         )
         result = route_gate_verdict(
-            self.tmp, gate, story_key="E1-001",
-            remediation_cycle=0, max_cycles=3,
+            self.tmp,
+            gate,
+            story_key="E1-001",
+            remediation_cycle=0,
+            max_cycles=3,
             story_path=story,
         )
         self.assertEqual(result["action"], "remediate")
@@ -217,12 +242,18 @@ class AiReviewPersistenceInvariant(_Mixin, unittest.TestCase):
     def test_fail_without_story_path_returns_descriptor_unpersisted(self) -> None:
         gate = self._gate(overall="FAIL")
         gate["categories"]["security"] = {
-            "verdict": "FAIL", "required": {}, "actual": {},
-            "rationale": "1 critical CVE", "evidence": [],
+            "verdict": "FAIL",
+            "required": {},
+            "actual": {},
+            "rationale": "1 critical CVE",
+            "evidence": [],
         }
         result = route_gate_verdict(
-            self.tmp, gate, story_key="E1-001",
-            remediation_cycle=0, max_cycles=3,
+            self.tmp,
+            gate,
+            story_key="E1-001",
+            remediation_cycle=0,
+            max_cycles=3,
         )
         self.assertEqual(result["action"], "remediate")
         self.assertFalse(result["tasks_persisted"])
@@ -240,6 +271,7 @@ class VerifierRemediationLoopInvariant(_Mixin, unittest.TestCase):
     def _persist_gate_file(self, gate: dict) -> None:
         # Build a minimal gate file on disk so production_ready_gate can load it.
         from story_automator.core.evidence_io import persist_gate_file
+
         persist_gate_file(self.tmp, gate)
 
     def _seed_story(self) -> Path:
@@ -254,6 +286,7 @@ class VerifierRemediationLoopInvariant(_Mixin, unittest.TestCase):
 
     def test_fail_verdict_returns_remediation_descriptor_with_tasks_persisted(self) -> None:
         from story_automator.core.success_verifiers import production_ready_gate
+
         gate = self._gate(overall="FAIL")
         # Match the persisted gate_id convention (kept consistent across the
         # audit-fix verifier integration).
@@ -278,6 +311,7 @@ class VerifierRemediationLoopInvariant(_Mixin, unittest.TestCase):
     def test_fail_at_max_cycles_parks_via_descriptor(self) -> None:
         from story_automator.core.gate_status import list_parked
         from story_automator.core.success_verifiers import production_ready_gate
+
         gate = self._gate(overall="FAIL")
         gate["gate_id"] = "audit-floor-1069d86-park"
         self._persist_gate_file(gate)
@@ -285,11 +319,13 @@ class VerifierRemediationLoopInvariant(_Mixin, unittest.TestCase):
         result = production_ready_gate(
             project_root=str(self.tmp),
             story_key="E1-001-my-story",
-            contract={"config": {
-                "gate_id": gate["gate_id"],
-                "remediation_cycle": 3,
-                "max_cycles": 3,
-            }},
+            contract={
+                "config": {
+                    "gate_id": gate["gate_id"],
+                    "remediation_cycle": 3,
+                    "max_cycles": 3,
+                }
+            },
         )
         self.assertFalse(result["verified"])
         self.assertEqual(result["remediation"]["action"], "park")
@@ -326,6 +362,7 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
 
     def _registry(self, allowlist: frozenset[str] | None = None):
         from story_automator.core.plugins import PluginRegistry
+
         if allowlist is None:
             allowlist = frozenset({"example"})
         return PluginRegistry(self.plugin_dir, allowlist)
@@ -333,10 +370,9 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
     def test_python_module_key_rejected(self) -> None:
         """Manifest with ``python_module`` key MUST raise PluginTrustError."""
         from story_automator.core.plugins import PluginTrustError
+
         self._write_manifest(
-            'name = "example"\n'
-            'version = "1.0.0"\n'
-            'python_module = "my_plugin.entry"\n'
+            'name = "example"\nversion = "1.0.0"\npython_module = "my_plugin.entry"\n'
         )
         with self.assertRaises(PluginTrustError) as ctx:
             self._registry().load_all()
@@ -347,11 +383,8 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
     def test_py_module_key_rejected(self) -> None:
         """Manifest with ``py_module`` key MUST raise PluginTrustError."""
         from story_automator.core.plugins import PluginTrustError
-        self._write_manifest(
-            'name = "example"\n'
-            'version = "1.0.0"\n'
-            'py_module = "my_plugin"\n'
-        )
+
+        self._write_manifest('name = "example"\nversion = "1.0.0"\npy_module = "my_plugin"\n')
         with self.assertRaises(PluginTrustError) as ctx:
             self._registry().load_all()
         self.assertIn("py_module", str(ctx.exception))
@@ -366,8 +399,8 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
         self._write_manifest(
             'name = "example"\n'
             'version = "1.0.0"\n'
-            '\n'
-            '[hooks]\n'
+            "\n"
+            "[hooks]\n"
             'post_gate = "python -m my_plugin.entry --gate-id $BMAD_GATE_ID"\n'
         )
         specs = self._registry().load_all()
@@ -385,11 +418,8 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
         the unknown-key path remains fail-closed.
         """
         from story_automator.core.plugins import PluginTrustError
-        self._write_manifest(
-            'name = "example"\n'
-            'version = "1.0.0"\n'
-            'import = "my_plugin:run"\n'
-        )
+
+        self._write_manifest('name = "example"\nversion = "1.0.0"\nimport = "my_plugin:run"\n')
         with self.assertRaises(PluginTrustError) as ctx:
             self._registry().load_all()
         self.assertIn("import", str(ctx.exception))
@@ -402,6 +432,7 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
         explicit (the test breaks, the contributor has to think).
         """
         from story_automator.core.plugins import PLUGIN_MANIFEST_KEYS
+
         self.assertEqual(
             set(PLUGIN_MANIFEST_KEYS),
             {"name", "version", "hooks", "timeout_s", "fail_closed"},
@@ -419,6 +450,7 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
         """
         import ast
         from story_automator.core import plugins as plugins_mod
+
         source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
         forbidden_names = {"importlib", "__import__", "import_module"}
@@ -446,7 +478,8 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
                 if node.attr in forbidden_names:
                     offenders.append(f"attribute access: .{node.attr}")
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "core/plugins.py uses Python-import APIs — declarative-only "
             f"trust boundary has been breached; see N6.4 / Path B. Offenders: {offenders}",
         )
@@ -470,7 +503,7 @@ class GateFileDeterminismBaseline(unittest.TestCase):
     def _build(self, overall: str, *, gate_id: str = "corp-1") -> dict:
         cats = {
             "correctness": {"verdict": overall, "required": {}, "actual": {}, "rationale": "r"},
-            "security":    {"verdict": "PASS",  "required": {}, "actual": {}, "rationale": "ok"},
+            "security": {"verdict": "PASS", "required": {}, "actual": {}, "rationale": "ok"},
         }
         return make_gate_file(
             gate_id=gate_id,
@@ -487,14 +520,25 @@ class GateFileDeterminismBaseline(unittest.TestCase):
         # Pin the field set. New fields are allowed (additive), but renaming
         # or removing one is what breaks audit replay.
         expected_keys = {
-            "gate_id", "schema_version", "target", "tier", "commit_sha",
-            "scanner_data_snapshot", "profile", "factory_version",
-            "risk_profile_ref", "categories", "overall", "waivers",
+            "gate_id",
+            "schema_version",
+            "target",
+            "tier",
+            "commit_sha",
+            "scanner_data_snapshot",
+            "profile",
+            "factory_version",
+            "risk_profile_ref",
+            "categories",
+            "overall",
+            "waivers",
             "evidence_bundle_hash",
         }
         # The actual gate carries AT LEAST these. Additive fields don't break it.
-        self.assertTrue(expected_keys.issubset(set(gate.keys())),
-                        f"missing gate fields: {sorted(expected_keys - set(gate.keys()))}")
+        self.assertTrue(
+            expected_keys.issubset(set(gate.keys())),
+            f"missing gate fields: {sorted(expected_keys - set(gate.keys()))}",
+        )
         self.assertEqual(gate["overall"], "PASS")
         self.assertEqual(gate["categories"]["correctness"]["verdict"], "PASS")
         self.assertEqual(gate["schema_version"], 1)
@@ -603,8 +647,11 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "must-not-leak"}, clear=False):
             scrubbed = scrub_env_for_subprocess()
             proc = subprocess.run(
-                [sys.executable, "-c",
-                 "import os; print(os.environ.get('BMAD_AUDIT_KEY', 'NONE'))"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ.get('BMAD_AUDIT_KEY', 'NONE'))",
+                ],
                 env=scrubbed,
                 capture_output=True,
                 text=True,
@@ -629,7 +676,9 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
 
         skill_src = (
             Path(__file__).resolve().parents[1]
-            / "skills" / "bmad-story-automator" / "src"
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
             / "story_automator"
         )
         # Scan core/ AND commands/ — both are inside the trust boundary
@@ -650,10 +699,13 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         def _is_subprocess_call(node: ast.Call) -> bool:
             func = node.func
             if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                return (
-                    func.value.id == "subprocess"
-                    and func.attr in {"run", "Popen", "call", "check_call", "check_output"}
-                )
+                return func.value.id == "subprocess" and func.attr in {
+                    "run",
+                    "Popen",
+                    "call",
+                    "check_call",
+                    "check_output",
+                }
             return False
 
         def _defines_scrub_helper(tree: ast.Module) -> bool:
@@ -665,10 +717,7 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             matter which filename hosts it.
             """
             for node in tree.body:
-                if (
-                    isinstance(node, ast.FunctionDef)
-                    and node.name == "scrub_env_for_subprocess"
-                ):
+                if isinstance(node, ast.FunctionDef) and node.name == "scrub_env_for_subprocess":
                     return True
             return False
 
@@ -687,6 +736,7 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             # cannot break the invariant.
             if _defines_scrub_helper(tree):
                 continue
+
             # Track names bound to scrub_env_for_subprocess(...) per function
             # scope, so callers may write:
             #   sandboxed = scrub_env_for_subprocess(env)
@@ -705,7 +755,8 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 def visit_Call(self, node: ast.Call) -> None:
                     if _is_subprocess_call(node):
                         env_kw = next(
-                            (kw for kw in node.keywords if kw.arg == "env"), None,
+                            (kw for kw in node.keywords if kw.arg == "env"),
+                            None,
                         )
                         ok = False
                         if env_kw is not None:
@@ -724,7 +775,8 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             _Visitor().visit(tree)
 
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
             + "\n  ".join(offenders),
         )
@@ -812,11 +864,7 @@ class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
                     if kw.arg in {"path", "dst"} and _is_path_expression(kw.value):
                         mutates_sprint_status = True
 
-        return (
-            calls_write_phase
-            and mutates_sprint_status
-            and not acquires_unified_lock
-        )
+        return calls_write_phase and mutates_sprint_status and not acquires_unified_lock
 
     def test_ast_unified_state_module_is_isolated_writer(self) -> None:
         """Walk every .py under core/; flag two-store writers that miss
@@ -827,7 +875,9 @@ class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
 
         skill_src = (
             Path(__file__).resolve().parents[1]
-            / "skills" / "bmad-story-automator" / "src"
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
             / "story_automator"
         )
         core_dir = skill_src / "core"
@@ -850,10 +900,10 @@ class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
             if self._module_violates(tree):
                 offenders.append(str(py_file.relative_to(skill_src)))
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Modules writing both sprint-status and phase stores without "
-            "unified_state_lock — G7 isolation invariant broken:\n  "
-            + "\n  ".join(offenders),
+            "unified_state_lock — G7 isolation invariant broken:\n  " + "\n  ".join(offenders),
         )
 
     def test_positive_failure_synthetic_violator_is_caught(self) -> None:
@@ -879,20 +929,22 @@ class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
         tree = ast.parse(synthetic)
         self.assertTrue(
             UnifiedStateWriteIsolationInvariant._module_violates(tree),
-            "AST walker FAILED to flag a known violator — invariant is "
-            "vacuously true",
+            "AST walker FAILED to flag a known violator — invariant is vacuously true",
         )
         # And the real unified_state.py source must pass — the writer is
         # exempted by structural recognition (test above), but the same
         # raw source also acquires the lock so the violation rule would
         # not fire either.
         from story_automator.core.integration import unified_state as us_mod
+
         real_tree = ast.parse(Path(us_mod.__file__).read_text(encoding="utf-8"))
         # Strip top-level write_unified_state to exercise the rule itself.
         stripped = ast.Module(
-            body=[n for n in real_tree.body if not (
-                isinstance(n, ast.FunctionDef) and n.name == "write_unified_state"
-            )],
+            body=[
+                n
+                for n in real_tree.body
+                if not (isinstance(n, ast.FunctionDef) and n.name == "write_unified_state")
+            ],
             type_ignores=[],
         )
         # Even without the exemption, the real module acquires the lock
@@ -902,6 +954,519 @@ class UnifiedStateWriteIsolationInvariant(unittest.TestCase):
             "unified_state.py raw source trips the violation rule — the "
             "module is supposed to bracket every two-store write with "
             "unified_state_lock",
+        )
+
+
+# ---------------------------------------------------------------------------
+# C5 — ThresholdApplyIsolationInvariant + ThresholdLockIsolationInvariant
+# ---------------------------------------------------------------------------
+# The self-improving gate (C5) auto-emits ThresholdProposals but MUST NEVER
+# silently rewrite its own rules. The apply step (``apply_threshold_proposal``
+# in ``core/innovation/threshold_apply.py``) is the only legal mutator of
+# ``gate_rules.py`` and may run ONLY from operator-initiated CLI handlers
+# under ``commands/``. The structural exemptions key off
+#   (a) the top-level ``def apply_threshold_proposal`` (the implementation
+#       file is rename-proof exempt — mirrors ``_defines_scrub_helper``), and
+#   (b) the CLI handler signature ``def f(args, *, confirm: str, ...)`` whose
+#       body calls ``apply_threshold_proposal`` (rename-proof exemption for
+#       the deliberately-coupled operator gate; matches spec §7.5).
+# All other ``core/`` and ``commands/`` modules MUST NOT call
+# ``apply_threshold_proposal`` directly, via alias rebinding, via
+# ``getattr(...)``, or via ``importlib.import_module(...).apply_threshold_proposal``.
+#
+# Additionally, every ``FileLock(...)`` call inside
+# ``core/innovation/threshold_*.py`` MUST resolve to the
+# ``.calibration.lock`` sidecar — pinned by the lock-isolation invariant —
+# so that no co-acquisition with ``.gate.lock`` / ``.lineage.lock`` /
+# ``.drift.lock`` / ``.unified-state.lock`` is structurally possible.
+
+
+class ThresholdApplyIsolationInvariant(unittest.TestCase):
+    """Pins C5 §7.5: only the operator-driven CLI handler may call
+    ``apply_threshold_proposal``. Mirrors ``AuditKeyEnvScrubInvariant``
+    (lines 530-732) for structural exemption + ``UnifiedStateWriteIsolationInvariant``
+    (lines 733-906) for binding tracking.
+    """
+
+    @staticmethod
+    def _defines_apply_helper(tree) -> bool:
+        """Return True iff the module's top level defines
+        ``apply_threshold_proposal`` — rename-proof signal that this *is*
+        the apply step's implementation file (current home:
+        ``core/innovation/threshold_apply.py``). The invariant must not
+        apply to the file that owns the helper, no matter which filename
+        hosts it (matches ``_defines_scrub_helper`` at lines 659-673).
+        """
+        import ast
+
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "apply_threshold_proposal":
+                return True
+        return False
+
+    @staticmethod
+    def _is_cli_apply_handler(tree) -> bool:
+        """Return True iff the module defines a top-level FunctionDef whose
+        first non-self argument is annotated ``confirm: str`` AND whose body
+        contains a ``Call`` to ``apply_threshold_proposal``.
+
+        Structural — rename-proof — so the §3 pre-authorized split of
+        ``calibration_cmd.py`` into ``calibration_subcommands.py`` cannot
+        break the invariant. The current home is
+        ``commands/calibration_cmd._cmd_apply``.
+        """
+        import ast
+
+        def _has_confirm_str(func: ast.FunctionDef) -> bool:
+            # ``confirm: str`` may appear as a positional or keyword-only
+            # arg. We accept either; the structural property is the type
+            # annotation, not the position.
+            all_args = list(func.args.args) + list(func.args.kwonlyargs)
+            for arg in all_args:
+                if arg.arg != "confirm":
+                    continue
+                ann = arg.annotation
+                if isinstance(ann, ast.Name) and ann.id == "str":
+                    return True
+                if isinstance(ann, ast.Constant) and ann.value == "str":
+                    # String-literal annotation (PEP 563-style) — also OK.
+                    return True
+            return False
+
+        def _calls_apply(func: ast.FunctionDef) -> bool:
+            for sub in ast.walk(func):
+                if not isinstance(sub, ast.Call):
+                    continue
+                fn = sub.func
+                if isinstance(fn, ast.Name) and fn.id == "apply_threshold_proposal":
+                    return True
+                if isinstance(fn, ast.Attribute) and fn.attr == "apply_threshold_proposal":
+                    return True
+            return False
+
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if _has_confirm_str(node) and _calls_apply(node):
+                return True
+        return False
+
+    @classmethod
+    def _module_violates(cls, tree) -> bool:
+        """Return True iff ``tree`` contains a direct or indirect call to
+        ``apply_threshold_proposal`` and is NOT covered by either structural
+        exemption (``_defines_apply_helper`` / ``_is_cli_apply_handler``).
+        Binding-tracking AST walker — modeled on
+        ``UnifiedStateWriteIsolationInvariant._module_violates`` (lines 743-855).
+
+        Tracks:
+          * ``from X import apply_threshold_proposal as ALIAS`` → ALIAS forbidden.
+          * ``ALIAS = apply_threshold_proposal`` (or alias) → LHS forbidden.
+
+        Flags:
+          * ``Call(func=Name(N))`` for N in the forbidden set (incl. the
+            canonical name).
+          * ``Call(func=Attribute(attr="apply_threshold_proposal"))`` —
+            regardless of receiver.
+          * ``Call(func=Name("getattr"), args=[_, Constant("apply_threshold_proposal"), ...])``.
+          * ``Attribute(attr="apply_threshold_proposal", value=Call(func=Attribute(attr="import_module"), ...))``.
+        """
+        import ast
+
+        forbidden: set[str] = {"apply_threshold_proposal"}
+
+        # First pass — record aliases.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "apply_threshold_proposal":
+                        forbidden.add(alias.asname or alias.name)
+            elif isinstance(node, ast.Assign):
+                if isinstance(node.value, ast.Name) and node.value.id in forbidden:
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            forbidden.add(tgt.id)
+                elif isinstance(node.value, ast.Attribute) and (
+                    node.value.attr == "apply_threshold_proposal"
+                ):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            forbidden.add(tgt.id)
+
+        # Second pass — flag direct/indirect calls + indirect access.
+        for node in ast.walk(tree):
+            # Direct/aliased call: f(...) or _ap(...).
+            if isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Name):
+                    if fn.id in forbidden:
+                        return True
+                    if fn.id == "getattr" and len(node.args) >= 2:
+                        second = node.args[1]
+                        if (
+                            isinstance(second, ast.Constant)
+                            and second.value == "apply_threshold_proposal"
+                        ):
+                            return True
+                if isinstance(fn, ast.Attribute) and fn.attr == "apply_threshold_proposal":
+                    return True
+            # Indirect access via importlib.import_module(...).apply_threshold_proposal
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "apply_threshold_proposal"
+                and isinstance(node.value, ast.Call)
+            ):
+                inner = node.value.func
+                if isinstance(inner, ast.Attribute) and inner.attr == "import_module":
+                    return True
+                if isinstance(inner, ast.Name) and inner.id == "import_module":
+                    return True
+        return False
+
+    def test_ast_no_direct_or_indirect_apply_in_core_and_commands(self) -> None:
+        """Walk every .py under BOTH core/ AND commands/; flag any call
+        (direct, aliased, getattr-indirect, importlib-indirect) to
+        ``apply_threshold_proposal`` from a module not covered by the two
+        structural exemptions.
+        """
+        import ast
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        scan_dirs = (skill_src / "core", skill_src / "commands")
+        offenders: list[str] = []
+        py_files: list[Path] = []
+        for d in scan_dirs:
+            if d.is_dir():
+                py_files.extend(d.rglob("*.py"))
+        for py_file in sorted(py_files):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            # Exemption (a): the file that owns the helper.
+            if self._defines_apply_helper(tree):
+                continue
+            # Exemption (b): the operator-driven CLI handler.
+            if self._is_cli_apply_handler(tree):
+                continue
+            if self._module_violates(tree):
+                offenders.append(str(py_file.relative_to(skill_src)))
+        self.assertEqual(
+            offenders,
+            [],
+            "Modules calling apply_threshold_proposal outside the "
+            "deliberately-coupled CLI gate — C5 self-improving-gate "
+            "isolation invariant broken:\n  " + "\n  ".join(offenders),
+        )
+
+    def test_positive_failure_synthetic_violator_is_caught(self) -> None:
+        """Two-direction proof matching
+        ``UnifiedStateWriteIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``
+        (lines 859-905):
+
+        (a) Synthesize source containing direct call + alias-rebinding
+            call + indirect ``getattr`` call + ``importlib.import_module``
+            chain; assert ALL flagged.
+        (b) Read the real ``threshold_apply.py`` source, AST-strip the
+            ``def apply_threshold_proposal`` top-level FunctionDef,
+            re-parse, assert the walker does NOT trip on the residual
+            file — proves the rule itself is operative independent of
+            the exemption.
+        """
+        import ast
+
+        # (a) Direct call.
+        direct_src = textwrap.dedent(
+            """
+            from story_automator.core.innovation.threshold_apply import (
+                apply_threshold_proposal,
+            )
+
+            def evil_direct():
+                apply_threshold_proposal(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(direct_src)),
+            "AST walker FAILED to flag a direct call — invariant is vacuously true",
+        )
+
+        # (a) Alias rebinding call.
+        alias_src = textwrap.dedent(
+            """
+            from story_automator.core.innovation.threshold_apply import (
+                apply_threshold_proposal as _ap,
+            )
+
+            def evil_alias():
+                _ap(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(alias_src)),
+            "AST walker FAILED to flag an alias-rebinding call",
+        )
+
+        # (a) Indirect getattr call.
+        getattr_src = textwrap.dedent(
+            """
+            from story_automator.core.innovation import threshold_apply as ta
+
+            def evil_getattr():
+                fn = getattr(ta, "apply_threshold_proposal")
+                fn(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(getattr_src)),
+            "AST walker FAILED to flag a getattr-indirect call",
+        )
+
+        # (a) importlib.import_module(...).apply_threshold_proposal chain.
+        importlib_src = textwrap.dedent(
+            """
+            import importlib
+
+            def evil_importlib():
+                mod = importlib.import_module("story_automator.core.innovation.threshold_apply")
+                mod.apply_threshold_proposal(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(importlib_src)),
+            "AST walker FAILED to flag importlib.import_module chain",
+        )
+
+        # (b) Real threshold_apply.py — strip the top-level def, prove the
+        # walker does NOT trip on the residual file.
+        from story_automator.core.innovation import threshold_apply as ta_mod
+
+        real_tree = ast.parse(Path(ta_mod.__file__).read_text(encoding="utf-8"))
+        stripped = ast.Module(
+            body=[
+                n
+                for n in real_tree.body
+                if not (isinstance(n, ast.FunctionDef) and n.name == "apply_threshold_proposal")
+            ],
+            type_ignores=[],
+        )
+        self.assertFalse(
+            ThresholdApplyIsolationInvariant._module_violates(stripped),
+            "threshold_apply.py residual (without its own def) trips the "
+            "violation rule — the file should not call apply_threshold_proposal "
+            "anywhere else",
+        )
+
+    def test_drift_band_proposals_disabled_by_default(self) -> None:
+        """Pin the safety-critical default ``enable_drift_band_proposals=False``.
+
+        Matches ``PluginTrustBoundaryInvariant.test_plugin_manifest_keys_closed_set``
+        (line 397) — widening the default to True is a trust-boundary
+        change that requires an explicit spec-level decision.
+        """
+        import inspect
+        from story_automator.core.innovation.threshold_proposer import ThresholdProposer
+
+        sig = inspect.signature(ThresholdProposer.__init__)
+        self.assertIn("enable_drift_band_proposals", sig.parameters)
+        self.assertIs(
+            sig.parameters["enable_drift_band_proposals"].default,
+            False,
+            "ThresholdProposer(enable_drift_band_proposals=...) default MUST be "
+            "False — drift-band auto-tuning is registered but disabled in v1 "
+            "(spec §3 + §7.5).",
+        )
+
+
+class ThresholdLockIsolationInvariant(unittest.TestCase):
+    """Pins C5 §3 lock-ordering policy: no ``FileLock`` construction in
+    ``core/innovation/threshold_*.py`` may target any sidecar other than
+    ``.calibration.lock``. AST-rejects co-acquisition setups with
+    ``.gate.lock`` / ``.lineage.lock`` / ``.drift.lock`` / ``.unified-state.lock``.
+    """
+
+    _CANONICAL_LOCK_SUFFIX = ".calibration.lock"
+    _CANONICAL_HELPER_NAMES = frozenset({"calibration_lock_path"})
+
+    @classmethod
+    def _is_filelock_call(cls, node) -> bool:
+        """Return True iff ``node`` is a ``Call`` whose ``func`` is either
+        ``FileLock`` (bare name) or ``Attribute(attr="FileLock")``
+        (e.g., ``filelock.FileLock(...)``).
+        """
+        import ast
+
+        if not isinstance(node, ast.Call):
+            return False
+        fn = node.func
+        if isinstance(fn, ast.Name) and fn.id == "FileLock":
+            return True
+        if isinstance(fn, ast.Attribute) and fn.attr == "FileLock":
+            return True
+        return False
+
+    @classmethod
+    def _path_arg_of(cls, call) -> object:
+        """Return the path argument of a ``FileLock(...)`` Call — either
+        the first positional or the ``lock_file=`` kwarg. Returns the AST
+        node (not a string) so the resolver can inspect its shape.
+        """
+        if call.args:
+            return call.args[0]
+        for kw in call.keywords:
+            if kw.arg == "lock_file":
+                return kw.value
+        return None
+
+    @classmethod
+    def _path_arg_is_canonical(cls, path_node) -> bool:
+        """Return True iff ``path_node`` resolves to the
+        ``.calibration.lock`` sidecar.
+
+        Accepted shapes (rooted in spec §3):
+          * ``Constant("...calibration.lock")`` — literal ending in the
+            canonical suffix.
+          * ``Call(calibration_lock_path(...))`` — the centralized helper.
+          * ``Call(str(calibration_lock_path(...)))`` — string-coerced
+            helper return value (current production form).
+          * Any nested call chain that contains a ``calibration_lock_path``
+            invocation anywhere in its subtree — defends against future
+            wrapping like ``Path(str(calibration_lock_path(r)))``.
+
+        Anything else (including non-canonical string literals like
+        ``".gate.lock"`` and unresolvable expressions) returns False —
+        the caller flags.
+        """
+        import ast
+
+        if path_node is None:
+            return False
+        # Literal string ending in the canonical suffix.
+        if isinstance(path_node, ast.Constant) and isinstance(path_node.value, str):
+            return path_node.value.endswith(cls._CANONICAL_LOCK_SUFFIX)
+        # Walk the subtree for any call to the centralized helper.
+        for sub in ast.walk(path_node):
+            if isinstance(sub, ast.Call):
+                fn = sub.func
+                if isinstance(fn, ast.Name) and fn.id in cls._CANONICAL_HELPER_NAMES:
+                    return True
+                if isinstance(fn, ast.Attribute) and fn.attr in cls._CANONICAL_HELPER_NAMES:
+                    return True
+        return False
+
+    def test_threshold_modules_only_acquire_calibration_lock(self) -> None:
+        """Walk every ``core/innovation/threshold_*.py``; inspect every
+        ``FileLock(...)`` construction. The first positional or
+        ``lock_file=`` kwarg MUST resolve to ``.calibration.lock``
+        (either by literal suffix or by going through the centralized
+        ``calibration_lock_path`` helper). Any other resolved or
+        unresolved path is flagged.
+        """
+        import ast
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        innovation_dir = skill_src / "core" / "innovation"
+        offenders: list[str] = []
+        for py_file in sorted(innovation_dir.glob("threshold_*.py")):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not self._is_filelock_call(node):
+                    continue
+                path_node = self._path_arg_of(node)
+                if not self._path_arg_is_canonical(path_node):
+                    offenders.append(
+                        f"{py_file.relative_to(skill_src)}:{node.lineno} — "
+                        f"FileLock(...) does not target .calibration.lock"
+                    )
+        self.assertEqual(
+            offenders,
+            [],
+            "FileLock constructions in core/innovation/threshold_*.py that "
+            "target a non-.calibration.lock sidecar — C5 lock-ordering "
+            "isolation invariant broken:\n  " + "\n  ".join(offenders),
+        )
+
+    def test_positive_failure_synthetic_filelock_is_caught(self) -> None:
+        """Hand-crafted ``FileLock(".gate.lock")`` must be caught by the
+        walker — proves the rule itself is operative.
+        """
+        import ast
+
+        synthetic = textwrap.dedent(
+            """
+            import filelock
+            from filelock import FileLock
+
+            def bad_co_acquire(root):
+                # Co-acquisition with gate lock would deadlock against the
+                # gate orchestrator — forbidden by C5 §3 lock-ordering.
+                a = FileLock(".gate.lock")
+                b = filelock.FileLock(".lineage.lock")
+                return a, b
+            """
+        )
+        tree = ast.parse(synthetic)
+        flagged: list[str] = []
+        for node in ast.walk(tree):
+            if not ThresholdLockIsolationInvariant._is_filelock_call(node):
+                continue
+            path_node = ThresholdLockIsolationInvariant._path_arg_of(node)
+            if not ThresholdLockIsolationInvariant._path_arg_is_canonical(path_node):
+                flagged.append(f"line {node.lineno}")
+        self.assertEqual(
+            len(flagged),
+            2,
+            f"Walker FAILED to flag known synthetic FileLock violators; "
+            f"got {flagged!r} — invariant is vacuously true",
+        )
+
+        # And the real threshold modules must pass the walker (positive
+        # half of the two-direction proof).
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        innovation_dir = skill_src / "core" / "innovation"
+        any_filelock_seen = False
+        for py_file in sorted(innovation_dir.glob("threshold_*.py")):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not ThresholdLockIsolationInvariant._is_filelock_call(node):
+                    continue
+                any_filelock_seen = True
+                path_node = ThresholdLockIsolationInvariant._path_arg_of(node)
+                self.assertTrue(
+                    ThresholdLockIsolationInvariant._path_arg_is_canonical(path_node),
+                    f"real {py_file.name}:{node.lineno} FileLock does not "
+                    f"resolve to .calibration.lock — the canonical resolver "
+                    f"missed a production call site",
+                )
+        self.assertTrue(
+            any_filelock_seen,
+            "Walker found ZERO FileLock calls in threshold_*.py — the "
+            "invariant is vacuously true because the production calls "
+            "are gone (and the test never executes the resolver)",
         )
 
 
