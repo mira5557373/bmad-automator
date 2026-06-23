@@ -6,8 +6,10 @@ and atomic-marker semantics.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import socket
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,10 +26,12 @@ from .evidence_io import (
     clear_gate_marker,
     compute_evidence_bundle_merkle_root,
     gate_lock_path,
+    get_gate_cleanup_root,
     get_gate_lock,
     load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
+    run_cleanup_janitor,
     write_gate_marker,
 )
 from .gate_lock_observability import _handle_gate_lock_timeout
@@ -202,11 +206,21 @@ def _quarantine_corrupted_marker(
     return result
 
 
-def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
+def _recover_from_crash_locked(
+    project_root: str | Path,
+) -> tuple[dict[str, Any], list[Path]]:
     """Inner body of :func:`recover_from_crash`, executed under the file lock.
 
     Split out so the lock acquisition lives in a single context-manager
     block while keeping the legacy single-function contract for callers.
+
+    K-5: returns ``(descriptor, pending_cleanup_paths)``. The descriptor
+    is the historical recovery dict (``recovered``, ``gate_id``, …); the
+    pending list contains absolute paths under ``_bmad/gate/cleanup/``
+    that the caller must ``shutil.rmtree`` OUTSIDE the gate lock. The
+    rename into ``cleanup/`` happened under the lock — the rmtree no
+    longer does, so concurrent gate runs are not blocked by a slow
+    delete on a multi-gigabyte evidence bundle.
     """
     root = Path(project_root)
     marker_path = root / "_bmad" / "gate" / "gate-in-progress.json"
@@ -214,10 +228,10 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
     try:
         marker = read_gate_marker(project_root)
     except GateMarkerCorruptedError as exc:
-        return _quarantine_corrupted_marker(root, marker_path, exc)
+        return _quarantine_corrupted_marker(root, marker_path, exc), []
 
     if marker is None:
-        return {"recovered": False}
+        return {"recovered": False}, []
 
     # L1 + J-03 fix: composite-identity liveness check. If the marker
     # carries a pid that is still running AND the recorded hostname +
@@ -319,7 +333,7 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
                 "reason": "live-pid-still-running",
                 "pid": pid,
                 "gate_id": marker.get("gate_id", ""),
-            }
+            }, []
 
     gate_id = marker.get("gate_id", "")
     commit_sha = marker.get("commit_sha", "")
@@ -327,19 +341,34 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
     verdict_path = root / "_bmad" / "gate" / "verdicts" / f"{gate_id}.json"
     had_verdict = verdict_path.is_file()
 
-    # Fix C-3 (Lens M): surface partial rmtree failures instead of
-    # silently swallowing the OSError. A partial cleanup leaves
-    # half-deleted evidence behind; the marker gets cleared
-    # regardless (the recovery contract is "never leave a stale
-    # marker"), but the operator now sees ``cleanup_failed=True``
-    # + ``cleanup_error`` so they can investigate the half-deleted
-    # state.
+    # K-5 (Lens K): the rmtree formerly executed here while the gate
+    # lock was held. Large evidence bundles can take seconds to delete,
+    # blocking concurrent ``run_production_gate`` callers on the same
+    # project. Instead, we atomically RENAME the orphan into
+    # ``_bmad/gate/cleanup/<gate_id>-<uuid4>/`` (an O(1) inode rename on
+    # the same filesystem) and surface the path so the caller can
+    # rmtree it after releasing the lock. A crash between rename and
+    # outside-lock rmtree leaves the subdir for ``run_cleanup_janitor``
+    # to mop up on the next startup.
+    #
+    # Fix C-3 honesty is preserved: the rename itself can fail (e.g.
+    # disk full creating the cleanup root); rmtree failures arising
+    # post-lock are surfaced separately by the caller. Both paths
+    # populate ``cleanup_failed`` / ``cleanup_error`` so the operator
+    # always sees a half-deleted state.
     cleanup_error: str | None = None
+    pending_cleanup: list[Path] = []
     if not had_verdict:
         evidence_dir = root / "_bmad" / "gate" / "evidence" / gate_id
         if evidence_dir.is_dir():
             try:
-                shutil.rmtree(evidence_dir)
+                cleanup_root = get_gate_cleanup_root(project_root)
+                # uuid4 suffix ⇒ even back-to-back recoveries of the same
+                # gate_id (e.g. operator retries after a crash) cannot
+                # collide on the destination path.
+                target = cleanup_root / f"{gate_id}-{uuid.uuid4().hex}"
+                os.rename(evidence_dir, target)
+                pending_cleanup.append(target)
             except OSError as exc:
                 cleanup_error = str(exc)
 
@@ -354,7 +383,32 @@ def _recover_from_crash_locked(project_root: str | Path) -> dict[str, Any]:
     if cleanup_error is not None:
         result["cleanup_failed"] = True
         result["cleanup_error"] = cleanup_error
-    return result
+    return result, pending_cleanup
+
+
+def _rmtree_quarantined_dirs(
+    paths: list[Path],
+) -> str | None:
+    """Best-effort outside-lock rmtree pass for K-5.
+
+    Receives the absolute paths returned by ``_recover_from_crash_locked``
+    (each living under ``_bmad/gate/cleanup/``) and ``shutil.rmtree``-s
+    them with per-path ``try/except OSError`` so one stubborn dir can't
+    derail the others.
+
+    Returns ``None`` on full success or the first error string for the
+    caller to surface as ``cleanup_error`` (preserves Fix C-3 honesty:
+    operators still see a single, real failure reason; the rest of the
+    paths get swept by the janitor on the next startup).
+    """
+    first_error: str | None = None
+    for target in paths:
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            if first_error is None:
+                first_error = str(exc)
+    return first_error
 
 
 def recover_from_crash(
@@ -382,8 +436,13 @@ def recover_from_crash(
     carries ``recovered=False, quarantined=True, quarantine_dir,
     corruption_reason`` per the audit-floor invariant.
 
-    The whole operation runs under ``_bmad/gate/.gate.lock`` so it
-    cannot race a concurrent ``run_production_gate`` (bug L1).
+    The marker-read + decision phase runs under
+    ``_bmad/gate/.gate.lock`` so it cannot race a concurrent
+    ``run_production_gate`` (bug L1). For K-5, orphan evidence dirs are
+    RENAMED into ``_bmad/gate/cleanup/`` under the lock (fast); the
+    actual ``shutil.rmtree`` happens AFTER the lock is released so
+    concurrent gates are no longer blocked by a multi-second delete on
+    large evidence bundles.
 
     Returns a dict describing what was recovered.
     """
@@ -391,11 +450,23 @@ def recover_from_crash(
     lock = get_gate_lock(project_root)
     try:
         with lock:
-            return _recover_from_crash_locked(project_root)
+            descriptor, pending_cleanup = _recover_from_crash_locked(
+                project_root,
+            )
     except Timeout as exc:
         _handle_gate_lock_timeout(
             project_root, gate_lock_path(project_root), lock.timeout, exc,
         )
+    # Lock released — perform the slow rmtree(s) here so we never block
+    # a concurrent gate run on bulk I/O. Failures only update the
+    # descriptor's cleanup_failed/cleanup_error fields; they never
+    # propagate (the inside-lock rename was the load-bearing step).
+    if pending_cleanup:
+        cleanup_error = _rmtree_quarantined_dirs(pending_cleanup)
+        if cleanup_error is not None and not descriptor.get("cleanup_failed"):
+            descriptor["cleanup_failed"] = True
+            descriptor["cleanup_error"] = cleanup_error
+    return descriptor
 
 
 def run_readiness_gate(
@@ -624,6 +695,16 @@ def run_production_gate(
                 "verify": descriptor["verify"],
             }
 
+    # K-5: best-effort janitor pass BEFORE acquiring the gate lock. The
+    # cleanup root contains orphaned post-rename / pre-rmtree subdirs
+    # left by prior crashes; they are by construction unreferenced so
+    # the janitor needs no lock. Failures are non-fatal — next startup
+    # will retry.
+    try:
+        run_cleanup_janitor(project_root)
+    except OSError:
+        pass
+
     # L1 fix: serialize the full marker → collectors → clear lifecycle
     # under the gate file lock so concurrent run_production_gate /
     # recover_from_crash calls cannot race on gate-in-progress.json.
@@ -638,11 +719,13 @@ def run_production_gate(
             project_root, gate_lock_path(project_root),
             _gate_lock.timeout, _exc,
         )
+    _pending_cleanup: list[Path] = []
     try:
         # Recovery runs under the same lock — use the *_locked variant
         # so we don't try to re-acquire (filelock is not re-entrant
-        # across separate FileLock instances).
-        _recover_from_crash_locked(project_root)
+        # across separate FileLock instances). K-5: capture the renamed
+        # cleanup paths so we can rmtree them outside the lock below.
+        _, _pending_cleanup = _recover_from_crash_locked(project_root)
 
         existing, _ = check_gate_reuse(
             project_root, gate_id, commit_sha, profile, factory_version,
@@ -692,6 +775,13 @@ def run_production_gate(
             clear_gate_marker(project_root)
     finally:
         _gate_lock.release()
+
+    # K-5: rmtree the quarantined orphan evidence dirs OUTSIDE the gate
+    # lock so the slow bulk delete does not block any other gate run
+    # that may now want the lock. Failures are intentionally swallowed
+    # here — the next startup's janitor will mop them up.
+    if _pending_cleanup:
+        _rmtree_quarantined_dirs(_pending_cleanup)
 
     # N5 (G5): export Merkle root so auditors can externally verify the
     # evidence bundle without trusting the factory. Empty bundle returns

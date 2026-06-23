@@ -19,6 +19,7 @@ from .evidence_io import (
     clear_gate_marker,
     gate_lock_path,
     get_gate_lock,
+    run_cleanup_janitor,
     write_gate_marker,
 )
 from .gate_lock_observability import _handle_gate_lock_timeout
@@ -29,6 +30,7 @@ from .gate_audit import (
 )
 from .gate_orchestrator import (
     _recover_from_crash_locked,
+    _rmtree_quarantined_dirs,
     check_gate_reuse,
     recover_from_crash,  # noqa: F401  back-compat: existing tests patch this name
 )
@@ -72,6 +74,14 @@ def run_system_gate(
     """
     assert_host_context("run_system_gate")
 
+    # K-5: best-effort janitor pass before locking. Same rationale as
+    # run_production_gate — the cleanup root is a sibling of evidence/
+    # and contains only unreferenced renamed subdirs.
+    try:
+        run_cleanup_janitor(project_root)
+    except OSError:
+        pass
+
     # L1 follow-up: serialize the marker lifecycle under the same lock
     # the production gate uses. The 3600s timeout matches
     # run_production_gate — system gates can run for many seconds while
@@ -84,11 +94,13 @@ def run_system_gate(
             project_root, gate_lock_path(project_root),
             _gate_lock.timeout, _exc,
         )
+    _pending_cleanup: list[Path] = []
     try:
         # Recovery runs under the same lock — use the *_locked variant
         # so we don't try to re-acquire (filelock is not re-entrant
-        # across separate FileLock instances).
-        _recover_from_crash_locked(project_root)
+        # across separate FileLock instances). K-5: capture renamed
+        # cleanup paths so we can rmtree them outside the lock below.
+        _, _pending_cleanup = _recover_from_crash_locked(project_root)
 
         existing, _ = check_gate_reuse(
             project_root, gate_id, commit_sha, profile, factory_version,
@@ -152,6 +164,11 @@ def run_system_gate(
             clear_gate_marker(project_root)
     finally:
         _gate_lock.release()
+
+    # K-5: outside-lock rmtree of orphan evidence dirs renamed during
+    # recovery. Slow bulk delete must not block other gates.
+    if _pending_cleanup:
+        _rmtree_quarantined_dirs(_pending_cleanup)
 
     if audit_policy is not None and audit_path is not None:
         cats_summary = ",".join(

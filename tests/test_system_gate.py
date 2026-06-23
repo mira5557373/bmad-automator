@@ -62,7 +62,8 @@ class RunSystemGateTests(unittest.TestCase):
         mock_env: MagicMock,
     ) -> None:
         mock_reuse.return_value = (None, "no existing gate")
-        mock_recover.return_value = {"recovered": False}
+        # K-5: inner recovery now returns (descriptor, pending_paths).
+        mock_recover.return_value = ({"recovered": False}, [])
         mock_collectors.return_value = []
 
         from story_automator.core.system_env import SystemEnvInfo, ENV_TIER_MINIMAL

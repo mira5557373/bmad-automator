@@ -108,7 +108,8 @@ class ConcurrentSystemGatesDoNotRace(_Mixin, unittest.TestCase):
             side_effect=slow_collectors,
         ), patch(
             "story_automator.core.system_gate._recover_from_crash_locked",
-            return_value={"recovered": False},
+            # K-5: inner recovery now returns (descriptor, pending_paths).
+            return_value=({"recovered": False}, []),
         ), patch(
             "story_automator.core.system_gate.check_gate_reuse",
             return_value=(None, ""),
@@ -212,7 +213,8 @@ class SystemGateAcquiresLockBeforeMarkerWrite(_Mixin, unittest.TestCase):
         ) as mock_reuse:
             mock_env.return_value.__enter__ = MagicMock(return_value=env_info)
             mock_env.return_value.__exit__ = MagicMock(return_value=False)
-            mock_recover.return_value = {"recovered": False}
+            # K-5: inner recovery now returns (descriptor, pending_paths).
+            mock_recover.return_value = ({"recovered": False}, [])
             mock_reuse.return_value = (None, "")
             mock_eval.return_value = _make_gate_file()
             run_system_gate(
@@ -301,7 +303,8 @@ class SystemGateReleasesLockOnException(_Mixin, unittest.TestCase):
         ) as mock_reuse:
             mock_env.return_value.__enter__ = MagicMock(return_value=env_info)
             mock_env.return_value.__exit__ = MagicMock(return_value=False)
-            mock_recover.return_value = {"recovered": False}
+            # K-5: inner recovery now returns (descriptor, pending_paths).
+            mock_recover.return_value = ({"recovered": False}, [])
             mock_reuse.return_value = (None, "")
             with self.assertRaises(RuntimeError):
                 run_system_gate(
