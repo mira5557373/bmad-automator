@@ -247,14 +247,18 @@ def evaluate_gate(
 
     Loads evidence -> adjudicates -> builds gate file -> persists -> audit.
     """
-    from .evidence_io import load_evidence_bundle, persist_gate_file
+    from .evidence_cache import cached_load_evidence_bundle
+    from .evidence_io import persist_gate_file
     from .gate_audit import (
         GateDecisionAudit,
         GateRenderedAudit,
         emit_gate_audit,
     )
 
-    evidence_bundle = load_evidence_bundle(project_root, gate_id)
+    # K-2: this entry point is called once per gate evaluation and
+    # immediately after by the Merkle exporter; cached read avoids the
+    # second disk scan.
+    evidence_bundle = cached_load_evidence_bundle(project_root, gate_id)
     adj = adjudicate(
         evidence_bundle, profile,
         priority=priority, has_unmitigated_risk_9=has_unmitigated_risk_9,

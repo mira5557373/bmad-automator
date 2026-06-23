@@ -28,7 +28,6 @@ from .evidence_io import (
     gate_lock_path,
     get_gate_cleanup_root,
     get_gate_lock,
-    load_evidence_bundle,
     load_gate_file,
     read_gate_marker,
     run_cleanup_janitor,
@@ -599,7 +598,10 @@ def _collect_error_evidence(
     cannot meaningfully fire without persisted evidence.
     """
     try:
-        bundle = load_evidence_bundle(project_root, gate_id)
+        # K-2: same gate_id is read by the Merkle exporter and verdict
+        # engine on the same run; share the cached bundle.
+        from .evidence_cache import cached_load_evidence_bundle
+        bundle = cached_load_evidence_bundle(project_root, gate_id)
     except FileNotFoundError:
         return []
     labels: list[str] = []
@@ -786,7 +788,10 @@ def run_production_gate(
     # N5 (G5): export Merkle root so auditors can externally verify the
     # evidence bundle without trusting the factory. Empty bundle returns
     # an empty-string sentinel — distinguishable from a real 64-hex root.
-    bundle = load_evidence_bundle(project_root, gate_id)
+    # K-2: cached read — verdict_engine already populated this entry for
+    # the same gate_id earlier in this call.
+    from .evidence_cache import cached_load_evidence_bundle
+    bundle = cached_load_evidence_bundle(project_root, gate_id)
     if bundle:
         gate_file["evidence_merkle_root"] = compute_evidence_bundle_merkle_root(bundle)
     else:

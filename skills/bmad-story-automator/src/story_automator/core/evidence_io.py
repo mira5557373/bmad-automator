@@ -118,6 +118,11 @@ def persist_evidence_record(
     filename = evidence_filename(record)
     target = evidence_dir / filename
     write_atomic(target, canonical_json(record) + "\n")
+    # K-2: any new persist mutates the bundle on disk, so the cached copy
+    # is now stale. Imported lazily to avoid a module-load cycle (the
+    # cache module calls back into ``load_evidence_bundle`` on a miss).
+    from .evidence_cache import invalidate_evidence_cache
+    invalidate_evidence_cache(project_root, gate_id)
     return target
 
 
