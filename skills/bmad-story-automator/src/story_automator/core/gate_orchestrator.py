@@ -19,6 +19,7 @@ from filelock import Timeout
 
 if TYPE_CHECKING:
     from .innovation.spec_drift_watcher import SpecDriftWatcher
+    from .innovation.threshold_proposer import ThresholdProposer
     from .usage_parsers import UsageMetrics
 
 from .collector_registry import CollectorRegistry
@@ -644,6 +645,7 @@ def run_production_gate(
     result_json_path: str | Path | None = None,
     drift_watcher: "SpecDriftWatcher | None" = None,
     session_usage: "UsageMetrics | None" = None,
+    threshold_proposer: "ThresholdProposer | None" = None,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -693,6 +695,27 @@ def run_production_gate(
     ``cost_total_usd`` field. Default ``None`` preserves
     byte-identical behavior for every existing call site — no cost
     directory is created.
+
+    ``threshold_proposer`` (C5, default ``None``) — when a
+    :class:`ThresholdProposer` is provided, the orchestrator calls
+    ``proposer.observe_gate(project_root, gate_file)`` AFTER
+    ``evaluate_gate`` returns and AFTER the existing ``lineage_root`` +
+    ``cost_total_usd`` blocks, but BEFORE returning the gate file. The
+    call site is wrapped in a broad ``try/except`` so a proposer failure
+    can never abort the gate — drift-to-proposal is strictly advisory
+    telemetry. On success the in-memory gate file gains
+    ``threshold_proposal_ref: str`` (a 16-hex proposal id, or ``""``
+    when no proposal was emitted). On failure the gate file gains
+    ``threshold_proposal_ref=""`` PLUS
+    ``threshold_proposer_error=<ExceptionClassName>`` so the operator
+    can distinguish "no proposal needed" from "proposer crashed". Both
+    fields are IN-MEMORY ONLY; the on-disk gate JSON under
+    ``_bmad/gate/verdicts/`` is byte-identical because
+    ``persist_gate_file`` ran inside ``evaluate_gate`` BEFORE this
+    mutation, matching the existing
+    ``evidence_merkle_root`` / ``lineage_root`` / ``cost_total_usd``
+    pattern. Default ``None`` preserves byte-identical behavior for
+    every existing call site.
 
     ``enable_pre_gate_verifier`` (Phase 3, default ``False``) — when
     True, the six inline pre-gate checks
@@ -880,6 +903,27 @@ def run_production_gate(
             # propagate. The absence of ``cost_total_usd`` on the gate
             # file is the operator's signal that emission failed.
             pass
+
+    # C5: optional threshold-proposer observe-hook. Default-None call
+    # sites are byte-identical to today. The hook is purely advisory
+    # (proposals are written to ``_bmad/calibration/proposals/`` for
+    # human review; nothing in ``core/`` may auto-apply them) so a
+    # proposer crash is swallowed and surfaced via the in-memory
+    # ``threshold_proposer_error`` diagnostic field — never propagated.
+    # Both fields are in-memory only; the on-disk gate JSON already
+    # persisted at verdict_engine.py:272 is NOT rewritten (matches the
+    # evidence_merkle_root / lineage_root / cost_total_usd pattern).
+    if threshold_proposer is not None:
+        try:
+            proposal = threshold_proposer.observe_gate(
+                project_root, gate_file,
+            )
+            gate_file["threshold_proposal_ref"] = (
+                proposal.proposal_id if proposal is not None else ""
+            )
+        except Exception as _exc:
+            gate_file["threshold_proposal_ref"] = ""
+            gate_file["threshold_proposer_error"] = type(_exc).__name__
 
     return gate_file
 

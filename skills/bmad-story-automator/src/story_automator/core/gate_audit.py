@@ -23,6 +23,7 @@ __all__ = [
     "GateReadinessAudit",
     "SystemGateStartedAudit",
     "EpicGateDecisionAudit",
+    "GateThresholdProposalAudit",
     "emit_gate_audit",
 ]
 
@@ -221,12 +222,44 @@ class EpicGateDecisionAudit:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class GateThresholdProposalAudit:
+    """Audit event: C5 threshold-proposer lifecycle event.
+
+    Emitted by ``threshold_proposer.observe_gate`` (``proposal_created``),
+    ``threshold_apply.apply_threshold_proposal`` (``proposal_applied``),
+    and ``threshold_proposer.reject_proposal`` / decisions ledger
+    (``proposal_rejected`` / ``proposal_superseded`` /
+    ``proposal_confirm_failed``). Rides ``UnknownEvent`` forward-compat
+    in the HMAC audit chain so ``core/telemetry_events.py`` stays
+    frozen, mirroring the :class:`GateReadinessAudit` precedent.
+    """
+    event_name: str = dataclasses.field(
+        default="GateThresholdProposal", init=False,
+    )
+    proposal_id: str = ""
+    target_module: str = ""
+    target_symbol: str = ""
+    event: str = ""
+    operator_id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "proposal_id": self.proposal_id,
+            "target_module": self.target_module,
+            "target_symbol": self.target_symbol,
+            "event": self.event,
+            "operator_id": self.operator_id,
+        }
+
+
 _AuditEvent = (
     GateStartedAudit | EvidenceCollectedAudit | GateBoundaryViolation
     | GateDecisionAudit | GateRenderedAudit
     | GateProfileDriftAudit | GateParkedAudit
     | GateReadinessAudit
     | SystemGateStartedAudit | EpicGateDecisionAudit
+    | GateThresholdProposalAudit
 )
 
 

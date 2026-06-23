@@ -18,6 +18,7 @@ from story_automator.core.gate_audit import (
     GateReadinessAudit,
     GateRenderedAudit,
     GateStartedAudit,
+    GateThresholdProposalAudit,
     SystemGateStartedAudit,
     emit_gate_audit,
 )
@@ -325,6 +326,72 @@ class EpicGateDecisionAuditTests(unittest.TestCase):
         self.assertEqual(d["overall"], "FAIL")
         self.assertEqual(d["epic_id"], "E1")
         self.assertIn("resilience", d["categories_summary"])
+
+
+class GateThresholdProposalAuditTests(unittest.TestCase):
+    """C5: GateThresholdProposalAudit dataclass + audit emission."""
+
+    def test_satisfies_audit_event_protocol(self) -> None:
+        event = GateThresholdProposalAudit(
+            proposal_id="0a1b2c3d4e5f6789",
+            target_module="story_automator.core.gate_rules",
+            target_symbol="PRIORITY_THRESHOLDS",
+            event="proposal_created",
+            operator_id="local",
+        )
+        self.assertIsInstance(event, AuditEventProtocol)
+
+    def test_event_name(self) -> None:
+        event = GateThresholdProposalAudit()
+        self.assertEqual(event.event_name, "GateThresholdProposal")
+
+    def test_event_name_is_frozen_field(self) -> None:
+        """event_name is init=False — cannot be supplied as a kwarg."""
+        with self.assertRaises(TypeError):
+            GateThresholdProposalAudit(event_name="MutatedName")  # type: ignore[call-arg]
+
+    def test_to_dict_contains_fields(self) -> None:
+        event = GateThresholdProposalAudit(
+            proposal_id="abcdef0123456789",
+            target_module="story_automator.core.gate_rules",
+            target_symbol="PRIORITY_THRESHOLDS",
+            event="proposal_applied",
+            operator_id="alice",
+        )
+        d = event.to_dict()
+        self.assertEqual(d["proposal_id"], "abcdef0123456789")
+        self.assertEqual(d["target_module"], "story_automator.core.gate_rules")
+        self.assertEqual(d["target_symbol"], "PRIORITY_THRESHOLDS")
+        self.assertEqual(d["event"], "proposal_applied")
+        self.assertEqual(d["operator_id"], "alice")
+
+    def test_frozen(self) -> None:
+        event = GateThresholdProposalAudit(proposal_id="x")
+        with self.assertRaises(AttributeError):
+            event.proposal_id = "y"  # type: ignore[misc]
+
+    def test_emits_through_audit_chain(self) -> None:
+        """End-to-end: emit_gate_audit accepts the new dataclass and the
+        record is hash-chained under ``GateThresholdProposal``."""
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = pathlib.Path(td) / "audit.jsonl"
+            policy = {"security": {"audit_trail": True}}
+            event = GateThresholdProposalAudit(
+                proposal_id="0a1b2c3d4e5f6789",
+                target_module="story_automator.core.gate_rules",
+                target_symbol="PRIORITY_THRESHOLDS",
+                event="proposal_created",
+                operator_id="local",
+            )
+            with patch.dict(os.environ, {"BMAD_AUDIT_KEY": "test-secret"}):
+                emit_gate_audit(policy, audit_path, event)
+            line = audit_path.read_text().strip()
+            record = json.loads(line)
+            self.assertEqual(record["event"], "GateThresholdProposal")
+            self.assertEqual(
+                record["payload"]["proposal_id"], "0a1b2c3d4e5f6789",
+            )
+            self.assertEqual(record["payload"]["event"], "proposal_created")
 
 
 if __name__ == "__main__":
