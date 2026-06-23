@@ -700,10 +700,13 @@ class TestRationaleDegradesWithoutCalibration(unittest.TestCase):
             _populate_window(root, [82.0, 84.0, 85.0, 87.0, 87.0], priority="P3")
             # Force the calibration importer to fail — pin the
             # "degrades gracefully" branch directly so this test passes
-            # whether or not the optional M08 module exists.
-            import story_automator.core.innovation.threshold_proposer as mod
+            # whether or not the optional M08 module exists. The helper
+            # was split out of threshold_proposer into the sibling
+            # threshold_proposer_helpers module in the C5 post-impl
+            # review fold-in; patch where the function lives.
+            import story_automator.core.innovation.threshold_proposer_helpers as helpers
 
-            with mock.patch.object(mod, "_maybe_calibration_sentence", return_value=""):
+            with mock.patch.object(helpers, "_maybe_calibration_sentence", return_value=""):
                 proposer = ThresholdProposer()
                 proposal = proposer.observe_gate(root, _current_gate(priority="P3"))
             self.assertIsNotNone(proposal)

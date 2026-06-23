@@ -493,6 +493,69 @@ class BomPreservedTests(_ApplyTestBase):
         self.assertTrue(result.startswith(b"\xef\xbb\xbf"), "BOM must be preserved")
         self.assertIn(b"(92, 90)", result)
 
+    def test_bom_splice_lands_at_correct_byte_position(self) -> None:
+        """Post-impl review fix (AC-A-12 strengthen): if ``_strip_bom``
+        were accidentally a no-op, ``ast.parse`` would still parse a
+        leading BOM as a comment, AST node positions would be byte-shifted
+        by 3, and the splice would land at the wrong offset — yet
+        ``(92, 90)`` might still appear somewhere in the rewrite for some
+        inputs. Strengthen the assertion: re-parse the BOM-stripped
+        result, re-locate the P1 tuple leaf, assert ``literal_eval`` of
+        the surviving leaf is the proposed value 92, AND assert no other
+        ``(95, 90)`` substring leaked.
+        """
+        import ast
+
+        _make_proposal(
+            project_root=self.project_root,
+            proposal_id="bbbbcccdddd22222",
+            target_module=self.target_module,
+            current_value=95,
+            proposed_value=92,
+        )
+        apply_threshold_proposal(
+            self.project_root,
+            "bbbbcccdddd22222",
+            confirm=_DEFAULT_SLUG,
+            operator_id="local",
+        )
+        result = self.target_path.read_bytes()
+        self.assertTrue(result.startswith(b"\xef\xbb\xbf"), "BOM must be preserved")
+        # Strip BOM and re-parse — byte-shift-after-splice would surface
+        # here as either a parse error or a misaligned literal.
+        stripped = result[3:]
+        tree = ast.parse(stripped)
+        located: ast.Constant | None = None
+        for node in tree.body:
+            if not isinstance(node, ast.AnnAssign):
+                continue
+            tgt = node.target
+            if not (isinstance(tgt, ast.Name) and tgt.id == "PRIORITY_THRESHOLDS"):
+                continue
+            rhs = node.value
+            if not isinstance(rhs, ast.Dict):
+                continue
+            for k_node, v_node in zip(rhs.keys, rhs.values, strict=False):
+                if (
+                    isinstance(k_node, ast.Constant)
+                    and k_node.value == "P1"
+                    and isinstance(v_node, ast.Tuple)
+                    and len(v_node.elts) >= 1
+                    and isinstance(v_node.elts[0], ast.Constant)
+                ):
+                    located = v_node.elts[0]
+                    break
+        self.assertIsNotNone(located, "P1[0] leaf not found in BOM-stripped result")
+        assert located is not None
+        self.assertEqual(
+            ast.literal_eval(located),
+            92,
+            "Splice landed at wrong byte position — BOM strip+restore is broken",
+        )
+        # Defense-in-depth: the prior value must not appear in the P1 tuple slot.
+        self.assertNotIn(b'"P1": (95, ', result)
+        self.assertIn(b'"P1": (92, ', result)
+
 
 class NonAsciiContentTests(_ApplyTestBase):
     def setUp(self) -> None:
@@ -525,6 +588,86 @@ class NonAsciiContentTests(_ApplyTestBase):
         self.assertIn("Привет non-ASCII", text)
         self.assertIn("(92, 90)", text)
         self.assertNotIn("(95, 90)", text)
+
+
+class NonAsciiSameLineContentTests(_ApplyTestBase):
+    """Post-impl review fix (AC-A-13 strengthen): the original test
+    only injected non-ASCII on a line ABOVE the splice target — that
+    exercises the BYTE-vs-character-index shift across line boundaries
+    (which ``_build_line_starts`` handles via byte scan). It does NOT
+    exercise the SAME-line case where ``node.col_offset`` must be
+    interpreted as a UTF-8 byte offset on the very line being spliced.
+
+    This test puts non-ASCII bytes BETWEEN the start of the target line
+    and the target ``Constant`` (as a trailing comment on the line
+    above, plus a Cyrillic comment on the same line as the P1 tuple).
+    An off-by-one bug treating ``col_offset`` as a character index
+    rather than a UTF-8 byte offset would land the splice mid-token.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        target = self.module_root / self.module_pkg_name / "gate_rules.py"
+        body = target.read_text("utf-8")
+        # Inject a Cyrillic comment on the SAME LINE as the P1 tuple
+        # (note the literal Cyrillic bytes appear between the line
+        # start and the splice target). Format: replace the P1 tuple
+        # line so it carries a leading-line Cyrillic comment ``# Привет``
+        # immediately after the existing comment marker.
+        body = body.replace(
+            '"P1": (95, 90),  # required_pct, fail_floor',
+            '"P1": (95, 90),  # required_pct, fail_floor — Привет',
+        )
+        target.write_text(body, encoding="utf-8")
+
+    def test_same_line_non_ascii_after_target_does_not_misalign_splice(self) -> None:
+        import ast
+
+        _make_proposal(
+            project_root=self.project_root,
+            proposal_id="cccdddd444455556",
+            target_module=self.target_module,
+            current_value=95,
+            proposed_value=92,
+        )
+        apply_threshold_proposal(
+            self.project_root,
+            "cccdddd444455556",
+            confirm=_DEFAULT_SLUG,
+            operator_id="local",
+        )
+        result_bytes = self.target_path.read_bytes()
+        result_text = result_bytes.decode("utf-8")
+        # The splice landed at the correct byte position: the Cyrillic
+        # tail of the SAME LINE is preserved and the leaf is the proposed value.
+        self.assertIn("Привет", result_text)
+        self.assertIn('"P1": (92, 90),', result_text)
+        self.assertNotIn('"P1": (95, 90),', result_text)
+        # AST-level proof: re-parse and verify the literal value is 92.
+        tree = ast.parse(result_bytes)
+        located: ast.Constant | None = None
+        for node in tree.body:
+            if not isinstance(node, ast.AnnAssign):
+                continue
+            tgt = node.target
+            if not (isinstance(tgt, ast.Name) and tgt.id == "PRIORITY_THRESHOLDS"):
+                continue
+            rhs = node.value
+            if not isinstance(rhs, ast.Dict):
+                continue
+            for k_node, v_node in zip(rhs.keys, rhs.values, strict=False):
+                if (
+                    isinstance(k_node, ast.Constant)
+                    and k_node.value == "P1"
+                    and isinstance(v_node, ast.Tuple)
+                    and len(v_node.elts) >= 1
+                    and isinstance(v_node.elts[0], ast.Constant)
+                ):
+                    located = v_node.elts[0]
+                    break
+        self.assertIsNotNone(located, "P1[0] leaf not found in non-ASCII same-line result")
+        assert located is not None
+        self.assertEqual(ast.literal_eval(located), 92)
 
 
 class BackupBeforeSpliceTests(_ApplyTestBase):

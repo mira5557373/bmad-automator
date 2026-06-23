@@ -557,6 +557,35 @@ class RenderDiffTests(unittest.TestCase):
         out2 = _render_diff("alpha", "beta", lineno=1)
         self.assertEqual(out1, out2)
 
+    def test_diff_truncation_preserves_minus_and_plus_lines(self) -> None:
+        """Post-impl review fix: a naive ``[:7]`` slice of unified-diff
+        output cuts between the ``-`` removal and the matching ``+``
+        addition when the diff exceeds 7 lines, leaving the operator
+        seeing only what was removed and never what replaced it.
+        Hunk-aware truncation must always preserve BOTH sides.
+        """
+        before = "\n".join(f"line {i}" for i in range(20))
+        after = "\n".join(f"line {i}" if i != 10 else "CHANGED" for i in range(20))
+        out = _render_diff(before, after, lineno=10)
+        lines = out.splitlines()
+        self.assertLessEqual(len(lines), 7, "still bounded to 7 lines")
+        # Detect a ``-`` removal AND a matching ``+`` addition. We
+        # ignore the file-header pair ``---`` / ``+++`` which always
+        # leads unified_diff output.
+        change_minus = [
+            line for line in lines if line.startswith("-") and not line.startswith("---")
+        ]
+        change_plus = [
+            line for line in lines if line.startswith("+") and not line.startswith("+++")
+        ]
+        self.assertTrue(
+            change_minus and change_plus,
+            f"truncated diff must contain BOTH a removal AND an addition; got\n{out}",
+        )
+        # Specifically the change must reflect ``line 10`` → ``CHANGED``.
+        self.assertIn("-line 10", out)
+        self.assertIn("+CHANGED", out)
+
 
 # ---------------------------------------------------------------------------
 # Cleanup of sys.modules / sys.path side effects between tests

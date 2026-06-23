@@ -1007,22 +1007,36 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
     @staticmethod
     def _is_cli_apply_handler(tree) -> bool:
         """Return True iff the module defines a top-level FunctionDef whose
-        first non-self argument is annotated ``confirm: str`` AND whose body
+        FIRST non-self argument is annotated ``confirm: str`` AND whose body
         contains a ``Call`` to ``apply_threshold_proposal``.
 
         Structural — rename-proof — so the §3 pre-authorized split of
         ``calibration_cmd.py`` into ``calibration_subcommands.py`` cannot
         break the invariant. The current home is
         ``commands/calibration_cmd._cmd_apply``.
+
+        Spec §7.5 tightens "first non-self positional or first kwonly arg"
+        (post-impl review fix). The caller MUST scope this exemption to
+        modules under ``commands/`` — see the path check at the call site.
         """
         import ast
 
-        def _has_confirm_str(func: ast.FunctionDef) -> bool:
-            # ``confirm: str`` may appear as a positional or keyword-only
-            # arg. We accept either; the structural property is the type
-            # annotation, not the position.
-            all_args = list(func.args.args) + list(func.args.kwonlyargs)
-            for arg in all_args:
+        def _has_confirm_str_as_first_kwonly_or_positional(func: ast.FunctionDef) -> bool:
+            # First non-self positional, or first kwonly arg. The spec
+            # narrows the structural property to a leading-position
+            # annotation, so a buried ``confirm: str`` deep in the arg
+            # list cannot accidentally exempt an unrelated helper.
+            candidates: list[ast.arg] = []
+            positional = list(func.args.posonlyargs) + list(func.args.args)
+            # Skip a leading ``self`` if present (rare for module-level
+            # functions, but cheap to guard).
+            if positional and positional[0].arg == "self":
+                positional = positional[1:]
+            if positional:
+                candidates.append(positional[0])
+            if func.args.kwonlyargs:
+                candidates.append(func.args.kwonlyargs[0])
+            for arg in candidates:
                 if arg.arg != "confirm":
                     continue
                 ann = arg.annotation
@@ -1047,7 +1061,7 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
         for node in tree.body:
             if not isinstance(node, ast.FunctionDef):
                 continue
-            if _has_confirm_str(node) and _calls_apply(node):
+            if _has_confirm_str_as_first_kwonly_or_positional(node) and _calls_apply(node):
                 return True
         return False
 
@@ -1075,7 +1089,13 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
 
         forbidden: set[str] = {"apply_threshold_proposal"}
 
-        # First pass — record aliases.
+        # First pass — record aliases. Tracks BOTH ``Assign`` (e.g.
+        # ``fn = apply_threshold_proposal``) AND ``AnnAssign`` (e.g.
+        # ``fn: object = apply_threshold_proposal``) — modeled on
+        # UnifiedStateWriteIsolationInvariant._module_violates (lines
+        # 743-855). The post-impl review found the AnnAssign branch
+        # was missing; without it a single PEP 526 annotated binding
+        # could smuggle a rebind past the walker.
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
@@ -1092,6 +1112,19 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
                     for tgt in node.targets:
                         if isinstance(tgt, ast.Name):
                             forbidden.add(tgt.id)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                if (
+                    isinstance(node.value, ast.Name)
+                    and node.value.id in forbidden
+                    and isinstance(node.target, ast.Name)
+                ):
+                    forbidden.add(node.target.id)
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "apply_threshold_proposal"
+                    and isinstance(node.target, ast.Name)
+                ):
+                    forbidden.add(node.target.id)
 
         # Second pass — flag direct/indirect calls + indirect access.
         for node in ast.walk(tree):
@@ -1152,8 +1185,14 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
             # Exemption (a): the file that owns the helper.
             if self._defines_apply_helper(tree):
                 continue
-            # Exemption (b): the operator-driven CLI handler.
-            if self._is_cli_apply_handler(tree):
+            # Exemption (b): the operator-driven CLI handler — scoped
+            # STRICTLY to modules under ``commands/`` per spec §7.5
+            # ("under a commands/ path component"). Post-impl review
+            # found the path constraint was missing, which would have
+            # let any ``core/`` module self-exempt by defining a
+            # confirm-shaped helper. Routing the check through the
+            # path predicate closes that gap.
+            if py_file.is_relative_to(skill_src / "commands") and self._is_cli_apply_handler(tree):
                 continue
             if self._module_violates(tree):
                 offenders.append(str(py_file.relative_to(skill_src)))
@@ -1243,19 +1282,82 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
             "AST walker FAILED to flag importlib.import_module chain",
         )
 
-        # (b) Real threshold_apply.py — strip the top-level def, prove the
-        # walker does NOT trip on the residual file.
+        # (a) AnnAssign rebinding via Name — post-impl review fix.
+        annassign_name_src = textwrap.dedent(
+            """
+            from story_automator.core.innovation.threshold_apply import (
+                apply_threshold_proposal,
+            )
+
+            def evil_annassign_name():
+                fn: object = apply_threshold_proposal
+                fn(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(annassign_name_src)),
+            "AST walker FAILED to flag AnnAssign(Name) rebind — first-pass "
+            "binding tracker is missing the AnnAssign branch",
+        )
+
+        # (a) AnnAssign rebinding via Attribute — post-impl review fix.
+        annassign_attr_src = textwrap.dedent(
+            """
+            from story_automator.core.innovation import threshold_apply as ta
+
+            def evil_annassign_attr():
+                fn: object = ta.apply_threshold_proposal
+                fn(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(ast.parse(annassign_attr_src)),
+            "AST walker FAILED to flag AnnAssign(Attribute) rebind — first-pass "
+            "binding tracker is missing the AnnAssign branch",
+        )
+
+        # (b) Real threshold_apply.py — two-direction proof:
+        #
+        #   (b.1) Strip the top-level def and inject a fake violator into
+        #         the residual; walker MUST trip (operative on real-file
+        #         residual shape).
+        #   (b.2) Strip the top-level def WITHOUT injecting; walker MUST
+        #         NOT trip (proves residual file does not call the helper
+        #         anywhere else).
+        #
+        # The post-impl review found the previous test only verified
+        # (b.2) on a residual that had ZERO Call nodes referencing the
+        # name — vacuously true. Injecting a known violator first
+        # forces the walker to reason about a meaningful residual.
         from story_automator.core.innovation import threshold_apply as ta_mod
 
         real_tree = ast.parse(Path(ta_mod.__file__).read_text(encoding="utf-8"))
-        stripped = ast.Module(
-            body=[
-                n
-                for n in real_tree.body
-                if not (isinstance(n, ast.FunctionDef) and n.name == "apply_threshold_proposal")
-            ],
+        stripped_body = [
+            n
+            for n in real_tree.body
+            if not (isinstance(n, ast.FunctionDef) and n.name == "apply_threshold_proposal")
+        ]
+
+        # (b.1) Inject a fake top-level violator into the residual.
+        violator_src = textwrap.dedent(
+            """
+            def _injected_violator():
+                apply_threshold_proposal(".", "id", confirm="x", operator_id="x")
+            """
+        )
+        violator_def = ast.parse(violator_src).body[0]
+        stripped_with_violator = ast.Module(
+            body=stripped_body + [violator_def],
             type_ignores=[],
         )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(stripped_with_violator),
+            "Injecting a real violator into the residual threshold_apply.py "
+            "tree did NOT trip the rule — the rule may be vacuous",
+        )
+
+        # (b.2) Same residual without the injected violator must NOT trip.
+        stripped = ast.Module(body=stripped_body, type_ignores=[])
         self.assertFalse(
             ThresholdApplyIsolationInvariant._module_violates(stripped),
             "threshold_apply.py residual (without its own def) trips the "

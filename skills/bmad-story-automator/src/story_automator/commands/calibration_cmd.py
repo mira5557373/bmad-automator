@@ -351,31 +351,100 @@ def _cmd_reject(args: list[str]) -> int:
 def _render_diff(before_source: str, after_source: str, lineno: int) -> str:
     """Bounded ASCII-only unified diff (spec §6.1).
 
-    3 lines context, ≤7 lines total, LF only, deterministic, ASCII only.
-    Non-ASCII content surfaces as ``UnicodeEncodeError`` → returns ``""``.
+    Up to 7 lines, LF only, deterministic, ASCII only. Non-ASCII content
+    surfaces as ``UnicodeEncodeError`` → returns ``""``. The truncation
+    is HUNK-AWARE: post-impl review found a naive ``[:7]`` slice could
+    cut between the first ``-`` removal and its matching ``+`` addition
+    (operator saw what was removed but never what replaced it). The
+    helper :func:`_bound_unified_diff` guarantees both sides survive.
     """
     _ = lineno  # part of the public signature; reserved for future hunk-shift
     before_lines = before_source.splitlines(keepends=False)
     after_lines = after_source.splitlines(keepends=False)
-    diff_iter = difflib.unified_diff(
-        before_lines,
-        after_lines,
-        fromfile="before",
-        tofile="after",
-        lineterm="",
-        n=3,
+    all_lines = list(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+            n=3,
+        )
     )
-    rendered: list[str] = []
-    for line in diff_iter:
-        rendered.append(line)
-        if len(rendered) >= 7:
-            break
+    rendered = _bound_unified_diff(all_lines, max_lines=7)
     text = "\n".join(rendered)
     try:
         text.encode("ascii")
     except UnicodeEncodeError:
         return ""
     return text
+
+
+def _bound_unified_diff(lines: list[str], *, max_lines: int) -> list[str]:
+    """Hunk-aware cap on a ``difflib.unified_diff`` output (post-impl fix).
+
+    Preserves the file-header pair, the first ``@@`` hunk header, AND
+    the first ``-``/``+`` change pair; greedy-fills remaining budget
+    with surrounding context lines.
+    """
+    if len(lines) <= max_lines:
+        return lines
+    # File header pair (leading ``---`` / ``+++``).
+    header: list[str] = []
+    cursor = 0
+    while cursor < min(2, len(lines)) and (
+        lines[cursor].startswith("---") or lines[cursor].startswith("+++")
+    ):
+        header.append(lines[cursor])
+        cursor += 1
+    # First hunk header.
+    hunk_idx = next((i for i in range(cursor, len(lines)) if lines[i].startswith("@@")), None)
+    if hunk_idx is None:
+        return (header + lines[cursor:])[:max_lines]
+    # First removal + first addition AFTER the hunk header.
+    first_minus = next(
+        (
+            i
+            for i in range(hunk_idx + 1, len(lines))
+            if lines[i].startswith("-") and not lines[i].startswith("---")
+        ),
+        None,
+    )
+    first_plus = next(
+        (
+            i
+            for i in range(hunk_idx + 1, len(lines))
+            if lines[i].startswith("+") and not lines[i].startswith("+++")
+        ),
+        None,
+    )
+    keep: set[int] = {hunk_idx}
+    if first_minus is not None:
+        keep.add(first_minus)
+    if first_plus is not None:
+        keep.add(first_plus)
+    budget = max_lines - len(header) - len(keep)
+    if budget < 0:
+        return (header + [lines[i] for i in sorted(keep)])[:max_lines]
+    # Greedy outward context fill (trailing first, then leading).
+    lo, hi = min(keep), max(keep)
+    while budget > 0:
+        added = False
+        if hi + 1 < len(lines) and (hi + 1) not in keep:
+            keep.add(hi + 1)
+            hi += 1
+            budget -= 1
+            added = True
+            if budget == 0:
+                break
+        if lo - 1 > hunk_idx and (lo - 1) not in keep:
+            keep.add(lo - 1)
+            lo -= 1
+            budget -= 1
+            added = True
+        if not added:
+            break
+    return (header + [lines[i] for i in sorted(keep)])[:max_lines]
 
 
 def _render_diff_for_proposal(proposal: Any) -> str:
