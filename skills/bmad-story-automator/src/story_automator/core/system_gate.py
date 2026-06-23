@@ -11,9 +11,14 @@ import copy
 from pathlib import Path
 from typing import Any
 
+from typing import TYPE_CHECKING
+
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from filelock import Timeout
+
+if TYPE_CHECKING:
+    from .usage_parsers import UsageMetrics
 
 from .evidence_io import (
     clear_gate_marker,
@@ -35,6 +40,7 @@ from .gate_orchestrator import (
     recover_from_crash,  # noqa: F401  back-compat: existing tests patch this name
 )
 from .gate_remediation import failing_categories_from_gate, prepare_remediation_tasks
+from .innovation.cost_evidence import emit_gate_cost_report
 from .gate_status import park_story, record_mitigation_debt
 from .product_profile import compute_profile_hash
 from .system_env import build_env_config, system_env
@@ -56,6 +62,7 @@ def run_system_gate(
     waivers: list[dict[str, Any]] | None = None,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
+    session_usage: "UsageMetrics | None" = None,
 ) -> dict[str, Any]:
     """Full system-altitude gate lifecycle.
 
@@ -146,7 +153,7 @@ def run_system_gate(
                     return gate_file
 
                 enriched = _inject_runtime_env(profile, env_info)
-                run_gate_collectors(
+                collector_outcomes = run_gate_collectors(
                     project_root, gate_id, commit_sha, enriched, registry,
                     audit_policy=audit_policy, audit_path=audit_path,
                 )
@@ -192,6 +199,18 @@ def run_system_gate(
     # when no chain exists on disk.
     from .innovation.lineage_ledger import load_lineage_root
     gate_file["lineage_root"] = load_lineage_root(project_root)
+
+    # C3: per-collector cost evidence (symmetric with run_production_gate).
+    # Best-effort emission — never break gate completion. Additive optional
+    # ``cost_total_usd`` field present only when emission succeeds.
+    if session_usage is not None and collector_outcomes:
+        try:
+            _cost_report = emit_gate_cost_report(
+                project_root, gate_id, session_usage, collector_outcomes,
+            )
+            gate_file["cost_total_usd"] = _cost_report.total_cost_usd
+        except Exception:
+            pass
 
     return gate_file
 

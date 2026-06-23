@@ -19,6 +19,7 @@ from filelock import Timeout
 
 if TYPE_CHECKING:
     from .innovation.spec_drift_watcher import SpecDriftWatcher
+    from .usage_parsers import UsageMetrics
 
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
@@ -44,6 +45,10 @@ from .gate_audit import (
     emit_gate_audit,
 )
 from .gate_schema import GateSchemaError
+# C3: per-collector cost evidence emission. Imported at module scope so
+# tests can ``patch.object(gate_orchestrator, "emit_gate_cost_report", ...)``
+# to simulate a disk-emission failure without affecting other callers.
+from .innovation.cost_evidence import emit_gate_cost_report
 from .gate_remediation import (
     EditAuthorizationError,
     failing_categories_from_gate,
@@ -638,6 +643,7 @@ def run_production_gate(
     enable_pre_gate_verifier: bool = False,
     result_json_path: str | Path | None = None,
     drift_watcher: "SpecDriftWatcher | None" = None,
+    session_usage: "UsageMetrics | None" = None,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -675,6 +681,18 @@ def run_production_gate(
     ``try/except`` so a drift-detector failure can never abort the
     gate — drift is strictly advisory telemetry. Default ``None``
     preserves byte-identical behavior for every existing call site.
+
+    ``session_usage`` (C3, default ``None``) — when a
+    :class:`UsageMetrics` from the host session is provided, the
+    orchestrator distributes the session's tokens/cost/duration across
+    the collectors that ran and persists per-collector cost evidence
+    under ``_bmad/gate/cost/<gate_id>/``. On success the gate file
+    gains an additive ``cost_total_usd: float`` field. Emission is
+    best-effort: any exception (disk full, mid-write crash, etc.) is
+    swallowed and the gate completes normally without the
+    ``cost_total_usd`` field. Default ``None`` preserves
+    byte-identical behavior for every existing call site — no cost
+    directory is created.
 
     ``enable_pre_gate_verifier`` (Phase 3, default ``False``) — when
     True, the six inline pre-gate checks
@@ -781,7 +799,7 @@ def run_production_gate(
             except Exception:
                 pass
         try:
-            _run_collectors(
+            collector_outcomes = _run_collectors(
                 project_root, gate_id, commit_sha, profile, registry,
                 audit_policy=audit_policy, audit_path=audit_path,
             )
@@ -845,6 +863,23 @@ def run_production_gate(
     # ``evidence_merkle_root`` empty-sentinel convention above.
     from .innovation.lineage_ledger import load_lineage_root
     gate_file["lineage_root"] = load_lineage_root(project_root)
+
+    # C3: per-collector cost evidence. Best-effort emission — wrapped
+    # in a broad except so a disk failure (ENOSPC, permission error,
+    # collector-list mismatch) can never break gate completion. The
+    # ``cost_total_usd`` field is ADDITIVE + OPTIONAL: present only
+    # when session_usage was provided AND emission succeeded.
+    if session_usage is not None and collector_outcomes:
+        try:
+            _cost_report = emit_gate_cost_report(
+                project_root, gate_id, session_usage, collector_outcomes,
+            )
+            gate_file["cost_total_usd"] = _cost_report.total_cost_usd
+        except Exception:
+            # Cost evidence is observability, not gating — never
+            # propagate. The absence of ``cost_total_usd`` on the gate
+            # file is the operator's signal that emission failed.
+            pass
 
     return gate_file
 
