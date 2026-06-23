@@ -189,6 +189,7 @@ def cmd_orchestrator_helper(args: list[str]) -> int:
         "agents-resolve": agents_resolve_action,
         "retro-agent": retro_agent_action,
         "gate": _gate,
+        "lineage": _lineage,
     }
     handler = dispatch.get(action)
     if handler is None:
@@ -241,6 +242,10 @@ def _usage(code: int) -> int:
     print("  gate status [--state=<reason>]", file=target)
     print("  gate resume <gate_id>", file=target)
     print("  gate invalidate <story|epic>", file=target)
+    print(
+        "  lineage <show|entry|stats|verify|orphans> --project-root=<path> [args]",
+        file=target,
+    )
     return code
 
 
@@ -254,6 +259,13 @@ def _gate(args: list[str]) -> int:
     if _emit_hook_or_veto("post_gate", ctx):
         return _veto_response("post_gate")
     return rc
+
+
+def _lineage(args: list[str]) -> int:
+    """Route to the C2 query CLI (read-only lineage ledger inspector)."""
+    from .lineage_cmd import lineage_dispatch
+
+    return lineage_dispatch(args)
 
 
 def _sprint_status(args: list[str]) -> int:
