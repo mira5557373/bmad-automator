@@ -19,7 +19,7 @@ from typing import Any, Iterator, Mapping, Protocol, runtime_checkable
 import filelock
 
 from .audit_env_scrub import scrub_env_for_subprocess
-from .common import compact_json, ensure_dir, iso_now
+from .common import compact_json, ensure_dir, fsync_dir, iso_now
 
 
 __all__ = [
@@ -396,6 +396,14 @@ class AuditLog:
                 handle.write(line_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
+            # M-3 crash-durability: on POSIX, the file's fsync only guarantees
+            # the data block reached disk — the parent directory inode must
+            # also be fsynced so the dirent created on the first append (and
+            # any metadata changes on subsequent appends, depending on the
+            # filesystem journal mode) survive power loss. ``fsync_dir`` is
+            # a no-op on Windows (no O_RDONLY directory handle), so this is
+            # safe to call unconditionally.
+            fsync_dir(self.path.parent)
 
             self._cached_seq = seq
             self._cached_tag = tag
