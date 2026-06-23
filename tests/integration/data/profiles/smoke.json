@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "smoke",
+  "matrix": {
+    "P0": {"coverage_pct": 100, "levels": ["unit", "integration"]},
+    "P1": {"coverage_pct": 90,  "levels": ["unit"]},
+    "P2": {"coverage_pct": 50,  "levels": ["unit"]},
+    "P3": {"coverage_pct": 20,  "levels": ["smoke"]}
+  },
+  "categories": {
+    "code": ["correctness"],
+    "system": []
+  },
+  "categories_na": [],
+  "rules": {},
+  "timeouts": {"correctness": 30},
+  "cost_tier": {"sku_id": "smoke", "arpu_monthly": 0, "max_pod_cost_per_tenant": 0},
+  "forbidden_until": {}
+}

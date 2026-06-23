@@ -14,14 +14,18 @@ test is the witness, not the fix.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from story_automator.core.audit import AuditLog, load_key_from_env
+from story_automator.core.collector_config import CollectorConfig
 from story_automator.core.collector_registry import CollectorRegistry
 from story_automator.core.evidence_io import (
     compute_evidence_bundle_merkle_root,
@@ -305,6 +309,275 @@ class TestFactorySelfEvaluation(unittest.TestCase):
             gate_path.stat().st_mtime_ns, mtime_before,
             "reuse path must not rewrite the persisted gate file",
         )
+
+
+# ---------- A-follow: smoke profile + in-test collector → real verdict ----------
+
+
+# Module-level helpers (must be defined at module scope so CollectorConfig
+# can hold references to them; lambdas would also work but explicit
+# functions read cleaner in failure messages).
+def _smoke_build_cmd(checkout: str, profile: dict[str, Any]) -> list[str]:
+    """Trivial collector command: exit 0, emit a recognizable stdout line.
+
+    The collector's stdout is fed to ``parse_metrics`` which extracts the
+    coverage/regressions metrics the correctness rule reads. We do NOT
+    inspect ``checkout`` or ``profile`` — the test only needs the
+    subprocess to terminate cleanly so the runner stamps ``status=ok``.
+    """
+    return [sys.executable, "-c", "print('SMOKE_OK coverage=95 regressions=0')"]
+
+
+def _smoke_parse_metrics(stdout: str) -> dict[str, Any]:
+    """Return the metric shape that ``correctness_rule`` consumes.
+
+    P1 priority requires ``coverage_pct >= 90`` for PASS; we emit 95 so
+    we sit comfortably above the threshold. ``regressions=0`` is the
+    pass condition for the regression gate. Both values are hard-coded
+    rather than parsed out of stdout — the test owns the parser so it
+    can guarantee deterministic metrics regardless of the trivial
+    subprocess's actual output.
+    """
+    if "SMOKE_OK" not in stdout:
+        return {}
+    return {"coverage_pct": 95, "regressions": 0}
+
+
+def _git_init_with_commit(path: Path) -> str:
+    """Create a tiny git repo with one commit; return the resolved SHA.
+
+    ``collector_checkout`` requires a real ``.git`` directory in
+    ``project_root`` so it can build a detached worktree at the gate's
+    ``commit_sha``. A pristine ``git init`` + one empty commit is the
+    smallest fixture that satisfies that contract.
+    """
+    env = {
+        **os.environ,
+        # Force git to skip system/global config so the test is hermetic
+        # across CI hosts that may have signing or hook config enabled.
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+    }
+
+    def _run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=True, capture_output=True, text=True, env=env,
+        )
+
+    subprocess.run(
+        ["git", "init", "--initial-branch=main", "-q", str(path)],
+        check=True, capture_output=True, env=env,
+    )
+    _run("config", "user.email", "smoke@test")
+    _run("config", "user.name", "Smoke Test")
+    _run("config", "commit.gpgsign", "false")
+    (path / "README.md").write_text("smoke fixture\n")
+    _run("add", "README.md")
+    _run("commit", "-q", "-m", "smoke init")
+    return _run("rev-parse", "HEAD").stdout.strip()
+
+
+class FactorySmokeProfileTests(unittest.TestCase):
+    """Drive ``run_production_gate`` against a profile with ONE active
+    category + an in-test collector wired to emit PASS-shaped metrics.
+
+    This closes the gap that ``TestFactorySelfEvaluation`` left open:
+    that harness uses an empty registry against the unmodified default
+    profile, so ``gate_rules.aggregate_verdicts`` fail-closes on an
+    empty active set and the verdict is forced to FAIL regardless of
+    anything downstream. The (collector → evidence → adjudicator →
+    verdict) chain is therefore NOT exercised end-to-end.
+
+    Smoke harness contract:
+      * Profile has exactly one active code category (``correctness``)
+        and no ``categories_na`` overrides.
+      * Registry holds ONE ``CollectorConfig`` for ``correctness`` whose
+        build_cmd emits a trivial exit-0 subprocess and whose
+        ``parse_metrics`` returns ``coverage_pct=95, regressions=0``.
+      * Therefore: status=ok, coverage 95% > 90% P1 floor, regressions=0
+        → ``correctness_rule`` returns PASS → ``aggregate_verdicts``
+        returns PASS → ``overall=PASS``.
+      * Evidence bundle is non-empty → ``evidence_merkle_root`` lives on
+        the live 64-hex branch (sentinel ``""`` would indicate the
+        bundle was empty, which would be a wiring regression).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.repo_root = Path(__file__).resolve().parents[2]
+
+        # 1. Hermetic temp project: git init + one commit so the gate's
+        #    collector_checkout step can build a detached worktree.
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.project_root = Path(cls._tmp.name) / "smoke-project"
+        cls.project_root.mkdir(parents=True)
+        try:
+            cls.commit_sha = _git_init_with_commit(cls.project_root)
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            cls._tmp.cleanup()
+            raise unittest.SkipTest(
+                f"git unavailable for smoke fixture: {exc}"
+            ) from exc
+
+        # 2. BMAD_AUDIT_KEY save/restore (canonical pattern — see the
+        #    parent harness for the rationale). Bare overwrite would
+        #    leak the operator's secret on teardown.
+        cls._saved_audit_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        os.environ["BMAD_AUDIT_KEY"] = "smoke-profile-test-secret"
+
+        # 3. STORY_AUTOMATOR_CHILD must NOT be set — the gate code asserts
+        #    host context and TrustBoundaryError aborts collection. Save
+        #    + clear; restore on teardown.
+        cls._saved_child = os.environ.pop("STORY_AUTOMATOR_CHILD", None)
+
+        # 4. Load smoke profile fixture. The JSON lives under
+        #    tests/integration/data/profiles/ and is loaded directly via
+        #    json.loads rather than load_bundled_profile — it is NOT a
+        #    bundled product profile, just a test fixture that exercises
+        #    the one-active-category path.
+        profile_path = (
+            Path(__file__).resolve().parent
+            / "data" / "profiles" / "smoke.json"
+        )
+        cls.profile: dict[str, Any] = json.loads(profile_path.read_text())
+        cls.profile_hash = compute_profile_hash(cls.profile)
+
+        # 5. Build the registry with ONE collector wired to emit
+        #    PASS-shaped metrics for correctness.
+        cls.registry = CollectorRegistry()
+        cls.registry.register(
+            CollectorConfig(
+                collector_id="smoke-correctness",
+                tool="python3",
+                category="correctness",
+                build_cmd=_smoke_build_cmd,
+                parse_metrics=_smoke_parse_metrics,
+            ),
+        )
+
+        # 6. Deterministic gate_id derived from the smoke commit SHA so
+        #    re-running the suite does not pollute state from prior runs
+        #    (the tmp dir is fresh anyway, but the gate_id stays stable
+        #    across runs of this class).
+        cls.gate_id = f"smoke-{cls.commit_sha[:12]}"
+        cls.audit_path = cls.project_root / "audit.jsonl"
+        cls.audit_policy = {"security": {"audit_trail": True}}
+
+        # 7. Drive the gate. Wrap in try/finally so env restoration is
+        #    unconditional; specific exceptions become SkipTest rather
+        #    than test errors so unrelated host quirks (sandbox path
+        #    restrictions, missing git) do not break CI.
+        try:
+            cls.gate_file = run_production_gate(
+                cls.project_root,
+                cls.gate_id,
+                commit_sha=cls.commit_sha,
+                target={"kind": "repo", "id": "smoke-test"},
+                profile=cls.profile,
+                factory_version="a-follow-smoke",
+                registry=cls.registry,
+                priority="P1",
+                audit_policy=cls.audit_policy,
+                audit_path=cls.audit_path,
+            )
+        except TrustBoundaryError as exc:
+            cls._restore_env()
+            cls._tmp.cleanup()
+            raise unittest.SkipTest(
+                f"host context rejects smoke gate: {exc}"
+            ) from exc
+        except (FileNotFoundError, PermissionError) as exc:
+            cls._restore_env()
+            cls._tmp.cleanup()
+            raise unittest.SkipTest(
+                f"sandbox forbids smoke gate IO: {exc}"
+            ) from exc
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._restore_env()
+        # Best-effort worktree prune so the parent .git doesn't accumulate
+        # phantom refs across runs (gate creates ephemeral worktrees
+        # under /tmp and cleans them up itself, but `git worktree prune`
+        # is the belt-and-braces cleanup).
+        try:
+            subprocess.run(
+                ["git", "-C", str(cls.project_root), "worktree", "prune"],
+                check=False, capture_output=True,
+            )
+        except (FileNotFoundError, OSError):
+            pass
+        cls._tmp.cleanup()
+
+    @classmethod
+    def _restore_env(cls) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if cls._saved_audit_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = cls._saved_audit_key
+        os.environ.pop("STORY_AUTOMATOR_CHILD", None)
+        if cls._saved_child is not None:
+            os.environ["STORY_AUTOMATOR_CHILD"] = cls._saved_child
+
+    def test_overall_verdict_is_pass(self) -> None:
+        """The collector-to-verdict chain produces PASS — the real
+        regression catch this class exists to provide.
+
+        Failure modes this catches:
+          * Registry filtering bug → no collectors run → empty active set
+            → FAIL.
+          * parse_metrics not wired → empty metrics → correctness_rule
+            sees coverage_pct=0 → FAIL on P1 floor.
+          * Evidence persistence dropped → adjudicator sees empty bundle
+            → fail-closed → FAIL.
+        """
+        self.assertEqual(
+            self.gate_file["overall"], "PASS",
+            f"expected PASS but got {self.gate_file['overall']}: "
+            f"categories={self.gate_file.get('categories')}",
+        )
+
+    def test_correctness_category_is_pass(self) -> None:
+        """Per-category verdict for the single active category."""
+        categories = self.gate_file.get("categories", {})
+        self.assertIn("correctness", categories)
+        self.assertEqual(categories["correctness"]["verdict"], "PASS")
+
+    def test_evidence_merkle_root_is_64_hex(self) -> None:
+        """Non-empty bundle path: Merkle root must be a 64-hex string.
+
+        The parent harness allowed the empty-string sentinel because the
+        empty-registry path is the live branch there. Here, the single
+        collector MUST persist at least one evidence record, so the live
+        branch is the 64-hex root. Catching the sentinel would mean the
+        evidence bundle is empty — a wiring regression.
+        """
+        root = self.gate_file.get("evidence_merkle_root")
+        self.assertIsInstance(root, str)
+        self.assertRegex(root, HEX64)
+
+    def test_evidence_bundle_root_matches_recomputation(self) -> None:
+        """External-verify path: a fresh Merkle recomputation over the
+        persisted bundle must equal the gate file's recorded root."""
+        bundle = load_evidence_bundle(self.project_root, self.gate_id)
+        self.assertTrue(bundle, "smoke collector must persist evidence")
+        expected = compute_evidence_bundle_merkle_root(bundle)
+        self.assertEqual(self.gate_file["evidence_merkle_root"], expected)
+
+    def test_gate_file_round_trips(self) -> None:
+        """Persisted gate file matches in-memory gate_id."""
+        reloaded = load_gate_file(self.project_root, self.gate_id)
+        self.assertEqual(reloaded["gate_id"], self.gate_id)
+        self.assertEqual(reloaded["overall"], "PASS")
+
+    def test_audit_chain_verifies(self) -> None:
+        """Audit chain stays intact across the collector-evidence loop."""
+        key = load_key_from_env()
+        self.assertIsNotNone(key)
+        log = AuditLog(path=self.audit_path, key=key)
+        ok, last_seq = log.verify()
+        self.assertTrue(ok, "audit chain failed integrity check")
+        self.assertGreaterEqual(last_seq, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover
