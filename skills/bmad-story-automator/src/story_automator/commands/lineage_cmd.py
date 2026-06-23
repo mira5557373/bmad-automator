@@ -114,47 +114,98 @@ def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
 # ---------------------------------------------------------------------------
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(prog: str = "lineage") -> argparse.ArgumentParser:
     """Construct the argparse tree for ``lineage_dispatch``.
 
     Each subparser declares ``--project-root`` as REQUIRED to mirror the
     contract spec (no implicit env fallback at the CLI surface, even
     though :func:`core.utils.get_project_root` would happily provide one).
+
+    ``prog`` defaults to ``"lineage"`` (top-level CLI invocation). The
+    orchestrator-helper code path passes ``"orchestrator-helper lineage"``
+    so its rendered help still matches the historic surface.
     """
     parser = argparse.ArgumentParser(
-        prog="orchestrator-helper lineage",
-        description="Query the cross-genre lineage ledger (read-only).",
+        prog=prog,
+        description=(
+            "Query the cross-genre lineage ledger (read-only). Every "
+            "subcommand requires --project-root pointing at the BMAD "
+            "project root that contains _bmad/lineage/."
+        ),
     )
-    sub = parser.add_subparsers(dest="subcommand")
+    sub = parser.add_subparsers(dest="subcommand", metavar="<subcommand>")
 
     def _add_common(p: argparse.ArgumentParser) -> None:
         p.add_argument(
             "--project-root",
             dest="project_root",
             required=True,
-            help="project root containing _bmad/lineage/",
+            metavar="PATH",
+            help="project root containing the _bmad/lineage/ ledger",
         )
 
-    p_show = sub.add_parser("show", help="print the full chain as JSON")
+    p_show = sub.add_parser(
+        "show",
+        help="print the full chain as canonical JSON",
+        description=(
+            "Emit every persisted lineage entry in chain (seq) order plus "
+            "the current merkle_root. Output is canonical JSON "
+            "(alphabetically-sorted keys)."
+        ),
+    )
     _add_common(p_show)
 
-    p_entry = sub.add_parser("entry", help="print one entry as JSON")
+    p_entry = sub.add_parser(
+        "entry",
+        help="print one <genre> <slug> entry as JSON",
+        description=(
+            "Look up a single lineage entry by (genre, slug) and emit it "
+            "as canonical JSON. Exits non-zero if the entry is missing."
+        ),
+    )
     _add_common(p_entry)
-    p_entry.add_argument("genre", help="lineage genre (e.g. brainstorm)")
+    p_entry.add_argument("genre", help="lineage genre (e.g. brainstorm, brief, PRD)")
     p_entry.add_argument("slug", help="artifact slug within the genre")
 
-    p_stats = sub.add_parser("stats", help="counts per genre + root + length")
+    p_stats = sub.add_parser(
+        "stats",
+        help="counts per genre, chain length, merkle root, orphan count",
+        description=(
+            "Aggregate ledger statistics: per-genre counts, chain length, "
+            "merkle_root over what's on disk, and orphan_count. Runs in "
+            "lenient mode so dangling parent_root pointers don't mask "
+            "useful info."
+        ),
+    )
     _add_common(p_stats)
 
-    p_verify = sub.add_parser("verify", help="re-run verify_lineage against disk")
+    p_verify = sub.add_parser(
+        "verify",
+        help="re-run verify_lineage against disk (strict)",
+        description=(
+            "Strict chain verification: rebuilds the chain from disk, "
+            "checks parent_root pointers, and re-derives the merkle_root. "
+            "Exits non-zero on any tamper / mismatch."
+        ),
+    )
     _add_common(p_verify)
 
     p_orphans = sub.add_parser(
-        "orphans", help="list entries with an unknown parent_root"
+        "orphans",
+        help="list entries whose parent_root is not in the chain",
+        description=(
+            "Inspect-only orphan detector: walks the on-disk index in "
+            "lenient mode and reports every entry whose parent_root "
+            "references a chain root that is not present."
+        ),
     )
     _add_common(p_orphans)
 
     return parser
+
+
+class _ParseHelp(Exception):
+    """Internal sentinel — argparse printed help, caller should exit 0."""
 
 
 def _parse_one(action_name: str, args: list[str]) -> argparse.Namespace | None:
@@ -162,11 +213,28 @@ def _parse_one(action_name: str, args: list[str]) -> argparse.Namespace | None:
 
     argparse normally calls ``sys.exit`` on failure; we trap that so the
     action layer can return a clean non-zero exit code instead of
-    letting SystemExit propagate to a test harness.
+    letting SystemExit propagate to a test harness. When the user passes
+    ``--help``/``-h`` we re-raise via :class:`_ParseHelp` so the action
+    layer can distinguish "help was printed" (exit 0) from "bad args"
+    (exit 2).
     """
     parser = _build_parser()
     # Prepend the subcommand so we can reuse the shared parser tree even
     # when an action helper is invoked directly with only its own args.
+    # argparse exits with code 0 when --help fires and a non-zero code
+    # otherwise; the code is the only signal we have to tell them apart.
+    if any(tok in ("-h", "--help") for tok in args):
+        try:
+            parser.parse_args([action_name, *args])
+        except SystemExit as exc:
+            # --help path exits 0; anything else here is genuinely bad
+            # args (mixing --help with malformed flags).
+            if (exc.code or 0) == 0:
+                raise _ParseHelp from None
+            return None
+        # parse_args returned without help firing despite --help in args
+        # (unreachable in practice, but keep the contract explicit).
+        raise _ParseHelp
     try:
         return parser.parse_args([action_name, *args])
     except SystemExit:
@@ -179,7 +247,10 @@ def _parse_one(action_name: str, args: list[str]) -> argparse.Namespace | None:
 
 
 def show_action(args: list[str]) -> int:
-    ns = _parse_one("show", args)
+    try:
+        ns = _parse_one("show", args)
+    except _ParseHelp:
+        return 0
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root", "ok": False})
         return 2
@@ -198,7 +269,10 @@ def show_action(args: list[str]) -> int:
 
 
 def entry_action(args: list[str]) -> int:
-    ns = _parse_one("entry", args)
+    try:
+        ns = _parse_one("entry", args)
+    except _ParseHelp:
+        return 0
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root or positional args", "ok": False})
         return 2
@@ -214,7 +288,10 @@ def entry_action(args: list[str]) -> int:
 
 
 def stats_action(args: list[str]) -> int:
-    ns = _parse_one("stats", args)
+    try:
+        ns = _parse_one("stats", args)
+    except _ParseHelp:
+        return 0
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root", "ok": False})
         return 2
@@ -242,7 +319,10 @@ def stats_action(args: list[str]) -> int:
 
 
 def verify_action(args: list[str]) -> int:
-    ns = _parse_one("verify", args)
+    try:
+        ns = _parse_one("verify", args)
+    except _ParseHelp:
+        return 0
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root", "ok": False})
         return 2
@@ -271,7 +351,10 @@ def verify_action(args: list[str]) -> int:
 
 
 def orphans_action(args: list[str]) -> int:
-    ns = _parse_one("orphans", args)
+    try:
+        ns = _parse_one("orphans", args)
+    except _ParseHelp:
+        return 0
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root", "ok": False})
         return 2
@@ -327,13 +410,20 @@ def lineage_dispatch(args: list[str]) -> int:
     (mirroring :func:`commands.gate_cmd.gate_dispatch`). ``--project-root``
     may appear before or after the subcommand thanks to argparse, but
     the subcommand itself MUST be the first positional argument we see.
+
+    Top-level ``--help`` / ``-h`` (with no subcommand) prints the
+    argparse-rendered help to stdout and returns 0 — this is what
+    operators expect from ``story-automator lineage --help``.
     """
     if not args:
         _usage()
         return 1
 
     # The subcommand may not be ``args[0]`` if the caller put a global
-    # flag first; scan for the first non-flag token.
+    # flag first; scan for the first non-flag token. NOTE: we deliberately
+    # do this BEFORE the bare-help shortcut so that ``lineage show --help``
+    # routes into the subcommand parser (where argparse can render the
+    # per-subcommand help block) rather than the top-level help.
     subcommand: str | None = None
     remaining: list[str] = []
     for idx, tok in enumerate(args):
@@ -341,7 +431,14 @@ def lineage_dispatch(args: list[str]) -> int:
             subcommand = tok
             remaining = args[:idx] + args[idx + 1 :]
             break
+
     if subcommand is None:
+        # No subcommand at all. If the operator asked for help, render
+        # the top-level argparse help (which already lists every
+        # subcommand with a one-line description) and exit cleanly.
+        if any(tok in ("-h", "--help") for tok in args):
+            _build_parser().print_help()
+            return 0
         _usage()
         return 1
 

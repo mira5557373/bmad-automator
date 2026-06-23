@@ -24,6 +24,7 @@ from .commands.calibration_cmd import cmd_calibration
 from .commands.drift_cmd import cmd_drift
 from .commands.triage_cmd import cmd_triage
 from .commands.audit_verify_cmd import cmd_audit_verify
+from .commands.lineage_cmd import lineage_dispatch
 from .commands.record_cost import cmd_record_cost
 from .commands.orchestrator import cmd_orchestrator_helper
 from .commands.state import (
@@ -141,6 +142,11 @@ def _command_registry() -> dict[str, Command]:
         "triage": cmd_triage,
         "audit-verify": cmd_audit_verify,
         "record-cost": cmd_record_cost,
+        # C2 query CLI — read-only lineage ledger inspector. The
+        # orchestrator-helper still dispatches "lineage" too (back-compat
+        # with operator runbooks that predate the top-level entry); both
+        # routes call the same lineage_dispatch.
+        "lineage": lineage_dispatch,
     }
 
 
