@@ -482,6 +482,101 @@ class RunProductionGateTests(unittest.TestCase):
         )
         self.assertEqual(reused["lineage_root"], fresh["lineage_root"])
 
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_mid_startup_quarantine_surfaces_on_return(
+        self, mock_run: MagicMock,
+    ) -> None:
+        """Round-2 #19: mid-startup marker-corruption quarantine MUST be
+        loud-on-return, not silent-on-disk.
+
+        Pre-fix: ``_recover_from_crash_locked`` runs at the top of
+        ``run_production_gate`` and may quarantine a corrupted marker; its
+        descriptor — carrying ``quarantined``, ``quarantine_dir``,
+        ``corruption_reason`` — was discarded with ``_, _pending_cleanup = ...``.
+        Operators saw a green PASS with no signal that recovery had moved
+        a corrupted marker; the only trace was a timestamp-named directory
+        under ``_bmad/gate/quarantine/`` they had no reason to inspect.
+
+        Post-fix: an additive ``recovery`` subdict is attached to the
+        return when the descriptor reports ``quarantined=True``. The fix
+        is purely additive — gate files for the common no-marker fast
+        path get no new key.
+        """
+        # Pre-seed a corrupted marker (broken JSON, salvageable gate_id).
+        marker_path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(
+            '{"gate_id": "lost-gate", not valid json',
+            encoding="utf-8",
+        )
+
+        # Seed evidence + a verdict so the fresh-gate path succeeds.
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        self._persist_evidence("fresh-gate-after-corruption", evidence)
+        mock_run.return_value = []
+
+        gate = run_production_gate(
+            self.project_root, "fresh-gate-after-corruption",
+            commit_sha="freshsha",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+
+        # The corruption-recovery quarantine MUST be surfaced on the
+        # return so operators see the §9.2 "loud, not silent" signal at
+        # the orchestrator's single integration point.
+        self.assertIn(
+            "recovery", gate,
+            "mid-startup quarantine must surface a 'recovery' subdict",
+        )
+        self.assertTrue(gate["recovery"].get("quarantined"))
+        self.assertIn("quarantine_dir", gate["recovery"])
+        self.assertIn("corruption_reason", gate["recovery"])
+        # Sanity: the on-disk quarantine artifact must also exist (the
+        # fix is observability, not a new behavior — the existing on-disk
+        # contract still holds).
+        quar_dir = Path(gate["recovery"]["quarantine_dir"])
+        self.assertTrue(quar_dir.is_dir())
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_no_marker_path_omits_recovery_key(
+        self, mock_run: MagicMock,
+    ) -> None:
+        """Round-2 #19 additive invariant: the ``recovery`` key MUST be
+        absent on the common no-marker fast path.
+
+        The fix is purely additive — quarantine surfacing only kicks in
+        when there is something operator-actionable to surface. Gate
+        files for the common (no marker present) path stay byte-for-byte
+        the same shape as pre-fix, preserving the frozen-gate-surface.
+        """
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        self._persist_evidence("gate-no-marker", evidence)
+        mock_run.return_value = []
+
+        gate = run_production_gate(
+            self.project_root, "gate-no-marker",
+            commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+
+        # The common no-marker path must NOT carry the recovery subdict.
+        self.assertNotIn(
+            "recovery", gate,
+            "no-marker fast path must not add 'recovery' (additive invariant)",
+        )
+
 
 class RouteGateVerdictTests(unittest.TestCase):
     """Task 9: verdict routing."""

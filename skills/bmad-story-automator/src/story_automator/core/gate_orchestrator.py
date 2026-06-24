@@ -442,6 +442,53 @@ def _recover_from_crash_locked(
     return result, pending_cleanup
 
 
+def _attach_recovery_signal(
+    gate_file: dict[str, Any],
+    descriptor: dict[str, Any],
+) -> None:
+    """Surface mid-startup recovery signals on ``run_production_gate``'s return.
+
+    Bug fix (round 2 #19): without this, a corrupted marker quarantined
+    mid-`run_production_gate` succeeded only on-disk under a
+    timestamp-named ``_bmad/gate/quarantine/`` directory the operator had
+    no reason to inspect — the return dict carried a green PASS with no
+    trace. The §9.2 "loud, not silent" contract is preserved by surfacing
+    the descriptor as an additive ``recovery`` subdict.
+
+    The subdict is attached ONLY when the descriptor indicates something
+    operator-actionable: ``quarantined=True`` (corruption was loud and
+    moved) or ``cleanup_failed`` (orphan-cleanup failed mid-recovery).
+    The common ``{"recovered": False}`` (no marker) and the routine
+    ``{"recovered": True, ...}`` (clean orphan reaper) cases add NOTHING
+    — preserving byte-identical pre-fix behavior on the
+    frozen-gate-surface and keeping the change purely additive.
+
+    Mutates ``gate_file`` in place. Tolerates the empty-dict default
+    populated by ``run_production_gate`` when the lock was acquired but
+    the recovery path was not reached (no signal to surface).
+    """
+    if not descriptor:
+        return
+    quarantined = bool(descriptor.get("quarantined"))
+    cleanup_failed = bool(descriptor.get("cleanup_failed"))
+    if not (quarantined or cleanup_failed):
+        return
+    recovery: dict[str, Any] = {}
+    if quarantined:
+        recovery["quarantined"] = True
+        if "quarantine_dir" in descriptor:
+            recovery["quarantine_dir"] = descriptor["quarantine_dir"]
+        if "corruption_reason" in descriptor:
+            recovery["corruption_reason"] = descriptor["corruption_reason"]
+        if "quarantine_error" in descriptor:
+            recovery["quarantine_error"] = descriptor["quarantine_error"]
+    if cleanup_failed:
+        recovery["cleanup_failed"] = True
+        if "cleanup_error" in descriptor:
+            recovery["cleanup_error"] = descriptor["cleanup_error"]
+    gate_file["recovery"] = recovery
+
+
 def _rmtree_quarantined_dirs(
     paths: list[Path],
 ) -> str | None:
@@ -876,13 +923,27 @@ def run_production_gate(
             _gate_lock.timeout, _exc,
         )
     _pending_cleanup: list[Path] = []
+    _recovery_descriptor: dict[str, Any] = {}
     try:
         try:
             # Recovery runs under the same lock — use the *_locked variant
             # so we don't try to re-acquire (filelock is not re-entrant
             # across separate FileLock instances). K-5: capture the renamed
             # cleanup paths so we can rmtree them outside the lock below.
-            _, _pending_cleanup = _recover_from_crash_locked(project_root)
+            # Bug fix (round 2 #19): capture the descriptor so the operator
+            # sees the §9.2 "loud, not silent" quarantine signal at the
+            # orchestrator's single integration point. Without this, a
+            # mid-startup corrupted-marker quarantine succeeded only
+            # on-disk under a timestamp dir the operator had no reason to
+            # inspect — `run_production_gate` returned a green PASS with
+            # no trace. The descriptor is surfaced via an additive
+            # ``recovery`` subdict only when actually meaningful
+            # (quarantined OR cleanup_failed); the common no-marker
+            # ``{"recovered": False}`` path adds nothing — preserving
+            # byte-identical behavior on the frozen-gate-surface.
+            _recovery_descriptor, _pending_cleanup = (
+                _recover_from_crash_locked(project_root)
+            )
 
             existing, _ = check_gate_reuse(
                 project_root, gate_id, commit_sha, profile, factory_version,
@@ -941,6 +1002,7 @@ def run_production_gate(
                             set(error_labels),
                         )
                         existing["overall"] = "FAIL"
+                _attach_recovery_signal(existing, _recovery_descriptor)
                 return existing
 
             if enable_lie_detector:
@@ -1105,6 +1167,17 @@ def run_production_gate(
         except Exception as _exc:
             gate_file["threshold_proposal_ref"] = ""
             gate_file["threshold_proposer_error"] = type(_exc).__name__
+
+    # Bug fix (round 2 #19): surface the §9.2 "loud, not silent"
+    # mid-startup recovery signal. The recovery descriptor was previously
+    # discarded at the `_recover_from_crash_locked` call, so a corrupted
+    # marker quarantined mid-`run_production_gate` left no trace on the
+    # operator-facing return dict — the operator only saw a green PASS
+    # while the quarantine record lived under a timestamp-named directory
+    # they had no reason to inspect. The additive ``recovery`` subdict is
+    # ONLY present when meaningful (``quarantined`` OR ``cleanup_failed``)
+    # so the common no-marker fast path is byte-identical to pre-fix.
+    _attach_recovery_signal(gate_file, _recovery_descriptor)
 
     return gate_file
 
