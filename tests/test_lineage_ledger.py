@@ -236,6 +236,21 @@ class FindOrphansTests(unittest.TestCase):
         entries = _full_chain()
         self.assertEqual(find_orphans(entries), [])
 
+    def test_find_orphans_detects_multiple_genesis_entries(self) -> None:
+        # Multi-genesis corruption: two entries both claim parent_root=='',
+        # which build_lineage_chain refuses (only entries[0] may be genesis).
+        # The lenient orphans CLI surface MUST flag this so it doesn't
+        # report a spurious clean chain. The FIRST parent_root=='' entry
+        # is the legitimate genesis; any subsequent claimant is an orphan.
+        e0 = _entry("brainstorm", "s0", parent_root="", body="b0")
+        e1 = _entry("kernel", "s1", parent_root="", body="b1")
+        orphans = find_orphans([e0, e1])
+        self.assertEqual(orphans, [e1])
+        # And the strict-mode builder still rejects this exact input, so
+        # the two surfaces remain consistent (lenient flags, strict refuses).
+        with self.assertRaises(LineageError):
+            build_lineage_chain([e0, e1])
+
 
 class FullEightGenreRoundTripTests(unittest.TestCase):
     def test_full_8_genre_chain_round_trip(self) -> None:

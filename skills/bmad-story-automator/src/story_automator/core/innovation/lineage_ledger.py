@@ -269,6 +269,15 @@ def find_orphans(entries: Sequence[LineageEntry]) -> list[LineageEntry]:
     in that set is an orphan: its claimed parent does not appear in the
     set we were given, so we cannot prove its provenance from this data
     alone.
+
+    Multi-genesis corruption is also flagged: at most ONE entry may carry
+    ``parent_root == ""`` (the first such entry in input order is the
+    legitimate genesis). Any subsequent entry that also claims genesis is
+    returned as an orphan — :func:`build_lineage_chain` would refuse such
+    a chain at line 1 (``entries_list[0].parent_root != ""``), so the
+    lenient orphan-detection CLI surface (``lineage orphans`` /
+    ``lineage stats``) must surface the corruption rather than report a
+    spurious clean chain. ``lineage verify`` remains the strict mode.
     """
     entries_list = list(entries)
     known_roots: set[str] = {""}
@@ -276,7 +285,16 @@ def find_orphans(entries: Sequence[LineageEntry]) -> list[LineageEntry]:
         known_roots.add(compute_lineage_root(entries_list[:idx]))
 
     orphans: list[LineageEntry] = []
+    seen_genesis = False
     for entry in entries_list:
+        if entry.parent_root == "":
+            # Only the first parent_root=='' is a legitimate genesis;
+            # every subsequent claimant is a multi-genesis corruption.
+            if seen_genesis:
+                orphans.append(entry)
+            else:
+                seen_genesis = True
+            continue
         if entry.parent_root not in known_roots:
             orphans.append(entry)
     return orphans
