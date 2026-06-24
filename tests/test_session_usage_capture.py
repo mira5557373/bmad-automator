@@ -92,9 +92,16 @@ class CaptureSessionUsageTests(unittest.TestCase):
             result = capture_session_usage(cli_id, path)
             self.assertEqual(result.cli_id, cli_id)
             self.assertEqual(result.usage, UsageMetrics())
-            # parser_id is downgraded to the runtime sentinel when
-            # usage is zero — see module docstring for why.
-            self.assertEqual(result.parser_id, "none")
+            # parser_id is downgraded to the runtime-fallback sentinel
+            # ("unparseable") when usage is zero — see module docstring
+            # for why. The lone exception is cli_id="none" whose
+            # operator-chosen dialect MUST remain reportable as "none"
+            # to preserve the documented distinction between "operator
+            # chose no parsing" and "parser tried and returned zeros".
+            if cli_id == "none":
+                self.assertEqual(result.parser_id, "none")
+            else:
+                self.assertEqual(result.parser_id, "unparseable")
 
     def test_capture_unknown_cli_id_raises(self) -> None:
         path = _write_fixture(self.root, "any.txt", "")
@@ -121,8 +128,10 @@ class CaptureSessionUsageTests(unittest.TestCase):
         result = capture_session_usage("claude-code", path)
         self.assertEqual(result.usage, UsageMetrics())
         self.assertEqual(result.bytes_read, 0)
-        # Empty file -> parser_id downgrades to the runtime sentinel.
-        self.assertEqual(result.parser_id, "none")
+        # Empty file -> parser_id downgrades to the runtime-fallback
+        # sentinel ("unparseable"). This is distinct from the
+        # operator-chosen "none" parser dialect.
+        self.assertEqual(result.parser_id, "unparseable")
 
     def test_capture_synthetic_claude_jsonl_produces_real_usage(self) -> None:
         path = _write_fixture(
@@ -155,7 +164,7 @@ class CaptureSessionUsageTests(unittest.TestCase):
         self.assertEqual(result.usage, UsageMetrics())
         # bytes_read still reflects what was on disk.
         self.assertGreater(result.bytes_read, 0)
-        self.assertEqual(result.parser_id, "none")
+        self.assertEqual(result.parser_id, "unparseable")
 
     def test_capture_returns_frozen_dataclass(self) -> None:
         path = _write_fixture(self.root, "empty.txt", "")
@@ -182,6 +191,42 @@ class CaptureSessionUsageTests(unittest.TestCase):
         path = _write_fixture(self.root, "session.jsonl", _claude_jsonl_blob())
         result = capture_session_usage("claude-code", str(path))
         self.assertEqual(result.usage.input_tokens, 1000)
+
+    def test_fallback_parser_id_disjoint_from_known_parsers(self) -> None:
+        # Regression pin for the runtime-fallback sentinel collision.
+        # The module docstring promises audit consumers can distinguish
+        # "operator chose no parsing" from "parser tried and returned
+        # zeros" via parser_id. That distinction only holds if the
+        # fallback sentinel string is NOT one of the documented parser
+        # ids. If a future refactor sets _FALLBACK_PARSER_ID back to
+        # "none" (or any other KNOWN_PARSERS value), audit consumers
+        # branching on parser_id will silently conflate the two cases.
+        from story_automator.core.innovation import session_usage_capture
+        self.assertNotIn(
+            session_usage_capture._FALLBACK_PARSER_ID,
+            set(KNOWN_PARSERS.values()),
+            msg=(
+                "Runtime-fallback sentinel must not collide with any "
+                "documented parser id; otherwise the docstring "
+                "distinction is unreachable."
+            ),
+        )
+
+    def test_operator_none_vs_runtime_fallback_distinguishable(self) -> None:
+        # End-to-end positive proof that the docstring contract holds:
+        # capture with cli_id="none" on any file (operator opt-out) and
+        # capture with cli_id="claude-code" on unparseable content
+        # (runtime degrade) MUST produce different parser_id values.
+        a = _write_fixture(self.root, "operator-none.txt", "anything")
+        b = _write_fixture(self.root, "garbled.jsonl", "not json at all")
+        ra = capture_session_usage("none", a)
+        rb = capture_session_usage("claude-code", b)
+        # Both UsageMetrics zero — distinction lives in parser_id.
+        self.assertEqual(ra.usage, UsageMetrics())
+        self.assertEqual(rb.usage, UsageMetrics())
+        self.assertEqual(ra.parser_id, "none")
+        self.assertEqual(rb.parser_id, "unparseable")
+        self.assertNotEqual(ra.parser_id, rb.parser_id)
 
 
 # ---------------------------------------------------------------------------

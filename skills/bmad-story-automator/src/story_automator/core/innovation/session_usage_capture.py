@@ -28,13 +28,15 @@ Fail-soft contract — mirrors the cost-evidence emission contract:
   caller asked us to read a specific path; silently returning zero
   would hide a misconfiguration).
 * Unparseable content => return zero-valued :class:`UsageMetrics`
-  with ``parser_id="none"`` and a logged warning. The session
+  with ``parser_id="unparseable"`` and a logged warning. The session
   legitimately may have emitted nothing the parser recognizes
   (toy CLI, custom stop hook); we never want to abort a gate over
-  it. Note that this is distinct from
+  it. Note that this sentinel is intentionally distinct from
   :data:`story_automator.core.usage_parsers.KNOWN_PARSERS["none"]`
-  — the ``"none"`` parser dialect is a deliberate operator choice,
-  whereas this fallback path is a runtime-degrade signal.
+  (which is the string ``"none"``) — the ``"none"`` parser dialect
+  is a deliberate operator choice, whereas this fallback path is
+  a runtime-degrade signal. Audit consumers branching on
+  ``parser_id`` can therefore distinguish the two cases.
 * Unknown ``cli_id`` => :class:`SessionUsageCaptureError` (re-raised
   from :class:`story_automator.core.usage_parsers.ParseError` so
   callers can catch a single class).
@@ -72,8 +74,11 @@ logger = logging.getLogger(__name__)
 # dialect we don't yet recognize. Kept distinct from the "none" parser
 # dialect (an operator-configured opt-out) so audit consumers can
 # distinguish "operator chose no parsing" from "parser tried and
-# returned zeros". See module docstring.
-_FALLBACK_PARSER_ID: str = "none"
+# returned zeros". See module docstring. The value MUST NOT collide
+# with any member of ``set(KNOWN_PARSERS.values())`` — otherwise the
+# documented distinction collapses into a single string. This is
+# pinned by ``test_fallback_parser_id_disjoint_from_known_parsers``.
+_FALLBACK_PARSER_ID: str = "unparseable"
 
 
 class SessionUsageCaptureError(ValueError):
@@ -163,9 +168,11 @@ def capture_session_usage(
     expected to be tolerant (see usage_parsers package docstring), so
     a transcript that yields no usage blocks reads as zero-valued
     :class:`UsageMetrics`. When that happens the returned
-    ``parser_id`` is set to ``"none"`` (the runtime-degrade sentinel)
-    so callers can tell "parser tried and got nothing" apart from
-    "parser succeeded with real numbers".
+    ``parser_id`` is set to ``"unparseable"`` (the runtime-degrade
+    sentinel — see :data:`_FALLBACK_PARSER_ID`) so callers can tell
+    "parser tried and got nothing" apart from "parser succeeded with
+    real numbers", AND apart from the operator-chosen ``"none"``
+    parser dialect (which still returns ``parser_id == "none"``).
     """
 
     parser_id = _validate_cli_id(cli_id)
@@ -191,10 +198,16 @@ def capture_session_usage(
     usage = parser(text)
 
     # If the parser returned all zeros, downgrade parser_id to the
-    # fallback sentinel so audit consumers can tell the difference
-    # between "parser found real numbers" and "parser found nothing".
+    # runtime-fallback sentinel so audit consumers can tell the
+    # difference between "parser found real numbers" and "parser
+    # found nothing". Exception: the operator-chosen ``"none"``
+    # parser dialect is *contractually* zero-returning (see
+    # :mod:`story_automator.core.usage_parsers.none`) — zero is the
+    # operator's intentional result there, not a runtime degrade, so
+    # preserve ``parser_id == "none"`` to keep the documented
+    # distinction between the two cases observable.
     effective_parser_id = parser_id
-    if usage == UsageMetrics():
+    if usage == UsageMetrics() and parser_id != "none":
         if bytes_read > 0:
             logger.warning(
                 "session_usage_capture: parser %r returned zero usage for "
