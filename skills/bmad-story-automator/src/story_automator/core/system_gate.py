@@ -110,17 +110,23 @@ def run_system_gate(
     # the production gate uses. The 3600s timeout matches
     # run_production_gate — system gates can run for many seconds while
     # collectors execute against a provisioned environment.
+    #
+    # R2 fix #26 (mirror of gate_orchestrator.py R2 fix #25):
+    # ``acquire()`` MUST be the first statement of the try whose
+    # ``finally:`` releases the lock — otherwise a SIGINT /
+    # KeyboardInterrupt arriving in the bytecode-gap between
+    # ``acquire()`` returning and ``SETUP_FINALLY`` of a separate inner
+    # try would hold the OS-level lock without registering the release
+    # cleanup. ``_pending_cleanup`` is hoisted ABOVE the lock acquisition
+    # so the outermost ``finally:`` (which runs ``_rmtree_quarantined_dirs``)
+    # sees it on every exit path. ``release()`` is a no-op when
+    # ``is_locked`` is False (filelock/_api.py:562), so a Timeout-raising
+    # or interrupted ``acquire()`` runs the finally safely.
+    _pending_cleanup: list[Path] = []
     _gate_lock = get_gate_lock(project_root, timeout=3600.0)
     try:
-        _gate_lock.acquire()
-    except Timeout as _exc:
-        _handle_gate_lock_timeout(
-            project_root, gate_lock_path(project_root),
-            _gate_lock.timeout, _exc,
-        )
-    _pending_cleanup: list[Path] = []
-    try:
         try:
+            _gate_lock.acquire()
             # Recovery runs under the same lock — use the *_locked variant
             # so we don't try to re-acquire (filelock is not re-entrant
             # across separate FileLock instances). K-5: capture renamed
@@ -228,7 +234,23 @@ def run_system_gate(
                     clear_gate_marker(project_root)
                 except OSError:
                     pass
+        except Timeout as _exc:
+            # R2 fix #26: Timeout from the ``acquire()`` at the top of
+            # this protected try lands here. ``_handle_gate_lock_timeout``
+            # is ``NoReturn`` (re-raises ``GateLockTimeoutError``), so the
+            # ``finally:`` below runs ``release()`` — which is a no-op
+            # because the lock was never acquired (``is_locked`` is False;
+            # filelock/_api.py:562).
+            _handle_gate_lock_timeout(
+                project_root, gate_lock_path(project_root),
+                _gate_lock.timeout, _exc,
+            )
         finally:
+            # R2 fix #26: every exit path from the protected try (success,
+            # exception, SIGINT/KeyboardInterrupt arriving in the
+            # bytecode-gap immediately after ``acquire()`` returns) lands
+            # here. ``release()`` is idempotent + ``is_locked``-gated so a
+            # Timeout-raising / interrupted ``acquire()`` is safe.
             _gate_lock.release()
     finally:
         # K-5: outside-lock rmtree of orphan evidence dirs renamed

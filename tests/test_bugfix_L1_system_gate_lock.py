@@ -280,6 +280,73 @@ class SystemGateReleasesLockOnProvisionFailure(_Mixin, unittest.TestCase):
             pass
 
 
+class SystemGateReleasesLockOnKeyboardInterruptAfterAcquire(
+    _Mixin, unittest.TestCase
+):
+    """R2 fix #26 regression — KeyboardInterrupt after acquire releases lock.
+
+    Mirror of ``test_lock_released_when_keyboard_interrupt_arrives_after_acquire``
+    in test_gate_orchestrator_g2_wiring.py for the system-gate sibling. The
+    pre-fix code had ``_pending_cleanup = []`` (and the ``except Timeout``
+    block) sitting between the ``_gate_lock.acquire()`` and the inner
+    try whose ``finally:`` releases the lock. A KeyboardInterrupt /
+    SIGINT delivered in that bytecode-gap leaked the OS-level lock until
+    the FileLock instance was GC'd — and any caller that retained the
+    traceback (a long-running supervisor, a test runner that catches
+    BaseException, sys.exc_info() retention, PyPy's deferred GC) would
+    pin the leak for the lifetime of that traceback reference.
+
+    The fix restructures so ``_gate_lock.acquire()`` is the FIRST
+    statement of the try whose ``finally:`` releases the lock — any
+    exception (including KeyboardInterrupt arriving immediately after
+    acquire returns) is caught by that finally and the lock is released.
+    """
+
+    @patch("story_automator.core.system_gate.get_gate_lock")
+    def test_system_gate_releases_lock_on_keyboard_interrupt_after_acquire(
+        self,
+        mock_get_lock: MagicMock,
+    ) -> None:
+        mock_lock = MagicMock()
+        mock_lock.timeout = 3600.0
+        release_calls: list[None] = []
+
+        def fake_acquire(*args: object, **kwargs: object) -> None:
+            # Simulate the sub-microsecond window: lock has been acquired
+            # at the OS level, then SIGINT arrives just as control returns
+            # to the caller.
+            raise KeyboardInterrupt()
+
+        mock_lock.acquire.side_effect = fake_acquire
+        mock_lock.release.side_effect = lambda *a, **kw: release_calls.append(None)
+        mock_get_lock.return_value = mock_lock
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_system_gate(
+                self.tmp,
+                "sg-ki-after-acquire",
+                epic_id="E1",
+                commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+            )
+
+        # The release MUST have been called even though the
+        # KeyboardInterrupt fired immediately after acquire returned.
+        # On the unfixed code this assertion fails because the lock
+        # release sits inside a try that was never entered (the
+        # _pending_cleanup assignment + the previous except Timeout
+        # block sat between acquire and the protecting try).
+        self.assertEqual(
+            len(release_calls), 1,
+            "_gate_lock.release() must run on every exit path from "
+            "the protected region — including KeyboardInterrupt "
+            "arriving immediately after acquire returns.",
+        )
+
+
 class SystemGateReleasesLockOnException(_Mixin, unittest.TestCase):
     """When the collector explodes, the lock must still be released."""
 
