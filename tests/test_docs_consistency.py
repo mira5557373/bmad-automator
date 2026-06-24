@@ -957,6 +957,43 @@ class FrozenSurfaceLOCWaiverConsistencyTests(unittest.TestCase):
             "historical snapshot, not the current file size.",
         )
 
+    # Tighter freshness band: doc must track live file within ±50 LOC.
+    # This is the contract surfaced inline in the waiver paragraph
+    # ("Bump the cited number whenever the live file drifts by more
+    # than ±50 LOC"). The 150-LOC tolerance above remains the hard
+    # ceiling; this 50-LOC tolerance enforces the documented
+    # bump-cadence floor so a round-3 fix that adds ~100 LOC without
+    # refreshing the waiver paragraph trips here BEFORE the looser
+    # 150-LOC ceiling test goes red.
+    LOC_FRESHNESS_BAND = 50
+
+    def test_waiver_cited_loc_within_freshness_band(self) -> None:
+        """The cited LOC must track the live file within ±50 LOC.
+
+        Catches the round-3 drift case where ``gate_orchestrator.py``
+        grew from 1300 → 1409 LOC across two ``BaseException``-safety
+        fixes (`clear marker on drift_watcher BaseException` +
+        `drain pending_cleanup on clear_gate_marker OSError`) without
+        the waiver paragraph being refreshed. The +109 LOC delta sat
+        comfortably within the 150-LOC hard ceiling but breached the
+        documented 50-LOC bump cadence.
+        """
+        live = self._live_loc()
+        cited = self._waiver_cited_loc()
+        delta = abs(live - cited)
+        self.assertLessEqual(
+            delta,
+            self.LOC_FRESHNESS_BAND,
+            f"frozen-gate-surface.md waiver cites {cited} LOC for "
+            f"core/gate_orchestrator.py but the live file is {live} "
+            f"LOC ({delta} LOC drift, freshness band "
+            f"±{self.LOC_FRESHNESS_BAND}). The waiver paragraph "
+            "documents 'Bump the cited number whenever the live "
+            "file drifts by more than ±50 LOC' — refresh the "
+            "**N** marker on the soft-limit waiver bullet to the "
+            "current value.",
+        )
+
 
 class ChangelogTagReferencesResolveTests(unittest.TestCase):
     """Every ``compat-*`` tag mentioned in CHANGELOG.md resolves via ``git tag``.
