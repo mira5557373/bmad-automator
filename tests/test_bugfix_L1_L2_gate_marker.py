@@ -278,5 +278,97 @@ class CorruptMarkerUnreadableQuarantinesOnlyMarker(_Mixin, unittest.TestCase):
         self.assertTrue((gate_root / "evidence" / "g2" / "g2.json").is_file())
 
 
+# ---------------------------------------------------------------------------
+# L2 — empty/missing gate_id in valid-JSON marker (Round 1 fix #29)
+# ---------------------------------------------------------------------------
+
+
+class ValidJsonMarkerMissingGateIdPreservesHistoricalEvidence(
+    _Mixin, unittest.TestCase
+):
+    """A valid-JSON marker missing ``gate_id`` MUST NOT wipe historical evidence.
+
+    Previously the recover_from_crash path read ``marker.get("gate_id", "")``
+    without validating non-empty / path-safe, then computed
+    ``evidence_dir = evidence / gate_id``. Pathlib semantics: ``Path('.../evidence') / ''``
+    is a no-op, so evidence_dir collapsed to the evidence ROOT containing every
+    historical gate. ``os.rename`` then moved the entire historical tree into
+    cleanup/ where it was rmtree'd — silently destroying every gate's bundle
+    while returning ``recovered=True, gate_id=''``. Such a marker is
+    structurally corrupted (the marker contract requires gate_id); recovery
+    must route it through the corrupted-marker quarantine path per §9.2.
+    """
+
+    def test_empty_gate_id_marker_does_not_destroy_historical_evidence(
+        self,
+    ) -> None:
+        gate_root = self.tmp / "_bmad" / "gate"
+        gate_root.mkdir(parents=True)
+        # Pre-seed two historical / completed gate evidence dirs.
+        for gid in ("completed-A", "completed-B"):
+            d = gate_root / "evidence" / gid
+            d.mkdir(parents=True)
+            (d / "audit.json").write_text(f'{{"gate": "{gid}"}}', encoding="utf-8")
+
+        # Marker is VALID JSON (a dict) but missing the gate_id field.
+        # read_gate_marker accepts this; the bug surfaces in
+        # _recover_from_crash_locked when it dereferences gate_id="".
+        marker = gate_root / "gate-in-progress.json"
+        marker.write_text("{}", encoding="utf-8")
+
+        result = recover_from_crash(self.tmp)
+
+        # Audit-floor MarkerCorruptionInvariant contract must hold:
+        # recovered=False, quarantined=True, quarantine_dir, corruption_reason.
+        self.assertFalse(result["recovered"])
+        self.assertTrue(result["quarantined"], "missing gate_id must surface loud")
+        self.assertIn("quarantine_dir", result)
+        self.assertIn("corruption_reason", result)
+
+        # The bug was: returns recovered=True/gate_id='' AND destroys evidence.
+        # Both halves must be fixed.
+        self.assertNotEqual(
+            result.get("gate_id", "MISSING"),
+            "",
+            "must not silently return gate_id=''",
+        )
+
+        # Historical evidence dirs MUST survive (this is the core regression).
+        for gid in ("completed-A", "completed-B"):
+            self.assertTrue(
+                (gate_root / "evidence" / gid / "audit.json").is_file(),
+                f"{gid} historical evidence must be preserved",
+            )
+
+        # Marker moved into quarantine (per the corrupted-marker contract).
+        quar = Path(result["quarantine_dir"])
+        self.assertTrue((quar / "gate-in-progress.json").is_file())
+        self.assertFalse(marker.exists())
+
+    def test_foreign_marker_with_extra_fields_but_no_gate_id_is_quarantined(
+        self,
+    ) -> None:
+        """Even a marker with unrelated valid-JSON content but no gate_id
+        must not destroy evidence — the structural contract is gate_id."""
+        gate_root = self.tmp / "_bmad" / "gate"
+        gate_root.mkdir(parents=True)
+        d = gate_root / "evidence" / "historical"
+        d.mkdir(parents=True)
+        (d / "x.json").write_text('{"ok": 1}', encoding="utf-8")
+
+        marker = gate_root / "gate-in-progress.json"
+        # Valid JSON object, but the gate_id key is absent.
+        marker.write_text('{"foo": "bar", "baz": 42}', encoding="utf-8")
+
+        result = recover_from_crash(self.tmp)
+        self.assertFalse(result["recovered"])
+        self.assertTrue(result["quarantined"])
+        # Historical evidence preserved.
+        self.assertTrue(
+            (gate_root / "evidence" / "historical" / "x.json").is_file(),
+            "historical evidence must survive a missing-gate_id marker",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

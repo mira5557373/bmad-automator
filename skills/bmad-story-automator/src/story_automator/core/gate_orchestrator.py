@@ -27,6 +27,7 @@ from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from .evidence_io import (
     GateMarkerCorruptedError,
+    _validate_gate_id,
     best_effort_extract_gate_id,
     can_reuse_gate_file,
     clear_gate_marker,
@@ -346,6 +347,29 @@ def _recover_from_crash_locked(
 
     gate_id = marker.get("gate_id", "")
     commit_sha = marker.get("commit_sha", "")
+
+    # Bug fix: a marker that parses as valid JSON but is MISSING / has an
+    # empty / has a path-unsafe ``gate_id`` was previously accepted here.
+    # That let ``evidence_dir = evidence / gate_id`` collapse to
+    # ``evidence/`` itself (Pathlib semantics: ``Path('.../evidence') / ''``
+    # is a no-op) and ``os.rename`` then moved the ENTIRE historical
+    # ``evidence/`` tree into ``cleanup/`` where it was rmtree'd —
+    # silently destroying every historical gate's bundle. Such a marker
+    # IS structurally corrupted (the marker contract requires gate_id);
+    # treat it like any other corruption per §9.2 ("loud, not silent")
+    # and route through ``_quarantine_corrupted_marker`` so the targeted
+    # L2-variant quarantine semantics apply (marker moved to quarantine;
+    # historical evidence dirs left intact).
+    try:
+        _validate_gate_id(gate_id)
+    except GateSchemaError as exc:
+        return _quarantine_corrupted_marker(
+            root,
+            marker_path,
+            GateMarkerCorruptedError(
+                f"gate marker missing or has invalid gate_id: {exc}"
+            ),
+        ), []
 
     verdict_path = root / "_bmad" / "gate" / "verdicts" / f"{gate_id}.json"
     had_verdict = verdict_path.is_file()
