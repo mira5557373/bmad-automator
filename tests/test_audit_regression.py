@@ -748,7 +748,24 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 # promises binding-tracking is "precise, not over-broad".
                 if node.module == "subprocess" and node.level == 0:
                     for alias in node.names:
-                        if alias.name in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES:
+                        # Star imports bind every public name from the
+                        # source module into the current namespace, so
+                        # ``from subprocess import *`` introduces bare-
+                        # name ``run`` / ``Popen`` / ``call`` /
+                        # ``check_call`` / ``check_output`` callables.
+                        # Without this branch a star-import + bare
+                        # ``run(..., env=...)`` silently bypasses the
+                        # D-04 trust-boundary net (verified empirically:
+                        # the walker returned ``[]`` for the canonical
+                        # star-import leaker before this branch landed).
+                        # Defense-in-depth ruff F403 also bans star
+                        # imports project-wide, so this branch is the
+                        # belt to F403's suspenders.
+                        if alias.name == "*":
+                            callable_aliases.update(
+                                AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES
+                            )
+                        elif alias.name in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES:
                             callable_aliases.add(alias.asname or alias.name)
         # Second pass — fixed-point rebinding closure. ``sub = subprocess``
         # rebinds the module; ``r = run`` rebinds a callable. Iterate to
@@ -2106,7 +2123,7 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
 
     def test_positive_failure_bypass_idioms_are_caught(self) -> None:
         """Two-direction proof for D-04 binding-tracking — the walker
-        must catch SEVEN idiomatic Python aliasing patterns that a
+        must catch EIGHT idiomatic Python aliasing patterns that a
         literal ``subprocess.<name>(...)`` predicate silently misses:
 
           (a) ``import subprocess as sp`` → ``sp.run(...)``
@@ -2119,6 +2136,9 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
               ``b.run(...)`` (transitive closure)
           (h) callable rebind ``from subprocess import run; r = run`` →
               ``r(...)``
+          (i) star import ``from subprocess import *`` → bare-name
+              ``run(...)`` / ``Popen(...)`` / ``call(...)`` /
+              ``check_call(...)`` / ``check_output(...)``
 
         Plus the canonical baseline:
           (d) ``import subprocess`` → ``subprocess.run(...)``
@@ -2278,6 +2298,46 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "Walker FAILED to flag callable rebind `r = run` + `r(...)` — "
             "binding-tracking missing for callable-alias rebinding",
         )
+
+        # (i) Star import ``from subprocess import *`` followed by
+        # bare-name ``run(...)``. Without the star-arm in
+        # _collect_subprocess_bindings, ``alias.name == '*'`` never
+        # matches SUBPROCESS_CALLABLES, ``callable_aliases`` stays
+        # empty, _module_offenders early-returns ``[]`` at the
+        # ``not module_aliases and not callable_aliases`` guard, and
+        # the leaking ``run(..., env={'BMAD_AUDIT_KEY': ...})`` call is
+        # silently exempted from the trust-boundary net. ruff F403
+        # bans star imports project-wide as defense-in-depth, but the
+        # audit-floor walker is the structural net of last resort —
+        # belt-and-suspenders is the contract.
+        star_import_src = """
+            from subprocess import *
+
+            def leak():
+                run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(star_import_src),
+            "Walker FAILED to flag `from subprocess import *` + bare "
+            "`run(...)` — star-imports must seed callable_aliases with "
+            "the full SUBPROCESS_CALLABLES set",
+        )
+
+        # And the same star-import must also seed every other
+        # callable, not just ``run``. Pins that the seed is the FULL
+        # SUBPROCESS_CALLABLES set, not a subset.
+        for callable_name in sorted(self.SUBPROCESS_CALLABLES):
+            star_import_callable_src = f"""
+            from subprocess import *
+
+            def leak():
+                {callable_name}(["ls"], env={{"BMAD_AUDIT_KEY": "leak"}})
+        """
+            self.assertTrue(
+                _flag(star_import_callable_src),
+                f"Walker FAILED to flag star-import + bare `{callable_name}(...)` — "
+                "star-import seed must include every SUBPROCESS_CALLABLES entry",
+            )
 
         # Negative — `run(...)` without any subprocess import MUST NOT
         # be flagged. Proves binding-tracking is precise, not over-broad.
