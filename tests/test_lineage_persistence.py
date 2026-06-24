@@ -218,6 +218,132 @@ class ConcurrentPersistTests(_TempProjectMixin, unittest.TestCase):
         self.assertIn("brainstorm/s-a", index["entries"])
         self.assertIn("brief/s-b", index["entries"])
 
+    def test_distinct_keys_under_heavy_contention_yield_unique_contiguous_seqs(
+        self,
+    ) -> None:
+        # Pin the documented contract from
+        # ``persist_lineage_entry`` (lineage_ledger.py docstring):
+        # "parallel persists on distinct (genre, slug) both end up in
+        # the index". Two threads is too tame to surface a duplicate-seq
+        # regression — derive seq from ``len(entries)`` outside the lock
+        # discipline and the index would show colliding seqs under
+        # barrier-synchronised contention. Assert the seq SET equals
+        # ``{0..N-1}`` exactly, which is the only invariant that
+        # actually disambiguates lock-protected reads from racy ones.
+        n_threads = 24
+        barrier = threading.Barrier(n_threads)
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+
+        def worker(idx: int) -> None:
+            try:
+                barrier.wait(timeout=30.0)
+                persist_lineage_entry(
+                    self.project_root,
+                    _entry("brainstorm", f"s-{idx:03d}", body=f"body-{idx}"),
+                )
+            except BaseException as exc:  # noqa: BLE001
+                with errors_lock:
+                    errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(i,))
+            for i in range(n_threads)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60.0)
+
+        self.assertEqual(errors, [], f"unexpected persist errors: {errors!r}")
+        index = json.loads(lineage_index_path(self.project_root).read_text())
+        entries = index["entries"]
+        self.assertEqual(
+            len(entries), n_threads,
+            f"expected {n_threads} distinct entries, got {len(entries)}",
+        )
+        seqs = [meta["seq"] for meta in entries.values()]
+        # Uniqueness + contiguity: under a properly locked persist the
+        # set of seqs equals exactly ``{0, 1, ..., n_threads-1}``. A
+        # duplicate would shrink this set; a leaked seq would leave a
+        # gap. Either failure mode silently misorders the chain at
+        # ``load_lineage_chain`` time.
+        self.assertEqual(
+            sorted(seqs), list(range(n_threads)),
+            f"seq values must be unique and contiguous 0..{n_threads - 1}: {seqs!r}",
+        )
+
+    def test_same_key_race_is_idempotent_and_chain_rebuilds_cleanly(self) -> None:
+        # Pin the second half of the contract: "re-persist of the same
+        # entry is idempotent". A buggy variant that advances ``seq``
+        # on every persist would emit ``seq=n_threads-1`` at the end
+        # of a same-key flood. The lock-protected reuse must keep it
+        # at ``seq=0`` (the original insertion ordinal), and the chain
+        # rebuild via :func:`load_lineage_chain` must succeed.
+        n_threads = 12
+        barrier = threading.Barrier(n_threads)
+        # All threads persist the IDENTICAL entry so payload_hash,
+        # parent_root, timestamp, genre, and slug all match — the
+        # canonical-JSON form is byte-identical across threads.
+        target_entry = _entry(
+            "brainstorm", "dup-key", body="dup-body",
+            ts="2026-06-24T00:00:00Z",
+        )
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+        returned_paths: list[Path] = []
+        paths_lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                barrier.wait(timeout=30.0)
+                out_path = persist_lineage_entry(
+                    self.project_root, target_entry,
+                )
+                with paths_lock:
+                    returned_paths.append(out_path)
+            except BaseException as exc:  # noqa: BLE001
+                with errors_lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60.0)
+
+        self.assertEqual(errors, [], f"unexpected persist errors: {errors!r}")
+        # (a) Every thread received the same disk path — the persist
+        # is functionally pure for an already-indexed entry.
+        self.assertEqual(len(returned_paths), n_threads)
+        self.assertEqual(
+            len(set(returned_paths)), 1,
+            f"all threads must return identical path: {returned_paths!r}",
+        )
+        # (b) Exactly one composite key in the index — no duplicate
+        # advertising of the same (genre, slug).
+        index = json.loads(lineage_index_path(self.project_root).read_text())
+        self.assertEqual(len(index["entries"]), 1)
+        self.assertIn("brainstorm/dup-key", index["entries"])
+        # (c) seq stays at 0 — the lock-protected reuse path read the
+        # pre-existing meta and copied its ``seq``. A regression that
+        # treats every persist as fresh would leak ``seq=n_threads-1``.
+        meta = index["entries"]["brainstorm/dup-key"]
+        self.assertEqual(
+            meta["seq"], 0,
+            f"idempotent re-persist must keep seq=0; got {meta['seq']!r}",
+        )
+        # (d) merkle_root is stable across re-persists (deterministic
+        # function of the entry alone).
+        self.assertEqual(meta["merkle_root"], compute_lineage_root([target_entry]))
+        # (e) Chain rebuild via load_lineage_chain succeeds — the
+        # idempotence contract holds end-to-end through the public
+        # read API, not just at the index level.
+        chain = load_lineage_chain(self.project_root)
+        self.assertEqual(len(chain.entries), 1)
+        self.assertEqual(chain.entries[0], target_entry)
+        self.assertEqual(chain.merkle_root, meta["merkle_root"])
+
 
 class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
     def test_atomic_write_no_partial_file_on_crash(self) -> None:
