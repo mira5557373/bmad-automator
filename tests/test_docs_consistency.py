@@ -2020,5 +2020,66 @@ class RecentlyShippedSiblingModuleMentionTests(unittest.TestCase):
         )
 
 
+class ValidateCliIdDocstringGrammarTests(unittest.TestCase):
+    """``_validate_cli_id`` docstring uses third-person-singular "Raises".
+
+    Pre-fix the docstring at
+    ``core/innovation/session_usage_capture.py:128`` opened its second
+    paragraph with ``Raised :class:`SessionUsageCaptureError` wraps the
+    underlying :class:`ParseError` so callers can catch one class.`` —
+    the clause ``Raised X wraps Y`` is ungrammatical because the past
+    participle ``Raised`` has no implicit subject before the finite
+    verb ``wraps`` arrives. The sibling docstring on
+    :func:`capture_session_usage` (same module, ~50 lines below) uses
+    the conventional PEP-257 ``Raises :class:`SessionUsageCaptureError`
+    if ...`` form, confirming the file's own voice convention is
+    third-person-singular ``Raises``. The fix changes ``Raised`` →
+    ``Raises`` and rephrases as ``Raises ..., wrapping ...``.
+
+    The regression test pins the post-fix grammar by asserting:
+
+    1. The docstring contains the third-person-singular ``Raises``
+       opener (PEP-257 style).
+    2. The pre-fix ungrammatical clause ``Raised :class:`Session...
+       wraps`` is gone — so a future refactor that re-introduces the
+       typo trips this test.
+    """
+
+    def _docstring(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.innovation.session_usage_capture"
+        )
+        return module._validate_cli_id.__doc__ or ""
+
+    def test_validate_cli_id_uses_third_person_singular_raises(self) -> None:
+        doc = self._docstring()
+        # The post-fix docstring must contain a ``Raises`` line — the
+        # PEP-257 convention for documenting what a function raises.
+        self.assertRegex(
+            doc,
+            r"\bRaises\s+:class:`SessionUsageCaptureError`",
+            "_validate_cli_id docstring does not use the third-person-"
+            "singular 'Raises :class:`SessionUsageCaptureError`' opener; "
+            "the sibling docstring on capture_session_usage uses this "
+            "PEP-257 form so the module voice should be consistent.",
+        )
+
+    def test_validate_cli_id_does_not_carry_pre_fix_typo(self) -> None:
+        """Pin the specific regression: pre-fix said 'Raised X wraps Y'.
+
+        Reverting to the pre-fix wording would re-introduce the
+        ungrammatical 'Raised :class:`SessionUsageCaptureError` wraps
+        the underlying :class:`ParseError`' clause.
+        """
+        doc = self._docstring()
+        self.assertNotRegex(
+            doc,
+            r"Raised\s+:class:`SessionUsageCaptureError`\s+wraps",
+            "_validate_cli_id docstring re-introduces the pre-fix "
+            "ungrammatical 'Raised :class:`SessionUsageCaptureError` "
+            "wraps' clause; use 'Raises ..., wrapping ...' instead.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

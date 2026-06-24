@@ -125,7 +125,7 @@ class SessionUsageCapture:
 def _validate_cli_id(cli_id: str) -> str:
     """Validate ``cli_id`` against :data:`KNOWN_PARSERS` and return the parser_id.
 
-    Raised :class:`SessionUsageCaptureError` wraps the underlying
+    Raises :class:`SessionUsageCaptureError`, wrapping the underlying
     :class:`ParseError` so callers can catch one class.
     """
 
