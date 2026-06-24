@@ -199,7 +199,17 @@ def _handle_gate_lock_timeout(
     new_exc = GateLockTimeoutError(
         str(lock_path), holder=holder, timeout=timeout,
     )
-    print(str(new_exc), file=sys.stderr)
+    # Observability never amplifies the primary failure: a broken/closed
+    # stderr (EPIPE on a redirected child, /dev/full, pytest-captured
+    # stream that became invalid) must not mask the raise of
+    # ``GateLockTimeoutError``. ``except filelock.Timeout:`` callers at
+    # all three ``get_gate_lock`` sites continue to match by inheritance
+    # only when the augmented exception actually propagates. Mirrors the
+    # ``_describe_lock_holder`` swallow-on-error discipline.
+    try:
+        print(str(new_exc), file=sys.stderr)
+    except OSError:
+        pass
     raise new_exc from exc
 
 

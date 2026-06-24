@@ -200,6 +200,44 @@ class LockTimeoutIncludesHolderTests(_Mixin, unittest.TestCase):
         holder = _describe_lock_holder(self.tmp)
         self.assertEqual(holder, {"_state": "corrupt"})
 
+    def test_handle_gate_lock_timeout_survives_broken_stderr(self) -> None:
+        # Round-3/fix-21 regression: the stderr observability ``print`` in
+        # ``_handle_gate_lock_timeout`` must NOT mask the
+        # ``GateLockTimeoutError`` raise when stderr write fails
+        # (BrokenPipeError on a stderr-redirected child, closed fd,
+        # /dev/full, pytest-captured stream that became invalid). Without
+        # the guard the operator sees a bare ``OSError`` instead of the
+        # rich holder-identity message B2 exists to surface, and every
+        # ``except filelock.Timeout:`` block at the three ``get_gate_lock``
+        # call sites silently fails to match.
+        import sys
+
+        class _BrokenStderr:
+            """Stderr stand-in whose ``.write`` raises OSError."""
+
+            def write(self, *_a: object, **_kw: object) -> int:
+                raise OSError("stderr broken")
+
+            def flush(self) -> None:
+                pass
+
+        lock_path = gate_lock_path(self.tmp)
+        original_stderr = sys.stderr
+        sys.stderr = _BrokenStderr()  # type: ignore[assignment]
+        try:
+            with self.assertRaises(GateLockTimeoutError) as cm:
+                _handle_gate_lock_timeout(
+                    self.tmp, lock_path, 0.1,
+                    Timeout(str(lock_path)),
+                )
+        finally:
+            sys.stderr = original_stderr
+        # The exception must still carry the holder + timeout context
+        # — the observability degradation must not leak into the
+        # primary path.
+        self.assertEqual(cm.exception.timeout_s, 0.1)
+        self.assertEqual(cm.exception.lock_file, str(lock_path))
+
 
 # ---------------------------------------------------------------------------
 # B-H2 — third call site at system_gate.run_system_gate
