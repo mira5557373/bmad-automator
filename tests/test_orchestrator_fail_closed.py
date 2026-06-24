@@ -7,6 +7,8 @@ Pins:
    file carries ``fail_closed_triggered=True`` plus a sorted
    ``fail_closed_categories`` list.
  - on + no error evidence: original verdict is preserved (no false-trigger).
+ - reuse path: the override applies to cache hits too (regression for the
+   bug where fresh vs reused diverged on identical inputs).
 """
 from __future__ import annotations
 
@@ -17,9 +19,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from story_automator.core.collector_registry import CollectorRegistry
-from story_automator.core.evidence_io import persist_evidence_record
+from story_automator.core.evidence_io import (
+    persist_evidence_record,
+    persist_gate_file,
+)
 from story_automator.core.gate_orchestrator import run_production_gate
-from story_automator.core.gate_schema import make_evidence_record
+from story_automator.core.gate_schema import make_evidence_record, make_gate_file
+from story_automator.core.product_profile import compute_profile_hash
 
 
 def _minimal_profile() -> dict:
@@ -156,6 +162,109 @@ class FailClosedEnabledTests(unittest.TestCase):
         self.assertEqual(
             gate["fail_closed_categories"], ["correctness/boom"],
         )
+
+
+class FailClosedReusePathTests(unittest.TestCase):
+    """Regression: ``fail_closed`` must apply on cache hits too.
+
+    Without the fix, the reuse short-circuit at
+    ``gate_orchestrator.py`` returned the on-disk gate dict without
+    running the fail_closed override block. Same (gate_id, commit,
+    profile, factory_version) + same fail_closed=True + same on-disk
+    error evidence yielded ``overall='PASS'`` on the reuse path but
+    ``overall='FAIL'`` on the fresh path — a direct contradiction of
+    the docstring contract ("forces overall=FAIL regardless of the
+    verdict_engine's decision"). The cache-hit fail-open let
+    error-status evidence slip into a commit via ``route_gate_verdict``
+    when the operator had explicitly turned on the safety net.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-fc-reuse-")
+        self.project_root = Path(self.tmpdir)
+        self.registry = CollectorRegistry()
+        self.profile = _minimal_profile()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_reuse_path_applies_fail_closed_override(self, mock_run) -> None:
+        # Pre-persist a PASS gate_file matching the call's (commit,
+        # profile_hash, factory_version) so ``check_gate_reuse``
+        # returns True. Also persist an error-status evidence record
+        # for the same gate_id — an out-of-band corruption scenario
+        # that the on-disk fail_closed safety net is designed to
+        # catch even when the operator has not re-evaluated.
+        profile_hash = compute_profile_hash(self.profile)
+        cached = make_gate_file(
+            gate_id="g-reuse-fc",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"name": "test", "hash": profile_hash},
+            factory_version="1.15.0",
+            categories={"correctness": {"verdict": "PASS", "evidence": []}},
+            overall="PASS",
+        )
+        persist_gate_file(self.project_root, cached)
+        record = make_evidence_record(
+            collector="boom", tool="t", category="correctness",
+            status="error", findings=["x"],
+        )
+        persist_evidence_record(self.project_root, "g-reuse-fc", record)
+        mock_run.return_value = []
+
+        result = run_production_gate(
+            self.project_root, "g-reuse-fc",
+            commit_sha="abc", target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            fail_closed=True,
+        )
+        # Reuse-hit confirmed by overall starting at PASS on disk;
+        # without the override the result would also be PASS. With
+        # the fix the override forces FAIL and emits the audit marks.
+        self.assertEqual(result["overall"], "FAIL")
+        self.assertTrue(result.get("fail_closed_triggered"))
+        self.assertEqual(
+            result.get("fail_closed_categories"), ["correctness/boom"],
+        )
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_reuse_path_fail_closed_off_preserves_cached_verdict(
+        self, mock_run,
+    ) -> None:
+        # When fail_closed is the (default) False, the reuse path
+        # must NOT inject the audit fields — preserves byte-identical
+        # back-compat for every existing call site.
+        profile_hash = compute_profile_hash(self.profile)
+        cached = make_gate_file(
+            gate_id="g-reuse-noop",
+            target={"kind": "story", "id": "s1"},
+            commit_sha="abc",
+            profile={"name": "test", "hash": profile_hash},
+            factory_version="1.15.0",
+            categories={"correctness": {"verdict": "PASS", "evidence": []}},
+            overall="PASS",
+        )
+        persist_gate_file(self.project_root, cached)
+        record = make_evidence_record(
+            collector="boom", tool="t", category="correctness",
+            status="error", findings=["x"],
+        )
+        persist_evidence_record(self.project_root, "g-reuse-noop", record)
+        mock_run.return_value = []
+
+        result = run_production_gate(
+            self.project_root, "g-reuse-noop",
+            commit_sha="abc", target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            # fail_closed defaults False
+        )
+        self.assertEqual(result["overall"], "PASS")
+        self.assertNotIn("fail_closed_triggered", result)
+        self.assertNotIn("fail_closed_categories", result)
 
 
 if __name__ == "__main__":

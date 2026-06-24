@@ -892,6 +892,31 @@ def run_production_gate(
                 else:
                     existing["evidence_merkle_root"] = ""
                 existing["lineage_root"] = load_lineage_root(project_root)
+                # Bug fix: ``fail_closed`` MUST apply to the reuse path
+                # too. Without this block the docstring contract
+                # ("forces overall=FAIL regardless of the verdict_engine's
+                # decision") was honored on cache miss but silently
+                # ignored on cache hit — same (gate_id, commit, profile,
+                # factory_version) + same fail_closed=True yielded
+                # different verdicts depending on whether the gate file
+                # was already on disk. Unlike the opt-in
+                # session_usage/threshold_proposer kwargs (which pertain
+                # to THIS call, not the cached run), ``fail_closed`` is
+                # a SAFETY OVERRIDE driven by on-disk error-status
+                # evidence — that evidence is by construction the same
+                # on disk whether the gate is fresh or reused, so the
+                # override decision is identical between modes. Mirrors
+                # the fresh-path block at lines 985-994 verbatim.
+                if fail_closed:
+                    error_labels = _collect_error_evidence(
+                        project_root, gate_id,
+                    )
+                    if error_labels:
+                        existing["fail_closed_triggered"] = True
+                        existing["fail_closed_categories"] = sorted(
+                            set(error_labels),
+                        )
+                        existing["overall"] = "FAIL"
                 return existing
 
             if enable_lie_detector:
