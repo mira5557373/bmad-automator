@@ -2628,5 +2628,147 @@ class HookBusDocsConsistencyTests(unittest.TestCase):
         )
 
 
+class ActionEnumDocsConsistencyTests(unittest.TestCase):
+    """CLAUDE.md + frozen-gate-surface.md Action enum vocabulary matches code.
+
+    Pre-fix both ``docs/spec/frozen-gate-surface.md`` (N6.6 section) and
+    ``CLAUDE.md`` (N6.6 bullet) stated the action enum closed vocabulary
+    was ``{"continue", "remediate", "park", "halt"}`` while the live
+    ``core/action_enum.py`` exports
+    ``VALID_ACTIONS = ("done", "remediate", "park", "defer", "escalate")``
+    and ``Action = Literal["done", "remediate", "park", "defer",
+    "escalate"]``. Two of the four documented strings (``continue``,
+    ``halt``) do not exist in code; three of the five actual strings
+    (``done``, ``defer``, ``escalate``) were absent from the documented
+    set.
+
+    The drift was bidirectional and the doc is the binding contract per
+    its preamble ("the symbols, fields, and behaviors listed here are
+    public contracts"). A plugin author calling
+    ``canonicalize_action("continue")`` would hit ``ActionError`` at
+    runtime; an operator enumerating verifier return values from the
+    doc would miss ``done``, ``defer``, ``escalate``.
+
+    The regression test pins both doc surfaces to the live
+    ``VALID_ACTIONS`` tuple so future drift in either direction trips
+    at the same commit.
+    """
+
+    FROZEN_SURFACE_PATH = REPO_ROOT / "docs" / "spec" / "frozen-gate-surface.md"
+
+    def _live_valid_actions(self) -> tuple[str, ...]:
+        module = importlib.import_module(
+            "story_automator.core.action_enum"
+        )
+        return tuple(module.VALID_ACTIONS)
+
+    def _frozen_surface_n66_section(self) -> str:
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        # The section is delimited by the
+        # ``### `core/action_enum.py` (Path B / N6.6)`` heading and the
+        # next ``### `` heading.
+        section_re = re.compile(
+            r"^### `core/action_enum\.py` \(Path B / N6\.6\).*?$",
+            re.MULTILINE,
+        )
+        match = section_re.search(text)
+        self.assertIsNotNone(
+            match,
+            "frozen-gate-surface.md no longer has the "
+            "'### `core/action_enum.py` (Path B / N6.6)' section heading; "
+            "update this regression test to match the new shape.",
+        )
+        start = match.end()
+        next_heading = re.search(r"^### ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return text[start:end]
+
+    def _claude_md_n66_bullet(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*Action enum \(N6\.6\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **Action enum (N6.6)**' "
+            "bullet; update this regression test to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_valid_actions_anchor_matches_expected_live_set(self) -> None:
+        """Defensive: live ``VALID_ACTIONS`` matches the doc fix's tuple.
+
+        Pin both halves of the contract: if a future refactor renames
+        any of these or adds a sixth value, this test trips so the docs
+        get re-audited at the same commit.
+        """
+        live = self._live_valid_actions()
+        expected = ("done", "remediate", "park", "defer", "escalate")
+        self.assertEqual(
+            live,
+            expected,
+            f"core.action_enum.VALID_ACTIONS is {live} but CLAUDE.md + "
+            f"frozen-gate-surface.md enumerate {expected}; either widen/"
+            "shrink the doc enumerations or rebind VALID_ACTIONS.",
+        )
+
+    def test_frozen_surface_n66_section_names_real_action_strings(self) -> None:
+        """frozen-gate-surface.md N6.6 section enumerates every live action.
+
+        Pin the spec's action vocabulary to ``VALID_ACTIONS`` so a future
+        doc edit cannot silently regress to the pre-fix bogus
+        ``{continue, halt}`` enumeration.
+        """
+        body = self._frozen_surface_n66_section()
+        for action in self._live_valid_actions():
+            self.assertIn(
+                f'"{action}"',
+                body,
+                f"frozen-gate-surface.md N6.6 section no longer "
+                f"names \"{action}\" as a verifier action. The live "
+                "VALID_ACTIONS tuple carries this token; the doc "
+                "enumeration must match or plugin authors will hit "
+                "ActionError at runtime.",
+            )
+        # The two pre-fix non-existent action strings MUST be gone.
+        for action in ("continue", "halt"):
+            self.assertNotIn(
+                f'"{action}"',
+                body,
+                f"frozen-gate-surface.md N6.6 section still lists "
+                f'"{action}" as an action, but the token is not in '
+                "core.action_enum.VALID_ACTIONS. A plugin author calling "
+                f"canonicalize_action('{action}') would get ActionError.",
+            )
+
+    def test_claude_md_n66_bullet_names_real_action_strings(self) -> None:
+        """CLAUDE.md N6.6 bullet enumerates every live action.
+
+        Pin the specific regression: pre-fix CLAUDE.md listed two
+        action strings (``continue``, ``halt``) that are NOT in
+        ``VALID_ACTIONS`` and omitted the three real ones (``done``,
+        ``defer``, ``escalate``).
+        """
+        bullet = self._claude_md_n66_bullet()
+        for action in self._live_valid_actions():
+            self.assertIn(
+                f'"{action}"',
+                bullet,
+                f"CLAUDE.md N6.6 bullet no longer names \"{action}\" "
+                "as a verifier action. The live VALID_ACTIONS tuple "
+                "carries this token; the doc enumeration must match.",
+            )
+        for action in ("continue", "halt"):
+            self.assertNotIn(
+                f'"{action}"',
+                bullet,
+                f"CLAUDE.md N6.6 bullet still lists \"{action}\" as "
+                "an action, but the token is not in "
+                "core.action_enum.VALID_ACTIONS.",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
