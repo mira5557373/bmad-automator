@@ -433,9 +433,24 @@ def emit_gate_cost_report(
     # but the registry does NOT enforce this — a hand-registered
     # CollectorConfig with a traversal id reaches this point. Reject
     # BEFORE disk touch so a half-written tree is impossible.
+    #
+    # Embedded NUL bytes (and other ASCII control chars) are folded
+    # into the same guard for the same reason — ``Path.resolve()``
+    # called inside ``write_atomic_text`` raises a raw stdlib
+    # ``ValueError('embedded null character')`` AFTER the cost dir has
+    # already been created by ``get_cost_root_dir``. That breaches the
+    # :class:`CostEvidenceError` "operator told us something illegal"
+    # docstring contract and the pre-disk-touch invariant the sibling
+    # tests pin for ``..`` / ``/`` / ``\\`` / reserved names.
     traversal: list[str] = []
     for cid in cids:
-        if ".." in Path(cid).parts or "/" in cid or "\\" in cid:
+        if (
+            ".." in Path(cid).parts
+            or "/" in cid
+            or "\\" in cid
+            or "\x00" in cid
+            or any(ord(ch) < 0x20 for ch in cid)
+        ):
             traversal.append(cid)
     if traversal:
         raise CostEvidenceError(

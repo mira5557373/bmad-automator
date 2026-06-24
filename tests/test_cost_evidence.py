@@ -426,6 +426,75 @@ class EmissionTests(unittest.TestCase):
         after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
         self.assertEqual(before, after)
 
+    def test_control_char_collector_id_raises_before_disk_touch(
+        self,
+    ) -> None:
+        """Regression — a collector_id containing an embedded NUL byte
+        (e.g. ``'c\\x00null'``) passed the empty-list, duplicate-id,
+        reserved-name AND path-traversal guards because ``Path(cid).parts``,
+        ``'/' in cid`` and ``'\\\\' in cid`` all returned False for it. The
+        flow then reached :func:`get_cost_root_dir` which CREATED the
+        per-gate ``_bmad/gate/cost/<gate_id>/`` dir, and the subsequent
+        :func:`write_atomic_text` call raised raw stdlib
+        ``ValueError('lstat: embedded null character in path')`` from
+        :meth:`Path.resolve` — breaching two contracts at once:
+
+        * the :class:`CostEvidenceError` class docstring's "operator told
+          us something illegal" promise (raw ValueError leaks instead of
+          CostEvidenceError);
+        * the pre-disk-touch invariant the sibling
+          :meth:`test_path_traversal_collector_id_raises_before_disk_touch`
+          pins (the gate dir gets created on a rejected input).
+
+        The orchestrator's broad ``except Exception`` wraps the leak so
+        it never aborts an in-flight gate, but cannot un-create the
+        directory. Fix: fold NUL bytes and any ASCII control character
+        into the path-traversal guard so emission rejects BEFORE disk
+        touch, symmetric with the existing ``..`` / ``/`` / ``\\`` /
+        reserved-name guards.
+        """
+
+        cost_root = Path(self.root) / "_bmad" / "gate" / "cost"
+        # Cover the natural reproducer (\x00) plus a handful of other
+        # ASCII control characters that would each independently trip
+        # Path.resolve / OS file-naming rules on different platforms.
+        for bad_id in ("c\x00null", "a\tb", "a\nb", "\x01leading"):
+            with self.subTest(bad_id=bad_id):
+                outcomes = [
+                    _make_outcome(bad_id, "static", duration_ms=1000),
+                ]
+                # Duration mode (the bug's natural reproducer).
+                with self.assertRaises(CostEvidenceError) as ctx_dur:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="duration",
+                    )
+                self.assertIn(
+                    "path traversal",
+                    str(ctx_dur.exception),
+                )
+                # Uniform mode — symmetric rejection parity with the
+                # duplicate-id / reserved-name / path-traversal guards.
+                with self.assertRaises(CostEvidenceError) as ctx_uni:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="uniform",
+                    )
+                self.assertIn(
+                    "path traversal",
+                    str(ctx_uni.exception),
+                )
+                # Pre-disk-touch invariant — the per-gate cost dir must
+                # NOT have been created. Mirrors the sibling traversal
+                # test's leaked-sibling-files check but stricter: a NUL
+                # byte never reaches Path.resolve, so even the per-gate
+                # dir creation by ``get_cost_root_dir`` should not fire.
+                self.assertFalse(
+                    (cost_root / self.gate_id).exists(),
+                    f"control-char id {bad_id!r} created per-gate cost "
+                    f"dir before rejection",
+                )
+
     def test_report_is_frozen_dataclass(self) -> None:
         outcomes = [_make_outcome("a", "static")]
         report = emit_gate_cost_report(
