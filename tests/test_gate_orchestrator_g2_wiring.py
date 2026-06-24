@@ -374,6 +374,66 @@ class RunProductionGateLockSemanticsTests(_MarkerFreeMixin, unittest.TestCase):
         # finally (the OSError did not prevent invocation).
         mock_clear.assert_called_once_with(self.project_root)
 
+    @patch.dict(os.environ, {}, clear=False)
+    @patch("story_automator.core.gate_orchestrator.get_gate_lock")
+    def test_lock_released_when_keyboard_interrupt_arrives_after_acquire(
+        self,
+        mock_get_lock: MagicMock,
+    ) -> None:
+        # R2 fix #25 regression: SIGINT / KeyboardInterrupt arriving in
+        # the bytecode-gap between ``_gate_lock.acquire()`` returning
+        # successfully and the inner try (whose ``finally:`` releases
+        # the lock) being entered MUST still release the lock. The pre-
+        # fix code had ``_pending_cleanup = []`` + ``_recovery_descriptor
+        # = {}`` (plus the ``except Timeout`` block) sitting between the
+        # acquire and the protecting try, so a KeyboardInterrupt
+        # delivered in that window leaked the OS-level lock until the
+        # FileLock instance was GC'd. The fix restructures so
+        # ``acquire()`` is the first statement of the try whose
+        # ``finally:`` releases the lock — any exception (including
+        # KeyboardInterrupt arriving immediately after acquire returns)
+        # is caught by that finally and the lock is released.
+        #
+        # We simulate the race by giving the mock lock an ``acquire()``
+        # that records a successful acquire, then raises
+        # KeyboardInterrupt. The fix guarantees ``release()`` runs even
+        # on this exit path; the unfixed code would not.
+        mock_lock = MagicMock()
+        mock_lock.timeout = 3600.0
+        release_calls: list[None] = []
+
+        def fake_acquire(*args: object, **kwargs: object) -> None:
+            # Simulate the sub-microsecond window: lock has been acquired
+            # at the OS level, then SIGINT arrives just as control
+            # returns to the caller.
+            raise KeyboardInterrupt()
+
+        mock_lock.acquire.side_effect = fake_acquire
+        mock_lock.release.side_effect = lambda *a, **kw: release_calls.append(None)
+        mock_get_lock.return_value = mock_lock
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_production_gate(
+                self.project_root,
+                "gate-ki-after-acquire",
+                commit_sha="abc",
+                target={"kind": "story", "id": "s1"},
+                profile=self.profile,
+                factory_version="1.0.0",
+                registry=self.registry,
+            )
+
+        # The release MUST have been called even though the
+        # KeyboardInterrupt fired immediately after acquire returned.
+        # On the unfixed code this assertion fails because the lock
+        # release sits inside a try that was never entered.
+        self.assertEqual(
+            len(release_calls), 1,
+            "_gate_lock.release() must run on every exit path from "
+            "the protected region — including KeyboardInterrupt "
+            "arriving immediately after acquire returns.",
+        )
+
 
 class RunProductionGateVerdictEquivalenceTests(_MarkerFreeMixin, unittest.TestCase):
     """AC-G-03 + AC-G-02: shared and per_unit produce IDENTICAL
