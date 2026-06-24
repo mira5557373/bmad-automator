@@ -751,12 +751,20 @@ def run_production_gate(
 
     ``drift_watcher`` (C1 follow-up, default ``None``) — when a
     :class:`SpecDriftWatcher` is provided, the orchestrator calls
-    ``watcher.poll()`` twice per gate run: once after the in-progress
-    marker is written and once after ``evaluate_gate`` returns but
-    before any ``fail_closed`` override. Both calls are wrapped in
-    ``try/except`` so a drift-detector failure can never abort the
-    gate — drift is strictly advisory telemetry. Default ``None``
-    preserves byte-identical behavior for every existing call site.
+    ``watcher.poll()`` twice per FULL gate run: once after the
+    in-progress marker is written and once after ``evaluate_gate``
+    returns but before any ``fail_closed`` override. Both calls are
+    wrapped in ``try/except`` so a drift-detector failure can never
+    abort the gate — drift is strictly advisory telemetry. Early-return
+    paths skip BOTH polls because the anchoring lifecycle events
+    (marker-written / evaluate_gate-returned) do not occur: the
+    pre-gate-verifier failure, the reuse cache-hit, and the
+    lie-detector ``baseline_drift`` short-circuit all return before
+    any marker is written. Operators relying on poll counts as a
+    dashboard signal must therefore filter on ``action != "pre_gate_failed"``
+    AND fresh-run gate files (cache hits return the cached gate file
+    without re-polling). Default ``None`` preserves byte-identical
+    behavior for every existing call site.
 
     ``session_usage`` (C3, default ``None``) — when a
     :class:`UsageMetrics` from the host session is provided, the

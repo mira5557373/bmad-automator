@@ -1077,5 +1077,84 @@ class SpecDriftPersistenceDocstringConsistencyTests(unittest.TestCase):
         )
 
 
+class RunProductionGateDriftWatcherDocstringTests(unittest.TestCase):
+    """``run_production_gate`` drift_watcher docstring matches actual poll sites.
+
+    Pre-fix the docstring at ``gate_orchestrator.run_production_gate``
+    promised the orchestrator calls ``watcher.poll()`` "twice per gate
+    run" without qualification. In practice three early-return paths
+    (``pre_gate_failed`` from the inline verifier, the reuse cache-hit
+    short-circuit, and the lie-detector ``baseline_drift`` abort) all
+    return BEFORE either poll site executes — yielding zero polls on
+    those reachable paths. An operator watching ``watcher.poll`` counts
+    as a dashboard signal would silently lose visibility on cache-hits
+    and HEAD-mismatches (the two paths where stalled/drifted sessions
+    are MOST likely to occur).
+
+    The fix tightens the docstring to (a) say "twice per FULL gate
+    run" instead of "twice per gate run", and (b) explicitly enumerate
+    that early-return paths skip BOTH polls because the anchoring
+    lifecycle events (marker-written / evaluate_gate-returned) do not
+    occur. This regression test pins both halves.
+    """
+
+    def test_drift_watcher_docstring_clarifies_full_gate_run_scope(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.gate_orchestrator"
+        )
+        doc = module.run_production_gate.__doc__ or ""
+        # The fix replaces "twice per gate run" with "twice per FULL
+        # gate run" to disambiguate the early-return paths. The phrase
+        # "twice per gate run" (without FULL) is the pre-fix misleading
+        # form; we accept either the precise post-fix wording or any
+        # other qualifier ("twice per FRESH gate run", "twice per
+        # complete gate run", etc.) that includes an uppercase
+        # adjective between "twice per" and "gate run".
+        self.assertNotRegex(
+            doc,
+            r"twice per gate run(?![\w-])",
+            "run_production_gate docstring still claims 'twice per gate "
+            "run' without qualification, but three early-return paths "
+            "(pre_gate_failed / reuse cache-hit / baseline_drift) skip "
+            "both polls. Tighten the wording to 'twice per FULL gate "
+            "run' or similar.",
+        )
+
+    def test_drift_watcher_docstring_enumerates_early_return_skips(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.gate_orchestrator"
+        )
+        doc = module.run_production_gate.__doc__ or ""
+        # Post-fix docstring must explicitly tell operators that
+        # early-return paths skip both polls so they can correctly
+        # interpret poll-count dashboards. Normalize whitespace
+        # because docstring line-wrap inserts newlines+indent between
+        # the phrase-pinning words.
+        normalized = re.sub(r"\s+", " ", doc)
+        self.assertIn(
+            "Early-return paths skip BOTH polls",
+            normalized,
+            "run_production_gate docstring no longer enumerates that "
+            "early-return paths skip both drift_watcher polls; "
+            "operators monitoring poll counts will misinterpret zero "
+            "polls on cache-hits / baseline-drift as a watcher bug.",
+        )
+        # Also assert all three early-return paths are named so the
+        # docstring stays exhaustive (future contributors adding a
+        # fourth early-return path must extend the docstring too).
+        for path_name in (
+            "pre-gate-verifier",
+            "reuse cache-hit",
+            "baseline_drift",
+        ):
+            self.assertIn(
+                path_name,
+                normalized,
+                f"run_production_gate docstring no longer names the "
+                f"{path_name!r} early-return path in its drift_watcher "
+                "section; the enumeration is incomplete.",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
