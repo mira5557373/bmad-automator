@@ -3321,5 +3321,215 @@ class CliDispatcherInvokersDocstringLOCFreshnessTests(unittest.TestCase):
         )
 
 
+class ContributingAdditiveGateFileFieldRuleConsistencyTests(unittest.TestCase):
+    """CONTRIBUTING.md ``### Additive-only gate_file field rule`` matches the live orchestrator.
+
+    Pre-fix CONTRIBUTING.md:225 said "Currently four fields are
+    embedded by the orchestrator outside the schema" and listed
+    {evidence_merkle_root, lineage_root, cost_total_usd,
+    fail_closed_triggered/fail_closed_categories}, while
+    docs/spec/frozen-gate-surface.md (the authoritative "what not to
+    break" doc per its own ``Status: locked`` header) enumerated a
+    DIFFERENT four-field set that included ``recovery: dict`` and
+    omitted the ``fail_closed_*`` pair. The live orchestrator at
+    ``core/gate_orchestrator.py`` actually embeds EIGHT distinct
+    additive top-level keys: the four CONTRIBUTING listed plus
+    ``recovery`` (round-2 silent-PASS fix), ``threshold_proposal_ref``
+    (C5 in-memory-only), and ``threshold_proposer_error`` (C5
+    in-memory-only). The "Adding a fifth field requires..." ceremony
+    in CONTRIBUTING was thus chronically misleading — at least four
+    fields had shipped past the "four" claim without anyone bumping
+    the doc.
+
+    The fix updates CONTRIBUTING to (a) replace "four" with "eight"
+    in the framing prose, (b) list every additive field including
+    ``recovery``, ``threshold_proposal_ref``, ``threshold_proposer_error``,
+    (c) distinguish persisted-on-disk vs in-memory-only halves, and
+    (d) bump the ceremony floor from "fifth field" to "ninth field".
+
+    This regression test pins:
+
+    1. The framing word in CONTRIBUTING (``Currently <N> distinct top-level
+       keys``) matches the live orchestrator's unique key count.
+    2. Every additive key the orchestrator stamps is name-mentioned in
+       the section body so an operator skimming the doc sees all of them.
+    3. The "Adding a Nth field requires..." ceremony floor word is one
+       greater than the live count (so when key #9 ships, the ceremony
+       floor must move to "tenth").
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+    # The schema-frozen key ``overall`` is part of GateFile (see
+    # gate_schema.GateFile) and is NOT an additive top-level key; the
+    # orchestrator merely overwrites it on the fail-closed override
+    # path. Excluded from the additive set.
+    SCHEMA_OWNED_KEYS = frozenset({"overall"})
+
+    # English number words 1..15 — covers the realistic drift band for
+    # additive-key counts on the gate_file dict.
+    NUMBER_WORDS = {
+        1: "one",
+        2: "two",
+        3: "three",
+        4: "four",
+        5: "five",
+        6: "six",
+        7: "seven",
+        8: "eight",
+        9: "nine",
+        10: "ten",
+        11: "eleven",
+        12: "twelve",
+        13: "thirteen",
+        14: "fourteen",
+        15: "fifteen",
+    }
+
+    def _live_additive_keys(self) -> set[str]:
+        """Return the set of distinct ``gate_file["<key>"] = ...`` keys
+        stamped by the orchestrator, minus the schema-frozen ``overall``.
+
+        Mirrors the manual reproducer in the bug report:
+        ``grep -nE 'gate_file\\["[a-z_]+"\\]\\s*=' core/gate_orchestrator.py``.
+        """
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        keys = set(
+            re.findall(r'gate_file\["([a-z_]+)"\]\s*=', text)
+        )
+        return keys - self.SCHEMA_OWNED_KEYS
+
+    def _section_body(self) -> str:
+        """Return the body of ``### Additive-only gate_file field rule``
+        bounded by the next ``###`` or ``##`` heading."""
+        text = _read("CONTRIBUTING.md")
+        match = re.search(
+            r"^### Additive-only `gate_file` field rule.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md no longer carries '### Additive-only "
+            "`gate_file` field rule' heading; update this regression "
+            "test to match the new shape.",
+        )
+        start = match.end()
+        next_heading = re.search(r"^#{2,3} ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return text[start:end]
+
+    def test_framing_count_matches_live_additive_key_count(self) -> None:
+        body = self._section_body()
+        live_keys = self._live_additive_keys()
+        live_count = len(live_keys)
+        expected_word = self.NUMBER_WORDS.get(live_count)
+        self.assertIsNotNone(
+            expected_word,
+            f"Live additive-key count = {live_count}, outside the "
+            "1..15 NUMBER_WORDS table this test knows about; extend "
+            "the table or rewrite the section framing.",
+        )
+        # The section's framing sentence carries shape "Currently <Word>
+        # distinct top-level keys" (post-fix). Pre-fix it was
+        # "Currently four fields are embedded". Both shapes carry a
+        # leading number word; we anchor on the case-insensitive word.
+        framing_re = re.compile(
+            r"Currently\s+([a-zA-Z]+)\s+(?:distinct\s+top-level\s+keys|fields)",
+        )
+        match = framing_re.search(body)
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md additive-only section no longer carries a "
+            "'Currently <Word> ...' framing sentence; either restore the "
+            "framing or update this regression test.",
+        )
+        doc_word = match.group(1).lower()
+        self.assertEqual(
+            doc_word,
+            expected_word,
+            f"CONTRIBUTING.md framing says 'Currently {doc_word} ...' but "
+            f"the live orchestrator embeds {live_count} distinct additive "
+            f"top-level keys (live set: {sorted(live_keys)}); bump the "
+            f"framing word to '{expected_word}'.",
+        )
+
+    def test_every_live_additive_key_is_named_in_section(self) -> None:
+        body = self._section_body()
+        live_keys = self._live_additive_keys()
+        missing = sorted(k for k in live_keys if f"`{k}" not in body)
+        self.assertEqual(
+            missing,
+            [],
+            "CONTRIBUTING.md additive-only section omits live "
+            f"orchestrator-stamped additive keys: {missing}. Either "
+            "add a bullet for each missing key or update this test if "
+            "the key set legitimately shrank.",
+        )
+
+    def test_adding_nth_field_ceremony_floor_is_live_count_plus_one(self) -> None:
+        """The ``Adding a <Nth> field requires...`` ceremony floor must
+        be one greater than the live additive-key count.
+
+        Pre-fix this said "Adding a fifth field" while the live count
+        was 8 — operators reading the doc to know whether to follow
+        the ceremony for a new field would mis-conclude.
+        """
+        body = self._section_body()
+        live_count = len(self._live_additive_keys())
+        # Ordinal words 2..15 covering 1+live_count for realistic
+        # additive-key counts.
+        ordinal_words = {
+            2: "second",
+            3: "third",
+            4: "fourth",
+            5: "fifth",
+            6: "sixth",
+            7: "seventh",
+            8: "eighth",
+            9: "ninth",
+            10: "tenth",
+            11: "eleventh",
+            12: "twelfth",
+            13: "thirteenth",
+            14: "fourteenth",
+            15: "fifteenth",
+        }
+        expected_ordinal = ordinal_words.get(live_count + 1)
+        self.assertIsNotNone(
+            expected_ordinal,
+            f"Live additive-key count + 1 = {live_count + 1}, outside "
+            "the 2..15 ordinal table this test knows about; extend the "
+            "table or rewrite the ceremony floor.",
+        )
+        ceremony_re = re.compile(
+            r"Adding\s+a\s+([a-zA-Z]+)\s+field\s+requires",
+        )
+        match = ceremony_re.search(body)
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md additive-only section no longer carries "
+            "an 'Adding a <Nth> field requires...' ceremony sentence; "
+            "either restore the ceremony or update this regression test.",
+        )
+        doc_ordinal = match.group(1).lower()
+        self.assertEqual(
+            doc_ordinal,
+            expected_ordinal,
+            f"CONTRIBUTING.md ceremony floor says 'Adding a "
+            f"{doc_ordinal} field requires...' but the live "
+            f"orchestrator embeds {live_count} additive keys, so the "
+            f"next key to ship is the {expected_ordinal} — bump the "
+            "ceremony floor word.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -222,8 +222,11 @@ section in `CLAUDE.md`, and update the frozen-surface doc.
 additional top-level fields on the dict AFTER `evaluate_gate`
 returns, but every such field MUST be additive: no rename, no
 removal, no signature narrowing. Consumers MUST tolerate the
-presence (or absence) of these fields. Currently four fields are
-embedded by the orchestrator outside the schema:
+presence (or absence) of these fields. Currently eight distinct
+top-level keys are embedded by the orchestrator outside the schema;
+`docs/spec/frozen-gate-surface.md` (the authoritative "what not to
+break" contract) is the source of truth for the persisted subset.
+The persisted-on-disk subset is six keys:
 
 - `evidence_merkle_root: str` — N5; canonical-JSON sha256 of the
   evidence bundle (or `""` when empty).
@@ -233,8 +236,25 @@ embedded by the orchestrator outside the schema:
   being supplied AND emission succeeding.
 - `fail_closed_triggered: bool` + `fail_closed_categories: list[str]`
   — phase-2; CONDITIONAL on `fail_closed=True`.
+- `recovery: dict` — round-2 follow-up; CONDITIONAL on mid-startup
+  `_recover_from_crash_locked` reporting `quarantined=True` or
+  `cleanup_failed=True`. Mirrors the operator-facing subset of
+  `recover_from_crash`'s return so mid-startup quarantines do not
+  return a silent PASS.
 
-Adding a fifth field requires (a) a sibling helper that emits it
+Plus two IN-MEMORY-ONLY keys set on the returned dict but NOT
+persisted to disk (the on-disk `_bmad/gate/verdicts/<gate_id>.json`
+is byte-identical to pre-C5 because `persist_gate_file` runs BEFORE
+these mutations, pinned by `ThresholdApplyIsolationInvariant`):
+
+- `threshold_proposal_ref: str` — C5; 16-hex proposal id when a
+  proposal was emitted on this gate evaluation, or `""` when the
+  proposer ran cleanly without emitting.
+- `threshold_proposer_error: str` — C5; exception class name when
+  the proposer raised. Absent (key not in dict) when the proposer
+  ran cleanly.
+
+Adding a ninth field requires (a) a sibling helper that emits it
 best-effort (try/except around the disk write), (b) a frozen-surface
 update under the relevant module section, (c) a per-field
 "CONDITIONAL when…" note in the schema doc, and (d) a regression
