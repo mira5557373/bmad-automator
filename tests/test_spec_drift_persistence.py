@@ -506,6 +506,80 @@ class TestWatcherPersistenceIntegration(unittest.TestCase):
             # The peer's baseline must remain on disk.
             self.assertEqual(load_baseline(root, "k1"), peer)
 
+    def test_poll_auto_init_does_not_clobber_in_toctou_window(
+        self,
+    ) -> None:
+        # Regression: pre-fix, ``poll()`` auto-init did
+        # ``not exists() -> persist_baseline(...)`` with NO lock
+        # continuity between the two calls. The companion
+        # ``test_poll_auto_init_does_not_clobber_concurrent_on_disk_baseline``
+        # above covers only the strictly-sequential case (peer persists
+        # BEFORE ``poll()`` is called), so A's outer ``exists()`` check
+        # already observes True and the auto-init persist is skipped at
+        # the outer guard. That test never opens the actual TOCTOU
+        # window: a peer that lands its persist BETWEEN A's outer
+        # ``exists()`` returning False and A's ``persist_baseline`` lock
+        # acquire would still get clobbered pre-fix. The fix adds
+        # ``if_absent=True`` to ``persist_baseline``, which re-checks
+        # existence INSIDE the lock and skips the write when a baseline
+        # already exists. This test simulates the interleave by patching
+        # ``Path.exists`` to return False AND drop a peer-persisted
+        # baseline inside the patched call (representing B's write
+        # landing in the window), mirroring the ``__init__`` interleave
+        # regression test at line 401 but exercising the ``poll()``
+        # auto-init call site at spec_drift_watcher.py:318.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Step 1: construct watcher A with persistence_key but no
+            # on-disk baseline — __init__'s load_baseline returns None,
+            # so A._baseline stays None and poll() will hit auto-init.
+            w = SpecDriftWatcher(
+                project_root=root, spec_path=root / "spec.md",
+                persistence_key="k1",
+            )
+            self.assertFalse(w.is_baseline_set())
+
+            peer = SpecDriftSnapshot(
+                score=0.95, requirements_total=20, requirements_satisfied=19,
+                timestamp_iso="2026-06-23T00:00:00Z",
+            )
+            # Step 2: A.poll() fires. check_compliance returns a
+            # regressed report so the auto-init in-memory snapshot is
+            # strictly worse than B's persisted baseline (score 0.0 vs
+            # peer's 0.95). The TOCTOU interleave is injected via the
+            # patched Path.exists below: on the first call against the
+            # baseline path, peer B persists its baseline AND exists()
+            # returns False (mirroring A's exists() observing the empty
+            # drift dir before B's write landed).
+            report = _report([
+                _verdict("REQ-01", "missing"),
+                _verdict("REQ-02", "missing"),
+            ])
+            call_state = {"persisted_peer": False}
+            original_exists = Path.exists
+
+            def _spoofed_exists(self_path: Path) -> bool:
+                target = baseline_path(root, "k1")
+                if self_path == target and not call_state["persisted_peer"]:
+                    # Simulate peer process B persisting its baseline
+                    # in the TOCTOU window — after our outer exists()
+                    # returned False but before our persist_baseline
+                    # acquires the lock.
+                    persist_baseline(root, "k1", peer)
+                    call_state["persisted_peer"] = True
+                    # Return False so the outer guard in poll()
+                    # proceeds to call persist_baseline (as it would
+                    # have observed False before B's write landed).
+                    return False
+                return original_exists(self_path)
+
+            with mock.patch(_TARGET, return_value=report), \
+                    mock.patch.object(Path, "exists", _spoofed_exists):
+                w.poll()
+            # The peer's baseline must remain on disk — A's stale
+            # auto-init snapshot must NOT have clobbered it.
+            self.assertEqual(load_baseline(root, "k1"), peer)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
