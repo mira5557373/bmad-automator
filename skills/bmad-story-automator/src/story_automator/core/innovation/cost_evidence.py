@@ -392,20 +392,41 @@ def emit_gate_cost_report(
     # partially-written summary. Per-collector files are written
     # FIRST so a successful summary.json implies all collector
     # records are durable. Stale ``<collector_id>.json`` files from a
-    # previous emit for the same gate_id are unlinked AFTER the new
-    # files land — so a partial re-emit (write succeeded but unlink
-    # didn't reach summary) doesn't lose data, and the on-disk
-    # collector set always matches the new summary.
+    # previous emit for the same gate_id are unlinked AFTER the
+    # summary.json write lands — so a partial re-emit that crashes
+    # between the new per-collector writes and the new summary write
+    # rolls back cleanly: the OLD summary.json (preserved via
+    # atomic-replace) still matches OLD per-collector files on disk,
+    # because no ghosts have been pruned yet. Pruning BEFORE summary
+    # write would have created the inverse failure mode: old summary
+    # references collectors whose files were just deleted.
     cost_dir = get_cost_root_dir(project_root, gate_id)
     for share in shares:
         share_path = cost_dir / f"{share.collector_id}.json"
         write_atomic_text(share_path, compact_json(_share_to_json(share)))
 
+    summary_payload = {
+        "gate_id": report.gate_id,
+        "session_usage": _usage_to_json(session_usage),
+        "per_collector": [_share_to_json(s) for s in shares],
+        "attribution_mode": actual_mode,
+        "total_cost_usd": report.total_cost_usd,
+        "collector_count": report.collector_count,
+        "timestamp_iso": report.timestamp_iso,
+    }
+    write_atomic_text(
+        cost_dir / "summary.json", compact_json(summary_payload),
+    )
+
     # Prune ghost per-collector files left over from prior emissions
     # for the same gate_id (e.g. crashed-recovery / remediation cycles
     # where the collector set shrank between runs). Without this, the
     # cost dir listing diverges from summary.json's ``per_collector``
-    # tuple and load_collector_cost_share returns stale data.
+    # tuple and load_collector_cost_share returns stale data. Pruning
+    # runs AFTER the new summary.json is durable so a failed summary
+    # write rolls back to a state where the OLD summary still matches
+    # the on-disk collector set (ghosts survive — they are dropped on
+    # the next successful re-emit).
     kept = {f"{s.collector_id}.json" for s in shares}
     kept.add("summary.json")
     try:
@@ -422,19 +443,6 @@ def emit_gate_cost_report(
             # Best-effort prune — observability, not gating. A leftover
             # ghost is worse than ignored, but emission must not abort.
             pass
-
-    summary_payload = {
-        "gate_id": report.gate_id,
-        "session_usage": _usage_to_json(session_usage),
-        "per_collector": [_share_to_json(s) for s in shares],
-        "attribution_mode": actual_mode,
-        "total_cost_usd": report.total_cost_usd,
-        "collector_count": report.collector_count,
-        "timestamp_iso": report.timestamp_iso,
-    }
-    write_atomic_text(
-        cost_dir / "summary.json", compact_json(summary_payload),
-    )
 
     return report
 

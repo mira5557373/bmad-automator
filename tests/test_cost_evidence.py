@@ -459,6 +459,106 @@ class EmissionTests(unittest.TestCase):
             load_collector_cost_share(self.root, self.gate_id, "ruff"),
         )
 
+    def test_reemit_summary_write_failure_rolls_back_to_old_state(
+        self,
+    ) -> None:
+        """Regression — re-emitting for the same gate_id with a smaller
+        collector set used to PRUNE ghost ``<collector_id>.json`` files
+        BEFORE writing the new ``summary.json``. If the summary write
+        then failed (ENOSPC, EROFS, SIGKILL between the unlink loop and
+        ``write_atomic_text`` of summary), the stale summary on disk
+        from the prior emit still referenced the pruned collectors —
+        but the prune step had already deleted their per-collector
+        files. Result: on-disk state was inconsistent (summary listed
+        {a, b, c}, files for {a only}) and a load of the dropped ids
+        returned ``None`` (ghost reference).
+
+        Fix reorders to: (1) write new per-collector files, (2) write
+        summary.json, (3) prune ghost files. A failed summary write
+        now rolls back cleanly: ``write_atomic_text`` writes via a
+        tempfile + ``os.replace``, so the OLD summary survives intact;
+        and because pruning hasn't run yet, the OLD per-collector
+        files survive too. The on-disk listing still matches the OLD
+        summary; the next successful re-emit fully repairs.
+
+        Reachable in production via the FAIL → remediation cycle where
+        a re-emit with a shrunk collector set races a disk-full /
+        read-only-filesystem / process-crash window.
+        """
+
+        from story_automator.core.innovation import cost_evidence
+
+        # Emit #1 — three collectors, succeeds normally.
+        first = [
+            _make_outcome("a", "static", duration_ms=1000),
+            _make_outcome("b", "static", duration_ms=1000),
+            _make_outcome("c", "static", duration_ms=1000),
+        ]
+        emit_gate_cost_report(self.root, self.gate_id, SESSION, first)
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = sorted(p.name for p in cost_dir.iterdir())
+        self.assertEqual(
+            before, ["a.json", "b.json", "c.json", "summary.json"],
+        )
+        summary_before = load_gate_cost_report(self.root, self.gate_id)
+        self.assertIsNotNone(summary_before)
+        assert summary_before is not None
+        self.assertEqual(
+            sorted(s.collector_id for s in summary_before.per_collector),
+            ["a", "b", "c"],
+        )
+
+        # Emit #2 — only [a] this time, but inject an OSError on the
+        # summary.json write to simulate ENOSPC / EROFS / abrupt fault.
+        real_write = cost_evidence.write_atomic_text
+
+        def flaky_write(path: Path, data: str, *, encoding: str = "utf-8") -> None:
+            if path.name == "summary.json":
+                raise OSError("simulated ENOSPC on summary.json write")
+            real_write(path, data, encoding=encoding)
+
+        with patch.object(cost_evidence, "write_atomic_text", flaky_write):
+            with self.assertRaises(OSError):
+                emit_gate_cost_report(
+                    self.root, self.gate_id, SESSION,
+                    [_make_outcome("a", "static", duration_ms=1000)],
+                )
+
+        # On the unfixed code (prune BEFORE summary write), this would
+        # be ["a.json", "summary.json"] — b.json + c.json deleted, but
+        # the stale summary still listed [a, b, c].
+        #
+        # On the fixed code (prune AFTER summary write), the prune
+        # step is never reached when the summary write raises, so all
+        # three per-collector files survive and the old summary on
+        # disk still matches the on-disk collector set.
+        after = sorted(p.name for p in cost_dir.iterdir())
+        self.assertEqual(
+            after, ["a.json", "b.json", "c.json", "summary.json"],
+            "ghost files were pruned before the summary write committed "
+            "— a failed summary write must roll back cleanly, leaving "
+            "the OLD per-collector files matching the OLD summary",
+        )
+
+        # And the OLD summary on disk should still match what's there.
+        summary_after = load_gate_cost_report(self.root, self.gate_id)
+        self.assertIsNotNone(summary_after)
+        assert summary_after is not None
+        self.assertEqual(
+            sorted(s.collector_id for s in summary_after.per_collector),
+            ["a", "b", "c"],
+            "old summary should be preserved when new summary write "
+            "fails — atomic-replace must not partially-apply",
+        )
+
+        # And load_collector_cost_share for the (now-survived) ids
+        # returns real data, not None (ghost reference).
+        for cid in ("a", "b", "c"):
+            self.assertIsNotNone(
+                load_collector_cost_share(self.root, self.gate_id, cid),
+                f"{cid}.json was pruned before summary committed",
+            )
+
     def test_load_gate_cost_report_collector_count_derived_from_len_shares(
         self,
     ) -> None:
