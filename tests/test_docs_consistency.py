@@ -1197,5 +1197,151 @@ class RunProductionGateDriftWatcherDocstringTests(unittest.TestCase):
             )
 
 
+class CliDispatcherSiblingModuleDocConsistencyTests(unittest.TestCase):
+    """CLAUDE.md's N6.5 bullet matches the live cli_dispatcher module layout.
+
+    Pre-fix CLAUDE.md:56 framed the sibling-module split as a
+    hypothetical future action ("500-LOC soft limit watched; split into
+    ``core/cli_dispatcher_invokers.py`` if approached") while in
+    reality:
+
+    1. ``core/cli_dispatcher_invokers.py`` already exists (added by the
+       N6.5 follow-up commit ``1d030f5`` ``fix(compat): N6.5
+       follow-up``) — the split has already happened.
+    2. ``core/cli_dispatcher.py`` is currently 545 LOC, i.e. ALREADY
+       45 lines over the project's own 500-LOC soft cap codified in
+       the CLAUDE.md Conventions section — the limit was already
+       crossed, not "watched".
+    3. ``cli_dispatcher.py::_default_invoker`` is a thin shim that
+       delegates to ``cli_dispatcher_invokers.default_invoker`` (see
+       ``cli_dispatcher.py:287`` ``from .cli_dispatcher_invokers
+       import default_invoker as _impl``) — the actual tmux_runtime
+       wiring lives in ``claude_code_invoker`` inside the sibling
+       module, not in ``_default_invoker`` itself.
+
+    Operators reading the pre-fix bullet would not learn that the
+    sibling module shipped, would underestimate the parent's LOC, and
+    would mis-attribute the tmux_runtime wiring. This regression test
+    pins three independent halves of the post-fix contract so future
+    re-edits to the bullet cannot silently regress any of them.
+    """
+
+    CLI_DISPATCHER_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "cli_dispatcher.py"
+    )
+    CLI_DISPATCHER_INVOKERS_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "cli_dispatcher_invokers.py"
+    )
+
+    def _claude_md_text(self) -> str:
+        return _read("CLAUDE.md")
+
+    def _n65_bullet(self, text: str) -> str:
+        """Return the N6.5 bullet body (a single Markdown bullet line)."""
+        match = re.search(
+            r"^- \*\*CLI dispatcher \(N6\.5\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **CLI dispatcher (N6.5)**' "
+            "bullet; update this regression test to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_cli_dispatcher_invokers_sibling_exists(self) -> None:
+        """Defensive: the sibling module must actually exist on disk.
+
+        This is the pre-condition for the doc fix; if a future refactor
+        deletes the sibling and re-inlines the invokers, the CLAUDE.md
+        bullet must be re-audited so the sibling reference does not
+        become a dangling pointer.
+        """
+        self.assertTrue(
+            self.CLI_DISPATCHER_INVOKERS_PATH.exists(),
+            "cli_dispatcher_invokers.py sibling missing; CLAUDE.md's N6.5 "
+            "bullet now references a non-existent module — either restore "
+            "the split or rewrite the bullet.",
+        )
+
+    def test_n65_bullet_no_longer_frames_split_as_hypothetical(self) -> None:
+        """The pre-fix 'if approached' framing must be gone.
+
+        Pin the specific regression: the bullet previously said
+        ``500-LOC soft limit watched; split into
+        core/cli_dispatcher_invokers.py if approached`` — phrased as a
+        conditional future action even though the split had already
+        shipped. Post-fix the bullet must not carry that 'if approached'
+        framing.
+        """
+        bullet = self._n65_bullet(self._claude_md_text())
+        self.assertNotIn(
+            "if approached",
+            bullet,
+            "CLAUDE.md N6.5 bullet still frames the cli_dispatcher_invokers "
+            "split as 'if approached' (hypothetical future); the split has "
+            "already shipped and the parent is already past the soft limit.",
+        )
+
+    def test_n65_bullet_names_invokers_sibling_as_shipped(self) -> None:
+        """Post-fix bullet must surface the sibling as an existing module."""
+        bullet = self._n65_bullet(self._claude_md_text())
+        self.assertIn(
+            "cli_dispatcher_invokers.py",
+            bullet,
+            "CLAUDE.md N6.5 bullet no longer names "
+            "cli_dispatcher_invokers.py; operators planning a new "
+            "milestone would not know the sibling module exists.",
+        )
+
+    def test_n65_bullet_acknowledges_parent_past_soft_limit(self) -> None:
+        """Pin the post-fix acknowledgement that the parent is past 500 LOC.
+
+        The fix's body claim is that ``cli_dispatcher.py`` is already
+        over the soft cap. Anchor on the explicit "past the 500-LOC
+        soft limit" phrasing so the bullet cannot drift back to the
+        pre-fix "watched" framing without tripping this test.
+        """
+        bullet = self._n65_bullet(self._claude_md_text())
+        self.assertRegex(
+            bullet,
+            r"past the 500-LOC soft limit",
+            "CLAUDE.md N6.5 bullet no longer acknowledges that "
+            "cli_dispatcher.py is past the 500-LOC soft limit; the doc "
+            "would mislead operators about the current module layout.",
+        )
+
+    def test_parent_loc_actually_exceeds_soft_limit(self) -> None:
+        """Defensive: the live parent module is genuinely past 500 LOC.
+
+        If a future refactor splits more code out of cli_dispatcher.py
+        and brings it back under 500 LOC, the bullet's "already past
+        the soft limit" claim becomes stale. This test trips when that
+        happens so the bullet gets re-audited at the same commit.
+        """
+        text = self.CLI_DISPATCHER_PATH.read_text(encoding="utf-8")
+        loc = len(text.splitlines())
+        self.assertGreater(
+            loc,
+            500,
+            f"cli_dispatcher.py is {loc} LOC (<= 500). The CLAUDE.md "
+            "N6.5 bullet still claims the file is past the soft limit; "
+            "either re-tighten the bullet's wording or update this test.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
