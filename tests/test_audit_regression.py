@@ -3217,15 +3217,20 @@ class ThresholdLockIsolationInvariant(unittest.TestCase):
 
 
 class WorktreePerUnitIsolationInvariant(unittest.TestCase):
-    """Pins G2 §7.5 — worktree-per-unit isolation. Four sub-tests:
+    """Pins G2 §7.5 — worktree-per-unit isolation. Five sub-tests:
 
     1. ``collector_isolation.py`` is process-global-state-free + lock-free.
-    2. Only ``run_gate_collectors``'s ``isolation_mode == "per_unit"``
+    2. The Sub-test 1 glob scan ALSO covers the sibling
+       ``collector_isolation_outcomes.py`` (extracted to keep the parent
+       under the 500-LOC soft limit) — added as a round-1-fix-37
+       regression to close the vacuous-pass hole where a violator placed
+       into the sibling silently passed Sub-test 1.
+    3. Only ``run_gate_collectors``'s ``isolation_mode == "per_unit"``
        dispatch may call ``run_collectors_per_unit``.
-    3. Two-direction positive-failure proof: synthetic violators flagged,
+    4. Two-direction positive-failure proof: synthetic violators flagged,
        AND the residual after stripping the legitimate ``def`` from
        ``collector_isolation.py`` with a fake violator injected MUST flag.
-    4. Safety-critical defaults pinned via ``inspect.signature`` at all
+    5. Safety-critical defaults pinned via ``inspect.signature`` at all
        four wiring sites.
 
     Mirrors ``AuditKeyEnvScrubInvariant`` for structural exemption,

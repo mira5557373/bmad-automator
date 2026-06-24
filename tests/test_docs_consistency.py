@@ -2770,5 +2770,104 @@ class ActionEnumDocsConsistencyTests(unittest.TestCase):
             )
 
 
+class WorktreePerUnitIsolationInvariantSubTestCountTests(unittest.TestCase):
+    """The ``WorktreePerUnitIsolationInvariant`` class docstring's
+    ``"Five sub-tests"`` (or similar word-form) count tracks the live
+    test-method count on the class, and the matching mention in
+    ``CLAUDE.md`` does too.
+
+    Pre-fix the class docstring read ``"Four sub-tests"`` and CLAUDE.md
+    read ``"(4 sub-tests; …)"``, even though the class exposed FIVE
+    ``test_*`` methods after the round-1-fix-37 sibling-coverage
+    regression was folded in (``test_glob_scan_covers_sibling_collector_isolation_modules``).
+    The drift is documentation-only — the audit-floor invariant runs
+    correctly — but it misleads contributors counting sub-tests by
+    inspection rather than by ``dir(cls)``.
+
+    The regression test walks the live class with ``inspect``, counts
+    the number of ``test_*`` attributes, and asserts that BOTH the class
+    docstring and the CLAUDE.md G2 bullet quote a matching number-word
+    or numeric token.
+    """
+
+    _WORDS = {
+        1: "one",
+        2: "two",
+        3: "three",
+        4: "four",
+        5: "five",
+        6: "six",
+        7: "seven",
+        8: "eight",
+        9: "nine",
+        10: "ten",
+    }
+
+    @classmethod
+    def _live_test_method_count(cls) -> int:
+        import importlib
+        import inspect
+
+        mod = importlib.import_module("tests.test_audit_regression")
+        target = getattr(mod, "WorktreePerUnitIsolationInvariant")
+        return sum(
+            1
+            for name, value in inspect.getmembers(target)
+            if name.startswith("test_") and callable(value)
+        )
+
+    @classmethod
+    def _docstring(cls) -> str:
+        import importlib
+
+        mod = importlib.import_module("tests.test_audit_regression")
+        target = getattr(mod, "WorktreePerUnitIsolationInvariant")
+        return target.__doc__ or ""
+
+    def test_class_docstring_sub_test_count_matches_live(self) -> None:
+        live = self._live_test_method_count()
+        word = self._WORDS.get(live)
+        self.assertIsNotNone(
+            word,
+            f"Add a number-word mapping for {live} to _WORDS",
+        )
+        doc = self._docstring()
+        pattern = re.compile(
+            rf"\b{word}\s+sub-tests\b",
+            re.IGNORECASE,
+        )
+        self.assertRegex(
+            doc,
+            pattern,
+            f"WorktreePerUnitIsolationInvariant class docstring no longer "
+            f"says '{word.capitalize()} sub-tests' but the live class "
+            f"exposes {live} test_* methods; bump the docstring count "
+            "when adding/removing test methods.",
+        )
+
+    def test_claude_md_g2_bullet_sub_test_count_matches_live(self) -> None:
+        live = self._live_test_method_count()
+        claude_md = _read("CLAUDE.md")
+        pattern = re.compile(
+            r"Pinned by `WorktreePerUnitIsolationInvariant` \((\d+) sub-tests;",
+        )
+        match = pattern.search(claude_md)
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md G2 bullet missing the "
+            "'Pinned by `WorktreePerUnitIsolationInvariant` (N sub-tests; …)' "
+            "shape — the docstring-vs-CLAUDE.md cross-reference test relies "
+            "on this anchor.",
+        )
+        documented = int(match.group(1))
+        self.assertEqual(
+            documented,
+            live,
+            f"CLAUDE.md G2 bullet says '({documented} sub-tests)' but the "
+            f"live WorktreePerUnitIsolationInvariant class exposes {live} "
+            "test_* methods; both must move together.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
