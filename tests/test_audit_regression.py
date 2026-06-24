@@ -574,6 +574,80 @@ class GateFileDeterminismBaseline(unittest.TestCase):
 class AuditKeyEnvScrubInvariant(unittest.TestCase):
     """Pins D-04: BMAD_AUDIT_KEY must never reach a subprocess env."""
 
+    # Closed allowlist of subprocess callables the AST walker must
+    # recognise. Mirrors the canonical ``subprocess`` API surface used
+    # across the codebase.
+    SUBPROCESS_CALLABLES = {
+        "run",
+        "Popen",
+        "call",
+        "check_call",
+        "check_output",
+    }
+
+    @staticmethod
+    def _collect_subprocess_bindings(tree) -> tuple[set[str], set[str]]:
+        """Return ``(module_aliases, callable_aliases)`` for ``tree``.
+
+        ``module_aliases`` are names bound to the ``subprocess`` module
+        via ``import subprocess`` / ``import subprocess as sp``.
+        ``callable_aliases`` are names bound to one of
+        :pyattr:`SUBPROCESS_CALLABLES` via ``from subprocess import run``
+        or ``from subprocess import run as r``.
+
+        Mirrors the binding-tracking idiom in
+        :py:meth:`ThresholdApplyIsolationInvariant._module_violates` so
+        future ``import subprocess as sp``, ``from subprocess import
+        run``, and ``from subprocess import run as r`` idioms cannot
+        silently bypass the D-04 trust-boundary net.
+        """
+        import ast
+
+        module_aliases: set[str] = set()
+        callable_aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "subprocess":
+                        module_aliases.add(alias.asname or alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module == "subprocess":
+                    for alias in node.names:
+                        if alias.name in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES:
+                            callable_aliases.add(alias.asname or alias.name)
+        return module_aliases, callable_aliases
+
+    @staticmethod
+    def _is_subprocess_call_with_bindings(
+        node,
+        module_aliases: set[str],
+        callable_aliases: set[str],
+    ) -> bool:
+        """Return True iff ``node`` is a subprocess call given the
+        binding sets from :py:meth:`_collect_subprocess_bindings`.
+
+        Recognises:
+          * ``<module_alias>.<callable>(...)`` — covers canonical
+            ``subprocess.run(...)`` AND ``import subprocess as sp`` →
+            ``sp.run(...)``.
+          * bare-name ``<callable_alias>(...)`` — covers ``from
+            subprocess import run`` → ``run(...)`` AND ``from subprocess
+            import run as r`` → ``r(...)``.
+        """
+        import ast
+
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            return (
+                func.value.id in module_aliases
+                and func.attr in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES
+            )
+        if isinstance(func, ast.Name):
+            return func.id in callable_aliases
+        return False
+
     def test_scrub_env_removes_bmad_audit_key(self) -> None:
         from story_automator.core.audit import scrub_env_for_subprocess
 
@@ -696,17 +770,12 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 return True
             return False
 
-        def _is_subprocess_call(node: ast.Call) -> bool:
-            func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                return func.value.id == "subprocess" and func.attr in {
-                    "run",
-                    "Popen",
-                    "call",
-                    "check_call",
-                    "check_output",
-                }
-            return False
+        # ``_collect_subprocess_bindings`` and
+        # ``_is_subprocess_call_with_bindings`` are staticmethods on this
+        # class — lifted so the positive-failure regression test can
+        # exercise the binding-tracking walker directly without scanning
+        # the real skill tree. See class docstring for the idiom.
+        _is_subprocess_call = self._is_subprocess_call_with_bindings
 
         def _defines_scrub_helper(tree: ast.Module) -> bool:
             """Return True iff the module's top level defines
@@ -737,6 +806,16 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             if _defines_scrub_helper(tree):
                 continue
 
+            # First pass — collect subprocess module + callable aliases so
+            # ``import subprocess as sp`` → ``sp.run(...)`` and
+            # ``from subprocess import run [as r]`` → ``run(...) / r(...)``
+            # are caught alongside the canonical ``subprocess.run(...)``.
+            module_aliases, callable_aliases = self._collect_subprocess_bindings(tree)
+            # If nothing imports subprocess in any form, no calls can be
+            # subprocess calls — skip the visit to save work.
+            if not module_aliases and not callable_aliases:
+                continue
+
             # Track names bound to scrub_env_for_subprocess(...) per function
             # scope, so callers may write:
             #   sandboxed = scrub_env_for_subprocess(env)
@@ -753,7 +832,7 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                     self.generic_visit(node)
 
                 def visit_Call(self, node: ast.Call) -> None:
-                    if _is_subprocess_call(node):
+                    if _is_subprocess_call(node, module_aliases, callable_aliases):
                         env_kw = next(
                             (kw for kw in node.keywords if kw.arg == "env"),
                             None,
@@ -779,6 +858,114 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             [],
             "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
             + "\n  ".join(offenders),
+        )
+
+    def test_positive_failure_bypass_idioms_are_caught(self) -> None:
+        """Two-direction proof for D-04 binding-tracking — the walker
+        must catch THREE idiomatic Python aliasing patterns that a
+        literal ``subprocess.<name>(...)`` predicate silently misses:
+
+          (a) ``import subprocess as sp`` → ``sp.run(...)``
+          (b) ``from subprocess import run`` → ``run(...)``
+          (c) ``from subprocess import run as r`` → ``r(...)``
+
+        Plus the canonical baseline:
+          (d) ``import subprocess`` → ``subprocess.run(...)``
+
+        Modeled on
+        ``ThresholdApplyIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``
+        (lines 1264-1340): each synthetic source is parsed, the
+        binding-collection helper is run, and the predicate is asserted
+        to flag the call. Negative case (no subprocess import at all)
+        is also asserted to confirm the walker doesn't false-positive
+        on unrelated ``run(...)`` calls.
+
+        Without binding-tracking (the pre-fix predicate which only
+        recognised ``ast.Attribute(value=ast.Name('subprocess'),
+        attr in {run,Popen,...})``), patterns (a)/(b)/(c) silently exit
+        the D-04 trust-boundary net while the audit-floor suite stays
+        green — the regression net itself is broken.
+        """
+        import ast
+
+        # Helper: parse, collect bindings, locate the leaking call, run
+        # predicate.
+        def _flag(src: str) -> bool:
+            tree = ast.parse(textwrap.dedent(src))
+            module_aliases, callable_aliases = self._collect_subprocess_bindings(
+                tree
+            )
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and self._is_subprocess_call_with_bindings(
+                    node, module_aliases, callable_aliases
+                ):
+                    return True
+            return False
+
+        # (d) Canonical baseline — predicate MUST flag.
+        canonical_src = """
+            import subprocess
+
+            def leak():
+                subprocess.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(canonical_src),
+            "Walker FAILED to flag canonical `subprocess.run(...)` — predicate broken",
+        )
+
+        # (a) ``import subprocess as sp`` rebind.
+        sp_alias_src = """
+            import subprocess as sp
+
+            def leak():
+                sp.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(sp_alias_src),
+            "Walker FAILED to flag `import subprocess as sp` + `sp.run(...)` — "
+            "binding-tracking missing for ast.Import asname",
+        )
+
+        # (b) ``from subprocess import run`` bare-name call.
+        from_import_src = """
+            from subprocess import run
+
+            def leak():
+                run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(from_import_src),
+            "Walker FAILED to flag `from subprocess import run` + `run(...)` — "
+            "binding-tracking missing for ast.ImportFrom",
+        )
+
+        # (c) ``from subprocess import run as r`` renamed call.
+        from_import_as_src = """
+            from subprocess import run as r
+
+            def leak():
+                r(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(from_import_as_src),
+            "Walker FAILED to flag `from subprocess import run as r` + `r(...)` — "
+            "binding-tracking missing for ast.ImportFrom asname",
+        )
+
+        # Negative — `run(...)` without any subprocess import MUST NOT
+        # be flagged. Proves binding-tracking is precise, not over-broad.
+        unrelated_src = """
+            def run(args, env=None):
+                return None
+
+            def innocent():
+                run(["ls"], env={"FOO": "bar"})
+        """
+        self.assertFalse(
+            _flag(unrelated_src),
+            "Walker FALSELY flagged unrelated `run(...)` with no subprocess "
+            "import — binding-tracking is over-broad",
         )
 
 
