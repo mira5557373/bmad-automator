@@ -290,38 +290,89 @@ def claude_code_invoker(
 
     # 3. Poll session_status until terminal or timeout.
     timeout_s = max(0.1, float(intent.timeout_s))
-    start = _clock_hook()
     last_status: dict[str, str | int] = {}
-    while True:
-        last_status = _session_status_hook(
-            session, full=False, codex=False, project_root=workspace
-        )
-        sstate = str(last_status.get("session_state", ""))
-        status = str(last_status.get("status", ""))
-        # Terminal markers: completed/dead/missing/error.
-        if status in {"completed", "dead", "missing", "not_found", "error"}:
-            break
-        if sstate in {"completed", "success", "failure", "crashed"}:
-            break
-        if _clock_hook() - start >= timeout_s:
-            # 4. Timeout — kill and return timed_out.
-            try:
-                _kill_session_hook(session, workspace)
-            except Exception:
-                pass
-            return {
-                "stdout_tail": "",
-                "head_sha": _git_head_hook(workspace),
-                "session_id": session,
-                "stderr_tail": f"claude-code session {session} exceeded timeout_s={timeout_s}",
-                "timed_out": True,
-            }
-        _sleep_hook(_POLL_INTERVAL_S)
+    # Wrap the entire polling loop so a transient hook failure (e.g. a tmux
+    # probe raising ``subprocess.TimeoutExpired`` / ``OSError`` from
+    # ``tmux_runtime.session_status``, or a clock/sleep hook misbehaving)
+    # cannot (a) leak the spawned tmux session as an orphan or (b) propagate
+    # past the dispatcher's docstring contract ("Never raises on CLI-side
+    # or git-side failure"). On any unexpected exception we best-effort
+    # kill the session (mirroring the timeout branch) and surface an
+    # error-shaped dict so :func:`dispatch_session` routes it through the
+    # lie-detector path with a descriptive ``stderr_tail``.
+    try:
+        start = _clock_hook()
+        while True:
+            last_status = _session_status_hook(
+                session, full=False, codex=False, project_root=workspace
+            )
+            sstate = str(last_status.get("session_state", ""))
+            status = str(last_status.get("status", ""))
+            # Terminal markers: completed/dead/missing/error.
+            if status in {"completed", "dead", "missing", "not_found", "error"}:
+                break
+            if sstate in {"completed", "success", "failure", "crashed"}:
+                break
+            if _clock_hook() - start >= timeout_s:
+                # 4. Timeout — kill and return timed_out.
+                try:
+                    _kill_session_hook(session, workspace)
+                except Exception:
+                    pass
+                return {
+                    "stdout_tail": "",
+                    "head_sha": _git_head_hook(workspace),
+                    "session_id": session,
+                    "stderr_tail": f"claude-code session {session} exceeded timeout_s={timeout_s}",
+                    "timed_out": True,
+                }
+            _sleep_hook(_POLL_INTERVAL_S)
+    except Exception as exc:  # noqa: BLE001 — fail-closed; never propagate.
+        # Drain the tmux session so we don't leak an orphan, then surface
+        # the failure as a non-timeout error dict.
+        try:
+            _kill_session_hook(session, workspace)
+        except Exception:
+            pass
+        try:
+            best_head = _git_head_hook(workspace)
+        except Exception:
+            best_head = ""
+        return {
+            "stdout_tail": "",
+            "head_sha": best_head,
+            "session_id": session,
+            "stderr_tail": (
+                f"claude-code polling failed for session {session}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            "timed_out": False,
+        }
 
     # 5. Pull stdout via verify_or_create_output, read it, tail-cap.
-    output_path = _verify_output_hook("", session, "", project_root=workspace)
-    stdout_tail = _tail(_read_output_hook(output_path)) if output_path else ""
-    head_sha = _git_head_hook(workspace)
+    # Wrap terminal-state output retrieval too: ``verify_or_create_output``
+    # and the read hook can raise ``OSError`` if the output file races a
+    # tmux server-side cleanup, and ``_git_head_hook`` can raise from a
+    # broken workspace. None of these may propagate past the invoker.
+    try:
+        output_path = _verify_output_hook("", session, "", project_root=workspace)
+        stdout_tail = _tail(_read_output_hook(output_path)) if output_path else ""
+        head_sha = _git_head_hook(workspace)
+    except Exception as exc:  # noqa: BLE001 — fail-closed; never propagate.
+        try:
+            best_head = _git_head_hook(workspace)
+        except Exception:
+            best_head = ""
+        return {
+            "stdout_tail": "",
+            "head_sha": best_head,
+            "session_id": session,
+            "stderr_tail": (
+                f"claude-code output retrieval failed for session {session}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            "timed_out": False,
+        }
     return {
         "stdout_tail": stdout_tail,
         "head_sha": head_sha,

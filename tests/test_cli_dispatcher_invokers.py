@@ -400,6 +400,85 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 )
                 self.assertFalse(raw["timed_out"])
 
+    def test_polling_loop_hook_failure_does_not_propagate_or_leak_session(
+        self,
+    ) -> None:
+        # Regression: a polling-loop hook (``_session_status_hook`` here,
+        # but the same pattern guards ``_clock_hook`` / ``_sleep_hook`` /
+        # the timeout-branch ``_git_head_hook``) raising a realistic tmux
+        # probe error must NOT propagate past ``claude_code_invoker`` —
+        # the dispatcher's docstring promises "Never raises on CLI-side
+        # or git-side failure". Pre-fix the entire loop unwound on
+        # ``subprocess.TimeoutExpired`` (the actual exception type a
+        # hung tmux probe raises — NOT a subclass of ``TimeoutError``),
+        # leaking an orphan tmux session (the timeout-branch kill was
+        # never reached) and bubbling out of ``dispatch_session`` past
+        # its ``except TimeoutError`` handler.
+        #
+        # The contract this regression pins:
+        #   1. Invoker returns a runner-contract dict, never raises.
+        #   2. ``stderr_tail`` carries enough context for operators to
+        #      diagnose ("polling failed", exception class+message).
+        #   3. ``timed_out=False`` (the bug is "polling hook failed",
+        #      not "session ran past timeout_s") so the dispatcher
+        #      classifies it via the lie-detector / error path, not the
+        #      timeout path.
+        #   4. The tmux session is best-effort killed so we don't leak
+        #      an orphan into the operator's tmux server.
+        import subprocess as _subprocess
+
+        for exc in (
+            RuntimeError("tmux command-bus error"),
+            _subprocess.TimeoutExpired("tmux", 15),
+            OSError("tmux server gone"),
+        ):
+            with self.subTest(exception=type(exc).__name__):
+                status = mock.Mock(side_effect=exc)
+                kill = mock.Mock()
+                with _StubHooks(status=status, kill=kill):
+                    raw = invokers.claude_code_invoker(
+                        profile=claude_default(), intent=_intent(timeout_s=5.0),
+                    )
+                # 1. Returned a dict, did not raise.
+                self.assertEqual(
+                    set(raw.keys()),
+                    {"stdout_tail", "head_sha", "session_id",
+                     "stderr_tail", "timed_out"},
+                )
+                # 2. Diagnostic context surfaced.
+                self.assertIn("polling failed", raw["stderr_tail"])
+                self.assertIn(type(exc).__name__, raw["stderr_tail"])
+                # 3. NOT classified as a timeout.
+                self.assertFalse(raw["timed_out"])
+                # 4. Session was best-effort killed to avoid orphan leak.
+                kill.assert_called_once()
+
+    def test_polling_loop_hook_failure_classifies_at_dispatch_session(
+        self,
+    ) -> None:
+        # End-to-end regression at the ``dispatch_session`` boundary: a
+        # polling-loop hook raising ``subprocess.TimeoutExpired`` (NOT a
+        # subclass of ``TimeoutError``, which the dispatcher catches
+        # explicitly) must surface as a ``DispatchResult`` with
+        # ``stop_reason="error"`` — not bubble out of the production
+        # ``_dispatch_via_cli_dispatcher`` wrapper, which only catches
+        # ``DispatcherError``.
+        import subprocess as _subprocess
+
+        status = mock.Mock(
+            side_effect=_subprocess.TimeoutExpired("tmux", 15)
+        )
+        with _StubHooks(status=status):
+            res = dispatch_session(
+                _intent(workspace="/tmp", timeout_s=5.0),
+                profile=claude_default(),
+                runtime_invoker=None,
+            )
+        self.assertIsInstance(res, DispatchResult)
+        # Polling failure surfaces a descriptive diagnostic, not a raw
+        # crash report.
+        self.assertIn("polling failed", res.stderr_tail)
+
     def test_empty_story_key_dispatches_to_error_or_classifies(self) -> None:
         # End-to-end regression at the dispatch_session boundary: an empty
         # story_key flowing into the invoker must not raise out of
