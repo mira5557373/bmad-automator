@@ -63,6 +63,42 @@ from .cost_attribution import (
     attribute_cost_uniform,
 )
 
+
+# Vocabulary translation between the substrate (cost_attribution) and the
+# user-facing cost_evidence surface. ``cost_attribution.VALID_ATTRIBUTION_MODES``
+# uses ``"duration-weighted"`` / ``"tool-call-weighted"`` for the per-share
+# ``attribution_mode`` field; ``cost_evidence.VALID_COST_ATTRIBUTION_MODES``
+# uses ``"duration"`` / ``"tool-calls"`` for the same conceptual key. Both
+# vocabularies are closed sets, but the per-share field used to flow
+# straight through to disk while the top-level summary field carried the
+# cost_evidence vocab — so a single ``summary.json`` document held the
+# same key name under two different controlled vocabularies, and a
+# consumer cross-checking either value against a single allowlist would
+# see a mismatch. We canonicalize at the persistence boundary: every
+# ``attribution_mode`` string in on-disk cost evidence (top-level summary
+# AND per-collector entries AND ``<collector_id>.json`` files) is
+# normalized to :data:`VALID_COST_ATTRIBUTION_MODES`.
+_COST_ATTRIBUTION_VOCAB_MAP: dict[str, str] = {
+    "uniform": "uniform",
+    "duration-weighted": "duration",
+    "tool-call-weighted": "tool-calls",
+}
+
+
+def _normalize_attribution_mode(mode: str) -> str:
+    """Translate the substrate vocabulary to the cost_evidence vocabulary.
+
+    Unknown strings pass through unchanged — the caller (emit or load)
+    is responsible for rejecting them via the closed-vocabulary guards.
+    The legacy on-disk values (``"duration-weighted"`` /
+    ``"tool-call-weighted"``) are mapped to their cost_evidence
+    equivalents so a round-trip via ``load_collector_cost_share`` /
+    ``load_gate_cost_report`` returns the canonical strings even for
+    JSON files written before this fix landed.
+    """
+
+    return _COST_ATTRIBUTION_VOCAB_MAP.get(mode, mode)
+
 if TYPE_CHECKING:
     from ..collector_config import CollectorOutcome
 
@@ -189,24 +225,34 @@ def collector_cost_path(
 
 
 def _share_to_json(share: CollectorCostShare) -> dict[str, object]:
+    # Normalize the substrate vocabulary ("duration-weighted" /
+    # "tool-call-weighted") to the cost_evidence vocabulary
+    # ("duration" / "tool-calls") so on-disk JSON carries a single
+    # closed vocabulary — same key name, same allowlist — at both the
+    # top-level summary and each per_collector entry.
     return {
         "collector_id": share.collector_id,
         "input_tokens": share.input_tokens,
         "output_tokens": share.output_tokens,
         "cost_usd": share.cost_usd,
         "duration_s": share.duration_s,
-        "attribution_mode": share.attribution_mode,
+        "attribution_mode": _normalize_attribution_mode(share.attribution_mode),
     }
 
 
 def _share_from_json(data: dict[str, object]) -> CollectorCostShare:
+    # Mirror the emit-side normalization on load so a round-trip
+    # through legacy JSON files (written before vocabulary unification)
+    # still returns the canonical cost_evidence vocab to callers.
     return CollectorCostShare(
         collector_id=str(data["collector_id"]),
         input_tokens=int(data["input_tokens"]),  # type: ignore[arg-type]
         output_tokens=int(data["output_tokens"]),  # type: ignore[arg-type]
         cost_usd=float(data["cost_usd"]),  # type: ignore[arg-type]
         duration_s=float(data["duration_s"]),  # type: ignore[arg-type]
-        attribution_mode=str(data["attribution_mode"]),
+        attribution_mode=_normalize_attribution_mode(
+            str(data["attribution_mode"]),
+        ),
     )
 
 

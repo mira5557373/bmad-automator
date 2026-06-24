@@ -736,6 +736,87 @@ class EmissionTests(unittest.TestCase):
         with self.assertRaises(CostEvidenceError):
             load_collector_cost_share(self.root, self.gate_id, "c1")
 
+    def test_attribution_mode_vocabulary_unified_across_summary_levels(
+        self,
+    ) -> None:
+        """Regression — top-level ``attribution_mode`` in summary.json and
+        the per-collector ``attribution_mode`` inside the SAME summary
+        used to carry two different closed vocabularies under one key
+        name. ``cost_evidence.VALID_COST_ATTRIBUTION_MODES`` is
+        ``('uniform', 'duration', 'tool-calls')`` while
+        ``cost_attribution.VALID_ATTRIBUTION_MODES`` is
+        ``('uniform', 'duration-weighted', 'tool-call-weighted')`` —
+        the top-level value came from the cost_evidence vocab via
+        ``_attribute()``'s second return, while each per_collector
+        entry's value came from the cost_attribution vocab via
+        ``CollectorCostShare.attribution_mode``. An operator filtering
+        on ``attribution_mode`` saw mismatched strings in one document
+        and ``load_collector_cost_share`` returned ``'duration-weighted'``
+        while ``load_gate_cost_report`` returned ``'duration'`` for the
+        same emit call.
+
+        Fix normalizes at the persistence boundary (_share_to_json) so
+        every ``attribution_mode`` string in on-disk cost evidence
+        (top-level summary, per-collector entries, and
+        ``<collector_id>.json`` files) is in
+        :data:`VALID_COST_ATTRIBUTION_MODES`.
+        """
+
+        from story_automator.core.innovation.cost_evidence import (
+            VALID_COST_ATTRIBUTION_MODES,
+        )
+
+        outcomes = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("mypy", "static", duration_ms=3000),
+        ]
+        emit_gate_cost_report(self.root, self.gate_id, SESSION, outcomes)
+
+        sp = summary_path(self.root, self.gate_id)
+        data = json.loads(sp.read_text())
+
+        top = data["attribution_mode"]
+        self.assertIn(
+            top, VALID_COST_ATTRIBUTION_MODES,
+            f"top-level attribution_mode {top!r} not in canonical vocab",
+        )
+        for entry in data["per_collector"]:
+            mode = entry["attribution_mode"]
+            self.assertIn(
+                mode, VALID_COST_ATTRIBUTION_MODES,
+                f"per_collector[{entry['collector_id']!r}] attribution_mode "
+                f"{mode!r} not in canonical vocab "
+                f"{VALID_COST_ATTRIBUTION_MODES}",
+            )
+            # And both nesting levels must agree under duration mode.
+            self.assertEqual(
+                mode, top,
+                f"per_collector[{entry['collector_id']!r}] attribution_mode "
+                f"{mode!r} != top-level {top!r} — vocab divergence under "
+                f"the same key name in one document",
+            )
+
+        # Round-trip via both loaders — they must also return the
+        # canonical vocab (and agree with each other).
+        report = load_gate_cost_report(self.root, self.gate_id)
+        assert report is not None
+        self.assertIn(report.attribution_mode, VALID_COST_ATTRIBUTION_MODES)
+        for share in report.per_collector:
+            self.assertIn(
+                share.attribution_mode, VALID_COST_ATTRIBUTION_MODES,
+            )
+            self.assertEqual(
+                share.attribution_mode, report.attribution_mode,
+            )
+        share_ruff = load_collector_cost_share(
+            self.root, self.gate_id, "ruff",
+        )
+        assert share_ruff is not None
+        self.assertIn(
+            share_ruff.attribution_mode, VALID_COST_ATTRIBUTION_MODES,
+        )
+        self.assertEqual(share_ruff.attribution_mode, report.attribution_mode)
+
 
 # ---------------------------------------------------------------------------
 # Group 2 — gate orchestrator integration
