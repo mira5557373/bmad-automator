@@ -74,7 +74,7 @@ contention while still failing fast on a wedged holder. Other stack
 modules use the same 30s convention for short-lived metadata locks."""
 
 
-_PERSISTENCE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]*$")
+_PERSISTENCE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]*\Z")
 
 _PERSISTENCE_KEY_MAX_LEN: int = 64
 """Upper bound on persistence-key length in characters.

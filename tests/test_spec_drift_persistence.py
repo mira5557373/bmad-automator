@@ -86,6 +86,24 @@ class TestPersistenceKeyValidation(unittest.TestCase):
             with self.assertRaises(SpecDriftError):
                 validate_persistence_key(key)
 
+    def test_trailing_newline_keys_rejected(self) -> None:
+        # Regression: pre-fix, ``_PERSISTENCE_KEY_RE`` anchored with
+        # ``$`` instead of ``\Z``, and Python's default-mode ``$``
+        # matches before a trailing ``\n``. That meant
+        # ``validate_persistence_key('foo\n')`` silently passed and
+        # ``drift_root_dir(..., create=True)`` then created a directory
+        # literally named ``foo\n`` under ``_bmad/drift/``, breaking the
+        # docstring promise that the resulting directory is "well-formed
+        # on every supported FS" (whitespace is explicitly listed as a
+        # rejected character in the docstring). Anchor the regex with
+        # ``\Z`` so trailing newline / carriage-return / CRLF all fail
+        # validation up front. Sibling ``test_invalid_keys_rejected``
+        # already covers internal-whitespace ``"with space"``; this
+        # case covers the trailing-anchor mismatch specifically.
+        for key in ("foo\n", "\nfoo", "foo\r", "foo\r\n"):
+            with self.assertRaises(SpecDriftError):
+                validate_persistence_key(key)
+
     def test_over_long_keys_rejected_as_spec_drift_error(self) -> None:
         # Regression: pre-fix, _PERSISTENCE_KEY_RE had no length cap so
         # a 256+ char key passed validation, then drift_root_dir(...,
