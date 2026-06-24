@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
+import pathlib
 import subprocess
 import sys
 import unittest
@@ -139,11 +141,21 @@ class EntryPointModuleTests(unittest.TestCase):
         # point is `python -m story_automator`. Exercise that path so we
         # know the registration sticks across a fresh process boundary
         # (catches accidental lazy-import deadlocks too).
+        #
+        # Explicitly set PYTHONPATH on the child env so the subprocess does
+        # not silently rely on the parent's launch convention. Without this,
+        # invocations where the parent uses sys.path injection (e.g. a
+        # future conftest.py adding skills/.../src) but no PYTHONPATH env
+        # var would surface here as a confusing "No module named
+        # story_automator" subprocess failure.
+        pkg_src_dir = pathlib.Path(cli.__file__).resolve().parent.parent
+        child_env = {**os.environ, "PYTHONPATH": str(pkg_src_dir)}
         result = subprocess.run(
             [sys.executable, "-m", "story_automator", "lineage", "--help"],
             capture_output=True,
             text=True,
             timeout=30,
+            env=child_env,
         )
         self.assertEqual(
             result.returncode,
@@ -152,6 +164,66 @@ class EntryPointModuleTests(unittest.TestCase):
         )
         # Help text lands somewhere — argparse prints to stdout.
         self.assertTrue(result.stdout, "expected help text on stdout")
+
+    def test_python_dash_m_lineage_help_robust_when_parent_uses_sys_path(
+        self,
+    ) -> None:
+        # Regression fence for "subprocess test inherits PYTHONPATH from
+        # parent without explicitly setting it". The original bug: the
+        # subprocess.run inside test_python_dash_m_lineage_help_succeeds
+        # passed NO env= kwarg, so the child inherited the parent's env.
+        # That works under `PYTHONPATH=... python -m unittest ...` but
+        # silently breaks under pytest+conftest.py scenarios where the
+        # parent uses sys.path injection (process-internal) and the
+        # PYTHONPATH env var is unset.
+        #
+        # This test simulates that parent scenario directly: it spawns a
+        # fresh parent python whose PYTHONPATH is stripped from the env,
+        # then sys.path.inserts the package src and shells out to
+        # `python -m story_automator lineage --help`. On the pre-fix code
+        # (no env=) the inner subprocess fails with "No module named
+        # story_automator" because sys.path mutations do not propagate
+        # across the process boundary. On the fixed code (env=child_env
+        # with PYTHONPATH set explicitly) the inner subprocess succeeds.
+        pkg_src_dir = pathlib.Path(cli.__file__).resolve().parent.parent
+        repo_root = pkg_src_dir.parent.parent.parent.parent
+        tests_dir = repo_root / "tests"
+
+        # Driver script: this is the "parent" that mimics a pytest/conftest
+        # sys.path injection style (no PYTHONPATH env var, but the package
+        # is on sys.path because the parent injected it).
+        driver = (
+            "import os, sys, unittest\n"
+            "os.environ.pop('PYTHONPATH', None)\n"
+            f"sys.path.insert(0, {str(pkg_src_dir)!r})\n"
+            f"sys.path.insert(0, {str(tests_dir.parent)!r})\n"
+            "loader = unittest.TestLoader()\n"
+            "from tests import test_lineage_cli_top_level as m\n"
+            "suite = loader.loadTestsFromName(\n"
+            "    'EntryPointModuleTests.test_python_dash_m_lineage_help_succeeds',\n"
+            "    m,\n"
+            ")\n"
+            "runner = unittest.TextTestRunner(verbosity=0)\n"
+            "result = runner.run(suite)\n"
+            "sys.exit(0 if result.wasSuccessful() else 1)\n"
+        )
+        # Strip PYTHONPATH from the driver's env so it has to rely on its
+        # own sys.path injection — matching the conftest.py scenario.
+        driver_env = {
+            k: v for k, v in os.environ.items() if k != "PYTHONPATH"
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", driver],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=driver_env,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"driver stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
 
 
 if __name__ == "__main__":
