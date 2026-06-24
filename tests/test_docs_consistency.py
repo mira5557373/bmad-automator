@@ -363,6 +363,106 @@ class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
         )
 
 
+class ReadmeTestCountFreshnessTests(unittest.TestCase):
+    """README test-count claim is not anchored to a known-stale snapshot.
+
+    Pre-fix README.md:62 read ``Tests: 4070 -> 4348 passing across the
+    session.`` while the live suite at HEAD reports 4644 tests (4070
+    session-start baseline + the C5 self-improving-gate + G2
+    worktree-per-unit-isolation milestones that landed after the
+    session-rollup doc was written). An operator running the repro
+    command from the README and seeing 4644 would either suspect a
+    dirty tree or chase ~296 phantom tests.
+
+    The regression test pins the README's session-end claim against a
+    known floor: post-fix the README must NOT carry the stale
+    ``4070 -> 4348 passing across the session`` shape, AND if it
+    quotes a current HEAD count it must be at or above 4644 (the
+    confirmed live count when this regression test was added).
+    The CHANGELOG.md occurrences at lines 11 and 117 are deliberately
+    NOT pinned by this test because they sit inside the sealed
+    ``## 260623`` historical entry and the CLAUDE.md hard guardrails
+    forbid rewriting the prose body of any historical changelog entry.
+    """
+
+    # The frozen lower bound: live test count at the time this test was
+    # added (4644). README must not claim fewer than this when it cites
+    # a HEAD count. Tolerance band allows the live count to grow without
+    # breaking this test — only a regression below the floor (or the
+    # pre-fix 4348 anchor) trips it.
+    HEAD_TEST_COUNT_FLOOR = 4644
+
+    # Specific stale anchor the pre-fix README carried. Must not appear
+    # in the README's tests-line unqualified by "session closed at" or
+    # similar framing that makes it clear the number is historical.
+    STALE_SESSION_END_ANCHOR = "4348"
+
+    def test_readme_does_not_claim_4070_to_4348_as_current(self) -> None:
+        text = _read("README.md")
+        # Find any line that mentions the test count.
+        tests_line_re = re.compile(r"^Tests:.*$", re.MULTILINE)
+        match = tests_line_re.search(text)
+        self.assertIsNotNone(
+            match,
+            "README.md no longer has a 'Tests: ...' line; either restore "
+            "the line or update this regression test to match the new shape.",
+        )
+        tests_line = match.group(0)
+        # The pre-fix line was exactly:
+        #   ``Tests: 4070 -> 4348 passing across the session.``
+        # Post-fix it may still mention 4348 as the historical
+        # session-end anchor, but never as the current passing count.
+        # We anchor on the precise stale shape "4070 -> 4348 passing
+        # across the session" — the exact byte sequence the pre-fix
+        # README carried — and reject it.
+        stale_shape_re = re.compile(
+            r"4070\s*(?:->|→)\s*4348\s+passing\s+across\s+the\s+session",
+        )
+        self.assertNotRegex(
+            tests_line,
+            stale_shape_re,
+            "README.md still claims '4070 -> 4348 passing across the "
+            "session' as the current count. C5 + G2 added ~296 tests "
+            f"after the session rollup; live count is at least "
+            f"{self.HEAD_TEST_COUNT_FLOOR}.",
+        )
+
+    def test_readme_head_count_is_at_or_above_known_floor(self) -> None:
+        """If the README cites a current-HEAD test count, it must be >= floor.
+
+        The README's post-fix shape mentions both a historical session
+        anchor (4348) and a current HEAD count. The current HEAD count
+        must be >= ``HEAD_TEST_COUNT_FLOOR`` (4644 — the live count when
+        this test was added). The historical anchor stays unchanged
+        because it describes a frozen-in-time snapshot.
+        """
+        text = _read("README.md")
+        tests_line_re = re.compile(r"^Tests:.*$", re.MULTILINE)
+        match = tests_line_re.search(text)
+        self.assertIsNotNone(match)
+        tests_line = match.group(0)
+        # Extract every 4-digit integer in the tests line.
+        numbers = [int(n) for n in re.findall(r"\b(\d{4})\b", tests_line)]
+        self.assertTrue(
+            numbers,
+            "README.md tests-line carries no numeric test counts; "
+            "either restore a numeric count or update this test.",
+        )
+        # The highest number on the line is treated as the "current
+        # HEAD" claim — the README's post-fix shape uses the order
+        # ``session-start -> HEAD (parenthetical historical anchor)``
+        # so the HEAD number is the largest. Verify the largest number
+        # is at or above the known floor.
+        head_claim = max(numbers)
+        self.assertGreaterEqual(
+            head_claim,
+            self.HEAD_TEST_COUNT_FLOOR,
+            f"README.md tests-line cites '{head_claim}' as its highest "
+            f"test count but the live suite at HEAD has at least "
+            f"{self.HEAD_TEST_COUNT_FLOOR} tests; the README is stale.",
+        )
+
+
 class FrozenSurfaceLOCWaiverConsistencyTests(unittest.TestCase):
     """The frozen-surface LOC waiver cites a current LOC near the live file.
 
