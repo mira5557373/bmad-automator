@@ -762,5 +762,133 @@ class RecentlyShippedSectionDateBoundsTests(unittest.TestCase):
         )
 
 
+class ReadmeQuickStartKwargsCoverageTests(unittest.TestCase):
+    """README quick-start enumerates every OPTIONAL kwarg of ``run_production_gate``.
+
+    Pre-fix README.md:75-94 listed only 6 OPTIONAL kwargs
+    (``drift_watcher``, ``session_usage``, ``baseline_sha``,
+    ``fail_closed``, ``enable_pre_gate_verifier``, ``result_json_path``)
+    under the explicit banner ``--- session-2026-06-23 additive kwargs
+    (all OPTIONAL, default off) ---``. The live signature in
+    ``core/gate_orchestrator.run_production_gate`` carries 10 OPTIONAL
+    kwargs: the 6 above plus ``enable_lie_detector`` (Phase 1),
+    ``threshold_proposer`` (C5), ``isolation_mode`` (G2), and
+    ``max_workers`` (G2). The four omitted kwargs landed in the same
+    2026-06-23 / 2026-06-24 timeframe the README banner advertises;
+    operators copy-pasting the quick-start as a template would not
+    discover the C5 self-improving-gate hook or the G2
+    worktree-per-unit isolation surfaces.
+
+    The regression test introspects the live function signature and
+    asserts every OPTIONAL kwarg appears verbatim inside the README's
+    quick-start fenced code block, so any future kwarg added to the
+    signature without a corresponding README update trips this test.
+    """
+
+    REQUIRED_OPTIONAL_KWARGS = (
+        "enable_lie_detector",
+        "baseline_sha",
+        "fail_closed",
+        "enable_pre_gate_verifier",
+        "result_json_path",
+        "drift_watcher",
+        "session_usage",
+        "threshold_proposer",
+        "isolation_mode",
+        "max_workers",
+    )
+
+    def _quick_start_block(self, text: str) -> str:
+        # Anchor on the import line that already lives inside the
+        # quick-start code fence — the block extends from that line
+        # through the next ``` fence terminator.
+        anchor = "from story_automator.core.gate_orchestrator import run_production_gate"
+        start = text.find(anchor)
+        self.assertGreaterEqual(
+            start,
+            0,
+            "README.md quick-start anchor import line missing; the "
+            "regression test cannot locate the code block.",
+        )
+        end_fence = text.find("```", start)
+        self.assertGreaterEqual(
+            end_fence,
+            0,
+            "README.md quick-start code block is missing its closing "
+            "``` fence after the anchor import.",
+        )
+        return text[start:end_fence]
+
+    def test_readme_quick_start_lists_every_optional_kwarg(self) -> None:
+        text = _read("README.md")
+        block = self._quick_start_block(text)
+        missing = [
+            kw for kw in self.REQUIRED_OPTIONAL_KWARGS
+            if not re.search(rf"^\s*{re.escape(kw)}\s*=", block, re.MULTILINE)
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "README.md quick-start no longer enumerates every OPTIONAL "
+            f"kwarg of run_production_gate; missing: {missing}. "
+            "New operators copy-pasting the example as a template will "
+            "not learn of these observability surfaces.",
+        )
+
+    def test_required_kwarg_set_matches_live_signature(self) -> None:
+        """Defensive: the kwarg list above must mirror the live signature.
+
+        If a future milestone adds another OPTIONAL kwarg to
+        ``run_production_gate`` (say, an 11th), this assertion fires —
+        forcing both the README update AND a bump to
+        ``REQUIRED_OPTIONAL_KWARGS`` above. Without this guard the
+        README test above could silently lag a new kwarg until someone
+        re-audits the README by hand.
+        """
+        import inspect
+
+        module = importlib.import_module(
+            "story_automator.core.gate_orchestrator"
+        )
+        sig = inspect.signature(module.run_production_gate)
+        live_optional = {
+            name for name, p in sig.parameters.items()
+            if p.kind is inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        documented = set(self.REQUIRED_OPTIONAL_KWARGS)
+        # The signature also includes default-bearing keyword-only
+        # kwargs that predate Path B (``priority``,
+        # ``has_unmitigated_risk_9``, ``waivers``, ``audit_policy``,
+        # ``audit_path``); those are not part of the quick-start's
+        # "session 2026-06-23 additive kwargs" banner so we filter them
+        # by the documented set (intersection = the path-B family this
+        # test pins). New kwargs that show up in live_optional but not
+        # in documented are flagged below.
+        pre_path_b_kwargs = {
+            "priority",
+            "has_unmitigated_risk_9",
+            "waivers",
+            "audit_policy",
+            "audit_path",
+        }
+        new_in_live = live_optional - documented - pre_path_b_kwargs
+        self.assertEqual(
+            new_in_live,
+            set(),
+            "run_production_gate has new OPTIONAL kwargs not pinned by "
+            f"REQUIRED_OPTIONAL_KWARGS in this test: {sorted(new_in_live)}. "
+            "Add them to REQUIRED_OPTIONAL_KWARGS and update README.md.",
+        )
+        # And every documented kwarg must still exist on the function.
+        missing_from_live = documented - live_optional
+        self.assertEqual(
+            missing_from_live,
+            set(),
+            "REQUIRED_OPTIONAL_KWARGS references kwargs no longer on "
+            f"run_production_gate: {sorted(missing_from_live)}",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

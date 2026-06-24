@@ -85,12 +85,16 @@ result = run_production_gate(
     factory_version=factory_version,  # core.gate_orchestrator.resolve_factory_version()
     registry=registry,                # core.collector_registry.CollectorRegistry
     # --- session-2026-06-23 additive kwargs (all OPTIONAL, default off) ---
-    drift_watcher=None,               # core.innovation.spec_drift_watcher.SpecDriftWatcher
-    session_usage=None,               # core.innovation.cost_attribution.UsageMetrics
+    enable_lie_detector=False,        # phase-1 baseline-commit drift check
     baseline_sha=None,                # str — for the lie-detector
     fail_closed=False,                # phase-2 error-status forces FAIL
     enable_pre_gate_verifier=False,   # phase-3 inline checks
     result_json_path=None,            # phase-2 schema-pinned result.json output
+    drift_watcher=None,               # core.innovation.spec_drift_watcher.SpecDriftWatcher
+    session_usage=None,               # core.innovation.cost_attribution.UsageMetrics
+    threshold_proposer=None,          # core.innovation.threshold_proposer.ThresholdProposer (C5)
+    isolation_mode="shared",          # G2 — "shared" (default) or "per_unit" worktree-per-unit isolation
+    max_workers=4,                    # G2 — bounded parallelism for per_unit mode (RAM-aware clamp)
 )
 ```
 
