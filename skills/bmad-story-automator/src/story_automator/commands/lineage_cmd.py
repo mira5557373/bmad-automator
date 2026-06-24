@@ -174,7 +174,9 @@ def _build_parser(prog: str = "lineage") -> argparse.ArgumentParser:
             "Aggregate ledger statistics: per-genre counts, chain length, "
             "merkle_root over what's on disk, and orphan_count. Runs in "
             "lenient mode so dangling parent_root pointers don't mask "
-            "useful info."
+            "useful info; ``ok`` is true iff ``orphan_count == 0`` so the "
+            "stats / verify subcommands agree on chain integrity for the "
+            "same on-disk bytes."
         ),
     )
     _add_common(p_stats)
@@ -308,11 +310,21 @@ def stats_action(args: list[str]) -> int:
     genre_counts = {k: counts[k] for k in sorted(counts.keys())}
     root = compute_lineage_root(entries) if entries else ""
     orphan_count = len(find_orphans(entries)) if entries else 0
+    # ``ok`` reflects chain integrity, NOT just "stats query succeeded".
+    # An orphan is the lenient loader's receipt of a dangling parent_root
+    # pointer; emitting ``ok: True`` while ``orphan_count > 0`` contradicts
+    # the ``verify`` subcommand on the same on-disk state and risks leading
+    # an operator to quote a misleading ``merkle_root`` (which is hashed
+    # over the broken seq-ordered list, NOT what ``load_lineage_root``
+    # would persist into ``gate_file.lineage_root``). Keep ``merkle_root``
+    # populated as a best-effort field for diagnostics — but tie ``ok`` to
+    # ``orphan_count == 0`` so the three read-only surfaces (show, stats,
+    # verify) agree on chain integrity for the same bytes on disk.
     _emit({
         "chain_length": len(entries),
         "genres": genre_counts,
         "merkle_root": root,
-        "ok": True,
+        "ok": orphan_count == 0,
         "orphan_count": orphan_count,
     })
     return 0

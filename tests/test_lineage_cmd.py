@@ -148,6 +148,36 @@ class StatsActionTests(_Base):
             payload["merkle_root"], compute_lineage_root(entries)
         )
 
+    def test_stats_ok_false_when_chain_has_dangling_parent_root(self) -> None:
+        # Persist a valid genesis entry, then a second entry with a bogus
+        # parent_root. ``verify`` reports ok:false on this chain — ``stats``
+        # MUST agree on the integrity verdict. Pre-fix, ``stats`` returned
+        # ok:true unconditionally and shipped a misleading merkle_root over
+        # the broken seq-ordered list, contradicting the verify subcommand
+        # and what ``load_lineage_root`` would persist into the gate file.
+        e0 = _entry("brainstorm", "s0", parent_root="", body="b0")
+        persist_lineage_entry(self.project_root, e0)
+        bogus_parent = "f" * 64
+        e1 = _entry("brief", "s1", parent_root=bogus_parent, body="b1")
+        persist_lineage_entry(self.project_root, e1)
+        code, raw = self._run(stats_action, [])
+        self.assertEqual(code, 0)  # lenient loader still succeeds
+        payload = json.loads(raw)
+        self.assertEqual(payload["chain_length"], 2)
+        self.assertEqual(payload["orphan_count"], 1)
+        # Both surfaces must agree on chain integrity for the same bytes.
+        self.assertFalse(
+            payload["ok"],
+            "stats.ok must reflect chain integrity (orphan_count == 0)"
+            " — not 'CLI ran without crashing' — so it agrees with verify"
+            " on the same on-disk state.",
+        )
+        # Cross-check the parallel ``verify`` surface for the same data.
+        code_v, raw_v = self._run(verify_action, [])
+        payload_v = json.loads(raw_v)
+        self.assertFalse(payload_v["ok"])
+        self.assertEqual(payload["ok"], payload_v["ok"])
+
 
 class VerifyActionTests(_Base):
     def test_verify_happy_path_returns_ok_true(self) -> None:
