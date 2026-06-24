@@ -393,11 +393,16 @@ def load_gate_cost_report(
         raise CostEvidenceError(
             f"per_collector field in {sp} must be a list",
         )
-    shares = tuple(
-        _share_from_json(entry)
-        for entry in per_collector_raw
-        if isinstance(entry, dict)
-    )
+    try:
+        shares = tuple(
+            _share_from_json(entry)
+            for entry in per_collector_raw
+            if isinstance(entry, dict)
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CostEvidenceError(
+            f"malformed per_collector share at {sp}: {exc}",
+        ) from exc
     return GateCostReport(
         gate_id=str(data.get("gate_id", "")),
         session_usage=_usage_from_json(
@@ -430,4 +435,9 @@ def load_collector_cost_share(
         raise CostEvidenceError(
             f"collector share at {path} is not a JSON object",
         )
-    return _share_from_json(data)
+    try:
+        return _share_from_json(data)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CostEvidenceError(
+            f"malformed collector share at {path}: {exc}",
+        ) from exc

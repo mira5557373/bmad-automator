@@ -225,6 +225,82 @@ class EmissionTests(unittest.TestCase):
             # Frozen dataclasses raise FrozenInstanceError on mutation.
             report.gate_id = "mutated"  # type: ignore[misc]
 
+    def test_load_gate_cost_report_missing_share_fields_raises_CostEvidenceError(
+        self,
+    ) -> None:
+        """Regression — _share_from_json's bare ``data["input_tokens"]`` etc.
+        used to leak ``KeyError`` out of :func:`load_gate_cost_report`,
+        breaching the :class:`CostEvidenceError` contract documented at
+        the class docstring ("malformed on-disk JSON during load").
+        """
+
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        sp = cost_dir / "summary.json"
+        sp.write_text(
+            json.dumps(
+                {
+                    "gate_id": self.gate_id,
+                    "session_usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_cost_usd": 0.0,
+                        "tool_calls_count": 0,
+                        "duration_s": 0.0,
+                    },
+                    # Missing input_tokens/output_tokens/cost_usd/duration_s
+                    # /attribution_mode -- enters _share_from_json which
+                    # used to raise bare KeyError.
+                    "per_collector": [{"collector_id": "c1"}],
+                    "attribution_mode": "uniform",
+                    "total_cost_usd": 0.0,
+                    "collector_count": 1,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                },
+            ),
+        )
+        with self.assertRaises(CostEvidenceError):
+            load_gate_cost_report(self.root, self.gate_id)
+
+    def test_load_collector_cost_share_missing_fields_raises_CostEvidenceError(
+        self,
+    ) -> None:
+        """Regression — same contract gap, but on the per-collector
+        loader. A ``<collector_id>.json`` missing every required share
+        field used to raise ``KeyError`` rather than the documented
+        :class:`CostEvidenceError`.
+        """
+
+        path = collector_cost_path(self.root, self.gate_id, "c1")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"collector_id": "c1"}))
+        with self.assertRaises(CostEvidenceError):
+            load_collector_cost_share(self.root, self.gate_id, "c1")
+
+    def test_load_collector_cost_share_wrong_type_raises_CostEvidenceError(
+        self,
+    ) -> None:
+        """Regression — int()/float() casts inside _share_from_json
+        leaked ``ValueError`` rather than the documented
+        :class:`CostEvidenceError` when a field is the wrong type.
+        """
+
+        path = collector_cost_path(self.root, self.gate_id, "c1")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "collector_id": "c1",
+                    "input_tokens": "not-an-int",
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                    "duration_s": 0.0,
+                    "attribution_mode": "uniform",
+                },
+            ),
+        )
+        with self.assertRaises(CostEvidenceError):
+            load_collector_cost_share(self.root, self.gate_id, "c1")
+
 
 # ---------------------------------------------------------------------------
 # Group 2 — gate orchestrator integration
