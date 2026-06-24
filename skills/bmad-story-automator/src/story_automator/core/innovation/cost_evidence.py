@@ -298,6 +298,9 @@ def emit_gate_cost_report(
     Raises :class:`CostEvidenceError` BEFORE touching disk when:
 
     * ``collector_outcomes`` is empty,
+    * ``collector_outcomes`` contains a duplicate ``collector_id``
+      (rejected symmetrically across all attribution modes — see the
+      duplicate-id guard below),
     * ``attribution_mode`` is not in
       :data:`VALID_COST_ATTRIBUTION_MODES`,
     * ``attribution_mode == "tool-calls"`` (not yet captured by the
@@ -318,6 +321,25 @@ def emit_gate_cost_report(
         raise CostEvidenceError(
             f"unknown attribution_mode: {attribution_mode!r}; "
             f"valid modes are {VALID_COST_ATTRIBUTION_MODES}",
+        )
+    # Duplicate-id guard — runs BEFORE attribution dispatch so both
+    # "uniform" and "duration" modes reject the same illegal input
+    # symmetrically. Without this, duration mode silently collapses
+    # duplicate ids in its weight dict while still summing both into
+    # the total — producing a report whose collector_count and per-
+    # share weights disagree. Uniform mode raises via
+    # cost_attribution._require_collectors; we want parity.
+    cids = [o.config.collector_id for o in collector_outcomes]
+    seen: set[str] = set()
+    dupes: list[str] = []
+    for cid in cids:
+        if cid in seen and cid not in dupes:
+            dupes.append(cid)
+        seen.add(cid)
+    if dupes:
+        raise CostEvidenceError(
+            "duplicate collector_id in outcomes: "
+            f"{', '.join(repr(d) for d in dupes)}",
         )
 
     try:

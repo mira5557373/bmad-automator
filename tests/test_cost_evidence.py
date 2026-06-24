@@ -203,6 +203,48 @@ class EmissionTests(unittest.TestCase):
                 f"unexpected partial file: {sibling}",
             )
 
+    def test_duplicate_collector_id_raises_symmetrically_across_modes(
+        self,
+    ) -> None:
+        """Regression — duration mode used to silently collapse duplicate
+        collector_ids into a single dict entry while still summing both
+        outcomes into ``total_duration``. That produced a report with
+        ``collector_count=1`` despite two outcomes being passed, and the
+        surviving share's weight was computed against the wrong total.
+        Meanwhile uniform mode raised via ``_require_collectors``.
+
+        The duplicate-id guard runs BEFORE attribution dispatch so both
+        modes reject the same illegal input symmetrically — and BEFORE
+        the cost directory is touched (the per-collector ``.json`` files
+        would otherwise clobber on disk too).
+        """
+
+        outcomes = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("ruff", "docs", duration_ms=3000),
+        ]
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        # Duration mode (the buggy path) must now raise.
+        with self.assertRaises(CostEvidenceError) as ctx_dur:
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+                attribution_mode="duration",
+            )
+        self.assertIn("duplicate collector_id", str(ctx_dur.exception))
+        # Uniform mode already raised; confirm parity (same exception
+        # type, same trigger).
+        with self.assertRaises(CostEvidenceError) as ctx_uni:
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+                attribution_mode="uniform",
+            )
+        self.assertIn("duplicate collector_id", str(ctx_uni.exception))
+        # Pre-disk-touch invariant — neither call should have written
+        # cost files for a rejected input.
+        after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        self.assertEqual(before, after)
+
     def test_invalid_attribution_mode_raises_before_disk_touch(self) -> None:
         outcomes = [_make_outcome("a", "static")]
         cost_dir = get_cost_root_dir(self.root, self.gate_id)
