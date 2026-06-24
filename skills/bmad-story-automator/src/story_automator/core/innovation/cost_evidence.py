@@ -49,7 +49,7 @@ Attribution selection:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -451,10 +451,31 @@ def emit_gate_cost_report(
         raise CostEvidenceError(str(exc)) from exc
 
     ts = timestamp_iso if timestamp_iso is not None else iso_now()
+    # Normalize each share's ``attribution_mode`` from the substrate
+    # vocabulary ("duration-weighted" / "tool-call-weighted") to the
+    # cost_evidence vocabulary ("duration" / "tool-calls") so the
+    # IN-MEMORY GateCostReport returned to the caller is internally
+    # consistent under one closed vocabulary at both the top-level
+    # ``attribution_mode`` and each ``per_collector[*].attribution_mode``
+    # — mirroring the persistence-boundary normalization performed by
+    # ``_share_to_json`` / ``_share_from_json``. Without this, callers
+    # using the returned report's ``per_collector`` tuple directly
+    # (e.g. cross-checking against :data:`VALID_COST_ATTRIBUTION_MODES`)
+    # would see the off-vocab substrate string while disk and loader
+    # paths return the canonical vocab.
+    normalized_shares = tuple(
+        replace(
+            share,
+            attribution_mode=_normalize_attribution_mode(
+                share.attribution_mode,
+            ),
+        )
+        for share in shares
+    )
     report = GateCostReport(
         gate_id=gate_id,
         session_usage=session_usage,
-        per_collector=tuple(shares),
+        per_collector=normalized_shares,
         attribution_mode=actual_mode,
         total_cost_usd=float(session_usage.total_cost_usd),
         collector_count=len(shares),

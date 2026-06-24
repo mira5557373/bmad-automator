@@ -817,6 +817,63 @@ class EmissionTests(unittest.TestCase):
         )
         self.assertEqual(share_ruff.attribution_mode, report.attribution_mode)
 
+    def test_in_memory_return_value_attribution_mode_vocab_unified(
+        self,
+    ) -> None:
+        """Regression — the IN-MEMORY GateCostReport returned by
+        ``emit_gate_cost_report`` used to carry mismatched vocabularies:
+        the top-level ``attribution_mode`` was normalized to the
+        cost_evidence vocab (``"duration"``) via ``_attribute()``'s
+        second return, but each ``per_collector[*].attribution_mode``
+        carried the raw substrate vocab (``"duration-weighted"``) from
+        ``attribute_cost_by_duration``. Disk emission AND
+        ``load_gate_cost_report`` normalized via ``_share_to_json`` /
+        ``_share_from_json``, so the regression slipped past the
+        on-disk + round-tripped vocab tests above.
+
+        Any caller iterating ``report.per_collector`` directly and
+        cross-checking ``attribution_mode`` against
+        :data:`VALID_COST_ATTRIBUTION_MODES` saw the off-vocab string.
+        Fix normalizes each share's ``attribution_mode`` when building
+        the in-memory GateCostReport so the immediate return value
+        matches both disk-state and round-tripped state.
+        """
+        from story_automator.core.innovation.cost_evidence import (
+            VALID_COST_ATTRIBUTION_MODES,
+        )
+
+        outcomes = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("mypy", "static", duration_ms=3000),
+        ]
+        # NB: no disk round-trip — assert on the immediate return value.
+        report = emit_gate_cost_report(
+            self.root, self.gate_id, SESSION, outcomes,
+        )
+
+        # Top-level field is canonical.
+        self.assertIn(
+            report.attribution_mode, VALID_COST_ATTRIBUTION_MODES,
+            f"top-level in-memory attribution_mode "
+            f"{report.attribution_mode!r} not in canonical vocab",
+        )
+        # Every per-collector entry must be canonical AND agree with
+        # the top-level mode under the duration path.
+        for share in report.per_collector:
+            self.assertIn(
+                share.attribution_mode, VALID_COST_ATTRIBUTION_MODES,
+                f"in-memory per_collector[{share.collector_id!r}] "
+                f"attribution_mode {share.attribution_mode!r} not in "
+                f"canonical vocab {VALID_COST_ATTRIBUTION_MODES}",
+            )
+            self.assertEqual(
+                share.attribution_mode, report.attribution_mode,
+                f"in-memory per_collector[{share.collector_id!r}] "
+                f"attribution_mode {share.attribution_mode!r} != "
+                f"top-level {report.attribution_mode!r} — vocab "
+                f"divergence in the same in-memory dataclass",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Group 2 — gate orchestrator integration
