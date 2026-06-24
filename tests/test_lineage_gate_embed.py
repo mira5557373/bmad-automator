@@ -210,6 +210,74 @@ class SystemGateLineageEmbedTests(_GateTempMixin, unittest.TestCase):
         self.assertIn("lineage_root", result)
         self.assertEqual(result["lineage_root"], expected_root)
 
+    def test_run_system_gate_reuse_path_embeds_lineage_root(self) -> None:
+        """Round-2 bug fix #23 — reuse short-circuit must populate
+        ``lineage_root`` symmetrically with the fresh path.
+
+        Before the fix, ``run_system_gate``'s reuse short-circuit
+        (``if existing is not None: return existing``) returned the cached
+        gate_file unmodified, dropping the in-memory ``lineage_root`` field
+        that the fresh path explicitly attaches at the end of the function.
+        ``run_production_gate``'s reuse path re-derives both
+        ``evidence_merkle_root`` and ``lineage_root`` precisely to preserve
+        return-shape symmetry across cache hit / miss; this test pins the
+        symmetric behavior for ``run_system_gate``.
+        """
+        expected_root = _persist_demo_chain(self.project_root)
+        existing_gate = _make_gate_file()
+        with patch(
+            "story_automator.core.system_gate._recover_from_crash_locked"
+        ) as mock_recover, patch(
+            "story_automator.core.system_gate.check_gate_reuse"
+        ) as mock_reuse:
+            mock_recover.return_value = ({"recovered": False}, [])
+            mock_reuse.return_value = (existing_gate, "")
+            result = run_system_gate(
+                self.project_root,
+                "sg1",
+                epic_id="E1",
+                commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+            )
+        # Bug regression: reuse path was returning the cached dict without
+        # the ``lineage_root`` field. A caller doing result["lineage_root"]
+        # would KeyError on cache hit but succeed on cache miss.
+        self.assertIn("lineage_root", result)
+        self.assertEqual(result["lineage_root"], expected_root)
+
+    def test_run_system_gate_reuse_path_lineage_root_empty_sentinel(
+        self,
+    ) -> None:
+        """Reuse-path symmetry holds with no on-disk chain too.
+
+        When no lineage chain exists on disk, the fresh path embeds the
+        empty-string sentinel; the reuse path must do the same so callers
+        see a consistent return shape.
+        """
+        existing_gate = _make_gate_file()
+        with patch(
+            "story_automator.core.system_gate._recover_from_crash_locked"
+        ) as mock_recover, patch(
+            "story_automator.core.system_gate.check_gate_reuse"
+        ) as mock_reuse:
+            mock_recover.return_value = ({"recovered": False}, [])
+            mock_reuse.return_value = (existing_gate, "")
+            result = run_system_gate(
+                self.project_root,
+                "sg1",
+                epic_id="E1",
+                commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+            )
+        self.assertIn("lineage_root", result)
+        self.assertEqual(result["lineage_root"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

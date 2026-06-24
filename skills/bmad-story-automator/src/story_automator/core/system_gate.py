@@ -132,6 +132,22 @@ def run_system_gate(
                 audit_policy=audit_policy, audit_path=audit_path,
             )
             if existing is not None:
+                # Reuse path must populate the same UNCONDITIONAL in-memory
+                # additive fields the fresh path always sets (the
+                # ``lineage_root`` embed at the end of this function) so
+                # callers see a consistent return shape regardless of
+                # cache hit / miss. The on-disk gate JSON is by design
+                # byte-identical between fresh and reused (persist_gate_file
+                # ran at verdict_engine.py BEFORE this mutation on the
+                # original fresh run), so we re-derive the unconditional
+                # field here without rewriting disk. Conditional fields
+                # (``cost_total_usd``) stay opt-in via ``session_usage``
+                # and are NOT recomputed on reuse — the caller's
+                # session_usage pertains to the current call, not the
+                # cached run. Mirrors gate_orchestrator.run_production_gate
+                # reuse-path block.
+                from .innovation.lineage_ledger import load_lineage_root
+                existing["lineage_root"] = load_lineage_root(project_root)
                 return existing
 
             env_config = build_env_config(
