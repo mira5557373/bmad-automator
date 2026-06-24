@@ -228,6 +228,95 @@ class CaptureSessionUsageTests(unittest.TestCase):
         self.assertEqual(rb.parser_id, "unparseable")
         self.assertNotEqual(ra.parser_id, rb.parser_id)
 
+    def test_no_warning_for_contractually_zero_parsers_on_nonempty_input(
+        self,
+    ) -> None:
+        # Regression pin for the misleading "parser returned zero usage"
+        # warning. The "none" dialect is an operator-chosen no-op and
+        # the "codex"/"gemini-cli" dialects are documented stubs — all
+        # three are CONTRACTUALLY zero-returning regardless of input
+        # (see usage_parsers/{none,codex_rollout,gemini_chat}.py
+        # docstrings). Emitting a WARNING that they "returned zero
+        # usage for non-empty transcript" falsely implies degradation
+        # where there is none. The warning must NOT fire for any of
+        # these three cli_ids, even when the transcript file is
+        # non-empty.
+        import logging
+
+        from story_automator.core.innovation import session_usage_capture
+
+        # A non-trivial transcript so bytes_read > 0 in every call.
+        contents = '{"event": "token_count", "tokens": 100}\n'
+
+        for cli_id in ("none", "codex", "gemini-cli"):
+            path = _write_fixture(
+                self.root, f"nonempty-{cli_id}.jsonl", contents,
+            )
+            with self.assertLogs(
+                session_usage_capture.logger, level=logging.WARNING,
+            ) as cm:
+                # assertLogs requires at least one record; emit a
+                # sentinel so the context manager is satisfied even
+                # when our code (correctly) emits nothing.
+                session_usage_capture.logger.warning(
+                    "sentinel-%s", cli_id,
+                )
+                result = capture_session_usage(cli_id, path)
+            # The sentinel is the ONLY warning. The capture must not
+            # have emitted its own "returned zero usage" message for
+            # any of these three contractually-zero dialects.
+            non_sentinel = [
+                m for m in cm.output if "sentinel-" not in m
+            ]
+            self.assertEqual(
+                non_sentinel,
+                [],
+                msg=(
+                    f"capture_session_usage emitted a misleading "
+                    f"warning for contractually-zero cli_id={cli_id!r}: "
+                    f"{non_sentinel!r}"
+                ),
+            )
+            # Behavior remaining: bytes_read reflects the file size
+            # and zero usage still routes through the runtime-fallback
+            # sentinel for the stub dialects (parser_id distinguishes
+            # operator-"none" from runtime degrade exactly as before).
+            self.assertEqual(result.usage, UsageMetrics())
+            self.assertGreater(result.bytes_read, 0)
+            if cli_id == "none":
+                self.assertEqual(result.parser_id, "none")
+            else:
+                self.assertEqual(result.parser_id, "unparseable")
+
+    def test_warning_still_fires_for_real_parser_on_nonempty_input(
+        self,
+    ) -> None:
+        # Counter-pin: the suppression must NOT swallow the warning
+        # for the real claude-jsonl parser. When the operator points
+        # cli_id="claude-code" at a non-empty transcript that the
+        # parser cannot extract anything from, the misleading-degrade
+        # signal IS meaningful and the warning must still fire.
+        import logging
+
+        from story_automator.core.innovation import session_usage_capture
+
+        path = _write_fixture(
+            self.root, "garbled-real-parser.jsonl", "not json at all\n",
+        )
+        with self.assertLogs(
+            session_usage_capture.logger, level=logging.WARNING,
+        ) as cm:
+            capture_session_usage("claude-code", path)
+        # At least one warning that mentions "returned zero usage"
+        # must be present — this is the real-parser degrade signal.
+        self.assertTrue(
+            any("returned zero usage" in m for m in cm.output),
+            msg=(
+                "Real parser zero-on-nonempty warning must still fire; "
+                f"observed: {cm.output!r}"
+            ),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Group 2 — tmux convenience wrapper

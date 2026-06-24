@@ -81,6 +81,21 @@ logger = logging.getLogger(__name__)
 _FALLBACK_PARSER_ID: str = "unparseable"
 
 
+# Parser ids whose CONTRACT is to always return zero-valued
+# :class:`UsageMetrics`. The ``"none"`` dialect is an explicit
+# operator opt-out (see :mod:`story_automator.core.usage_parsers.none`);
+# the ``"codex-rollout"`` and ``"gemini-chat"`` dialects are documented
+# stubs that ignore their input until a real parser lands (see their
+# module docstrings). For these dialects, zero IS the spec — emitting a
+# WARNING that the parser "returned zero usage for non-empty transcript"
+# would falsely imply degradation. The warning suppression is keyed off
+# parser_id (not cli_id) so it stays in lockstep with the dialects even
+# if the cli_id -> parser_id mapping evolves.
+_ZERO_BY_CONTRACT_PARSER_IDS: frozenset[str] = frozenset(
+    {"none", "codex-rollout", "gemini-chat"}
+)
+
+
 class SessionUsageCaptureError(ValueError):
     """Raised when capture cannot proceed (missing file or unknown CLI).
 
@@ -208,7 +223,16 @@ def capture_session_usage(
     # distinction between the two cases observable.
     effective_parser_id = parser_id
     if usage == UsageMetrics() and parser_id != "none":
-        if bytes_read > 0:
+        # Only emit the "parser returned zero on non-empty input"
+        # warning when zero genuinely signals degradation. Stub
+        # parsers (codex-rollout, gemini-chat) and the operator-chosen
+        # "none" dialect are contractually zero-returning — see
+        # :data:`_ZERO_BY_CONTRACT_PARSER_IDS`. Logging there would
+        # falsely accuse a parser that is behaving exactly per spec.
+        if (
+            bytes_read > 0
+            and parser_id not in _ZERO_BY_CONTRACT_PARSER_IDS
+        ):
             logger.warning(
                 "session_usage_capture: parser %r returned zero usage for "
                 "non-empty transcript at %s (%d bytes); downgrading "
