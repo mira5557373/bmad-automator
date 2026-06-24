@@ -205,20 +205,26 @@ class RecoverFromCrashTests(unittest.TestCase):
         self.assertFalse(result["recovered"])
 
     def _rewrite_marker_with_dead_pid(self, gate_id: str, commit_sha: str) -> None:
-        """Replace the in-flight marker so its ``pid`` is a non-existent one.
+        """Replace the in-flight marker so its writer is unambiguously dead.
 
         ``write_gate_marker`` now stamps the current process's PID (L1 fix)
         so ``recover_from_crash`` can perform a liveness check. The
         recover-orphan-evidence tests want to exercise the post-crash
-        path — i.e. the writer is dead — which we simulate by overwriting
-        the marker after the fact with PID 999999.
+        path — i.e. the writer is dead — which we simulate by stamping a
+        ``hostname`` that cannot match ``socket.gethostname()``. The
+        foreign-host fast path at gate_orchestrator.py:269-274 forces
+        ``alive = False`` without consulting the local PID table, so the
+        test is robust regardless of whether PID 999999 happens to be
+        live on the host (theoretically reachable on Linux with
+        ``pid_max=4194304``).
         """
         import json as _json
         marker = {
             "gate_id": gate_id,
             "commit_sha": commit_sha,
             "started_at": "2026-06-20T00:00:00Z",
-            "pid": 999999,  # almost-certainly dead
+            "pid": 999999,  # PID is irrelevant on the foreign-host path
+            "hostname": "definitely-not-this-host.invalid",
         }
         path = (
             self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
@@ -336,6 +342,62 @@ class RecoverFromCrashTests(unittest.TestCase):
         )
         self.assertTrue(verdict_path.exists())
         # Marker should be cleared
+        marker_path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        self.assertFalse(marker_path.exists())
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_dead_pid_marker_robust_against_live_999999(self) -> None:
+        """Regression: the dead-pid test fixture must not depend on PID 999999
+        being absent on the host. On Linux ``pid_max=4194304`` makes 999999 a
+        reachable PID; if it happens to be alive when the test runs, the L1
+        liveness check at gate_orchestrator.py:264-301 would mark the marker
+        live and recovery would skip. The fixture sidesteps the PID table by
+        stamping a foreign ``hostname``, which triggers the fast path at
+        gate_orchestrator.py:269-274 and forces ``alive = False`` without any
+        PID lookup. This test pins that property by simulating PID 999999 as
+        very-much alive (with a fake create_time inside the legacy-marker
+        window): without the foreign-host marker the assertions below would
+        fail (live PID + matching create_time → recovery refuses to clean up).
+        """
+        gate_id = "crash-gate-999"
+        write_gate_marker(self.project_root, gate_id, "sha-crash")
+        self._rewrite_marker_with_dead_pid(gate_id, "sha-crash")
+
+        evidence_dir = (
+            self.project_root / "_bmad" / "gate" / "evidence" / gate_id
+        )
+        evidence_dir.mkdir(parents=True)
+        (evidence_dir / "dummy.json").write_text("{}")
+
+        # Simulate the worst case: PID 999999 IS alive AND its create_time
+        # falls inside the legacy-marker two-sided bound around
+        # ``started_at: 2026-06-20T00:00:00Z`` so the B1 fallback would
+        # NOT defeat it. The only thing keeping the test green is the
+        # foreign-host fast path.
+        from datetime import datetime
+
+        started_at_epoch = datetime.fromisoformat(
+            "2026-06-20T00:00:00+00:00",
+        ).timestamp()
+
+        fake_proc = MagicMock()
+        fake_proc.create_time.return_value = started_at_epoch  # in-bound
+        with patch(
+            "story_automator.core.gate_orchestrator.psutil.pid_exists",
+            return_value=True,
+        ), patch(
+            "story_automator.core.gate_orchestrator.psutil.Process",
+            return_value=fake_proc,
+        ):
+            result = recover_from_crash(self.project_root)
+
+        # Foreign-host marker → alive=False short-circuit → recovery runs.
+        self.assertTrue(result["recovered"])
+        self.assertEqual(result["gate_id"], gate_id)
+        self.assertFalse(result["had_verdict"])
+        self.assertFalse(evidence_dir.exists())
         marker_path = (
             self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
         )
