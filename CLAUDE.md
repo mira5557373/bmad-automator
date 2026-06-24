@@ -17,7 +17,7 @@
 
 - `skills/bmad-story-automator/` — installable main skill, contains the Python runtime
   - `src/story_automator/core/` — runtime building blocks (telemetry, tmux runtime, policy, verifiers, common helpers)
-  - `src/story_automator/core/innovation/` — cross-cutting observability + scoring substrate (spec-drift watcher + persistence, lineage ledger, cost attribution + cost evidence + session usage capture, RAMR, ledger, kernel classifier, adversarial review, replay diff, phase budget, stack risk weights, threshold proposer + apply + decisions + helpers)
+  - `src/story_automator/core/innovation/` — cross-cutting observability + scoring substrate (spec-drift watcher + persistence + types, lineage ledger, cost attribution + cost evidence + session usage capture, RAMR, ledger, kernel classifier, adversarial review, replay diff, phase budget, stack risk weights, threshold proposer + apply + decisions + helpers)
   - `src/story_automator/core/usage_parsers/` — provider-specific session-rollout parsers (`claude_jsonl`, `codex_rollout`, `gemini_chat`, `none`, `types`)
   - `src/story_automator/core/integration/` — cross-module integration helpers (e.g. `unified_state.py` for the sprint-phase dual-store unification)
   - `src/story_automator/core/bauto_bridge/` — bmad-auto-pattern compat shims (HookBus shim)

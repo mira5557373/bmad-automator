@@ -211,6 +211,99 @@ class ClaudeMdInnovationModuleMapEnumerationTests(unittest.TestCase):
         )
 
 
+class ClaudeMdInnovationLineSpecDriftFamilyEnumerationTests(unittest.TestCase):
+    """CLAUDE.md's module-map innovation line names the spec-drift sibling-split family.
+
+    Pre-fix the parenthetical at CLAUDE.md:20 named "spec-drift watcher
+    + persistence" but omitted the third sibling, ``spec_drift_types.py``
+    (a 210-LOC sibling-split that hosts the watcher's pure dataclasses
+    (``SpecDriftSnapshot``, ``SpecDriftEvent``), bespoke
+    ``SpecDriftError`` exception, severity-bucket constants, and four
+    standalone helpers — mirrors the ``threshold_proposer`` /
+    ``threshold_proposer_helpers`` pattern as the file's docstring
+    explicitly states). The same line names the threshold sibling family
+    in full (``threshold proposer + apply + decisions + helpers``), so
+    the asymmetric truncation of the spec-drift family hid public
+    surface from operators whom CLAUDE.md explicitly instructs to "Read
+    these existing modules before planning any new milestone".
+
+    The regression test pins the line-20 parenthetical to mention the
+    "types" token alongside "spec-drift" so the family enumeration stays
+    symmetric to the threshold family treatment on the same line.
+    """
+
+    INNOVATION_DIR = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+    )
+
+    def _module_map_innovation_line(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^  - `src/story_automator/core/innovation/`.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '  - `src/story_automator/core/"
+            "innovation/`' module-map line; update this regression test "
+            "to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_innovation_line_names_spec_drift_types_sibling(self) -> None:
+        line = self._module_map_innovation_line()
+        # The spec-drift sibling-split family is three modules:
+        # spec_drift_watcher.py, spec_drift_persistence.py,
+        # spec_drift_types.py. The parenthetical must name all three by
+        # listing "types" alongside "spec-drift watcher + persistence".
+        # Lowercase comparison so future re-wordings (e.g. "+ types and
+        # persistence") still pass as long as the token is present
+        # somewhere in the spec-drift enumeration.
+        lower = line.lower()
+        self.assertIn(
+            "spec-drift",
+            lower,
+            "CLAUDE.md module-map line for core/innovation/ no longer "
+            "mentions the spec-drift family at all; update this "
+            "regression test if the family was renamed.",
+        )
+        self.assertIn(
+            "types",
+            lower,
+            "CLAUDE.md module-map line for core/innovation/ does not "
+            "mention the spec_drift_types.py sibling-split module. "
+            "spec_drift_types.py is a 210-LOC sibling whose docstring "
+            "explicitly self-describes as a sibling-split mirroring the "
+            "threshold_proposer/threshold_proposer_helpers pattern. The "
+            "same line enumerates the threshold family in full "
+            "('threshold proposer + apply + decisions + helpers') so "
+            "the spec-drift family must be enumerated symmetrically.",
+        )
+
+    def test_innovation_dir_actually_carries_spec_drift_types_module(self) -> None:
+        """Defensive: the disk genuinely carries spec_drift_types.py.
+
+        If a future refactor folds the types back into the watcher (or
+        moves them out of ``core/innovation/``), the line-20 mention
+        becomes stale; this test trips so the module-map line gets
+        re-audited at the same commit.
+        """
+        expected = self.INNOVATION_DIR / "spec_drift_types.py"
+        self.assertTrue(
+            expected.exists(),
+            f"core/innovation/ no longer carries the expected spec-drift "
+            f"types sibling: missing {expected}. Either restore it or "
+            "update this regression test (and the CLAUDE.md module-map line).",
+        )
+
+
 class CostAttributionDocstringTests(unittest.TestCase):
     """``cost_attribution`` module docstring reflects C3 having shipped.
 
@@ -435,6 +528,7 @@ class SiblingModulePatternExemplarCompletenessTests(unittest.TestCase):
     REQUIRED_SIBLING_LEAVES = (
         "audit_env_scrub.py",
         "spec_drift_persistence.py",
+        "spec_drift_types.py",
         "gate_lock_observability.py",
         "collector_isolation_outcomes.py",
         "threshold_proposer_helpers.py",
