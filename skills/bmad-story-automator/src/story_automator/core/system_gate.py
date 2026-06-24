@@ -150,9 +150,18 @@ def run_system_gate(
                 )
 
             write_gate_marker(project_root, gate_id, commit_sha)
+            collector_outcomes: list = []
             try:
                 with system_env(env_config, str(project_root)) as env_info:
                     if not env_info.provisioned:
+                        # Bug fix (round 1, item 32): do NOT early-return
+                        # here. Returning bypasses the EpicGateDecisionAudit
+                        # emission + lineage_root embed below, leaving a
+                        # SystemGateStartedAudit with no matching decision
+                        # event (an audit-trail asymmetry) and a gate_file
+                        # missing the orchestrator-level fields its PASS
+                        # sibling carries. Construct the FAIL gate_file
+                        # and fall through to the unified post-lock block.
                         from .gate_schema import make_gate_file as _make_gate_file
 
                         gate_file = _make_gate_file(
@@ -168,25 +177,24 @@ def run_system_gate(
                             categories={}, overall="FAIL",
                         )
                         gate_file["_provision_failed"] = True
-                        return gate_file
+                    else:
+                        enriched = _inject_runtime_env(profile, env_info)
+                        collector_outcomes = run_gate_collectors(
+                            project_root, gate_id, commit_sha, enriched, registry,
+                            audit_policy=audit_policy, audit_path=audit_path,
+                            isolation_mode=isolation_mode,
+                            max_workers=max_workers,
+                        )
 
-                    enriched = _inject_runtime_env(profile, env_info)
-                    collector_outcomes = run_gate_collectors(
-                        project_root, gate_id, commit_sha, enriched, registry,
-                        audit_policy=audit_policy, audit_path=audit_path,
-                        isolation_mode=isolation_mode,
-                        max_workers=max_workers,
-                    )
-
-                target = {"kind": "epic", "id": epic_id}
-                gate_file = evaluate_gate(
-                    project_root, gate_id,
-                    commit_sha=commit_sha, target=target,
-                    profile=profile, factory_version=factory_version,
-                    priority=priority, waivers=waivers,
-                    audit_policy=audit_policy, audit_path=audit_path,
-                    tier="system",
-                )
+                        target = {"kind": "epic", "id": epic_id}
+                        gate_file = evaluate_gate(
+                            project_root, gate_id,
+                            commit_sha=commit_sha, target=target,
+                            profile=profile, factory_version=factory_version,
+                            priority=priority, waivers=waivers,
+                            audit_policy=audit_policy, audit_path=audit_path,
+                            tier="system",
+                        )
             finally:
                 clear_gate_marker(project_root)
         finally:

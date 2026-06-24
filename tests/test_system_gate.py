@@ -200,6 +200,110 @@ class RunSystemGateTests(unittest.TestCase):
         self.assertTrue(result.get("_provision_failed"))
 
 
+class ProvisionFailureAuditCompletenessTests(unittest.TestCase):
+    """Regression for round-1 fix #32 — provision-failure path must emit
+    EpicGateDecisionAudit, embed ``lineage_root``, and produce a gate_file
+    symmetric with the PASS path (minus cost — no collectors ran).
+
+    Before the fix, ``run_system_gate`` returned early at the
+    ``not env_info.provisioned`` branch, bypassing the unified
+    post-lock audit-emission + lineage-embed block. This left a
+    ``SystemGateStartedAudit`` with no matching ``EpicGateDecisionAudit``
+    in the audit chain (an asymmetry: every successful path emits both)
+    and a returned gate_file missing the ``lineage_root`` field that
+    operators expect on every system-tier gate.
+    """
+
+    def setUp(self) -> None:
+        self._saved_key = os.environ.pop("BMAD_AUDIT_KEY", None)
+        os.environ["BMAD_AUDIT_KEY"] = "test-canary-secret"
+
+    def tearDown(self) -> None:
+        os.environ.pop("BMAD_AUDIT_KEY", None)
+        if self._saved_key is not None:
+            os.environ["BMAD_AUDIT_KEY"] = self._saved_key
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.system_env")
+    @patch("story_automator.core.system_gate._recover_from_crash_locked")
+    @patch("story_automator.core.system_gate.check_gate_reuse")
+    def test_provision_failure_emits_epic_decision_audit_and_embeds_lineage_root(
+        self,
+        mock_reuse: MagicMock,
+        mock_recover: MagicMock,
+        mock_env: MagicMock,
+    ) -> None:
+        import json
+        from pathlib import Path
+
+        mock_reuse.return_value = (None, "")
+        mock_recover.return_value = ({"recovered": False}, [])
+
+        from story_automator.core.system_env import (
+            ENV_TIER_MINIMAL,
+            SystemEnvInfo,
+        )
+
+        env_info = SystemEnvInfo(
+            env_id="e1", tier=ENV_TIER_MINIMAL,
+            namespace="ns", provisioned=False,
+        )
+        mock_env.return_value.__enter__ = MagicMock(return_value=env_info)
+        mock_env.return_value.__exit__ = MagicMock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as td:
+            audit_path = Path(td) / "audit.jsonl"
+            result = run_system_gate(
+                td, "sg1",
+                epic_id="E1", commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+                audit_policy={"security": {"audit_trail": True}},
+                audit_path=audit_path,
+            )
+
+            # Behaviour-preserving asserts: still FAIL + _provision_failed.
+            self.assertEqual(result["overall"], "FAIL")
+            self.assertTrue(result.get("_provision_failed"))
+
+            # Bug fix #1: ``lineage_root`` must be present on every
+            # system-tier gate_file we hand back. Empty-string sentinel
+            # is acceptable when no chain exists on disk.
+            self.assertIn(
+                "lineage_root", result,
+                "provision-failure gate_file must embed lineage_root "
+                "(orchestrator-level field, symmetric with PASS path)",
+            )
+
+            # Bug fix #2: the audit log must contain BOTH the
+            # SystemGateStarted (already emitted before provision) AND
+            # the EpicGateDecision rendered for the FAIL verdict. The
+            # asymmetry — Started with no matching Decision — is the
+            # core audit-trail completeness gap this regression test
+            # pins.
+            self.assertTrue(audit_path.is_file())
+            events = []
+            with audit_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = json.loads(line)
+                    events.append(rec["event"])
+
+            self.assertIn(
+                "SystemGateStarted", events,
+                "pre-provision audit event must still be emitted",
+            )
+            self.assertIn(
+                "EpicGateDecision", events,
+                "EpicGateDecision must be emitted on provision-failure "
+                "FAIL — every Started event needs a matching Decision",
+            )
+
+
 class RouteEpicVerdictTests(unittest.TestCase):
     @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
     def test_pass_returns_done(self) -> None:
