@@ -65,7 +65,23 @@ VALID_ATTRIBUTION_MODES: tuple[str, ...] = (
     "duration-weighted",
     "tool-call-weighted",
 )
-"""Closed vocabulary for :attr:`CollectorCostShare.attribution_mode`."""
+"""Recommended vocabulary for :attr:`CollectorCostShare.attribution_mode`
+*when shares are produced by this module's helpers*.
+
+The three public helpers (:func:`attribute_cost_uniform`,
+:func:`attribute_cost_by_duration`, :func:`attribute_cost_by_tool_calls`)
+always tag their output shares with one of these literals. Downstream
+consumers (e.g. :mod:`~story_automator.core.innovation.cost_evidence`)
+re-tag with their own controlled vocabulary on persist / load, so
+:class:`CollectorCostShare` instances reaching disk-aware callers may
+legitimately carry a different string (e.g. ``"duration"`` /
+``"tool-calls"``). The dataclass itself does NOT enforce membership —
+``CollectorCostShare(..., attribution_mode="anything")`` is constructible
+— precisely because the substrate is shared by multiple persistence
+vocabularies. Callers that require a closed-vocabulary check must do so
+explicitly against the vocabulary appropriate to *their* layer (see
+:data:`story_automator.core.innovation.cost_evidence.VALID_COST_ATTRIBUTION_MODES`
+for the on-disk vocab)."""
 
 
 @dataclass(frozen=True)
@@ -76,6 +92,13 @@ class CollectorCostShare:
     share. ``attribution_mode`` records *how* this share was computed
     so downstream audit can distinguish a uniform fallback from a
     duration-weighted estimate.
+
+    ``attribution_mode`` is a free-form ``str`` by design — see
+    :data:`VALID_ATTRIBUTION_MODES` for the recommended vocabulary
+    when constructing shares via this module's helpers, but downstream
+    persistence layers (notably
+    :mod:`~story_automator.core.innovation.cost_evidence`) may carry
+    their own controlled vocabulary on shares loaded from disk.
     """
 
     collector_id: str

@@ -179,8 +179,11 @@ class FrozenAndSumInvariantTests(unittest.TestCase):
             share.cost_usd = 99.9  # type: ignore[misc]
 
     def test_attribution_mode_set_on_each_share(self) -> None:
-        # The mode label is non-optional and must be one of the
-        # closed vocabulary entries.
+        # The three public helpers always tag their output with one of
+        # the recommended vocabulary entries (see
+        # ``VALID_ATTRIBUTION_MODES``). Downstream persistence layers
+        # may legitimately carry a different vocabulary, but the
+        # in-module producers stick to the recommended set.
         modes_seen = set()
         modes_seen.update(
             s.attribution_mode
@@ -195,6 +198,43 @@ class FrozenAndSumInvariantTests(unittest.TestCase):
             for s in attribute_cost_by_tool_calls(SESSION, {"a": 1, "b": 2})
         )
         self.assertEqual(modes_seen, set(VALID_ATTRIBUTION_MODES))
+
+    def test_attribution_mode_is_free_form_string(self) -> None:
+        # Regression for round-2 bug sweep finding: the docstring on
+        # ``VALID_ATTRIBUTION_MODES`` used to claim it was the "closed
+        # vocabulary" for ``CollectorCostShare.attribution_mode``, but
+        # the frozen dataclass does NOT enforce membership. This is by
+        # design — :mod:`cost_evidence` legitimately constructs shares
+        # with its own controlled vocabulary (``"duration"`` /
+        # ``"tool-calls"``) via its ``_share_from_json`` loader, and
+        # adding strict ``__post_init__`` enforcement here would break
+        # that layer. This test pins the documented "free-form ``str``
+        # by design" contract so a future refactor that adds naive
+        # ``assert mode in VALID_ATTRIBUTION_MODES`` validation fails
+        # loudly here before it breaks the persistence layer.
+        share = CollectorCostShare(
+            collector_id="x",
+            input_tokens=1,
+            output_tokens=2,
+            cost_usd=0.01,
+            duration_s=1.0,
+            attribution_mode="hammer-time",  # not in VALID_ATTRIBUTION_MODES
+        )
+        self.assertEqual(share.attribution_mode, "hammer-time")
+        self.assertNotIn(share.attribution_mode, VALID_ATTRIBUTION_MODES)
+        # The cost_evidence vocab ("duration" / "tool-calls") must also
+        # round-trip through the constructor unchanged — that's the
+        # whole reason the dataclass field is intentionally permissive.
+        for cost_evidence_mode in ("duration", "tool-calls"):
+            s = CollectorCostShare(
+                collector_id="y",
+                input_tokens=0,
+                output_tokens=0,
+                cost_usd=0.0,
+                duration_s=0.0,
+                attribution_mode=cost_evidence_mode,
+            )
+            self.assertEqual(s.attribution_mode, cost_evidence_mode)
 
     def test_attribute_preserves_sum(self) -> None:
         session = UsageMetrics(
