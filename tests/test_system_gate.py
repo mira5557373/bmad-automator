@@ -261,5 +261,166 @@ class StoriesToReopenTests(unittest.TestCase):
         self.assertEqual(reopened, [])
 
 
+class RunSystemGateG2WiringTests(unittest.TestCase):
+    """AC-G-08 — ``run_system_gate`` accepts + forwards G2 kwargs.
+
+    Mirrors ``test_gate_orchestrator_g2_wiring.py``: validation runs
+    early (before host check / lock acquisition), defaults are
+    ``shared`` + ``4``, and the kwargs reach ``run_gate_collectors``.
+    """
+
+    def _build_env_info(self):
+        from story_automator.core.system_env import (
+            ENV_TIER_MINIMAL,
+            SystemEnvInfo,
+        )
+
+        return SystemEnvInfo(env_id="e1", tier=ENV_TIER_MINIMAL, namespace="ns")
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.assert_host_context")
+    def test_invalid_isolation_mode_raises_before_host_check(
+        self, mock_host: MagicMock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError):
+                run_system_gate(
+                    td, "sg1",
+                    epic_id="E1", commit_sha="abc",
+                    epic_metadata={},
+                    profile=_minimal_profile(),
+                    factory_version="1.0.0",
+                    registry=CollectorRegistry(),
+                    isolation_mode="bogus",
+                )
+        mock_host.assert_not_called()
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.assert_host_context")
+    def test_invalid_max_workers_raises_before_host_check(
+        self, mock_host: MagicMock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(TypeError):
+                run_system_gate(
+                    td, "sg1",
+                    epic_id="E1", commit_sha="abc",
+                    epic_metadata={},
+                    profile=_minimal_profile(),
+                    factory_version="1.0.0",
+                    registry=CollectorRegistry(),
+                    max_workers="four",  # type: ignore[arg-type]
+                )
+        mock_host.assert_not_called()
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.assert_host_context")
+    def test_invalid_max_workers_bool_raises(
+        self, mock_host: MagicMock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(TypeError):
+                run_system_gate(
+                    td, "sg1",
+                    epic_id="E1", commit_sha="abc",
+                    epic_metadata={},
+                    profile=_minimal_profile(),
+                    factory_version="1.0.0",
+                    registry=CollectorRegistry(),
+                    max_workers=True,  # type: ignore[arg-type]
+                )
+        mock_host.assert_not_called()
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.system_env")
+    @patch("story_automator.core.system_gate.evaluate_gate")
+    @patch("story_automator.core.system_gate.run_gate_collectors")
+    @patch("story_automator.core.system_gate._recover_from_crash_locked")
+    @patch("story_automator.core.system_gate.check_gate_reuse")
+    def test_default_isolation_mode_is_shared(
+        self,
+        mock_reuse: MagicMock,
+        mock_recover: MagicMock,
+        mock_collectors: MagicMock,
+        mock_evaluate: MagicMock,
+        mock_env: MagicMock,
+    ) -> None:
+        mock_reuse.return_value = (None, "")
+        mock_recover.return_value = ({"recovered": False}, [])
+        mock_collectors.return_value = []
+
+        env_info = self._build_env_info()
+        mock_env.return_value.__enter__ = MagicMock(return_value=env_info)
+        mock_env.return_value.__exit__ = MagicMock(return_value=False)
+        mock_evaluate.return_value = {
+            "gate_id": "sg1", "schema_version": 1, "tier": "system",
+            "target": {"kind": "epic", "id": "E1"},
+            "commit_sha": "abc",
+            "profile": {"id": "test", "version": 1, "hash": "h1"},
+            "factory_version": "1.0.0", "categories": {},
+            "overall": "PASS", "waivers": [],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            run_system_gate(
+                td, "sg1",
+                epic_id="E1", commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+            )
+        mock_collectors.assert_called_once()
+        _, kwargs = mock_collectors.call_args
+        self.assertEqual(kwargs["isolation_mode"], "shared")
+        self.assertEqual(kwargs["max_workers"], 4)
+
+    @patch.dict(os.environ, {"_STORY_AUTOMATOR_HOST": "1"}, clear=False)
+    @patch("story_automator.core.system_gate.system_env")
+    @patch("story_automator.core.system_gate.evaluate_gate")
+    @patch("story_automator.core.system_gate.run_gate_collectors")
+    @patch("story_automator.core.system_gate._recover_from_crash_locked")
+    @patch("story_automator.core.system_gate.check_gate_reuse")
+    def test_per_unit_kwargs_threaded_through(
+        self,
+        mock_reuse: MagicMock,
+        mock_recover: MagicMock,
+        mock_collectors: MagicMock,
+        mock_evaluate: MagicMock,
+        mock_env: MagicMock,
+    ) -> None:
+        mock_reuse.return_value = (None, "")
+        mock_recover.return_value = ({"recovered": False}, [])
+        mock_collectors.return_value = []
+
+        env_info = self._build_env_info()
+        mock_env.return_value.__enter__ = MagicMock(return_value=env_info)
+        mock_env.return_value.__exit__ = MagicMock(return_value=False)
+        mock_evaluate.return_value = {
+            "gate_id": "sg1", "schema_version": 1, "tier": "system",
+            "target": {"kind": "epic", "id": "E1"},
+            "commit_sha": "abc",
+            "profile": {"id": "test", "version": 1, "hash": "h1"},
+            "factory_version": "1.0.0", "categories": {},
+            "overall": "PASS", "waivers": [],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            run_system_gate(
+                td, "sg1",
+                epic_id="E1", commit_sha="abc",
+                epic_metadata={},
+                profile=_minimal_profile(),
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+                isolation_mode="per_unit",
+                max_workers=2,
+            )
+        mock_collectors.assert_called_once()
+        _, kwargs = mock_collectors.call_args
+        self.assertEqual(kwargs["isolation_mode"], "per_unit")
+        self.assertEqual(kwargs["max_workers"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

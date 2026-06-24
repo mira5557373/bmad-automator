@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from typing import TYPE_CHECKING
 
+from .collector_isolation import _validate_isolation_kwargs
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from filelock import Timeout
@@ -63,6 +64,8 @@ def run_system_gate(
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
     session_usage: "UsageMetrics | None" = None,
+    isolation_mode: Literal["shared", "per_unit"] = "shared",
+    max_workers: int = 4,
 ) -> dict[str, Any]:
     """Full system-altitude gate lifecycle.
 
@@ -78,7 +81,21 @@ def run_system_gate(
     delegates to :func:`gate_orchestrator._recover_from_crash_locked`
     because ``filelock`` is not re-entrant across separate ``FileLock``
     instances.
+
+    G2 (additive): ``isolation_mode`` + ``max_workers`` mirror
+    :func:`gate_orchestrator.run_production_gate`. Default
+    ``"shared"`` preserves byte-identical behavior. ``"per_unit"``
+    drives each system collector into its own fresh worktree inside a
+    bounded ``ThreadPoolExecutor``. Both kwargs are type/value
+    validated EARLY — before ``assert_host_context`` and before the
+    gate-lock acquisition — so invalid values raise without leaving
+    any marker or partial state on disk (HIGH #6).
     """
+    # HIGH #6 — validate isolation kwargs BEFORE any other work, so
+    # invalid values raise without acquiring the gate lock and without
+    # leaving a partial marker on disk. Validated in BOTH modes.
+    _validate_isolation_kwargs(isolation_mode, max_workers)
+
     assert_host_context("run_system_gate")
 
     # K-5: best-effort janitor pass before locking. Same rationale as
@@ -156,6 +173,8 @@ def run_system_gate(
                 collector_outcomes = run_gate_collectors(
                     project_root, gate_id, commit_sha, enriched, registry,
                     audit_policy=audit_policy, audit_path=audit_path,
+                    isolation_mode=isolation_mode,
+                    max_workers=max_workers,
                 )
 
             target = {"kind": "epic", "id": epic_id}

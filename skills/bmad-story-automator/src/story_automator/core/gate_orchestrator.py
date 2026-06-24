@@ -12,7 +12,7 @@ import socket
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import psutil
 from filelock import Timeout
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .innovation.threshold_proposer import ThresholdProposer
     from .usage_parsers import UsageMetrics
 
+from .collector_isolation import _validate_isolation_kwargs
 from .collector_registry import CollectorRegistry
 from .collector_runner import run_gate_collectors
 from .evidence_io import (
@@ -588,12 +589,20 @@ def _run_collectors(
     diff_categories: set[str] | None = None,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
+    isolation_mode: Literal["shared", "per_unit"] = "shared",
+    max_workers: int = 4,
 ) -> list[Any]:
-    """Wrapper for testability — delegates to run_gate_collectors."""
+    """Wrapper for testability — delegates to run_gate_collectors.
+
+    G2 (additive): forwards ``isolation_mode`` + ``max_workers`` to
+    ``run_gate_collectors``. Defaults preserve byte-identical behavior.
+    """
     return run_gate_collectors(
         project_root, gate_id, commit_sha, profile, registry,
         diff_categories=diff_categories,
         audit_policy=audit_policy, audit_path=audit_path,
+        isolation_mode=isolation_mode,
+        max_workers=max_workers,
     )
 
 
@@ -646,6 +655,8 @@ def run_production_gate(
     drift_watcher: "SpecDriftWatcher | None" = None,
     session_usage: "UsageMetrics | None" = None,
     threshold_proposer: "ThresholdProposer | None" = None,
+    isolation_mode: Literal["shared", "per_unit"] = "shared",
+    max_workers: int = 4,
 ) -> dict[str, Any]:
     """Full gate lifecycle: crash recovery -> reuse -> [lie-detect] -> collect -> evaluate.
 
@@ -730,7 +741,25 @@ def run_production_gate(
     collectors. The default-off behavior preserves every existing call
     site; flip the default in a future milestone after operator
     confidence is built.
+
+    ``isolation_mode`` (G2, default ``"shared"``) — selects the
+    collector-execution shape. ``"shared"`` runs the historical
+    single-checkout sequential loop (byte-identical to pre-G2).
+    ``"per_unit"`` drives each collector into its own fresh worktree
+    inside a bounded ``ThreadPoolExecutor``. ``max_workers`` (default
+    ``4``) sizes the parallel pool; it is RAM- and CPU-clamped by
+    ``_clamp_max_workers``. Both kwargs are type/value validated
+    EARLY — before ``assert_host_context`` and before the gate-lock
+    acquisition — so invalid values raise without leaving any
+    marker or partial state on disk (HIGH #6).
     """
+    # HIGH #6 — validate isolation kwargs BEFORE any other work, so
+    # invalid values raise without acquiring the gate lock and without
+    # leaving a partial marker on disk. Validated in BOTH modes
+    # (``max_workers="four"`` in ``shared`` still raises) to prevent
+    # operator footguns when flipping mode later.
+    _validate_isolation_kwargs(isolation_mode, max_workers)
+
     assert_host_context("run_production_gate")
 
     if enable_pre_gate_verifier:
@@ -825,6 +854,8 @@ def run_production_gate(
             collector_outcomes = _run_collectors(
                 project_root, gate_id, commit_sha, profile, registry,
                 audit_policy=audit_policy, audit_path=audit_path,
+                isolation_mode=isolation_mode,
+                max_workers=max_workers,
             )
             gate_file = evaluate_gate(
                 project_root, gate_id,
