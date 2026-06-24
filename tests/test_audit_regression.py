@@ -885,9 +885,38 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         # callers may write:
         #   sandboxed = scrub_env_for_subprocess(env)
         #   subprocess.run(..., env=sandboxed)
+        #
+        # ``scrubbed_names`` is snapshot/restored on every FunctionDef /
+        # AsyncFunctionDef boundary so the binding is scoped to the
+        # ENCLOSING FUNCTION as the docstring at
+        # ``test_ast_no_unscrubbed_subprocess_in_core`` promises. Without
+        # the snapshot, a ``sandboxed = scrub_env_for_subprocess(...)``
+        # in function ``a`` would leak into function ``b`` and silently
+        # accept a ``subprocess.run(..., env=sandboxed)`` where
+        # ``sandboxed`` is bound to a raw env dict — a false-negative
+        # path for the D-04 audit-floor invariant.
         class _Visitor(ast.NodeVisitor):
             def __init__(self) -> None:
                 self.scrubbed_names: set[str] = set()
+
+            def _visit_function(self, node) -> None:
+                # Snapshot+restore the scrubbed-name set across the
+                # function boundary so bindings made inside ``node`` do
+                # not leak into sibling functions, and bindings made in
+                # the enclosing scope (e.g. module-level) remain
+                # available to nested closures.
+                saved = self.scrubbed_names
+                self.scrubbed_names = set(saved)
+                try:
+                    self.generic_visit(node)
+                finally:
+                    self.scrubbed_names = saved
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                self._visit_function(node)
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                self._visit_function(node)
 
             def visit_Assign(self, node: ast.Assign) -> None:
                 if is_scrub_call(node.value):
@@ -1269,6 +1298,180 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "accepted an unscrubbed env=dict literal after a bare "
             "annotation — visit_AnnAssign must guard ``node.value is "
             "not None`` AND must not bind a name without a scrub call",
+        )
+
+    def test_scrub_binding_is_function_scoped(self) -> None:
+        """The docstring at ``test_ast_no_unscrubbed_subprocess_in_core``
+        promises the walker accepts ``env=<name>`` only when ``<name>``
+        was bound by ``scrub_env_for_subprocess(...)`` IN THE SAME
+        FUNCTION. Without ``visit_FunctionDef`` / ``visit_AsyncFunctionDef``
+        snapshotting ``scrubbed_names``, a binding made in function A
+        leaks into function B and silently accepts an unscrubbed
+        ``subprocess.run(..., env=<same name>)`` there — a false-negative
+        path for the D-04 audit-floor invariant.
+        """
+        import ast
+
+        # (a) BAD — function ``a`` binds ``sandboxed`` via scrub_env, then
+        # function ``b`` binds the SAME name to a raw env dict and calls
+        # subprocess.run(..., env=sandboxed). With module-scoped
+        # tracking, b's call is falsely accepted; with function-scoped
+        # tracking, b's call is flagged.
+        cross_function_leak_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def a(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                return sandboxed
+
+            def b(raw_env):
+                sandboxed = raw_env
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        offenders = self._module_offenders(ast.parse(cross_function_leak_src))
+        self.assertEqual(
+            len(offenders),
+            1,
+            "Walker FAILED to flag subprocess.run(env=sandboxed) inside "
+            "function ``b`` even though ``sandboxed`` is bound to a raw "
+            "env dict there — module-scoped scrubbed_names is leaking "
+            "function ``a``'s binding into ``b``'s scope, contradicting "
+            "the 'in the same function' contract in the docstring at "
+            "test_ast_no_unscrubbed_subprocess_in_core",
+        )
+
+        # (b) BAD — ordering-independent variant: function ``b`` (the
+        # leaker) appears BEFORE function ``a`` (the scrubber) in source
+        # order. The walker must flag b's call regardless of source
+        # order; module-scoped tracking that processes a first would
+        # produce a different verdict than module-scoped tracking that
+        # processes b first, so this case pins the per-function reset
+        # rather than just a "names from later functions don't bleed
+        # backward" weaker property.
+        reversed_order_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def b(raw_env):
+                sandboxed = raw_env
+                subprocess.run(["ls"], env=sandboxed)
+
+            def a(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                return sandboxed
+            """
+        )
+        offenders = self._module_offenders(ast.parse(reversed_order_src))
+        self.assertEqual(
+            len(offenders),
+            1,
+            "Walker FAILED to flag subprocess.run(env=sandboxed) inside "
+            "function ``b`` when ``b`` appears before ``a`` in source "
+            "order — function-scope isolation must be order-independent",
+        )
+
+        # (c) BAD — undefined name case. Function ``a`` binds
+        # ``sandboxed`` via scrub_env; function ``b`` references the
+        # SAME name without defining it. At runtime ``b`` would raise
+        # NameError; at AST-check time the walker must still flag
+        # because the name is not bound to scrub_env_for_subprocess
+        # IN THE SAME FUNCTION.
+        undefined_name_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def a(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                return sandboxed
+
+            def b():
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        offenders = self._module_offenders(ast.parse(undefined_name_src))
+        self.assertEqual(
+            len(offenders),
+            1,
+            "Walker FAILED to flag subprocess.run(env=sandboxed) inside "
+            "function ``b`` where ``sandboxed`` is not defined — "
+            "module-scoped scrubbed_names is bleeding from ``a``",
+        )
+
+        # (d) GOOD — async-function variant of the same-function safe
+        # pattern. Pins the AsyncFunctionDef branch of the per-function
+        # snapshot.
+        async_safe_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            async def safe(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(async_safe_src)),
+            [],
+            "Walker FALSELY flagged a same-function scrub-and-use pattern "
+            "inside an async def — visit_AsyncFunctionDef must mirror "
+            "visit_FunctionDef's snapshot behavior",
+        )
+
+        # (e) BAD — async cross-function leak. Pins that the
+        # AsyncFunctionDef branch RESTORES the saved scrubbed_names on
+        # exit (not just that it snapshots on entry).
+        async_cross_function_leak_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            async def a(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                return sandboxed
+
+            async def b(raw_env):
+                sandboxed = raw_env
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        offenders = self._module_offenders(ast.parse(async_cross_function_leak_src))
+        self.assertEqual(
+            len(offenders),
+            1,
+            "Walker FAILED to flag async-function cross-function leak — "
+            "visit_AsyncFunctionDef must restore the saved scrubbed_names",
+        )
+
+        # (f) GOOD — nested closure inherits the enclosing function's
+        # scrub binding. The snapshot pattern uses ``set(saved)`` (a
+        # COPY), so an inner function reads its enclosing function's
+        # bindings while its own bindings do not leak out.
+        nested_closure_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def outer(env):
+                sandboxed = scrub_env_for_subprocess(env)
+
+                def inner():
+                    subprocess.run(["ls"], env=sandboxed)
+
+                inner()
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(nested_closure_src)),
+            [],
+            "Walker FALSELY flagged a nested closure reading its "
+            "enclosing function's scrubbed name — the per-function "
+            "snapshot must seed the inner scope from the saved set",
         )
 
     def test_positive_failure_bypass_idioms_are_caught(self) -> None:
