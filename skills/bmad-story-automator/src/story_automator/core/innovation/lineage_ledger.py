@@ -263,40 +263,82 @@ def verify_lineage(
 def find_orphans(entries: Sequence[LineageEntry]) -> list[LineageEntry]:
     """Return entries whose ``parent_root`` does not match a known root.
 
-    "Known roots" are the running Merkle roots of every non-empty prefix
-    of ``entries`` (in input order), plus the empty string (which means
-    "I am the genesis entry").  Any entry whose ``parent_root`` is not
-    in that set is an orphan: its claimed parent does not appear in the
-    set we were given, so we cannot prove its provenance from this data
-    alone.
+    Order-independent: the chain order is reconstructed topologically by
+    following ``parent_root`` pointers from the genesis entry. This means
+    callers can pass entries in any order (alpha-sorted, persist-order,
+    arbitrary) and ``find_orphans`` will produce the same result for any
+    structurally valid chain. Concretely, the function:
 
-    Multi-genesis corruption is also flagged: at most ONE entry may carry
-    ``parent_root == ""`` (the first such entry in input order is the
-    legitimate genesis). Any subsequent entry that also claims genesis is
-    returned as an orphan — :func:`build_lineage_chain` would refuse such
-    a chain at line 1 (``entries_list[0].parent_root != ""``), so the
-    lenient orphan-detection CLI surface (``lineage orphans`` /
-    ``lineage stats``) must surface the corruption rather than report a
-    spurious clean chain. ``lineage verify`` remains the strict mode.
+    1. Identifies the genesis (the unique entry with ``parent_root == ""``).
+       Multi-genesis corruption flags every extra genesis as an orphan
+       (:func:`build_lineage_chain` would refuse such a chain at line 1).
+    2. Iteratively extends the chain by finding the entry whose
+       ``parent_root`` equals the running Merkle root.
+    3. Any entry not reachable by this walk — because its claimed parent
+       does not appear in the dataset — is an orphan.
+
+    Topological reconstruction is what makes this robust against the
+    lenient loader (``commands/lineage_cmd._load_entries_lenient``), which
+    falls back to alphabetical ordering when the disk index has no usable
+    ``seq`` field. Under input-order semantics, alpha-sorted entries would
+    produce phantom orphans for structurally intact chains.
     """
     entries_list = list(entries)
-    known_roots: set[str] = {""}
-    for idx in range(1, len(entries_list) + 1):
-        known_roots.add(compute_lineage_root(entries_list[:idx]))
+    if not entries_list:
+        return []
 
-    orphans: list[LineageEntry] = []
-    seen_genesis = False
+    # Phase 1: collect genesis claimants. Only the first parent_root=='' is
+    # a legitimate genesis; every subsequent claimant is an orphan.
+    genesis: LineageEntry | None = None
+    extra_genesis: list[LineageEntry] = []
+    non_genesis: list[LineageEntry] = []
     for entry in entries_list:
         if entry.parent_root == "":
-            # Only the first parent_root=='' is a legitimate genesis;
-            # every subsequent claimant is a multi-genesis corruption.
-            if seen_genesis:
-                orphans.append(entry)
+            if genesis is None:
+                genesis = entry
             else:
-                seen_genesis = True
-            continue
-        if entry.parent_root not in known_roots:
+                extra_genesis.append(entry)
+        else:
+            non_genesis.append(entry)
+
+    if genesis is None:
+        # No genesis entry at all — every non-genesis entry's parent_root
+        # is unreachable.
+        return list(non_genesis)
+
+    # Phase 2: topologically walk the chain by following parent_root
+    # pointers. Group non-genesis entries by their parent_root so each
+    # extension step is O(1) lookup.
+    by_parent: dict[str, list[LineageEntry]] = {}
+    for entry in non_genesis:
+        by_parent.setdefault(entry.parent_root, []).append(entry)
+
+    chain: list[LineageEntry] = [genesis]
+    placed: set[int] = {id(genesis)}
+    running_root = compute_lineage_root(chain)
+    while running_root in by_parent:
+        candidates = by_parent[running_root]
+        # Multiple entries claiming the same parent_root means the chain
+        # forks. The first candidate (input order) is the canonical next
+        # link; the rest are fork-orphans whose parent_root points at a
+        # real root but whose lineage was never extended into the chain.
+        nxt = candidates[0]
+        chain.append(nxt)
+        placed.add(id(nxt))
+        running_root = compute_lineage_root(chain)
+
+    # Phase 3: every non-genesis entry not placed in the chain is an
+    # orphan. Preserve input order so the output is deterministic.
+    orphans: list[LineageEntry] = []
+    for entry in non_genesis:
+        if id(entry) not in placed:
             orphans.append(entry)
+    orphans.extend(extra_genesis)
+    # Sort by original input position so callers receive orphans in the
+    # same order they were passed in (matches the prior input-order
+    # output contract for the cases that did work).
+    position = {id(e): idx for idx, e in enumerate(entries_list)}
+    orphans.sort(key=lambda e: position[id(e)])
     return orphans
 
 

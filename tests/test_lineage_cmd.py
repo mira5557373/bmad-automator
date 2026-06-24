@@ -211,6 +211,40 @@ class OrphansActionTests(_Base):
         self.assertEqual(len(payload["orphans"]), 1)
         self.assertEqual(payload["orphans"][0]["slug"], "s1")
 
+    def test_orphans_non_alpha_persist_order_without_seq_no_false_positives(
+        self,
+    ) -> None:
+        # Persist a non-alpha order: kernel first, brainstorm second. Then
+        # strip the seq keys from the index to simulate a legacy/migrated
+        # index where the lenient loader falls back to alpha order. The
+        # chain is structurally intact (brainstorm's parent_root references
+        # the kernel-only prefix root), so find_orphans must NOT report any
+        # phantom orphans — it should walk the chain topologically rather
+        # than rely on input ordering. See lineage_ledger.find_orphans.
+        e_kernel = _entry("kernel", "s1", parent_root="", body="k1")
+        persist_lineage_entry(self.project_root, e_kernel)
+        parent_after_kernel = compute_lineage_root([e_kernel])
+        e_brainstorm = _entry(
+            "brainstorm", "s1", parent_root=parent_after_kernel, body="b1"
+        )
+        persist_lineage_entry(self.project_root, e_brainstorm)
+        # Strip the seq keys from index.json — lenient loader will then
+        # fall back to alpha tie-break (brainstorm < kernel), which is the
+        # OPPOSITE of persist/chain order.
+        idx_path = self.project_root / "_bmad" / "lineage" / "index.json"
+        idx_data = json.loads(idx_path.read_text())
+        for key in list(idx_data["entries"].keys()):
+            idx_data["entries"][key].pop("seq", None)
+        idx_path.write_text(
+            json.dumps(idx_data, sort_keys=True, separators=(",", ":"))
+        )
+        code, raw = self._run(orphans_action, [])
+        self.assertEqual(code, 0)
+        payload = json.loads(raw)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["orphan_count"], 0)
+        self.assertEqual(payload["orphans"], [])
+
 
 class DispatchTests(_Base):
     def test_dispatch_unknown_action_returns_nonzero(self) -> None:
