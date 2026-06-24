@@ -28,11 +28,13 @@ The four fixes pinned here:
 
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 import tempfile
 import textwrap
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from story_automator.core.evidence_io import (
@@ -100,13 +102,20 @@ class WaiverExpiryOnReuseInvariant(_Mixin, unittest.TestCase):
         self.assertIn("waiver expired", reason)
 
     def test_unexpired_waiver_allows_reuse(self) -> None:
+        # Use dynamic future dates so this test does NOT become a time bomb.
+        # See ``test_unexpired_waiver_fixture_has_no_hardcoded_year_literal``
+        # for the regression rationale (calendar drift would otherwise flip
+        # the assertion shape and mask a real §6.4(e) regression).
+        now = datetime.now(timezone.utc)
+        issued_at = now.isoformat()
+        expires_at = (now + timedelta(days=1)).isoformat()
         gate = self._gate(
             waivers=[
                 {
                     "waiver_id": "01J90000000000000000000F",
                     "operator_id": "mira",
-                    "issued_at": "2099-01-01T00:00:00Z",
-                    "expires_at": "2099-12-31T23:59:59Z",
+                    "issued_at": issued_at,
+                    "expires_at": expires_at,
                     "failing_categories": ["security"],
                     "reason": "infra dependency",
                     "signature": "sig",
@@ -121,6 +130,34 @@ class WaiverExpiryOnReuseInvariant(_Mixin, unittest.TestCase):
             factory_version="1.15.0",
         )
         self.assertTrue(ok)
+
+    def test_unexpired_waiver_fixture_has_no_hardcoded_year_literal(self) -> None:
+        """Regression test for the 2099-12-31 time bomb.
+
+        The previous fixture pinned ``expires_at = '2099-12-31T23:59:59Z'``,
+        which would silently flip ``test_unexpired_waiver_allows_reuse`` to
+        a ``waiver expired`` failure after that date — indistinguishable in
+        CI from a real §6.4(e) regression. This invariant pins the dynamic
+        fixture so the time-bomb cannot reappear via copy-paste or revert.
+        """
+        source = inspect.getsource(self.test_unexpired_waiver_allows_reuse)
+        # Specifically reject the historical 2099 literal that was the
+        # original time-bomb. Other year literals (e.g. inside docstring
+        # references) are not the bug here, so we keep the rule narrow.
+        self.assertNotIn(
+            "2099",
+            source,
+            "fixture must use dynamic dates (datetime.now + timedelta), not "
+            "hardcoded year literals — see the 2099-12-31 time-bomb finding",
+        )
+        # And it MUST actually use a dynamic date helper, not just be
+        # silent. This pins the fix forward.
+        self.assertIn(
+            "datetime.now",
+            source,
+            "fixture must derive expires_at from datetime.now to avoid a "
+            "future time bomb",
+        )
 
 
 # ---------------------------------------------------------------------------
