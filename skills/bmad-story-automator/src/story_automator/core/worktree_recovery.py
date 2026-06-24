@@ -22,6 +22,7 @@ repo is a no-op.
 Determinism: the returned descriptor does NOT contain timestamps;
 only counts + the list of removed paths. Safe to log.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -64,7 +65,7 @@ def _registered_worktrees(project_root: str | Path) -> set[str]:
     paths: set[str] = set()
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            paths.add(line[len("worktree "):].strip())
+            paths.add(line[len("worktree ") :].strip())
     return paths
 
 
@@ -89,8 +90,7 @@ def _scratch_candidates() -> list[Path]:
         return []
     try:
         return [
-            p for p in tmp_root.iterdir()
-            if p.name.startswith(_COLLECTOR_PREFIX) and p.is_dir()
+            p for p in tmp_root.iterdir() if p.name.startswith(_COLLECTOR_PREFIX) and p.is_dir()
         ]
     except OSError:
         return []
@@ -101,6 +101,7 @@ def recover_orphan_worktrees(
     *,
     min_age_s: float = 3600.0,
     now: float | None = None,
+    per_unit_window_s: float = 0.0,
 ) -> dict[str, Any]:
     """Clean up orphaned collector worktrees + their scratch dirs.
 
@@ -114,6 +115,16 @@ def recover_orphan_worktrees(
             call ``time.time()`` once at the start. Determinism in
             the returned descriptor is preserved either way — we do
             NOT include ``now`` in the payload.
+        per_unit_window_s: optional safety-margin (seconds) for
+            operators running the janitor right after a per-unit
+            collector dispatch crash. The per-unit path raises the
+            ``git worktree add`` timeout to 90s, so an in-flight
+            worker on a slow disk can leave a scratch dir up to ~90s
+            old that is still active. Defaults to ``0.0`` — when
+            zero, the effective age threshold is ``min_age_s``
+            (byte-identical to today). When non-zero, the effective
+            age threshold becomes ``max(min_age_s, per_unit_window_s)``
+            so the higher of the two windows wins.
 
     Returns:
         A descriptor of what was done::
@@ -126,7 +137,8 @@ def recover_orphan_worktrees(
             }
     """
     root = Path(project_root)
-    cutoff = (time.time() if now is None else now) - min_age_s
+    effective_min_age = max(min_age_s, per_unit_window_s)
+    cutoff = (time.time() if now is None else now) - effective_min_age
 
     pruned = _prune_registry(root)
     registered = _registered_worktrees(root)
