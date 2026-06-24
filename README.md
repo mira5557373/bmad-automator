@@ -19,7 +19,7 @@ The repository contains:
   changelog entries under `docs/changelog/`, and audit status reports
   under `docs/audit/`.
 
-## What shipped this session (2026-06-23)
+## What shipped this session (2026-06-23 + 2026-06-24)
 
 This session closed out the cost / lineage / drift observability arc
 plus the operability + bug-sweep cleanup that preceded it. Highlights:

@@ -1036,6 +1036,148 @@ class RecentlyShippedSectionDateBoundsTests(unittest.TestCase):
         )
 
 
+class ReadmeWhatShippedSectionDateBoundsTests(unittest.TestCase):
+    """README.md "What shipped this session (...)" heading bounds its bullets.
+
+    Pre-fix README.md:22 read ``## What shipped this session (2026-06-23)``
+    while the section body at lines 23-67 discussed both C5 (changelog
+    ``docs/changelog/2026-06-23-c5-self-improving-gate.md``) and G2
+    (changelog ``docs/changelog/2026-06-24-g2-worktree-per-unit.md``).
+    G2's authoritative changelog filename anchors it on 2026-06-24, but
+    the README heading asserted every milestone in its body shipped on
+    2026-06-23 alone, so the README misrepresented the date range it
+    covered. Commit 8772327 had already fixed the identical drift in
+    CLAUDE.md:59 ("session 2026-06-23" -> "sessions 2026-06-23 +
+    2026-06-24") and pinned it via ``RecentlyShippedSectionDateBoundsTests``
+    above, but the parallel README heading remained unprotected.
+
+    This regression test mirrors the CLAUDE.md test pattern for the
+    README's "What shipped this session (...)" heading: parse the
+    heading for the latest bounding date, then assert every dated
+    changelog file referenced by a bullet in that section has a date
+    <= the bounding date. Body-level mentions of C5 + G2 (lines 62-63)
+    and quick-start kwargs (lines 96-97) ensure the bullets reach
+    forward to 2026-06-24 work, so the heading must too.
+    """
+
+    DATED_CHANGELOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+    SECTION_HEADING_RE = re.compile(
+        r"^## What shipped this session \((.+?)\)$",
+        re.MULTILINE,
+    )
+    DATE_IN_HEADING_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+    CHANGELOG_DIR = REPO_ROOT / "docs" / "changelog"
+
+    def _section_body(self, text: str) -> tuple[str, str]:
+        """Return (heading_inner, body) for the "What shipped" section."""
+        match = self.SECTION_HEADING_RE.search(text)
+        self.assertIsNotNone(
+            match,
+            "README.md no longer has a '## What shipped this session (...)' "
+            "heading; update this regression test to match the new shape.",
+        )
+        start = match.end()
+        # Find the next '## ' heading after the section start.
+        next_heading = re.search(r"^## ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return match.group(1), text[start:end]
+
+    def _bounding_date(self, heading_inner: str) -> tuple[int, int, int]:
+        """Latest YYYY-MM-DD date mentioned in the section heading."""
+        dates = self.DATE_IN_HEADING_RE.findall(heading_inner)
+        self.assertTrue(
+            dates,
+            f"Section heading '{heading_inner}' carries no YYYY-MM-DD "
+            "date; the section header must bound its bullets by date.",
+        )
+        return max((int(y), int(m), int(d)) for (y, m, d) in dates)
+
+    def _milestone_tags_in_body(self, body: str) -> set[str]:
+        """Lower-case milestone slugs hinted by the section body.
+
+        Sources of milestone tags include:
+
+        * Bullet boldface labels of shape ``- **<tag>** ...`` or
+          ``- **<tag1> / <tag2>** ...`` (e.g. ``- **C1 / C2 / C3**``).
+        * Body-prose mentions of milestone tokens shaped like a
+          capital letter / capital letter + digit / capital letter +
+          digit + dot-digit (e.g. ``C5``, ``G2``, ``N6.5``,
+          ``D-04``). The README's session-rollup paragraph at lines
+          62-63 ("C5 + G2 landed afterward") references work whose
+          changelog files anchor the section's bounding-date floor,
+          so the extractor must surface those tags even when no
+          boldface bullet carries them.
+
+        Tokens are lower-cased and split on ``/`` / ``+`` delimiters
+        before being returned.
+        """
+        tags: set[str] = set()
+        # Source 1: boldface bullet labels.
+        for line in body.splitlines():
+            m = re.match(r"^- \*\*([^*]+)\*\*", line)
+            if not m:
+                continue
+            label = m.group(1).strip().lower()
+            # Split a compound bullet label like "C1 / C2 / C3" or
+            # "L1 / L2 / L1-followup" into individual milestone tags.
+            for part in re.split(r"[/+]", label):
+                token_match = re.match(r"\s*([a-z0-9.]+)", part)
+                if token_match:
+                    tags.add(token_match.group(1))
+        # Source 2: body-prose mentions of milestone tokens shaped
+        # like ``C5``, ``G2``, ``N6.5``, ``D-04``. Anchor on a
+        # capital letter followed by one or more digits with an
+        # optional ``.<digit>`` minor-version segment; require a
+        # non-word-char boundary on both sides so e.g. ``ABC123`` is
+        # not picked up.
+        token_re = re.compile(r"(?<![\w-])([A-Z]\d+(?:\.\d+)?)(?![\w-])")
+        for token in token_re.findall(body):
+            tags.add(token.lower())
+        return tags
+
+    def test_section_heading_bounds_dated_changelog_milestones(self) -> None:
+        text = _read("README.md")
+        heading_inner, body = self._section_body(text)
+        bound = self._bounding_date(heading_inner)
+        tags = self._milestone_tags_in_body(body)
+        # For each tag, find the matching dated changelog file (if any)
+        # and assert its date <= the section's bounding date. We accept
+        # tags that have no matching changelog file (e.g. follow-up
+        # work folded into a parent file) — only positive matches are
+        # asserted.
+        violations: list[str] = []
+        for changelog in self.CHANGELOG_DIR.iterdir():
+            if not changelog.is_file():
+                continue
+            name = changelog.name
+            if not self.DATED_CHANGELOG_RE.match(name):
+                continue
+            # Filename shape: YYYY-MM-DD-<slug>.md where slug starts
+            # with the milestone tag, e.g. ``2026-06-24-g2-worktree-...``.
+            head = name[:10]
+            slug = name[11:-3] if name.endswith(".md") else name[11:]
+            # The leading slug segment up to the first '-' is the tag.
+            tag_segment = slug.split("-", 1)[0].lower()
+            if tag_segment not in tags:
+                continue
+            try:
+                y, m, d = (int(head[0:4]), int(head[5:7]), int(head[8:10]))
+            except ValueError:
+                continue
+            if (y, m, d) > bound:
+                violations.append(
+                    f"{name} (date {head}) > section bound "
+                    f"{bound[0]:04d}-{bound[1]:02d}-{bound[2]:02d}",
+                )
+        self.assertEqual(
+            violations,
+            [],
+            "README.md '## What shipped this session (...)' heading does "
+            "not bound the latest changelog date of its bullets: "
+            f"{violations}",
+        )
+
+
 class ReadmeQuickStartKwargsCoverageTests(unittest.TestCase):
     """README quick-start enumerates every OPTIONAL kwarg of ``run_production_gate``.
 
