@@ -136,15 +136,23 @@ are kept stable. The trailer is required so the audit log can map
 each commit back to the agent that authored it; reviewers reject
 commits without the trailer.
 
-### Audit-floor invariants (26 green)
+### Audit-floor invariants (11 green)
 
 `tests/test_audit_regression.py` is the audit-floor regression net.
-Every contribution MUST keep that suite green. The invariants are
-each pinned to a specific frozen-surface behavior — see
-`docs/spec/frozen-gate-surface.md` for the per-invariant mapping.
-Two of the current 26 (`UnifiedStateWriteIsolationInvariant`) were
-added by milestone G7 in this session; future invariants will land
-the same way:
+Every contribution MUST keep that suite green. "11 green" counts
+invariant **classes** (the structural unit each "+1 invariant"
+milestone increments); the same suite currently exposes 40 test
+methods across those 11 classes, because most invariants pin
+several orthogonal sub-behaviors. When milestone summaries quote
+a delta (e.g. CLAUDE.md's G2 "10 → 11"), they refer to the class
+count; when an older summary quotes a method-count delta (e.g.
+the G7-era "24 → 26"), the prose annotates which metric it used.
+The invariants are each pinned to a specific frozen-surface
+behavior — see `docs/spec/frozen-gate-surface.md` for the
+per-invariant mapping. One of the current 11
+(`UnifiedStateWriteIsolationInvariant`, two test methods inside
+that single class) was added by milestone G7 in this session;
+future invariants will land the same way:
 
 1. Add a new test method to `tests/test_audit_regression.py`.
 2. Reference it in `docs/spec/frozen-gate-surface.md` under
@@ -153,7 +161,7 @@ the same way:
    post-fix tree before merging.
 
 Once an invariant lands, it MUST NOT be skipped, narrowed, or
-removed; regressing the count below 26 is a release-blocking
+removed; regressing the class count below 11 is a release-blocking
 condition.
 
 ### Sibling-module pattern (audit_env_scrub, spec_drift_persistence, gate_lock_observability)

@@ -167,9 +167,18 @@ class ContributingSectionHeadingsTests(unittest.TestCase):
     REQUIRED_HEADINGS = (
         "## sw-style discipline",
         "### TDD pattern",
-        "### Audit-floor invariants (26 green)",
         "### Sibling-module pattern",
         "### Additive-only `gate_file` field rule",
+    )
+
+    # Audit-floor heading is matched by a regex rather than a fixed string
+    # so the documented class count can be bumped (e.g. "11 green" → "12
+    # green") without breaking this test on every new invariant; the
+    # regression test that actually pins the count against the live suite
+    # lives in ``AuditFloorInvariantCountConsistencyTests`` below.
+    AUDIT_FLOOR_HEADING_RE = re.compile(
+        r"^### Audit-floor invariants \(\d+ green\)$",
+        re.MULTILINE,
     )
 
     def test_contributing_section_headings_present(self) -> None:
@@ -179,6 +188,85 @@ class ContributingSectionHeadingsTests(unittest.TestCase):
             missing,
             [],
             f"CONTRIBUTING.md missing required section headings: {missing}",
+        )
+
+    def test_contributing_audit_floor_heading_present(self) -> None:
+        text = _read("CONTRIBUTING.md")
+        self.assertRegex(
+            text,
+            self.AUDIT_FLOOR_HEADING_RE,
+            "CONTRIBUTING.md missing '### Audit-floor invariants (N green)' "
+            "heading with a numeric class count.",
+        )
+
+
+class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
+    """The "N green" count in CONTRIBUTING.md matches the live class count.
+
+    Pre-fix CONTRIBUTING.md was anchored at "26 green" (a stale
+    test-method count snapshot from polish commit 79fbd75) while C5 and
+    G2 subsequently added two more invariant classes. CLAUDE.md
+    simultaneously quoted "10 → 11" using a per-class delta and
+    "24 → 26" using a per-method delta, leaving no single source of
+    truth. The fix pins one metric — invariant **classes** — across all
+    operator-facing docs and uses this regression test to keep them
+    aligned with the live ``tests/test_audit_regression.py`` count.
+    """
+
+    AUDIT_REGRESSION_PATH = REPO_ROOT / "tests" / "test_audit_regression.py"
+    AUDIT_FLOOR_HEADING_RE = re.compile(
+        r"^### Audit-floor invariants \((\d+) green\)$",
+        re.MULTILINE,
+    )
+    # Top-level ``class`` defs whose name ends in ``Invariant`` or
+    # ``Baseline``. Excludes the ``_Mixin`` helper. This is the metric
+    # CLAUDE.md's G2 entry ("10 → 11") increments and the metric
+    # CONTRIBUTING.md is anchored against.
+    CLASS_DEF_RE = re.compile(
+        r"^class\s+\w+(?:Invariant|Baseline)\b",
+        re.MULTILINE,
+    )
+
+    def _live_class_count(self) -> int:
+        text = self.AUDIT_REGRESSION_PATH.read_text(encoding="utf-8")
+        return len(self.CLASS_DEF_RE.findall(text))
+
+    def test_contributing_heading_matches_live_class_count(self) -> None:
+        live = self._live_class_count()
+        contributing = _read("CONTRIBUTING.md")
+        match = self.AUDIT_FLOOR_HEADING_RE.search(contributing)
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md missing '### Audit-floor invariants (N green)' "
+            "heading.",
+        )
+        documented = int(match.group(1))
+        self.assertEqual(
+            documented,
+            live,
+            f"CONTRIBUTING.md heading says '{documented} green' but "
+            f"tests/test_audit_regression.py has {live} invariant classes; "
+            "bump the heading and the release-blocking guard line below it.",
+        )
+
+    def test_contributing_release_blocking_line_matches_live_class_count(self) -> None:
+        live = self._live_class_count()
+        contributing = _read("CONTRIBUTING.md")
+        release_block_re = re.compile(
+            r"regressing the class count below (\d+) is a release-blocking",
+        )
+        match = release_block_re.search(contributing)
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md missing 'regressing the class count below N is "
+            "a release-blocking' sentence anchored to the live class count.",
+        )
+        documented = int(match.group(1))
+        self.assertEqual(
+            documented,
+            live,
+            f"CONTRIBUTING.md release-blocking floor pins '{documented}' "
+            f"but live class count is {live}; both must move together.",
         )
 
 
