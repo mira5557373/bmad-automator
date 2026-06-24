@@ -5,14 +5,16 @@ persists evidence via persist_evidence_record, and emits audit events.
 Full gate collector loop creates a fresh checkout, iterates applicable
 collectors, persists evidence, and returns collected outcomes.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .adjudicator import resolve_timeout, run_collector_with_timeout
 from .collector_checkout import collector_checkout
 from .collector_config import CollectorConfig, CollectorOutcome
+from .collector_isolation import _validate_isolation_kwargs
 from .collector_registry import CollectorRegistry
 from .evidence_io import persist_evidence_record
 from .gate_audit import EvidenceCollectedAudit, emit_gate_audit
@@ -71,7 +73,9 @@ def run_single_collector(
                 ),
             )
         return CollectorOutcome(
-            config=config, evidence=evidence, persisted_path=persisted,
+            config=config,
+            evidence=evidence,
+            persisted_path=persisted,
         )
 
     evidence = run_collector_with_timeout(
@@ -119,6 +123,8 @@ def run_gate_collectors(
     diff_categories: set[str] | None = None,
     audit_policy: dict[str, Any] | None = None,
     audit_path: Path | None = None,
+    isolation_mode: Literal["shared", "per_unit"] = "shared",
+    max_workers: int = 4,
 ) -> list[CollectorOutcome]:
     """Run all applicable collectors for a gate evaluation.
 
@@ -132,16 +138,42 @@ def run_gate_collectors(
     failure surfaces as an evidence record with ``status="error"`` and
     a synthetic ``exit_code=-1`` so the verdict engine treats it as
     real evidence rather than missing evidence.
+
+    G2 (additive): ``isolation_mode`` selects between the shared-checkout
+    loop (default ``"shared"`` — byte-identical to pre-G2) and the
+    per-unit worktree dispatch (``"per_unit"``) which runs each collector
+    inside its own fresh worktree in a bounded ``ThreadPoolExecutor``.
+    ``max_workers`` is the requested parallelism for ``per_unit``; it is
+    clamped by ``_clamp_max_workers``. In ``"shared"`` mode the kwarg has
+    no behavioral effect but is still type-validated to prevent operator
+    footguns when flipping mode later (HIGH #6).
     """
+    # HIGH #6 — early kwarg validation BEFORE assert_host_context so
+    # invalid kwargs raise even in a child-session env, and before any
+    # gate-lock or checkout work happens.
+    _validate_isolation_kwargs(isolation_mode, max_workers)
     assert_host_context("run_gate_collectors")
     collectors = registry.applicable(profile)
     if diff_categories is not None:
-        collectors = [
-            c for c in collectors if c.category in diff_categories
-        ]
+        collectors = [c for c in collectors if c.category in diff_categories]
     if not collectors:
         return []
 
+    if isolation_mode == "per_unit":
+        from .collector_isolation import run_collectors_per_unit
+
+        return run_collectors_per_unit(
+            project_root,
+            gate_id,
+            commit_sha,
+            profile,
+            collectors,
+            max_workers=max_workers,
+            audit_policy=audit_policy,
+            audit_path=audit_path,
+        )
+
+    # Existing shared-mode path — BYTE-IDENTICAL to pre-G2.
     outcomes: list[CollectorOutcome] = []
     with collector_checkout(project_root, commit_sha) as checkout:
         for config in collectors:
@@ -167,7 +199,9 @@ def run_gate_collectors(
                 )
                 try:
                     persisted = persist_evidence_record(
-                        project_root, gate_id, evidence,
+                        project_root,
+                        gate_id,
+                        evidence,
                     )
                 except Exception:
                     persisted = None
