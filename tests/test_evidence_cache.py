@@ -392,6 +392,107 @@ class EvidenceCacheTests(unittest.TestCase):
             )
             self.assertEqual(second, disk_after)
 
+    def test_invalidate_all_does_not_unmask_stale_load(self) -> None:
+        """Regression: ``invalidate_all_evidence_cache`` MUST NOT erase
+        the per-key generation signal that a concurrent
+        ``invalidate_evidence_cache`` raised.
+
+        Scenario:
+          1. Thread A enters ``cached_load_evidence_bundle`` for key K
+             with the cache cold, snapshots ``gen_at_entry = 0``,
+             releases the lock, and reads disk (1 record).
+          2. Driver persists V2 via ``persist_evidence_record`` — this
+             bumps ``_GEN[K]`` to 1 via ``invalidate_evidence_cache``.
+          3. Driver calls ``invalidate_all_evidence_cache``. Pre-fix
+             this RESET ``_GEN`` to ``{}``, masking the just-fired
+             per-key bump.
+          4. Thread A re-acquires the lock, reads
+             ``current_gen = _GEN.get(K, 0) = 0`` (pre-fix), matches
+             ``gen_at_entry == 0``, and stores its 1-record bundle.
+          5. The next reader hits the cache and is served a stale
+             1-record bundle even though disk has 2.
+
+        Fix: bulk-drop must BUMP every existing ``_GEN`` entry, not
+        clear them. Then A re-acquires, sees ``current_gen == 2``
+        (1 from the persist + 1 from the bulk-bump) vs
+        ``gen_at_entry == 0`` and refuses to store.
+        """
+        from story_automator.core import evidence_cache, evidence_io
+
+        # Cold cache. Disk has exactly one record.
+        _seed_record(self.root, "g1", tool="ruff")
+        invalidate_all_evidence_cache()
+
+        a_captured_disk = threading.Event()
+        a_may_relock = threading.Event()
+
+        real_load = evidence_io.load_evidence_bundle
+
+        def stale_capture_load(project_root: object, gate_id: str):
+            # Read disk RIGHT NOW (only 1 record present), then park
+            # until the driver has persisted V2 + called invalidate_all.
+            result = real_load(project_root, gate_id)
+            a_captured_disk.set()
+            a_may_relock.wait(timeout=5.0)
+            return result
+
+        thread_a_result: list[list[dict]] = []
+        thread_a_error: list[BaseException] = []
+
+        def thread_a_worker() -> None:
+            try:
+                original = evidence_io.load_evidence_bundle
+                evidence_io.load_evidence_bundle = stale_capture_load
+                try:
+                    bundle = evidence_cache.cached_load_evidence_bundle(
+                        self.root, "g1",
+                    )
+                    thread_a_result.append(bundle)
+                finally:
+                    evidence_io.load_evidence_bundle = original
+            except BaseException as exc:  # noqa: BLE001
+                thread_a_error.append(exc)
+
+        thread_a = threading.Thread(target=thread_a_worker)
+        thread_a.start()
+        try:
+            self.assertTrue(
+                a_captured_disk.wait(timeout=5.0),
+                "Thread A never captured the pre-persist disk snapshot",
+            )
+            # Persist V2 — this bumps _GEN[K] to 1 via the persist's
+            # invalidate_evidence_cache call.
+            _seed_record(self.root, "g1", tool="mypy", collector="mypy")
+            disk_after_persist = load_evidence_bundle(self.root, "g1")
+            self.assertEqual(
+                len(disk_after_persist), 2,
+                "Driver persist did not actually land on disk",
+            )
+            # Bulk-drop. Pre-fix: _GEN.clear() erases the just-bumped
+            # entry. Post-fix: each existing entry is bumped by 1.
+            invalidate_all_evidence_cache()
+            # Release Thread A. It will re-acquire the lock and inspect
+            # the per-key generation.
+            a_may_relock.set()
+        finally:
+            thread_a.join(timeout=5.0)
+            self.assertFalse(thread_a.is_alive(), "Thread A hung")
+        if thread_a_error:
+            raise thread_a_error[0]
+        self.assertEqual(len(thread_a_result), 1)
+        # The decisive assertion: the next reader must observe the
+        # current disk state (2 records), NOT Thread A's 1-record
+        # stale snapshot. Pre-fix this fails because A's snapshot
+        # was silently cached.
+        next_read = cached_load_evidence_bundle(self.root, "g1")
+        self.assertEqual(
+            len(next_read), 2,
+            "Cache served stale bundle after bulk-drop unmasked the "
+            f"per-key gen bump: got {len(next_read)} records, disk "
+            f"has {len(disk_after_persist)}",
+        )
+        self.assertEqual(next_read, load_evidence_bundle(self.root, "g1"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -146,12 +146,23 @@ def invalidate_all_evidence_cache() -> None:
 
     Production code paths should prefer :func:`invalidate_evidence_cache`
     so unrelated gates retain their cached bundles. Does NOT bump the
-    per-key invalidation counter — bulk drops are tracked implicitly by
-    the absence of subsequent hits.
+    ``invalidations`` counter — bulk drops are tracked implicitly by the
+    absence of subsequent hits.
 
-    Resets the generation map too: bulk-drop is a test-isolation tool,
-    so any in-flight loader observing a stale generation post-clear
-    will see ``current_gen == gen_at_entry == 0`` and proceed normally.
+    BUMPS every existing per-key generation counter by 1 instead of
+    clearing ``_GEN``. This preserves the "gen-advance ⇒ refuse to
+    cache" invariant from :func:`invalidate_evidence_cache` even when
+    an in-flight miss-loader interleaves with a bulk-drop. Clearing
+    ``_GEN`` outright would let a loader that snapshotted
+    ``gen_at_entry == N`` after some earlier ``invalidate_evidence_cache``
+    fire and then completed its disk read just before this bulk-drop
+    silently observe ``current_gen == 0`` on re-acquire and store a
+    pre-persist snapshot — see ``test_invalidate_all_does_not_unmask_stale_load``.
+    Keys NEVER seen by ``_GEN`` are still safe: a cold-cache loader
+    that observed ``gen_at_entry == 0`` for a never-tracked key cannot
+    have raced with a real persist that bumped ``_GEN[key]``, because a
+    real persist would have created the ``_GEN[key]`` entry that this
+    bump-pass then advances.
 
     Also resets the ``_STATS`` hit/miss/invalidations counters to zero so
     that consecutive test methods see a fresh observability baseline.
@@ -162,7 +173,12 @@ def invalidate_all_evidence_cache() -> None:
     """
     with _LOCK:
         _CACHE.clear()
-        _GEN.clear()
+        # Bump rather than clear: any prior in-flight miss-loader that
+        # snapshotted a per-key generation will now see current_gen >
+        # gen_at_entry and refuse to store its (potentially stale)
+        # bundle. Clearing _GEN would erase that signal.
+        for k in list(_GEN.keys()):
+            _GEN[k] += 1
         _STATS["hits"] = 0
         _STATS["misses"] = 0
         _STATS["invalidations"] = 0
