@@ -43,8 +43,9 @@ Memory profile:
   should plan a periodic restart if it processes >100k distinct gate_ids.
 
 This module is intentionally a sibling of :mod:`evidence_io` so that
-``evidence_io.py`` stays under its current LOC and the cache lifecycle
-is isolated for testing.
+``evidence_io.py`` stays under the CLAUDE.md 500-LOC soft cap (along
+with :mod:`evidence_io_cleanup`, the K-5 quarantine + janitor sibling)
+and the cache lifecycle is isolated for testing.
 """
 from __future__ import annotations
 

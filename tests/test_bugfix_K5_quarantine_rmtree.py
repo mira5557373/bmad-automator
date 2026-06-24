@@ -306,7 +306,7 @@ class JanitorPerSubdirIsolation(_Mixin, unittest.TestCase):
             return real_rmtree(path, *args, **kwargs)
 
         with mock.patch(
-            "story_automator.core.evidence_io.shutil.rmtree",
+            "story_automator.core.evidence_io_cleanup.shutil.rmtree",
             side_effect=selective_rmtree,
         ):
             # Must not raise — per-subdir try/except.

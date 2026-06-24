@@ -1759,6 +1759,98 @@ class LineageLedgerLOCSoftLimitTests(unittest.TestCase):
             )
 
 
+class EvidenceIOLOCSoftLimitTests(unittest.TestCase):
+    """``evidence_io.py`` stays under the CLAUDE.md 500-LOC soft limit.
+
+    Pre-fix ``evidence_io.py`` sat at 560 LOC, breaching the soft cap
+    that the sibling ``evidence_cache.py`` module's docstring at lines
+    22-24 cites as the reason for its own existence ("intentionally a
+    sibling of ``evidence_io`` so that ``evidence_io.py`` stays under
+    its current LOC"). The K-2 cache split (commit ``32032cb``) brought
+    the parent to 531 LOC, then ``e43e1b6`` ("fix(evidence_io): enforce
+    gate-marker contract fields on read") added 29 lines to grow it back
+    to 560. The fix extracted the K-5 cleanup/janitor block
+    (``_GATE_CLEANUP_DIRNAME``, ``get_gate_cleanup_root``,
+    ``run_cleanup_janitor``) into a new ``evidence_io_cleanup`` sibling
+    that the parent re-exports, mirroring the
+    ``spec_drift_watcher`` / ``spec_drift_types`` and
+    ``lineage_ledger`` / ``lineage_persistence`` patterns.
+
+    The regression test pins both halves of the contract: (a) the
+    canonical ``evidence_io.py`` stays under the soft limit, and (b) the
+    new sibling exists and re-exports the K-5 surface so the public
+    surface (consumed by ``gate_orchestrator`` and ``system_gate``) is
+    preserved.
+    """
+
+    EVIDENCE_IO_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "evidence_io.py"
+    )
+    EVIDENCE_IO_CLEANUP_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "evidence_io_cleanup.py"
+    )
+    SOFT_LIMIT_LOC = 500
+
+    def test_evidence_io_under_soft_limit(self) -> None:
+        text = self.EVIDENCE_IO_PATH.read_text(encoding="utf-8")
+        loc = len(text.splitlines())
+        self.assertLessEqual(
+            loc,
+            self.SOFT_LIMIT_LOC,
+            f"evidence_io.py is {loc} LOC but the CLAUDE.md "
+            f"soft cap is {self.SOFT_LIMIT_LOC}. Extract another helper "
+            "into the sibling evidence_io_cleanup module to recover headroom.",
+        )
+
+    def test_evidence_io_cleanup_sibling_exists_and_reexports(self) -> None:
+        """The split must preserve the K-5 public surface.
+
+        ``gate_orchestrator`` and ``system_gate`` consume
+        ``get_gate_cleanup_root`` and ``run_cleanup_janitor`` via
+        ``from .evidence_io import ...``; the re-export contract keeps
+        that import path working while the definitions live in
+        ``evidence_io_cleanup``.
+        """
+        self.assertTrue(
+            self.EVIDENCE_IO_CLEANUP_PATH.exists(),
+            "evidence_io_cleanup.py sibling missing; the LOC split has "
+            "regressed and evidence_io.py will breach the soft cap again.",
+        )
+        cleanup_module = importlib.import_module(
+            "story_automator.core.evidence_io_cleanup"
+        )
+        io_module = importlib.import_module(
+            "story_automator.core.evidence_io"
+        )
+        for symbol in (
+            "get_gate_cleanup_root",
+            "run_cleanup_janitor",
+        ):
+            self.assertTrue(
+                hasattr(cleanup_module, symbol),
+                f"evidence_io_cleanup no longer exposes {symbol!r}; the "
+                "sibling-split contract has regressed.",
+            )
+            self.assertTrue(
+                hasattr(io_module, symbol),
+                f"evidence_io no longer re-exports {symbol!r}; existing "
+                "callers (gate_orchestrator, system_gate, K-5 tests) "
+                "would break.",
+            )
+
+
 class SpecDriftPersistenceDocstringConsistencyTests(unittest.TestCase):
     """``spec_drift_persistence`` docstring matches the bytes its writer emits.
 
