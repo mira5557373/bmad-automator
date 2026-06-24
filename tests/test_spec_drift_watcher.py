@@ -228,6 +228,79 @@ class TestSnapshotAndPoll(unittest.TestCase):
         self.assertAlmostEqual(event.delta, 0.50)
         self.assertEqual(len(event.requirements_lost), 5)
 
+    def test_set_baseline_invokes_check_compliance_exactly_once(self):
+        """Regression: set_baseline() must read state ATOMICALLY.
+
+        Previously ``set_baseline(snapshot=None)`` called
+        ``check_compliance`` twice — once via ``self.snapshot()`` and a
+        second time via ``self._reread_satisfied_ids()`` — so the
+        baseline dataclass and the cached id set could be derived from
+        two independent reads. With LLM non-determinism (or any spec /
+        working-tree change between calls) the two shards then
+        disagreed, producing incoherent ``poll()`` events later
+        (e.g. ``severity='OK'`` with non-empty ``requirements_lost``).
+
+        This test pins the contract that ``set_baseline()`` performs a
+        SINGLE ``check_compliance`` invocation and derives both the
+        snapshot and the id set from the same verdicts list.
+        """
+        w = _make_watcher()
+        # Two reads with DIFFERENT satisfied sets — the bug surfaced
+        # only when the two internal reads disagreed.
+        first_report = _report([
+            _verdict(f"REQ-{i:02d}", "implemented") for i in range(1, 6)
+        ])  # 5 satisfied / 5 total
+        second_report = _report([
+            _verdict(f"REQ-{i:02d}", "implemented") for i in range(1, 8)
+        ])  # 7 satisfied / 7 total — DIFFERENT shape
+        with mock.patch(
+            _TARGET, side_effect=[first_report, second_report]
+        ) as patched:
+            w.set_baseline()
+        # Only one call is allowed — the second read in the legacy code
+        # is what introduced the cross-call inconsistency.
+        self.assertEqual(patched.call_count, 1)
+        # And the two state shards must agree: the dataclass's
+        # requirements_satisfied count must match the cached id-set
+        # size. Before the fix they came from different reads, so this
+        # assertion would fail (5 != 7).
+        self.assertEqual(
+            w._baseline.requirements_satisfied,
+            len(w._baseline_ids),
+        )
+
+    def test_set_baseline_yields_coherent_poll_event(self):
+        """Regression: set_baseline + poll must produce a coherent event.
+
+        With the legacy two-call ``set_baseline()`` an immediate
+        ``poll()`` against the FIRST report could report
+        ``severity='OK'`` (score-based, no drift) while
+        ``requirements_lost`` contained REQs (id-based, two lost),
+        because the cached id set came from the second internal read.
+        Post-fix the cached id set matches the baseline snapshot, so an
+        identical-input poll is fully OK with empty
+        ``requirements_lost``.
+        """
+        w = _make_watcher()
+        baseline_report = _report([
+            _verdict(f"REQ-{i:02d}", "implemented") for i in range(1, 6)
+        ])  # 5 satisfied / 5 total
+        diverging_report = _report([
+            _verdict(f"REQ-{i:02d}", "implemented") for i in range(1, 8)
+        ])  # 7 satisfied / 7 total — diverges from baseline_report
+        with mock.patch(
+            _TARGET, side_effect=[baseline_report, diverging_report]
+        ):
+            w.set_baseline()
+        # Now poll() against the SAME baseline_report. If the cached id
+        # set came from the diverging second read (the bug), this
+        # would produce delta=0.0 with non-empty requirements_lost.
+        with mock.patch(_TARGET, return_value=baseline_report):
+            event = w.poll()
+        self.assertEqual(event.severity, "OK")
+        self.assertAlmostEqual(event.delta, 0.0)
+        self.assertEqual(event.requirements_lost, ())
+
     def test_requirements_lost_correctly_diffed(self):
         w = _make_watcher()
         baseline = _report([

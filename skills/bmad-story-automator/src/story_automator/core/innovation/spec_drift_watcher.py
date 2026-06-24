@@ -340,20 +340,36 @@ class SpecDriftWatcher:
         """
         if self._stopped:
             raise SpecDriftError("watcher has been stopped; cannot take snapshot")
+        snap, _ids = self._take_snapshot_with_ids()
+        return snap
+
+    def _take_snapshot_with_ids(self) -> tuple[SpecDriftSnapshot, set[str]]:
+        """Atomic single-call snapshot + satisfied-id set.
+
+        Both ``snapshot()`` and ``set_baseline()`` use this to guarantee
+        that the dataclass score and the id set come from the same
+        ``check_compliance`` invocation. Splitting them across two calls
+        would let the spec / working tree / LLM output shift between
+        reads, leaving the baseline shards inconsistent (e.g.
+        ``requirements_satisfied=5`` while ``len(_baseline_ids)=7``) and
+        producing incoherent ``poll()`` events later. Also halves the
+        subprocess cost of ``set_baseline()``.
+        """
         report = check_compliance(
             spec_path=self._spec_path,
             diff_text="",
             cwd=self._project_root,
         )
         verdicts = list(report.verdicts)
-        satisfied = len(_satisfied_ids(verdicts))
+        satisfied_ids = _satisfied_ids(verdicts)
         total = len(verdicts)
-        return SpecDriftSnapshot(
-            score=_score(satisfied, total),
+        snap = SpecDriftSnapshot(
+            score=_score(len(satisfied_ids), total),
             requirements_total=total,
-            requirements_satisfied=satisfied,
+            requirements_satisfied=len(satisfied_ids),
             timestamp_iso=_now_iso(),
         )
+        return snap, satisfied_ids
 
     def is_baseline_set(self) -> bool:
         """Return ``True`` iff a baseline snapshot has been recorded."""
@@ -369,10 +385,10 @@ class SpecDriftWatcher:
         if self._stopped:
             raise SpecDriftError("watcher has been stopped; cannot set baseline")
         if snapshot is None:
-            snapshot = self.snapshot()
-            # The freshly-taken snapshot is already scored; re-derive
-            # the id set so callers don't have to thread it through.
-            self._baseline_ids = self._reread_satisfied_ids()
+            # Single ``check_compliance`` read — the dataclass and the
+            # id set are derived from the SAME verdicts list so a later
+            # ``poll()`` can never observe two disagreeing shards.
+            snapshot, self._baseline_ids = self._take_snapshot_with_ids()
         else:
             # Baseline supplied by caller — we don't know the id set,
             # so a follow-up poll() will discover it on demand.
@@ -383,22 +399,6 @@ class SpecDriftWatcher:
                 persist_baseline,
             )
             persist_baseline(self._project_root, self._persistence_key, snapshot)
-
-    def _reread_satisfied_ids(self) -> set[str]:
-        """Re-fetch the satisfied-id set from spec_compliance.
-
-        Called immediately after ``snapshot()`` so the cached set
-        matches the snapshot we just recorded. We could thread the set
-        out of ``snapshot()`` directly, but keeping ``snapshot()`` 's
-        return type narrow (just the dataclass) is the cleaner public
-        contract.
-        """
-        report = check_compliance(
-            spec_path=self._spec_path,
-            diff_text="",
-            cwd=self._project_root,
-        )
-        return _satisfied_ids(report.verdicts)
 
     # ------------------------------------------------------------------
     # Polling
