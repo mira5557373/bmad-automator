@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -57,6 +58,17 @@ LINEAGE_GENRES: tuple[str, ...] = (
 )
 
 _GENRES_SET = frozenset(LINEAGE_GENRES)
+
+# Slug whitelist: alphanumerics plus ``_ . -``. Forbids path separators
+# (``/``, ``\``), ``..`` segments, NUL bytes, and leading/trailing
+# whitespace so a slug can never escape ``_bmad/lineage/<genre>/`` via
+# the lexical ``_entry_disk_path`` composition. The closed character
+# class is friendlier than a denylist (no surprise control characters,
+# no Unicode normalisation gotchas) and matches the simple
+# ``s0``/``missing-slug``-style identifiers already used in tests + CLI
+# round-trip.  This is the C2-follow-up tightening flagged in
+# :func:`make_lineage_entry`'s MVP docstring.
+_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class LineageError(ValueError):
@@ -143,6 +155,20 @@ def make_lineage_entry(
         )
     if not isinstance(slug, str) or not slug:
         raise LineageError("slug must be a non-empty string")
+    # Reject path-traversal characters so a slug can never escape
+    # ``_bmad/lineage/<genre>/`` via the lexical ``_entry_disk_path``
+    # composition (``..`` segments, ``/`` / ``\`` separators, NUL,
+    # leading/trailing whitespace).  Single-operator threat model bounds
+    # the security impact, but the documented on-disk shape contract
+    # ('one canonical-JSON file per entry under
+    # ``_bmad/lineage/<genre>/<slug>.json``') would otherwise be silently
+    # violated and the index would advertise non-portable ``..``-laden
+    # ``path`` fields.
+    if not _SLUG_RE.match(slug) or ".." in slug:
+        raise LineageError(
+            f"slug {slug!r} must match {_SLUG_RE.pattern!r} and contain no "
+            f"'..' segments (no path separators, NUL bytes, or whitespace)"
+        )
     if not isinstance(payload_hash, str):
         raise LineageError("payload_hash must be a string")
     if not isinstance(parent_root, str):

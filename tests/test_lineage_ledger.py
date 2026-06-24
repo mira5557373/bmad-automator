@@ -82,6 +82,53 @@ class LineageGenreVocabularyTests(unittest.TestCase):
                 timestamp_iso="2026-06-22T00:00:00Z",
             )
 
+    def test_make_entry_rejects_path_traversal_slug(self) -> None:
+        # Regression: round-2 bug sweep. ``make_lineage_entry`` previously
+        # validated slug only via ``isinstance(slug, str) and slug != ''``,
+        # so ``slug='../../escape'`` flowed through to
+        # ``_entry_disk_path`` and the atomic write landed at
+        # ``_bmad/escape.json`` — OUTSIDE the documented
+        # ``_bmad/lineage/<genre>/<slug>.json`` sandbox. The follow-up
+        # tightening promised by the MVP docstring rejects any slug
+        # containing path separators, ``..`` segments, NUL bytes, or
+        # leading/trailing whitespace at the constructor.
+        forbidden_slugs = [
+            "../../escape",   # path traversal
+            "..",             # bare double-dot segment
+            "a..b",           # embedded double-dot
+            "a/b",            # forward slash
+            "a\\b",           # backslash
+            "a\x00b",         # NUL byte
+            " s0",            # leading whitespace
+            "s0 ",            # trailing whitespace
+            "s\tb",           # tab whitespace
+            "/abs",           # absolute path
+        ]
+        for slug in forbidden_slugs:
+            with self.subTest(slug=slug):
+                with self.assertRaises(LineageError):
+                    make_lineage_entry(
+                        genre="brief",
+                        slug=slug,
+                        payload_hash=_h("body"),
+                        parent_root="",
+                        timestamp_iso="2026-06-22T00:00:00Z",
+                    )
+
+    def test_make_entry_accepts_normal_slug_alphabet(self) -> None:
+        # Conservative whitelist still admits the slug shapes already used
+        # in production tests + CLI round-trip: alphanumerics + ``_ . -``.
+        for slug in ["s0", "missing-slug", "v1.0", "Abc_123", "x", "a.b-c_d"]:
+            with self.subTest(slug=slug):
+                ent = make_lineage_entry(
+                    genre="brief",
+                    slug=slug,
+                    payload_hash=_h("body"),
+                    parent_root="",
+                    timestamp_iso="2026-06-22T00:00:00Z",
+                )
+                self.assertEqual(ent.slug, slug)
+
 
 class LineageRootDeterminismTests(unittest.TestCase):
     def test_compute_root_is_deterministic(self) -> None:
