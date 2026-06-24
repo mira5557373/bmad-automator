@@ -812,6 +812,25 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                             self.scrubbed_names.add(tgt.id)
                 self.generic_visit(node)
 
+            def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+                # Mirror visit_Assign for PEP 526 annotated assignments
+                # (e.g. ``scrubbed: dict = scrub_env_for_subprocess(env)``).
+                # Without this branch, a benign type annotation on a
+                # correctly-scrubbed call site falsely trips the D-04
+                # audit-floor invariant — see the AnnAssign branches in
+                # ThresholdApplyIsolationInvariant._module_violates and
+                # UnifiedStateWriteIsolationInvariant._module_violates
+                # for the same pattern. ``node.value`` is optional on
+                # AnnAssign (bare annotations like ``x: int`` have
+                # value=None) so guard before probing.
+                if (
+                    node.value is not None
+                    and is_scrub_call(node.value)
+                    and isinstance(node.target, ast.Name)
+                ):
+                    self.scrubbed_names.add(node.target.id)
+                self.generic_visit(node)
+
             def visit_Call(self, node: ast.Call) -> None:
                 if is_subprocess_call(node, module_aliases, callable_aliases):
                     env_kw = next(
@@ -1076,6 +1095,96 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "Walker FAILED to honour the structural skip for modules "
             "defining scrub_env_for_subprocess at top level — "
             "rename-proof skip helper is broken",
+        )
+
+    def test_annassign_scrub_binding_is_tracked(self) -> None:
+        """PEP 526 annotated assignment of a scrub call must register
+        the target name in ``scrubbed_names`` — same as a plain
+        ``ast.Assign``. Without ``visit_AnnAssign`` mirroring
+        ``visit_Assign``, ``e: dict = scrub_env_for_subprocess(env)``
+        silently fails to bind ``e``, and the follow-up
+        ``subprocess.run(..., env=e)`` is falsely flagged.
+
+        This is a latent false-positive in the D-04 audit-floor
+        invariant: no current core/ module uses the annotated pattern,
+        so the suite passes today — but the moment somebody writes
+        ``child_env: dict[str, str] = scrub_env_for_subprocess(...)``
+        CI breaks for a non-issue. Modeled on the AnnAssign tests in
+        ``ThresholdApplyIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``
+        (lines 1690-1722).
+
+        Negative case: a bare annotation ``x: int`` (no value) must
+        not trip the visitor — ``node.value`` is ``None`` for those,
+        and the AnnAssign branch must guard before probing.
+        """
+        import ast
+
+        # (a) GOOD — annotated assignment of a direct scrub call.
+        # Mirrors the canonical safe form ``scrubbed =
+        # scrub_env_for_subprocess(env)`` exactly, just with a PEP 526
+        # annotation; the walker must accept the follow-up
+        # ``env=scrubbed`` exactly the same way.
+        annassign_name_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed: dict = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(annassign_name_src)),
+            [],
+            "Walker FALSELY flagged env=<name> where <name> was bound "
+            "to scrub_env_for_subprocess(...) via an annotated assignment "
+            "(AnnAssign) — visit_AnnAssign branch is missing from the "
+            "binding tracker",
+        )
+
+        # (b) GOOD — annotated assignment of an attribute-form scrub call.
+        annassign_attr_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core import audit
+
+            def safe(env):
+                scrubbed: dict = audit.scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(annassign_attr_src)),
+            [],
+            "Walker FALSELY flagged env=<name> where <name> was bound "
+            "to audit.scrub_env_for_subprocess(...) via an annotated "
+            "assignment — attribute-form scrub call inside AnnAssign "
+            "must be accepted",
+        )
+
+        # (c) Robustness — a bare AnnAssign with no value (e.g.
+        # ``x: int``) must not crash the visitor. ``node.value`` is
+        # ``None`` for those, and the AnnAssign branch must guard
+        # before probing. Also asserts the walker does not falsely
+        # accept a subsequent unscrubbed call simply because a bare
+        # annotation of the same name appears earlier.
+        bare_annassign_src = textwrap.dedent(
+            """
+            import subprocess
+
+            def leak():
+                e: dict
+                subprocess.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(bare_annassign_src))),
+            1,
+            "Walker either crashed on AnnAssign(value=None) or falsely "
+            "accepted an unscrubbed env=dict literal after a bare "
+            "annotation — visit_AnnAssign must guard ``node.value is "
+            "not None`` AND must not bind a name without a scrub call",
         )
 
     def test_positive_failure_bypass_idioms_are_caught(self) -> None:
