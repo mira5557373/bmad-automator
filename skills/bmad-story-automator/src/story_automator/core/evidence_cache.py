@@ -176,9 +176,13 @@ def invalidate_all_evidence_cache() -> None:
     """Drop every cached bundle. Intended for test isolation.
 
     Production code paths should prefer :func:`invalidate_evidence_cache`
-    so unrelated gates retain their cached bundles. Does NOT bump the
-    ``invalidations`` counter — bulk drops are tracked implicitly by the
-    absence of subsequent hits.
+    so unrelated gates retain their cached bundles. Does not bump (i.e.
+    increment-by-one) the per-event ``invalidations`` counter the way
+    :func:`invalidate_evidence_cache` does; instead this function zeroes
+    ``_STATS["invalidations"]`` (alongside ``hits`` and ``misses``) as
+    part of its test-isolation contract documented below. Bulk drops in
+    production are therefore tracked implicitly by the absence of
+    subsequent hits, not by a per-call counter bump.
 
     BUMPS every existing per-key generation counter by 1 instead of
     clearing ``_GEN``. This preserves the "gen-advance ⇒ refuse to
@@ -195,7 +199,7 @@ def invalidate_all_evidence_cache() -> None:
     real persist would have created the ``_GEN[key]`` entry that this
     bump-pass then advances.
 
-    Also resets the ``_STATS`` hit/miss/invalidations counters to zero so
+    Resets the ``_STATS`` hit/miss/invalidations counters to zero so
     that consecutive test methods see a fresh observability baseline.
     Without this reset, a test method querying
     :func:`evidence_cache_stats` after ``setUp`` would observe historical

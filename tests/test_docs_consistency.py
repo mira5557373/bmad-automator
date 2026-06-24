@@ -3745,5 +3745,110 @@ class EvidenceCacheGenGrowthDocstringTests(unittest.TestCase):
         )
 
 
+class InvalidateAllEvidenceCacheDocstringConsistencyTests(unittest.TestCase):
+    """``invalidate_all_evidence_cache`` docstring does not contradict itself
+    on the ``_STATS["invalidations"]`` counter.
+
+    Pre-fix the docstring at
+    ``evidence_cache.py:invalidate_all_evidence_cache`` made two claims about
+    the same counter in two different paragraphs:
+
+    1. (early) "Does NOT bump the ``invalidations`` counter — bulk drops are
+       tracked implicitly by the absence of subsequent hits."
+    2. (later) "Also resets the ``_STATS`` hit/miss/invalidations counters to
+       zero so that consecutive test methods see a fresh observability
+       baseline."
+
+    Both descriptions were technically distinct ("bump" meaning ``+= 1`` vs
+    "reset to zero") but a reader scanning the first paragraph alone would
+    infer the counter is left untouched, then be surprised at the explicit
+    ``= 0`` assignment further down. The fix tightens the first paragraph to
+    say "Does not bump (i.e. increment-by-one)" and explicitly cross-refers
+    to the zero-reset behavior below, so a reader cannot stop early and
+    mis-infer.
+
+    This regression test pins the post-fix wording so a future
+    docstring edit cannot silently re-introduce the apparent
+    contradiction.
+    """
+
+    def _docstring(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.evidence_cache"
+        )
+        return module.invalidate_all_evidence_cache.__doc__ or ""
+
+    def test_docstring_no_longer_carries_pre_fix_does_not_bump_phrase(self) -> None:
+        """Pin the specific pre-fix wording that caused the apparent contradiction.
+
+        The pre-fix phrasing was an exact substring: ``Does NOT bump the
+        ``invalidations`` counter — bulk drops are tracked implicitly by
+        the absence of subsequent hits.`` Re-introducing this exact byte
+        sequence (with "NOT" uppercase and no qualifier on "bump") would
+        recreate the same operator-facing contradiction with the
+        zero-reset paragraph below it.
+        """
+        doc = self._docstring()
+        # Normalize whitespace so docstring line-wrap (paragraph indents
+        # + newlines) does not hide the regression.
+        normalized = re.sub(r"\s+", " ", doc)
+        self.assertNotIn(
+            "Does NOT bump the ``invalidations`` counter",
+            normalized,
+            "invalidate_all_evidence_cache docstring still carries the "
+            "pre-fix 'Does NOT bump the ``invalidations`` counter' phrase. "
+            "The same docstring later says it 'resets the ``_STATS`` "
+            "hit/miss/invalidations counters to zero', so a reader of "
+            "only the first paragraph would mis-infer the counter is "
+            "left untouched. Soften the phrasing or cross-refer to the "
+            "zero-reset behavior.",
+        )
+
+    def test_docstring_cross_refers_no_bump_and_zero_reset_together(self) -> None:
+        """The post-fix docstring ties the no-bump rationale to the zero-reset.
+
+        The post-fix wording must make clear that the function does not
+        do ``+= 1`` (the per-event bump that
+        :func:`invalidate_evidence_cache` performs) AND zeroes the same
+        counter as part of its test-isolation contract. We assert two
+        signals: (a) the qualifier "increment-by-one" (or
+        equivalent "+= 1" wording) appears so "bump" is unambiguous,
+        and (b) the word "zero" / "zeroes" appears in the same first
+        paragraph so the two behaviors are bound together rather than
+        appearing 15+ lines apart.
+        """
+        doc = self._docstring()
+        normalized = re.sub(r"\s+", " ", doc)
+        self.assertRegex(
+            normalized,
+            r"increment-by-one|\+= 1",
+            "invalidate_all_evidence_cache docstring no longer qualifies "
+            "the word 'bump' with an explicit increment-by-one (or '+= 1') "
+            "hint. Without the qualifier, a reader could conflate 'bump' "
+            "with the later zero-reset behavior and infer a contradiction.",
+        )
+        # First paragraph: everything up to the first blank line / BUMPS
+        # marker (the second paragraph leads with 'BUMPS every existing').
+        first_para_match = re.search(
+            r"(.+?)(?:BUMPS every existing|\Z)",
+            normalized,
+        )
+        self.assertIsNotNone(
+            first_para_match,
+            "Could not isolate the first paragraph of the docstring; "
+            "update this regression test to match the new shape.",
+        )
+        first_para = first_para_match.group(1)
+        self.assertRegex(
+            first_para,
+            r"\bzero(?:es|s)?\b",
+            "invalidate_all_evidence_cache docstring first paragraph "
+            "no longer mentions the zero-reset behavior alongside the "
+            "no-bump claim. The two behaviors must appear together so "
+            "a reader who stops at the first paragraph does not "
+            "mis-infer the counter is left untouched.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
