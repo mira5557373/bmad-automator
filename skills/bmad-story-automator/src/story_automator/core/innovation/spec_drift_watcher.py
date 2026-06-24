@@ -122,10 +122,17 @@ class SpecDriftWatcher:
                 ``SpecDriftError`` so typos do not silently degrade
                 detection.
             persistence_key: Optional slug used as the directory name
-                under ``<project_root>/_bmad/drift/``. When provided,
-                the watcher loads any persisted baseline at init,
-                persists ``set_baseline`` to ``baseline.json``, and
-                appends each ``poll()`` event to ``events.jsonl``.
+                under ``<project_root>/_bmad/drift/``. When provided
+                AND ``baseline_snapshot`` is ``None``, the watcher
+                loads any persisted baseline at init. When BOTH
+                ``baseline_snapshot`` and ``persistence_key`` are
+                supplied, the caller-supplied snapshot wins in memory
+                and is persisted to disk only when no baseline already
+                exists there (a previously-persisted baseline is
+                conservatively preserved on disk — the in-memory and
+                on-disk baselines may diverge in this case, by design).
+                ``set_baseline`` always persists to ``baseline.json``
+                and each ``poll()`` event is appended to ``events.jsonl``.
                 ``None`` (default) keeps the watcher purely in-memory,
                 byte-identical to the MVP. Slug is restricted to
                 ``[A-Za-z0-9][A-Za-z0-9_-]*`` to block path traversal.

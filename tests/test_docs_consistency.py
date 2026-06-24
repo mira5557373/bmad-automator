@@ -2288,5 +2288,87 @@ class SessionUsageCaptureFailSoftDocstringTests(unittest.TestCase):
         )
 
 
+class SpecDriftWatcherPersistenceKeyDocstringTests(unittest.TestCase):
+    """``SpecDriftWatcher.__init__`` docstring documents both-kwargs precedence.
+
+    Pre-fix the ``persistence_key`` docstring said "the watcher loads any
+    persisted baseline at init" unconditionally. The live code only loads
+    from disk when ``baseline_snapshot is None`` (line 157 of
+    ``spec_drift_watcher.py``); when BOTH ``baseline_snapshot`` and
+    ``persistence_key`` are supplied AND disk already holds a different
+    baseline, the caller-supplied snapshot wins in memory while the
+    on-disk baseline is conservatively preserved. This is intentional
+    design (the inline comment at lines 164-166 documents the
+    "previously-persisted baseline is never clobbered by a stale
+    caller-supplied snapshot" choice), but the docstring did not surface
+    the in-memory/on-disk divergence corner case.
+
+    The regression test pins the clarified docstring so a future
+    refactor that removes the precedence-rule documentation trips this
+    test at the same commit. Doc-precision fix only — no code change.
+    """
+
+    def test_persistence_key_docstring_documents_both_kwargs_precedence(
+        self,
+    ) -> None:
+        module = importlib.import_module(
+            "story_automator.core.innovation.spec_drift_watcher"
+        )
+        init_doc = module.SpecDriftWatcher.__init__.__doc__ or ""
+        # Normalize whitespace so the assertion does not depend on
+        # the docstring's wrap column.
+        normalized = re.sub(r"\s+", " ", init_doc).strip()
+        # Pin the BOTH-kwargs precedence rule.
+        self.assertIn(
+            "baseline_snapshot``",
+            normalized,
+            "SpecDriftWatcher.__init__ docstring no longer references "
+            "the baseline_snapshot kwarg by name in the persistence_key "
+            "section; the both-kwargs precedence corner case must stay "
+            "documented so operators do not assume disk wins.",
+        )
+        # Pin the explicit clarification that both-kwargs leaves disk
+        # alone when a baseline already exists there.
+        self.assertIn(
+            "previously-persisted baseline is conservatively preserved",
+            normalized,
+            "SpecDriftWatcher.__init__ docstring no longer documents "
+            "that a previously-persisted on-disk baseline is preserved "
+            "when both baseline_snapshot and persistence_key are "
+            "supplied. This corner case (in-memory and on-disk baselines "
+            "may diverge) is intentional design and must remain "
+            "documented so operators audit drift telemetry against the "
+            "correct truth source.",
+        )
+
+    def test_persistence_key_docstring_clarifies_load_precondition(
+        self,
+    ) -> None:
+        """The 'loads any persisted baseline at init' phrase is now scoped.
+
+        Pre-fix the docstring promised an unconditional load; the live
+        code only loads when ``baseline_snapshot is None``. Pin that the
+        load promise is now qualified.
+        """
+        module = importlib.import_module(
+            "story_automator.core.innovation.spec_drift_watcher"
+        )
+        init_doc = module.SpecDriftWatcher.__init__.__doc__ or ""
+        normalized = re.sub(r"\s+", " ", init_doc).strip()
+        # The qualifier must appear adjacent to the "loads any persisted
+        # baseline at init" promise. We assert the conjunction shape
+        # ("provided AND baseline_snapshot") rather than an exact phrase
+        # so a future rewording does not falsely trip.
+        self.assertRegex(
+            normalized,
+            r"provided\s+AND\s+``baseline_snapshot``\s+is\s+``None``",
+            "SpecDriftWatcher.__init__ docstring no longer qualifies the "
+            "'loads any persisted baseline at init' promise with the "
+            "'AND baseline_snapshot is None' precondition. Without the "
+            "qualifier the docstring contradicts the live code at line "
+            "157 which only loads from disk when self._baseline is None.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
