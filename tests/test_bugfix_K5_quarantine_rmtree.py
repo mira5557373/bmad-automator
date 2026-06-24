@@ -337,6 +337,71 @@ class RmtreeFailureOutsideLockDoesNotPropagate(_Mixin, unittest.TestCase):
         self.assertIn("cleanup_error", result)
 
 
+class ClearGateMarkerOSErrorDrainsPendingCleanup(_Mixin, unittest.TestCase):
+    """Round-3 fix #20 — ``clear_gate_marker`` OSError must not leak pending_cleanup.
+
+    Before the fix, ``_recover_from_crash_locked`` called
+    ``clear_gate_marker(project_root)`` UNCONDITIONALLY after a successful
+    rename of the orphan evidence dir into ``_bmad/gate/cleanup/``. Because
+    ``clear_gate_marker`` catches only ``FileNotFoundError``, any other
+    ``OSError`` (read-only fs, permission denied, IsADirectoryError on the
+    marker unlink) propagated out BEFORE the ``(result, pending_cleanup)``
+    tuple was returned. All three call sites
+    (``recover_from_crash``, ``run_production_gate``, and
+    ``system_gate.run_system_gate``) bind the return via tuple unpacking, so
+    the local ``pending_cleanup`` reference was never assigned to the
+    caller, and the outside-lock ``_rmtree_quarantined_dirs`` pass was
+    skipped. The renamed evidence subdir leaked into
+    ``_bmad/gate/cleanup/<gate_id>-<uuid4>/`` until the next startup
+    janitor swept it.
+
+    Fix: catch the marker-clear OSError in ``_recover_from_crash_locked``,
+    surface via the existing ``cleanup_failed`` / ``cleanup_error``
+    descriptor fields (mirroring the rename's OSError handling), and
+    always return the tuple so the outside-lock rmtree drains the queue.
+    """
+
+    def test_clear_gate_marker_oserror_does_not_leak_pending_cleanup(self) -> None:
+        self._seed_dead_marker(gate_id="marker-fail-gate")
+
+        with mock.patch(
+            "story_automator.core.gate_orchestrator.clear_gate_marker",
+            side_effect=OSError("simulated readonly fs on marker unlink"),
+        ):
+            # Pre-fix: this raised OSError out of recover_from_crash.
+            # Post-fix: returns descriptor with cleanup_failed=True.
+            result = recover_from_crash(self.tmp)
+
+        # Recovery still succeeds on the orphan-rename side; the marker
+        # failure is surfaced via cleanup_failed / cleanup_error.
+        self.assertTrue(
+            result.get("recovered"),
+            "rename succeeded so recovered=True must hold",
+        )
+        self.assertEqual(result.get("gate_id"), "marker-fail-gate")
+        self.assertTrue(
+            result.get("cleanup_failed", False),
+            "marker-clear OSError must be surfaced as cleanup_failed",
+        )
+        self.assertIn(
+            "clear_gate_marker failed",
+            result.get("cleanup_error", ""),
+            "cleanup_error must name the marker-clear as the failure source",
+        )
+
+        # The K-5 contract: pending_cleanup must have been drained even
+        # though clear_gate_marker raised inside the lock. Pre-fix the
+        # renamed subdir leaked here until the next startup janitor.
+        cleanup_root = get_gate_cleanup_root(self.tmp)
+        if cleanup_root.is_dir():
+            leftovers = list(cleanup_root.iterdir())
+            self.assertEqual(
+                leftovers, [],
+                f"clear_gate_marker OSError must not leak _pending_cleanup; "
+                f"leftover: {[p.name for p in leftovers]}",
+            )
+
+
 class JanitorRunsBeforeLockOnStartup(_Mixin, unittest.TestCase):
     """The janitor must execute before the gate lock is acquired."""
 

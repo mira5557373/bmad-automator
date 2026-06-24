@@ -428,7 +428,38 @@ def _recover_from_crash_locked(
             except OSError as exc:
                 cleanup_error = str(exc)
 
-    clear_gate_marker(project_root)
+    # Bug fix (round 3 #20): ``clear_gate_marker`` only catches
+    # ``FileNotFoundError``; any other ``OSError`` (read-only fs,
+    # permission denied, IsADirectoryError) propagated out of this
+    # function BEFORE the ``(result, pending_cleanup)`` tuple was
+    # returned. All three call sites
+    # (``recover_from_crash``, ``run_production_gate``, and
+    # ``system_gate.run_system_gate``) bind the return value via tuple
+    # unpacking; on propagation, ``pending_cleanup`` was never assigned
+    # to the caller and the outside-lock
+    # ``_rmtree_quarantined_dirs`` pass at ``recover_from_crash:594`` /
+    # ``run_production_gate:1169`` was skipped — the renamed evidence
+    # subdir leaked under ``_bmad/gate/cleanup/`` until the next startup
+    # janitor swept it. Catching the marker-clear OSError here mirrors
+    # the rename's existing OSError handling (lines 428-429): the
+    # failure is surfaced via ``cleanup_failed`` / ``cleanup_error`` so
+    # the operator still sees the I/O failure loudly (§9.2), AND the
+    # ``(result, pending_cleanup)`` tuple is always returned so the
+    # outside-lock rmtree drains the queue on every code path. The
+    # marker stays on disk (clear failed), so the NEXT recovery attempt
+    # will re-try the unlink, preserving recovery integrity.
+    try:
+        clear_gate_marker(project_root)
+    except OSError as exc:
+        # Mirror the rename-failure surfacing pattern. The cleanup
+        # failure on the marker unlink IS still operator-actionable
+        # (read-only fs, permission denied), but it is decoupled from
+        # the rename's success — both can fail independently.
+        marker_clear_error = f"clear_gate_marker failed: {exc}"
+        if cleanup_error is None:
+            cleanup_error = marker_clear_error
+        else:
+            cleanup_error = f"{cleanup_error}; {marker_clear_error}"
 
     result: dict[str, Any] = {
         "recovered": True,
