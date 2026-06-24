@@ -358,6 +358,81 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
             )
         self.assertEqual(len(raw["stdout_tail"]), invokers._STDOUT_TAIL_CAP_CHARS)
 
+    def test_prompt_template_with_extra_placeholder_does_not_crash(self) -> None:
+        # Regression: ``CLIProfile``'s loader validates ``prompt_template``
+        # is a non-empty string but does NOT parse its format keys. An
+        # operator-authored TOML profile carrying ``prompt_template =
+        # "{prompt} --ws {workspace}"`` was raising ``KeyError: 'workspace'``
+        # from ``str.format`` inside ``claude_code_invoker`` because only
+        # ``prompt=`` was supplied as a kwarg. That ``KeyError`` propagated
+        # through ``default_invoker`` and ``dispatch_session`` (which only
+        # catches ``TimeoutError``), violating its docstring contract that
+        # it "Never raises on CLI-side or git-side failure". The fix
+        # renders the template with a defaulting mapping so unknown
+        # placeholders surface as empty strings rather than crashes.
+        from types import MappingProxyType
+
+        for template, expected_in_cmd in (
+            ("{prompt} --ws {workspace}", "/skill do-thing --ws"),
+            ("{prompt} sha={baseline_sha}", "/skill do-thing sha="),
+            ("run {a} {b} {prompt} {c}", "/skill do-thing"),
+        ):
+            with self.subTest(template=template):
+                profile = CLIProfile(
+                    cli_id="claude-code",
+                    binary="claude",
+                    prompt_template=template,
+                    bypass_flags=(),
+                    hook_dialect="claude",
+                    canonical_event_map=MappingProxyType({}),
+                    skill_tree_dir=".claude/skills",
+                )
+                with _StubHooks() as h:
+                    raw = invokers.claude_code_invoker(
+                        profile=profile, intent=_intent(),
+                    )
+                # Wire-shape preserved; no KeyError escaped.
+                self.assertEqual(
+                    set(raw.keys()),
+                    {"stdout_tail", "head_sha", "session_id",
+                     "stderr_tail", "timed_out"},
+                )
+                # The rendered command reached spawn_session — the canonical
+                # ``{prompt}`` placeholder was substituted, unknown
+                # placeholders rendered as empty strings.
+                h.spawn.assert_called_once()
+                cmd = h.spawn.call_args[0][1]
+                self.assertIn(expected_in_cmd, cmd)
+
+    def test_prompt_template_extra_placeholder_classifies_at_dispatch_session(
+        self,
+    ) -> None:
+        # End-to-end regression at the ``dispatch_session`` boundary: a
+        # ``prompt_template`` carrying an unknown placeholder must surface
+        # as a ``DispatchResult`` (not a bare ``KeyError`` crash through
+        # ``_dispatch_via_cli_dispatcher``, which only catches
+        # ``DispatcherError``).
+        from types import MappingProxyType
+
+        profile = CLIProfile(
+            cli_id="claude-code",
+            binary="claude",
+            prompt_template="{prompt} --ws {workspace}",
+            bypass_flags=(),
+            hook_dialect="claude",
+            canonical_event_map=MappingProxyType({}),
+            skill_tree_dir=".claude/skills",
+        )
+        with _StubHooks():
+            res = dispatch_session(
+                _intent(workspace="/tmp"),
+                profile=profile,
+                runtime_invoker=None,
+            )
+        self.assertIsInstance(res, DispatchResult)
+        # Must NOT report a raw KeyError leak.
+        self.assertNotIn("KeyError", res.stderr_tail)
+
     def test_claude_code_invoker_rejects_wrong_cli_id(self) -> None:
         # Defensive: claude_code_invoker called with a non-claude profile
         # raises NotImplementedError. This guards against orchestrator

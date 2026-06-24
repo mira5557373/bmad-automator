@@ -131,6 +131,22 @@ _POLL_INTERVAL_S: float = 1.0
 _STDOUT_TAIL_CAP_CHARS: int = 8000
 
 
+class _DefaultEmptyDict(dict):
+    """``dict`` subclass returning ``""`` for missing keys.
+
+    Used as the mapping passed to ``str.format_map`` when rendering an
+    operator-authored ``prompt_template``. ``CLIProfile``'s loader validates
+    the template is a non-empty string but does NOT parse its format keys,
+    so a template like ``"{prompt} --ws {workspace}"`` reaches the invoker
+    intact. ``str.format`` would raise ``KeyError`` for ``{workspace}``;
+    ``format_map`` with this dict surfaces an empty placeholder instead,
+    preserving the dispatcher's "never raise on CLI-side failure" contract.
+    """
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # claude_code_invoker
 # ---------------------------------------------------------------------------
@@ -245,9 +261,27 @@ def claude_code_invoker(
     # The spawn API is (session, command, selected_agent, project_root).
     binary = profile.binary or "claude"
     bypass = " ".join(profile.bypass_flags) if profile.bypass_flags else ""
-    rendered_prompt = (profile.prompt_template or "{prompt}").format(
-        prompt=intent.prompt
-    )
+    # Render the prompt with a defaulting mapping so an operator-authored
+    # ``prompt_template`` carrying an unexpected placeholder (e.g.
+    # ``{workspace}`` or ``{baseline_sha}``) does NOT crash the invoker
+    # with ``KeyError`` — that would propagate past ``dispatch_session``,
+    # which only catches ``TimeoutError``, violating its docstring contract
+    # ("Never raises on CLI-side or git-side failure"). ``CLIProfile``'s
+    # loader validates the template is a non-empty string but does not parse
+    # its format keys, so any extra ``{name}`` field reaches us. Unknown
+    # placeholders render as empty strings; the canonical ``{prompt}`` key
+    # is supplied by ``intent.prompt``.
+    _render_map: dict[str, str] = _DefaultEmptyDict(prompt=intent.prompt)
+    try:
+        rendered_prompt = (profile.prompt_template or "{prompt}").format_map(
+            _render_map
+        )
+    except (ValueError, IndexError):
+        # ``format_map`` can still raise on malformed format specs (e.g.
+        # ``{prompt:`` with no closing brace) or numeric-positional
+        # placeholders (e.g. ``{0}``). Fail soft: fall back to the bare
+        # prompt so the dispatcher gets a clean runner-contract dict.
+        rendered_prompt = intent.prompt or ""
     # We pass the prompt via the binary's CLI; the binary is responsible for
     # interpreting it. (Real claude-code uses stdin for /skill, but for
     # spawning we just embed the prompt in the command — tests don't actually
