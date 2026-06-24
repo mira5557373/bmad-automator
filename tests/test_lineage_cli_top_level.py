@@ -165,6 +165,35 @@ class EntryPointModuleTests(unittest.TestCase):
         # Help text lands somewhere — argparse prints to stdout.
         self.assertTrue(result.stdout, "expected help text on stdout")
 
+    def test_repo_root_path_arithmetic_resolves_to_this_file(self) -> None:
+        # Regression fence for the off-by-one in
+        # test_python_dash_m_lineage_help_robust_when_parent_uses_sys_path:
+        # the path arithmetic used to walk one too many `.parent`s, landing
+        # one level ABOVE the actual repo root. tests_dir then pointed at a
+        # non-existent directory and the driver subprocess silently fell
+        # back to its inherited cwd to import `tests`, defeating the
+        # cwd-independence guarantee the robust-test was meant to assert.
+        # Pin the arithmetic by proving the resolved tests_dir contains
+        # *this* file regardless of the caller's cwd.
+        pkg_src_dir = pathlib.Path(cli.__file__).resolve().parent.parent
+        repo_root = pkg_src_dir.parent.parent.parent
+        tests_dir = repo_root / "tests"
+        this_file = tests_dir / "test_lineage_cli_top_level.py"
+        self.assertTrue(
+            tests_dir.is_dir(),
+            f"computed tests_dir does not exist: {tests_dir}",
+        )
+        self.assertTrue(
+            this_file.is_file(),
+            f"computed tests_dir does not contain this test file: {this_file}",
+        )
+        # And the resolved path must match the path of this very module so
+        # we're not just landing on a sibling `tests/` directory by luck.
+        self.assertEqual(
+            this_file.resolve(),
+            pathlib.Path(__file__).resolve(),
+        )
+
     def test_python_dash_m_lineage_help_robust_when_parent_uses_sys_path(
         self,
     ) -> None:
@@ -186,7 +215,9 @@ class EntryPointModuleTests(unittest.TestCase):
         # across the process boundary. On the fixed code (env=child_env
         # with PYTHONPATH set explicitly) the inner subprocess succeeds.
         pkg_src_dir = pathlib.Path(cli.__file__).resolve().parent.parent
-        repo_root = pkg_src_dir.parent.parent.parent.parent
+        # pkg_src_dir = .../bmad-automator/skills/bmad-story-automator/src
+        # Walk: src -> bmad-story-automator -> skills -> bmad-automator (repo root)
+        repo_root = pkg_src_dir.parent.parent.parent
         tests_dir = repo_root / "tests"
 
         # Driver script: this is the "parent" that mimics a pytest/conftest
