@@ -1605,5 +1605,130 @@ class CliDispatcherDocsCliIdVocabularyTests(unittest.TestCase):
         )
 
 
+class RecentlyShippedSiblingModuleMentionTests(unittest.TestCase):
+    """CLAUDE.md's "Recently shipped" bullets name every shipped sibling module.
+
+    Pre-fix the K-2 bullet at CLAUDE.md said only "memoization with explicit
+    invalidation on persist; observability-only — no behavior change" and
+    never named the implementing module ``core/evidence_cache.py`` (165 LOC,
+    imported 7 times by ``evidence_io.py``, ``verdict_engine.py``, and
+    ``gate_orchestrator.py``). Similarly the G2 bullet named only
+    ``core/collector_isolation.py`` and never mentioned the sibling
+    ``core/collector_isolation_outcomes.py`` (139 LOC of pure outcome-reifier
+    helpers extracted to keep the parent under the 500-LOC soft limit;
+    imported 4 times by ``collector_isolation.py``).
+
+    Given CLAUDE.md's own directive "Read these existing modules before
+    planning any new milestone — interfaces are stable", an engineer
+    designing a new milestone that touches evidence-bundle memoization
+    would not discover ``evidence_cache.py`` from the doc and could
+    design a parallel cache, breaking the K-2 "explicit invalidation on
+    persist" contract. The regression test pins both module names to the
+    respective bullets.
+    """
+
+    EVIDENCE_CACHE_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "evidence_cache.py"
+    )
+    COLLECTOR_ISOLATION_OUTCOMES_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "collector_isolation_outcomes.py"
+    )
+
+    def _k2_bullet(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*Evidence-bundle memoization \(K-2\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **Evidence-bundle memoization "
+            "(K-2)**' bullet; update this regression test to match the new shape.",
+        )
+        return match.group(0)
+
+    def _g2_bullet(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*Worktree-per-unit isolation \(G2\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **Worktree-per-unit isolation "
+            "(G2)**' bullet; update this regression test to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_k2_bullet_names_evidence_cache_module(self) -> None:
+        bullet = self._k2_bullet()
+        self.assertIn(
+            "evidence_cache.py",
+            bullet,
+            "CLAUDE.md K-2 bullet no longer names ``core/evidence_cache.py`` "
+            "(the 165-LOC module that actually implements the K-2 memoization "
+            "with explicit invalidation on persist). An operator planning a new "
+            "milestone that touches evidence-bundle caching would not discover "
+            "the module from the doc and could design a parallel cache, breaking "
+            "the K-2 'invalidate on persist' contract.",
+        )
+
+    def test_g2_bullet_names_collector_isolation_outcomes_module(self) -> None:
+        bullet = self._g2_bullet()
+        self.assertIn(
+            "collector_isolation_outcomes.py",
+            bullet,
+            "CLAUDE.md G2 bullet no longer names ``core/collector_isolation_outcomes.py`` "
+            "(the 139-LOC sibling extracted to keep the parent under the 500-LOC "
+            "soft limit after the AC-I-13 / AC-I-14 fold-in). An operator planning "
+            "a new milestone that touches per-unit outcome reification would not "
+            "discover the helper module from the doc.",
+        )
+
+    def test_evidence_cache_module_actually_exists(self) -> None:
+        """Defensive: ``evidence_cache.py`` must exist on disk.
+
+        If a future refactor moves the K-2 cache somewhere else (e.g.
+        inlines it back into ``evidence_io.py``), the CLAUDE.md mention
+        becomes a dangling pointer. This test trips so the doc gets
+        re-audited at the same commit.
+        """
+        self.assertTrue(
+            self.EVIDENCE_CACHE_PATH.exists(),
+            "core/evidence_cache.py missing; CLAUDE.md's K-2 bullet now "
+            "references a non-existent module — either restore the file or "
+            "rewrite the bullet.",
+        )
+
+    def test_collector_isolation_outcomes_module_actually_exists(self) -> None:
+        """Defensive: ``collector_isolation_outcomes.py`` must exist on disk.
+
+        If a future refactor folds the outcome reifiers back into
+        ``collector_isolation.py``, the CLAUDE.md mention becomes a
+        dangling pointer. This test trips so the doc gets re-audited at
+        the same commit.
+        """
+        self.assertTrue(
+            self.COLLECTOR_ISOLATION_OUTCOMES_PATH.exists(),
+            "core/collector_isolation_outcomes.py missing; CLAUDE.md's G2 "
+            "bullet now references a non-existent module — either restore "
+            "the file or rewrite the bullet.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
