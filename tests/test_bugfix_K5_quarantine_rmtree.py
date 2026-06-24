@@ -430,5 +430,156 @@ class CleanupRootDoesNotPolluteEvidence(_Mixin, unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# K-5: pending-cleanup drain on early-return paths of run_production_gate /
+# run_system_gate. Pre-fix, the reuse-shortcut ``return existing`` and the
+# lie-detector ``return {"action": "baseline_drift", ...}`` exited the inner
+# try block via the lock-release finally without ever running the
+# outside-lock ``_rmtree_quarantined_dirs(_pending_cleanup)`` pass. The
+# renamed orphan leaked into ``_bmad/gate/cleanup/`` until the next startup
+# janitor swept it. Fix: function-level finally so EVERY exit path drains
+# the queue.
+# ---------------------------------------------------------------------------
+
+
+class PendingCleanupDrainedOnEarlyReturnPaths(_Mixin, unittest.TestCase):
+    """run_production_gate / run_system_gate drain _pending_cleanup on every exit."""
+
+    def _minimal_profile(self) -> dict:
+        return {
+            "version": 1,
+            "id": "test",
+            "matrix": {
+                "P0": {"coverage_pct": 80, "levels": ["unit"]},
+                "P1": {"coverage_pct": 60, "levels": ["unit"]},
+                "P2": {"coverage_pct": 40, "levels": ["unit"]},
+                "P3": {"coverage_pct": 20, "levels": ["unit"]},
+            },
+            "categories": {"code": ["correctness"], "system": []},
+        }
+
+    def _persist_reusable_gate(self, gate_id: str, commit_sha: str,
+                               profile: dict, factory_version: str) -> None:
+        from story_automator.core.evidence_io import persist_gate_file
+        from story_automator.core.gate_schema import make_gate_file
+        from story_automator.core.product_profile import compute_profile_hash
+
+        gate_file = make_gate_file(
+            gate_id=gate_id,
+            target={"kind": "story", "id": "s1"},
+            commit_sha=commit_sha,
+            profile={
+                "id": profile.get("id", "test"),
+                "version": profile.get("version", 1),
+                "hash": compute_profile_hash(profile),
+            },
+            factory_version=factory_version,
+            categories={"correctness": {"verdict": "PASS", "evidence": []}},
+            overall="PASS",
+        )
+        persist_gate_file(self.tmp, gate_file)
+
+    def test_reuse_shortcut_drains_pending_cleanup(self) -> None:
+        """Reuse-path ``return existing`` must still rmtree the renamed orphan.
+
+        Before the fix, _recover_from_crash_locked renamed the orphan evidence
+        dir into ``_bmad/gate/cleanup/<gate_id>-<uuid>/`` and populated
+        ``_pending_cleanup``, but the ``return existing`` early-return at the
+        reuse shortcut exited via the lock-release finally without reaching
+        the outside-lock rmtree pass. The orphan leaked until the next
+        startup janitor swept it.
+        """
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core.gate_orchestrator import run_production_gate
+
+        # Seed a dead-PID legacy marker pointing at a DIFFERENT gate_id so
+        # recovery quarantines the orphan evidence dir for that gate.
+        self._seed_dead_marker(gate_id="orphan-gate")
+
+        # Persist a reusable gate file for the gate_id we are about to
+        # ``run_production_gate(...)``. check_gate_reuse will return it,
+        # triggering the ``return existing`` early-return.
+        profile = self._minimal_profile()
+        self._persist_reusable_gate(
+            "reuse-gate", "abc123", profile, "1.0.0",
+        )
+
+        result = run_production_gate(
+            self.tmp, "reuse-gate",
+            commit_sha="abc123",
+            target={"kind": "story", "id": "s1"},
+            profile=profile,
+            factory_version="1.0.0",
+            registry=CollectorRegistry(),
+        )
+
+        # Reuse-path returned the cached gate.
+        self.assertEqual(result.get("overall"), "PASS")
+        self.assertEqual(result.get("gate_id"), "reuse-gate")
+
+        # K-5 contract: the cleanup root must be empty after the call.
+        # Pre-fix this asserted leftover ``orphan-gate-<uuid>`` entries.
+        cleanup_root = get_gate_cleanup_root(self.tmp)
+        if cleanup_root.is_dir():
+            leftovers = list(cleanup_root.iterdir())
+            self.assertEqual(
+                leftovers, [],
+                f"reuse-path early-return must drain _pending_cleanup; "
+                f"leftover: {[p.name for p in leftovers]}",
+            )
+
+    def test_lie_detector_baseline_drift_return_drains_pending_cleanup(self) -> None:
+        """Lie-detector ``baseline_drift`` return must still rmtree the renamed orphan.
+
+        Same shape as the reuse-path test but exercising the
+        ``enable_lie_detector=True`` early-return. The drift-detection helper
+        is monkey-patched to return ``ok=False`` so the
+        ``{"action": "baseline_drift", ...}`` branch fires.
+        """
+        from story_automator.core.collector_registry import CollectorRegistry
+        from story_automator.core import gate_orchestrator as _go
+
+        # Seed a dead-PID legacy marker pointing at a DIFFERENT gate_id.
+        self._seed_dead_marker(gate_id="orphan-gate-2")
+
+        profile = self._minimal_profile()
+
+        # Stub detect_baseline_drift to return a not-ok outcome, forcing
+        # the lie-detector early-return path.
+        class _Outcome:
+            ok = False
+
+            def to_dict(self) -> dict:
+                return {"reason": "expected-sha-mismatch"}
+
+        with mock.patch.object(
+            _go, "detect_baseline_drift", return_value=_Outcome(),
+        ):
+            result = _go.run_production_gate(
+                self.tmp, "drift-gate",
+                commit_sha="abc123",
+                target={"kind": "story", "id": "s1"},
+                profile=profile,
+                factory_version="1.0.0",
+                registry=CollectorRegistry(),
+                enable_lie_detector=True,
+                baseline_sha="baseline-deadbeef",
+            )
+
+        # Lie-detector path returned the baseline_drift descriptor.
+        self.assertEqual(result.get("action"), "baseline_drift")
+        self.assertEqual(result.get("gate_id"), "drift-gate")
+
+        # K-5 contract: cleanup root must be empty after the call.
+        cleanup_root = get_gate_cleanup_root(self.tmp)
+        if cleanup_root.is_dir():
+            leftovers = list(cleanup_root.iterdir())
+            self.assertEqual(
+                leftovers, [],
+                f"lie-detector early-return must drain _pending_cleanup; "
+                f"leftover: {[p.name for p in leftovers]}",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

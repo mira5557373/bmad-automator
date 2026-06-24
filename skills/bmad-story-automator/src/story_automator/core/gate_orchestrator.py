@@ -806,77 +806,86 @@ def run_production_gate(
         )
     _pending_cleanup: list[Path] = []
     try:
-        # Recovery runs under the same lock — use the *_locked variant
-        # so we don't try to re-acquire (filelock is not re-entrant
-        # across separate FileLock instances). K-5: capture the renamed
-        # cleanup paths so we can rmtree them outside the lock below.
-        _, _pending_cleanup = _recover_from_crash_locked(project_root)
-
-        existing, _ = check_gate_reuse(
-            project_root, gate_id, commit_sha, profile, factory_version,
-            audit_policy=audit_policy, audit_path=audit_path,
-        )
-        if existing is not None:
-            return existing
-
-        if enable_lie_detector:
-            outcome = detect_baseline_drift(
-                project_root,
-                expected_sha=commit_sha,
-                baseline_sha=baseline_sha,
-            )
-            if not outcome.ok:
-                return {
-                    "action": "baseline_drift",
-                    "gate_id": gate_id,
-                    "verify": outcome.to_dict(),
-                }
-
-        if audit_policy is not None and audit_path is not None:
-            emit_gate_audit(
-                audit_policy, audit_path,
-                GateStartedAudit(
-                    gate_id=gate_id, commit_sha=commit_sha,
-                    profile_hash=compute_profile_hash(profile),
-                ),
-            )
-
-        write_gate_marker(project_root, gate_id, commit_sha)
-        # C1 follow-up: optional spec-drift watcher polled at lifecycle
-        # start. Failures are strictly advisory and must never abort
-        # the gate — drift is telemetry, not gating.
-        if drift_watcher is not None:
-            try:
-                drift_watcher.poll()
-            except Exception:
-                pass
         try:
-            collector_outcomes = _run_collectors(
-                project_root, gate_id, commit_sha, profile, registry,
-                audit_policy=audit_policy, audit_path=audit_path,
-                isolation_mode=isolation_mode,
-                max_workers=max_workers,
-            )
-            gate_file = evaluate_gate(
-                project_root, gate_id,
-                commit_sha=commit_sha, target=target,
-                profile=profile, factory_version=factory_version,
-                priority=priority,
-                has_unmitigated_risk_9=has_unmitigated_risk_9,
-                waivers=waivers,
-                audit_policy=audit_policy, audit_path=audit_path,
-            )
-        finally:
-            clear_gate_marker(project_root)
-    finally:
-        _gate_lock.release()
+            # Recovery runs under the same lock — use the *_locked variant
+            # so we don't try to re-acquire (filelock is not re-entrant
+            # across separate FileLock instances). K-5: capture the renamed
+            # cleanup paths so we can rmtree them outside the lock below.
+            _, _pending_cleanup = _recover_from_crash_locked(project_root)
 
-    # K-5: rmtree the quarantined orphan evidence dirs OUTSIDE the gate
-    # lock so the slow bulk delete does not block any other gate run
-    # that may now want the lock. Failures are intentionally swallowed
-    # here — the next startup's janitor will mop them up.
-    if _pending_cleanup:
-        _rmtree_quarantined_dirs(_pending_cleanup)
+            existing, _ = check_gate_reuse(
+                project_root, gate_id, commit_sha, profile, factory_version,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+            if existing is not None:
+                return existing
+
+            if enable_lie_detector:
+                outcome = detect_baseline_drift(
+                    project_root,
+                    expected_sha=commit_sha,
+                    baseline_sha=baseline_sha,
+                )
+                if not outcome.ok:
+                    return {
+                        "action": "baseline_drift",
+                        "gate_id": gate_id,
+                        "verify": outcome.to_dict(),
+                    }
+
+            if audit_policy is not None and audit_path is not None:
+                emit_gate_audit(
+                    audit_policy, audit_path,
+                    GateStartedAudit(
+                        gate_id=gate_id, commit_sha=commit_sha,
+                        profile_hash=compute_profile_hash(profile),
+                    ),
+                )
+
+            write_gate_marker(project_root, gate_id, commit_sha)
+            # C1 follow-up: optional spec-drift watcher polled at lifecycle
+            # start. Failures are strictly advisory and must never abort
+            # the gate — drift is telemetry, not gating.
+            if drift_watcher is not None:
+                try:
+                    drift_watcher.poll()
+                except Exception:
+                    pass
+            try:
+                collector_outcomes = _run_collectors(
+                    project_root, gate_id, commit_sha, profile, registry,
+                    audit_policy=audit_policy, audit_path=audit_path,
+                    isolation_mode=isolation_mode,
+                    max_workers=max_workers,
+                )
+                gate_file = evaluate_gate(
+                    project_root, gate_id,
+                    commit_sha=commit_sha, target=target,
+                    profile=profile, factory_version=factory_version,
+                    priority=priority,
+                    has_unmitigated_risk_9=has_unmitigated_risk_9,
+                    waivers=waivers,
+                    audit_policy=audit_policy, audit_path=audit_path,
+                )
+            finally:
+                clear_gate_marker(project_root)
+        finally:
+            _gate_lock.release()
+    finally:
+        # K-5: rmtree the quarantined orphan evidence dirs OUTSIDE the
+        # gate lock so the slow bulk delete does not block any other
+        # gate run that may now want the lock. Wrapped in a function-
+        # level finally so EVERY exit path — the reuse-shortcut
+        # ``return existing``, the lie-detector ``return
+        # {"action": "baseline_drift", ...}``, the main fall-through,
+        # and any exception — runs the rmtree pass. Skipping it here
+        # would leak the renamed orphan into ``_bmad/gate/cleanup/``
+        # until the next startup janitor swept it, contradicting the
+        # K-5 inline-drain contract on these reachable early-return
+        # paths. Failures are intentionally swallowed — the next
+        # startup's janitor will mop up any leftover dirs.
+        if _pending_cleanup:
+            _rmtree_quarantined_dirs(_pending_cleanup)
 
     # N5 (G5): export Merkle root so auditors can externally verify the
     # evidence bundle without trusting the factory. Empty bundle returns

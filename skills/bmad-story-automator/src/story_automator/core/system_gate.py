@@ -120,81 +120,89 @@ def run_system_gate(
         )
     _pending_cleanup: list[Path] = []
     try:
-        # Recovery runs under the same lock — use the *_locked variant
-        # so we don't try to re-acquire (filelock is not re-entrant
-        # across separate FileLock instances). K-5: capture renamed
-        # cleanup paths so we can rmtree them outside the lock below.
-        _, _pending_cleanup = _recover_from_crash_locked(project_root)
+        try:
+            # Recovery runs under the same lock — use the *_locked variant
+            # so we don't try to re-acquire (filelock is not re-entrant
+            # across separate FileLock instances). K-5: capture renamed
+            # cleanup paths so we can rmtree them outside the lock below.
+            _, _pending_cleanup = _recover_from_crash_locked(project_root)
 
-        existing, _ = check_gate_reuse(
-            project_root, gate_id, commit_sha, profile, factory_version,
-            audit_policy=audit_policy, audit_path=audit_path,
-        )
-        if existing is not None:
-            return existing
+            existing, _ = check_gate_reuse(
+                project_root, gate_id, commit_sha, profile, factory_version,
+                audit_policy=audit_policy, audit_path=audit_path,
+            )
+            if existing is not None:
+                return existing
 
-        env_config = build_env_config(
-            str(project_root), commit_sha, epic_metadata, profile,
-        )
-
-        if audit_policy is not None and audit_path is not None:
-            emit_gate_audit(
-                audit_policy, audit_path,
-                SystemGateStartedAudit(
-                    gate_id=gate_id, epic_id=epic_id,
-                    commit_sha=commit_sha,
-                    profile_hash=compute_profile_hash(profile),
-                    env_tier=env_config.tier,
-                ),
+            env_config = build_env_config(
+                str(project_root), commit_sha, epic_metadata, profile,
             )
 
-        write_gate_marker(project_root, gate_id, commit_sha)
-        try:
-            with system_env(env_config, str(project_root)) as env_info:
-                if not env_info.provisioned:
-                    from .gate_schema import make_gate_file as _make_gate_file
-
-                    gate_file = _make_gate_file(
-                        gate_id=gate_id, tier="system",
-                        target={"kind": "epic", "id": epic_id},
+            if audit_policy is not None and audit_path is not None:
+                emit_gate_audit(
+                    audit_policy, audit_path,
+                    SystemGateStartedAudit(
+                        gate_id=gate_id, epic_id=epic_id,
                         commit_sha=commit_sha,
-                        profile={
-                            "id": profile.get("id", ""),
-                            "version": profile.get("version", 1),
-                            "hash": compute_profile_hash(profile),
-                        },
-                        factory_version=factory_version,
-                        categories={}, overall="FAIL",
-                    )
-                    gate_file["_provision_failed"] = True
-                    return gate_file
-
-                enriched = _inject_runtime_env(profile, env_info)
-                collector_outcomes = run_gate_collectors(
-                    project_root, gate_id, commit_sha, enriched, registry,
-                    audit_policy=audit_policy, audit_path=audit_path,
-                    isolation_mode=isolation_mode,
-                    max_workers=max_workers,
+                        profile_hash=compute_profile_hash(profile),
+                        env_tier=env_config.tier,
+                    ),
                 )
 
-            target = {"kind": "epic", "id": epic_id}
-            gate_file = evaluate_gate(
-                project_root, gate_id,
-                commit_sha=commit_sha, target=target,
-                profile=profile, factory_version=factory_version,
-                priority=priority, waivers=waivers,
-                audit_policy=audit_policy, audit_path=audit_path,
-                tier="system",
-            )
-        finally:
-            clear_gate_marker(project_root)
-    finally:
-        _gate_lock.release()
+            write_gate_marker(project_root, gate_id, commit_sha)
+            try:
+                with system_env(env_config, str(project_root)) as env_info:
+                    if not env_info.provisioned:
+                        from .gate_schema import make_gate_file as _make_gate_file
 
-    # K-5: outside-lock rmtree of orphan evidence dirs renamed during
-    # recovery. Slow bulk delete must not block other gates.
-    if _pending_cleanup:
-        _rmtree_quarantined_dirs(_pending_cleanup)
+                        gate_file = _make_gate_file(
+                            gate_id=gate_id, tier="system",
+                            target={"kind": "epic", "id": epic_id},
+                            commit_sha=commit_sha,
+                            profile={
+                                "id": profile.get("id", ""),
+                                "version": profile.get("version", 1),
+                                "hash": compute_profile_hash(profile),
+                            },
+                            factory_version=factory_version,
+                            categories={}, overall="FAIL",
+                        )
+                        gate_file["_provision_failed"] = True
+                        return gate_file
+
+                    enriched = _inject_runtime_env(profile, env_info)
+                    collector_outcomes = run_gate_collectors(
+                        project_root, gate_id, commit_sha, enriched, registry,
+                        audit_policy=audit_policy, audit_path=audit_path,
+                        isolation_mode=isolation_mode,
+                        max_workers=max_workers,
+                    )
+
+                target = {"kind": "epic", "id": epic_id}
+                gate_file = evaluate_gate(
+                    project_root, gate_id,
+                    commit_sha=commit_sha, target=target,
+                    profile=profile, factory_version=factory_version,
+                    priority=priority, waivers=waivers,
+                    audit_policy=audit_policy, audit_path=audit_path,
+                    tier="system",
+                )
+            finally:
+                clear_gate_marker(project_root)
+        finally:
+            _gate_lock.release()
+    finally:
+        # K-5: outside-lock rmtree of orphan evidence dirs renamed
+        # during recovery. Slow bulk delete must not block other gates.
+        # Wrapped in a function-level finally so EVERY exit path — the
+        # reuse-shortcut ``return existing``, the provision-failed
+        # ``return gate_file``, the main fall-through, and any
+        # exception — runs the rmtree pass. Without this, the
+        # early-return paths would leak the renamed orphan into
+        # ``_bmad/gate/cleanup/`` until the next startup janitor
+        # swept it. Failures are intentionally swallowed.
+        if _pending_cleanup:
+            _rmtree_quarantined_dirs(_pending_cleanup)
 
     if audit_policy is not None and audit_path is not None:
         cats_summary = ",".join(
