@@ -572,6 +572,48 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 # 4. Session was best-effort killed to avoid orphan leak.
                 kill.assert_called_once()
 
+    def test_polling_loop_base_exception_drains_session_before_propagating(
+        self,
+    ) -> None:
+        # Regression: ``BaseException`` subclasses (``KeyboardInterrupt``,
+        # ``SystemExit``) BYPASS the ``except Exception`` polling-loop
+        # guard by Python semantics. Pre-fix, an operator Ctrl-C arriving
+        # during the polling loop propagated out of ``claude_code_invoker``
+        # without ever invoking ``_kill_session_hook``, leaking the spawned
+        # tmux session as an orphan. ``BaseException`` propagation itself
+        # is by design (the dispatcher's contract at
+        # ``cli_dispatcher.py`` documents that Ctrl-C aborts the run);
+        # what this test pins is that the orphan cleanup runs BEFORE the
+        # interrupt propagates.
+        #
+        # Two contracts pinned:
+        #   1. ``_kill_session_hook(session, workspace)`` is invoked
+        #      exactly once with the spawned session id, even though the
+        #      polling-loop guard is ``except Exception:``.
+        #   2. The original ``BaseException`` still propagates (we do NOT
+        #      swallow Ctrl-C — that would defeat the operator's intent).
+        for exc_cls, exc_arg in (
+            (KeyboardInterrupt, "operator interrupt"),
+            (SystemExit, 1),
+        ):
+            with self.subTest(exception=exc_cls.__name__):
+                status = mock.Mock(side_effect=exc_cls(exc_arg))
+                kill = mock.Mock()
+                with _StubHooks(status=status, kill=kill):
+                    with self.assertRaises(exc_cls):
+                        invokers.claude_code_invoker(
+                            profile=claude_default(),
+                            intent=_intent(timeout_s=5.0),
+                        )
+                # Session was drained before the interrupt propagated —
+                # no orphan leaked into the operator's tmux server.
+                kill.assert_called_once()
+                # And we drained the EXACT session we spawned, not some
+                # other identifier (smoke-test that the cleanup binds the
+                # right name).
+                killed_session = kill.call_args.args[0]
+                self.assertTrue(killed_session.startswith("sa-disp-"))
+
     def test_polling_loop_hook_failure_classifies_at_dispatch_session(
         self,
     ) -> None:

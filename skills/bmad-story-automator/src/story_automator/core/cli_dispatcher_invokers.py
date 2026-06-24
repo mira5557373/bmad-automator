@@ -393,6 +393,22 @@ def claude_code_invoker(
             ),
             "timed_out": False,
         }
+    except BaseException:
+        # ``BaseException`` subclasses (``KeyboardInterrupt`` /
+        # ``SystemExit``) bypass the ``except Exception`` arm above by
+        # Python semantics. The dispatcher's docstring contract at
+        # ``cli_dispatcher.py`` explicitly allows BaseException to
+        # propagate (operator Ctrl-C aborts the run), but the orphan-leak
+        # concern is independent of propagation: if we don't drain the
+        # spawned tmux session here, every interrupted invocation
+        # accumulates an orphan in the operator's tmux server. Drain
+        # best-effort, then re-raise so the operator's interrupt still
+        # tears down the run as designed.
+        try:
+            _kill_session_hook(session, workspace)
+        except Exception:
+            pass
+        raise
 
     # 5. Pull stdout via verify_or_create_output, read it, tail-cap.
     # Wrap terminal-state output retrieval too: ``verify_or_create_output``
