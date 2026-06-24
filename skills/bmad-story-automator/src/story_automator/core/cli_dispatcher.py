@@ -313,6 +313,36 @@ def _build_timeout_result(
     )
 
 
+def _build_invoker_error_result(
+    *,
+    profile: CLIProfile,
+    intent: SessionIntent,
+    exc: Exception,
+) -> DispatchResult:
+    """Construct a uniformly-shaped ``stop_reason="error"`` :class:`DispatchResult`
+    for a runtime-invoker exception.
+
+    Per the docstring contract on :func:`dispatch_session` ("Never raises
+    on CLI-side or git-side failure"), CLI runtime failures from the
+    invoker (e.g. ``OSError`` from env access, ``subprocess.CalledProcessError``
+    from a tmux server-down condition, ``RuntimeError`` from a misbehaving
+    runner) are surfaced as ``DispatchResult`` values, not propagated.
+    The escalating severity is ``CRITICAL`` so the orchestrator routes to
+    operator-visible error handling, matching the git-layer CRITICAL
+    branch in :func:`_classify_from_lie_detector`.
+    """
+    outcome = VerifyOutcome.escalate("invoker_error", severity="CRITICAL")
+    return DispatchResult(
+        ok=False,
+        cli_id=profile.cli_id,
+        head_sha="",
+        stop_reason="error",
+        verify_outcome=outcome.to_dict(),
+        session_id="",
+        stderr_tail=f"{type(exc).__name__}: {exc}",
+    )
+
+
 def _classify_from_lie_detector(
     *,
     profile: CLIProfile,
@@ -422,6 +452,23 @@ def dispatch_session(
             profile=profile,
             intent=intent,
             stderr_tail=str(exc),
+        )
+    except NotImplementedError:
+        # Programmer/configuration error from the default-invoker switch
+        # (codex / gemini-cli / none / unknown cli_id paths). Propagate so
+        # the orchestrator can route the failure cleanly — pinned by
+        # test_no_invoker_routes_through_default_invoker_for_codex.
+        raise
+    except Exception as exc:
+        # Any other CLI/runtime exception from the invoker is surfaced as
+        # a DispatchResult, not propagated. Honors the docstring contract:
+        # "Never raises on CLI-side or git-side failure — those become
+        # stop_reason='error' or 'timeout' with ok=False". BaseException
+        # (KeyboardInterrupt, SystemExit) still propagates by design.
+        return _build_invoker_error_result(
+            profile=profile,
+            intent=intent,
+            exc=exc,
         )
 
     if not isinstance(raw, dict):

@@ -490,6 +490,100 @@ class DispatchSessionTimeoutTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# dispatch_session — invoker exception classification
+# ---------------------------------------------------------------------------
+
+
+class DispatchSessionInvokerExceptionTests(unittest.TestCase):
+    """Regression: docstring promise "Never raises on CLI-side or git-side
+    failure" must hold for non-TimeoutError runtime exceptions from the
+    invoker. NotImplementedError is the documented exception — it
+    propagates so the orchestrator can route the default-invoker switch's
+    "no shim for this cli_id" signal. All other Exception subclasses
+    (OSError, RuntimeError, ValueError, subprocess.CalledProcessError,
+    KeyError from a misconfigured prompt_template, etc.) must surface as
+    DispatchResult(stop_reason="error", ok=False).
+    """
+
+    def _raising_runner(self, exc: Exception):
+        def _invoke(*, profile: CLIProfile, intent: SessionIntent) -> dict[str, Any]:
+            raise exc
+        return _invoke
+
+    def test_oserror_classified_as_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._raising_runner(OSError("boom")),
+            )
+            self.assertEqual(res.stop_reason, "error")
+            self.assertFalse(res.ok)
+            self.assertEqual(res.cli_id, "claude-code")
+            self.assertEqual(res.verify_outcome["severity"], "CRITICAL")
+            self.assertEqual(res.verify_outcome["reason"], "invoker_error")
+            self.assertIn("OSError", res.stderr_tail)
+            self.assertIn("boom", res.stderr_tail)
+
+    def test_runtimeerror_classified_as_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._raising_runner(RuntimeError("kaput")),
+            )
+            self.assertEqual(res.stop_reason, "error")
+            self.assertFalse(res.ok)
+            self.assertIn("RuntimeError", res.stderr_tail)
+
+    def test_subprocess_calledprocesserror_classified_as_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            exc = subprocess.CalledProcessError(
+                1, ["tmux", "send-keys"], stderr=b"tmux: server not running",
+            )
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._raising_runner(exc),
+            )
+            self.assertEqual(res.stop_reason, "error")
+            self.assertFalse(res.ok)
+            self.assertIn("CalledProcessError", res.stderr_tail)
+
+    def test_notimplementederror_propagates(self) -> None:
+        # NotImplementedError is the documented routing signal for an
+        # un-wired cli_id; the dispatcher must NOT classify it as an
+        # invoker error so the orchestrator can route loudly. Pinned by
+        # test_no_invoker_routes_through_default_invoker_for_codex in
+        # test_cli_dispatcher_invokers.py.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            with self.assertRaises(NotImplementedError):
+                dispatch_session(
+                    _make_intent(tmp, base),
+                    profile=claude_default(),
+                    runtime_invoker=self._raising_runner(
+                        NotImplementedError("no shim for codex"),
+                    ),
+                )
+
+    def test_keyboardinterrupt_propagates(self) -> None:
+        # BaseException subclasses (KeyboardInterrupt, SystemExit) must
+        # still propagate — operator Ctrl-C must reach the orchestrator.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            with self.assertRaises(KeyboardInterrupt):
+                dispatch_session(
+                    _make_intent(tmp, base),
+                    profile=claude_default(),
+                    runtime_invoker=self._raising_runner(KeyboardInterrupt()),
+                )
+
+
+# ---------------------------------------------------------------------------
 # dispatch_session — plugin integration (HookBusShim)
 # ---------------------------------------------------------------------------
 
