@@ -592,6 +592,18 @@ def load_lineage_chain(project_root: str | Path) -> LineageChain:
 
     Empty index raises :class:`LineageError` — callers wanting the
     "no chain" sentinel should use :func:`load_lineage_root` instead.
+
+    Symmetric read-path validation: ``make_lineage_entry`` rejects any
+    slug containing path separators, ``..`` segments, NUL bytes, or
+    leading/trailing whitespace at the write boundary (see lines 158-171).
+    The same containment contract holds on the read path: a tampered or
+    hand-edited ``index.json`` containing a traversal composite_key
+    (e.g. ``"../../escape"``) would otherwise feed a sandbox-escaping
+    ``(genre, slug)`` pair to :func:`_entry_disk_path`, silently
+    violating the documented ``_bmad/lineage/<genre>/<slug>.json`` shape
+    contract. We validate ``genre`` against :data:`_GENRES_SET` and
+    ``slug`` against :data:`_SLUG_RE` (plus ``..`` rejection) BEFORE
+    composing the on-disk path, mirroring the constructor's whitelist.
     """
     entries_meta = _read_index(project_root)
     if not entries_meta:
@@ -600,7 +612,23 @@ def load_lineage_chain(project_root: str | Path) -> LineageChain:
         )
     entries: list[LineageEntry] = []
     for composite_key, _meta in sorted(entries_meta.items(), key=_index_sort_key):
-        genre, _, slug = composite_key.partition("/")
+        genre, sep, slug = composite_key.partition("/")
+        if sep != "/" or not slug:
+            raise LineageError(
+                f"corrupt lineage index composite_key {composite_key!r}: "
+                f"expected '<genre>/<slug>' shape"
+            )
+        if genre not in _GENRES_SET:
+            raise LineageError(
+                f"corrupt lineage index composite_key {composite_key!r}: "
+                f"genre {genre!r} not in {LINEAGE_GENRES}"
+            )
+        if not _SLUG_RE.match(slug) or ".." in slug:
+            raise LineageError(
+                f"corrupt lineage index composite_key {composite_key!r}: "
+                f"slug {slug!r} must match {_SLUG_RE.pattern!r} and contain "
+                f"no '..' segments (no path separators, NUL bytes, or whitespace)"
+            )
         entries.append(load_lineage_entry(project_root, genre, slug))
     return build_lineage_chain(entries)
 

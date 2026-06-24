@@ -480,6 +480,89 @@ class CorruptIndexTests(_TempProjectMixin, unittest.TestCase):
         with self.assertRaises(LineageError):
             load_lineage_chain(self.project_root)
 
+    def test_load_chain_rejects_path_traversal_composite_key(self) -> None:
+        # Regression: round-3 bug sweep. ``make_lineage_entry`` rejects
+        # path-traversal slugs at the write boundary, but the symmetric
+        # validation on the read path at :func:`load_lineage_chain` was
+        # missing. A tampered / hand-edited / merge-conflict-resolved
+        # ``index.json`` containing composite_key=``"../../escape"`` would
+        # yield ``genre=".."`` and ``slug="../escape"`` from
+        # ``composite_key.partition("/")``; the lexical ``_entry_disk_path``
+        # composition would then point OUTSIDE the documented
+        # ``_bmad/lineage/<genre>/<slug>.json`` sandbox. The fix validates
+        # ``genre`` against ``_GENRES_SET`` and ``slug`` against
+        # ``_SLUG_RE`` (plus ``..`` rejection) before composing the path,
+        # raising ``LineageError`` on tamper.
+        _ = get_lineage_root_dir(self.project_root)  # creates dir
+        idx_path = lineage_index_path(self.project_root)
+        # Plant a payload OUTSIDE _bmad/lineage/ that the traversal
+        # composite_key would resolve to. Without the fix this gets read.
+        outside_payload = self.project_root / "real-entry.json"
+        outside_payload.write_text(json.dumps({
+            "genre": "brainstorm",
+            "slug": "real-entry",
+            "payload_hash": _h("escape-body"),
+            "parent_root": "",
+            "timestamp_iso": "2026-06-24T00:00:00Z",
+        }))
+        # Hand-craft a tampered index with a traversal composite_key.
+        idx_path.write_text(json.dumps({
+            "entries": {
+                "../../real-entry": {
+                    "path": "real-entry.json",
+                    "merkle_root": "deadbeef" * 8,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                    "seq": 0,
+                },
+            },
+        }))
+        # Read-path must REJECT the traversal composite_key. Without the
+        # fix, this call would silently return a LineageChain holding the
+        # payload from OUTSIDE the lineage sandbox.
+        with self.assertRaises(LineageError) as ctx:
+            load_lineage_chain(self.project_root)
+        # Error message should point at the offending key so an operator
+        # can locate the tampered index entry.
+        self.assertIn("../../real-entry", str(ctx.exception))
+
+    def test_load_chain_rejects_unknown_genre_composite_key(self) -> None:
+        # Symmetric to ``test_make_entry_rejects_unknown_genre`` — the
+        # read-path validation must also reject genres outside the
+        # ``_GENRES_SET`` vocabulary even when the slug looks well-formed.
+        _ = get_lineage_root_dir(self.project_root)  # creates dir
+        idx_path = lineage_index_path(self.project_root)
+        idx_path.write_text(json.dumps({
+            "entries": {
+                "manifesto/s0": {
+                    "path": "manifesto/s0.json",
+                    "merkle_root": "deadbeef" * 8,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                    "seq": 0,
+                },
+            },
+        }))
+        with self.assertRaises(LineageError) as ctx:
+            load_lineage_chain(self.project_root)
+        self.assertIn("manifesto", str(ctx.exception))
+
+    def test_load_chain_rejects_malformed_composite_key(self) -> None:
+        # A composite_key with no '/' separator (or empty slug) violates
+        # the documented "<genre>/<slug>" shape and must be rejected.
+        _ = get_lineage_root_dir(self.project_root)  # creates dir
+        idx_path = lineage_index_path(self.project_root)
+        idx_path.write_text(json.dumps({
+            "entries": {
+                "no-separator-here": {
+                    "path": "x.json",
+                    "merkle_root": "deadbeef" * 8,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                    "seq": 0,
+                },
+            },
+        }))
+        with self.assertRaises(LineageError):
+            load_lineage_chain(self.project_root)
+
 
 class LineageLockTests(_TempProjectMixin, unittest.TestCase):
     def test_get_lineage_lock_returns_filelock(self) -> None:
