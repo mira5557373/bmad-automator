@@ -1395,6 +1395,106 @@ class SpecDriftWatcherLOCSoftLimitTests(unittest.TestCase):
             )
 
 
+class LineageLedgerLOCSoftLimitTests(unittest.TestCase):
+    """``lineage_ledger.py`` stays under the CLAUDE.md 500-LOC soft limit.
+
+    Pre-fix the ledger sat at 617 LOC, breaching the soft cap. The C2
+    follow-ups (path-traversal rejection, rollback-on-index-write
+    failure, topological orphan detection, multi-genesis corruption
+    flagging) added ~140 lines without a corresponding split. The fix
+    extracted the disk-persistence helpers (``get_lineage_root_dir``,
+    ``lineage_index_path``, ``get_lineage_lock``, ``_entry_disk_path``,
+    ``_read_index``, ``_write_index``, ``persist_lineage_entry``,
+    ``load_lineage_entry``, ``_index_sort_key``, ``load_lineage_chain``,
+    ``load_lineage_root``) into a new ``lineage_persistence`` sibling,
+    mirroring the ``spec_drift_watcher`` / ``spec_drift_persistence``
+    pattern.
+
+    The regression test pins both halves of the contract: (a) the
+    canonical ledger stays under the soft limit, and (b) the new sibling
+    exists and re-exports the symbols so the public surface is preserved.
+    """
+
+    LINEAGE_LEDGER_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+        / "lineage_ledger.py"
+    )
+    LINEAGE_PERSISTENCE_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+        / "lineage_persistence.py"
+    )
+    SOFT_LIMIT_LOC = 500
+
+    def test_lineage_ledger_under_soft_limit(self) -> None:
+        text = self.LINEAGE_LEDGER_PATH.read_text(encoding="utf-8")
+        loc = len(text.splitlines())
+        self.assertLessEqual(
+            loc,
+            self.SOFT_LIMIT_LOC,
+            f"lineage_ledger.py is {loc} LOC but the CLAUDE.md "
+            f"soft cap is {self.SOFT_LIMIT_LOC}. Extract another helper "
+            "into the sibling lineage_persistence module to recover headroom.",
+        )
+
+    def test_lineage_persistence_sibling_exists_and_reexports(self) -> None:
+        """The split must preserve the public surface of the ledger.
+
+        Tests + ``commands.lineage_cmd`` consume both public functions
+        (``persist_lineage_entry`` / ``load_lineage_root`` / ...) and
+        private helpers (``_read_index`` / ``_write_index`` /
+        ``_index_sort_key``) via ``from ... lineage_ledger import``. The
+        re-export contract keeps that import path working while the
+        definitions live in ``lineage_persistence``.
+        """
+        self.assertTrue(
+            self.LINEAGE_PERSISTENCE_PATH.exists(),
+            "lineage_persistence.py sibling missing; the LOC split has "
+            "regressed and the ledger will breach the soft cap again.",
+        )
+        persistence_module = importlib.import_module(
+            "story_automator.core.innovation.lineage_persistence"
+        )
+        ledger_module = importlib.import_module(
+            "story_automator.core.innovation.lineage_ledger"
+        )
+        for symbol in (
+            "get_lineage_root_dir",
+            "lineage_index_path",
+            "get_lineage_lock",
+            "_entry_disk_path",
+            "_read_index",
+            "_write_index",
+            "_index_sort_key",
+            "persist_lineage_entry",
+            "load_lineage_entry",
+            "load_lineage_chain",
+            "load_lineage_root",
+        ):
+            self.assertTrue(
+                hasattr(persistence_module, symbol),
+                f"lineage_persistence no longer exposes {symbol!r}; the "
+                "sibling-split contract has regressed.",
+            )
+            self.assertTrue(
+                hasattr(ledger_module, symbol),
+                f"lineage_ledger no longer re-exports {symbol!r}; existing "
+                "callers (commands.lineage_cmd, system_gate, tests) would "
+                "break.",
+            )
+
+
 class SpecDriftPersistenceDocstringConsistencyTests(unittest.TestCase):
     """``spec_drift_persistence`` docstring matches the bytes its writer emits.
 

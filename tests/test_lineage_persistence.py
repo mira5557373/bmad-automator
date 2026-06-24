@@ -399,8 +399,15 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
         target_dir = (
             self.project_root / "_bmad" / "lineage" / "brainstorm"
         )
+        # Patch the persistence-module reference: ``persist_lineage_entry``
+        # was extracted to ``lineage_persistence.py`` (CLAUDE.md 500-LOC
+        # split) and resolves ``write_atomic_text`` against THAT module's
+        # namespace. The historical ``lineage_ledger.write_atomic_text``
+        # path no longer carries the symbol; patching here keeps the
+        # crash-safety contract pinned at the layer that actually fires
+        # the write.
         with patch(
-            "story_automator.core.innovation.lineage_ledger.write_atomic_text",
+            "story_automator.core.innovation.lineage_persistence.write_atomic_text",
             side_effect=OSError("simulated crash"),
         ):
             with self.assertRaises(OSError):
@@ -428,7 +435,7 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
             self.project_root / "_bmad" / "lineage" / "brainstorm" / "s0.json"
         )
         with patch(
-            "story_automator.core.innovation.lineage_ledger._write_index",
+            "story_automator.core.innovation.lineage_persistence._write_index",
             side_effect=OSError("simulated index write failure"),
         ):
             with self.assertRaises(OSError):
@@ -457,21 +464,28 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
         target_path = (
             self.project_root / "_bmad" / "lineage" / "brainstorm" / "s0.json"
         )
-        from story_automator.core.innovation import lineage_ledger as _ll
+        # ``persist_lineage_entry`` was extracted to
+        # ``lineage_persistence.py`` (CLAUDE.md 500-LOC split); the
+        # internal ``write_atomic_text`` call site resolves against THAT
+        # module's namespace, so the patch must target the persistence
+        # module rather than the historical ``lineage_ledger`` import.
+        from story_automator.core.innovation import (
+            lineage_persistence as _lp,
+        )
 
-        real_write = _ll.write_atomic_text
+        real_write = _lp.write_atomic_text
         call_log: list[Path] = []
 
         def _side_effect(path, text):  # type: ignore[no-untyped-def]
             call_log.append(Path(path))
             if len(call_log) == 1:
-                # First call = entry write at line 484. Let it through.
+                # First call = entry write. Let it through.
                 return real_write(path, text)
             # Second call = ``_write_index`` -> ``write_atomic_text`` for
-            # ``index.json`` (line 445). Simulate ENOSPC/EACCES here.
+            # ``index.json``. Simulate ENOSPC/EACCES here.
             raise OSError("simulated index-write crash")
 
-        with patch.object(_ll, "write_atomic_text", side_effect=_side_effect):
+        with patch.object(_lp, "write_atomic_text", side_effect=_side_effect):
             with self.assertRaises(OSError):
                 persist_lineage_entry(self.project_root, entry)
         # Confirm both calls were attempted — the test would be vacuous
@@ -502,7 +516,7 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
         baseline_root = load_lineage_root(self.project_root)
 
         with patch(
-            "story_automator.core.innovation.lineage_ledger._write_index",
+            "story_automator.core.innovation.lineage_persistence._write_index",
             side_effect=OSError("simulated index write failure"),
         ):
             with self.assertRaises(OSError):
