@@ -9,10 +9,12 @@ API on tmux_runtime, no new third-party deps.
 Why a sibling module?
 ---------------------
 
-``core/cli_dispatcher.py`` is currently 481 LOC (500-LOC soft limit per
-project convention). Adding the real invoker wiring inline would push
-it over. Splitting also keeps the dispatcher's classification logic
-unit-testable without dragging in tmux at import time.
+``core/cli_dispatcher.py`` is currently 545 LOC (already past the
+500-LOC soft limit per project convention; a further split is
+indicated). Adding the real invoker wiring inline would have pushed
+it even further past. Splitting also keeps the dispatcher's
+classification logic unit-testable without dragging in tmux at
+import time.
 
 Public surface (all consumed only by ``cli_dispatcher.py``):
 

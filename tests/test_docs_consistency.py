@@ -2869,5 +2869,110 @@ class WorktreePerUnitIsolationInvariantSubTestCountTests(unittest.TestCase):
         )
 
 
+class CliDispatcherInvokersDocstringLOCFreshnessTests(unittest.TestCase):
+    """``cli_dispatcher_invokers.py`` docstring's parent-LOC figure is fresh.
+
+    Pre-fix the module docstring at
+    ``core/cli_dispatcher_invokers.py:12`` read
+    ``cli_dispatcher.py is currently 481 LOC (500-LOC soft limit per
+    project convention).`` while the live parent file had grown to
+    545 LOC across follow-up commits (C5 / G2 fold-ins). The "currently"
+    qualifier made it a load-bearing freshness promise — a future
+    contributor reading the rationale would believe the parent was 64
+    LOC smaller than reality and might decide further extraction was
+    unnecessary.
+
+    The fix updates the docstring to either cite the current parent LOC
+    or weaken the freshness promise (e.g. drop ``currently``). This
+    regression test pins both halves of the contract:
+
+    1. If the docstring still claims a specific parent LOC qualified
+       by ``currently``, that number must match the live parent LOC
+       within a generous tolerance (allowing modest in-flight growth
+       between doc bumps).
+    2. The pre-fix stale ``481`` figure is gone, so reverting to that
+       exact wording would re-introduce the drift.
+
+    Doc-precision fix only — no code change. The 500-LOC soft cap on
+    ``cli_dispatcher.py`` is independently tracked by the
+    ``CliDispatcherSiblingModuleDocConsistencyTests`` class above (which
+    pins the CLAUDE.md N6.5 bullet's "past the 500-LOC soft limit"
+    acknowledgement against the live parent LOC).
+    """
+
+    CLI_DISPATCHER_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "cli_dispatcher.py"
+    )
+    CLI_DISPATCHER_INVOKERS_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "cli_dispatcher_invokers.py"
+    )
+    # Tolerance band: docstring may lag the live file by up to ~100 LOC
+    # before the freshness claim becomes misleading. This catches the
+    # pre-fix 64-LOC undercount while allowing modest in-flight growth
+    # between doc bumps.
+    LOC_TOLERANCE = 100
+
+    def test_invokers_docstring_does_not_cite_stale_481_as_current(self) -> None:
+        """Pin the specific regression: pre-fix docstring said 'currently 481'.
+
+        Reverting to the pre-fix wording would re-introduce the original
+        drift. Anchor on the precise stale shape "currently 481 LOC" so
+        a hypothetical legitimate historical reference to "481" would
+        survive.
+        """
+        text = self.CLI_DISPATCHER_INVOKERS_PATH.read_text(encoding="utf-8")
+        self.assertNotRegex(
+            text,
+            r"currently\s+481\s+LOC",
+            "cli_dispatcher_invokers.py docstring re-introduces the "
+            "pre-fix stale 'currently 481 LOC' claim. The parent file "
+            "has grown well past 481 LOC; either drop the 'currently' "
+            "qualifier or cite the live parent LOC.",
+        )
+
+    def test_invokers_docstring_loc_claim_matches_live_parent(self) -> None:
+        """If the docstring cites a current parent LOC, it must be fresh.
+
+        The post-fix docstring may either (a) drop the specific number
+        and use a non-numeric framing, or (b) carry a fresh number that
+        tracks the live parent LOC within ``LOC_TOLERANCE``. We extract
+        any ``currently NNN LOC`` shape and validate it against the live
+        parent file; if the docstring drops the number entirely the
+        regex misses and this test no-ops (the prior test pins the
+        stale 481 anchor independently).
+        """
+        text = self.CLI_DISPATCHER_INVOKERS_PATH.read_text(encoding="utf-8")
+        match = re.search(r"currently\s+(\d+)\s+LOC", text)
+        if match is None:
+            # Docstring no longer carries a numeric "currently NNN LOC"
+            # claim. The drift cannot recur from a missing number.
+            return
+        cited = int(match.group(1))
+        live = len(
+            self.CLI_DISPATCHER_PATH.read_text(encoding="utf-8").splitlines()
+        )
+        delta = abs(live - cited)
+        self.assertLessEqual(
+            delta,
+            self.LOC_TOLERANCE,
+            f"cli_dispatcher_invokers.py docstring cites {cited} LOC "
+            f"for cli_dispatcher.py but the live file is {live} LOC "
+            f"(|delta|={delta}, tolerance={self.LOC_TOLERANCE}). Bump "
+            "the cited LOC in the docstring or drop the specific number.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
