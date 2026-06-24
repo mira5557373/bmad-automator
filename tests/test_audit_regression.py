@@ -898,19 +898,53 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), "NONE")
 
     @staticmethod
-    def _is_scrub_call(node) -> bool:
+    def _collect_scrub_aliases(tree) -> set[str]:
+        """Return names bound to ``scrub_env_for_subprocess`` via
+        ``from <anywhere> import scrub_env_for_subprocess`` or
+        ``from <anywhere> import scrub_env_for_subprocess as <alias>``.
+
+        Mirrors the binding-tracking idiom in
+        :py:meth:`_collect_subprocess_bindings` (lines 710-739) so future
+        ``from .audit import scrub_env_for_subprocess as s`` /
+        ``from story_automator.core.audit import scrub_env_for_subprocess
+        as s`` idioms cannot silently trip a D-04 false-positive on the
+        *allowed* scrub-name side — symmetric with the alias-binding
+        coverage that already exists on the forbidden subprocess side.
+        """
+        import ast
+
+        aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "scrub_env_for_subprocess":
+                        aliases.add(alias.asname or alias.name)
+        return aliases
+
+    @staticmethod
+    def _is_scrub_call(node, aliases: frozenset[str] | set[str] = frozenset()) -> bool:
         """Return True iff ``node`` is a call to ``scrub_env_for_subprocess``
-        (bare-name or attribute form). Lifted to a staticmethod so the
-        positive-failure regression test can exercise the env-keyword
-        check directly without scanning the real skill tree.
+        (bare-name, attribute, or import-alias form). Lifted to a
+        staticmethod so the positive-failure regression test can
+        exercise the env-keyword check directly without scanning the
+        real skill tree.
+
+        ``aliases`` is the per-module set returned by
+        :py:meth:`_collect_scrub_aliases` — names bound to
+        ``scrub_env_for_subprocess`` via ``from ... import ... as
+        <alias>``. Default ``frozenset()`` preserves backward-compatible
+        bare-name + attribute matching for any non-walker caller.
         """
         import ast
 
         if not isinstance(node, ast.Call):
             return False
         func = node.func
-        if isinstance(func, ast.Name) and func.id == "scrub_env_for_subprocess":
-            return True
+        if isinstance(func, ast.Name):
+            if func.id == "scrub_env_for_subprocess":
+                return True
+            if func.id in aliases:
+                return True
         if isinstance(func, ast.Attribute) and func.attr == "scrub_env_for_subprocess":
             return True
         return False
@@ -955,7 +989,18 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         if not module_aliases and not callable_aliases:
             return []
 
-        is_scrub_call = cls._is_scrub_call
+        # Symmetric to ``module_aliases`` / ``callable_aliases`` on the
+        # forbidden subprocess side: track aliased names of the
+        # ALLOWED scrub helper so ``from .audit import
+        # scrub_env_for_subprocess as s`` followed by ``env=s()`` is
+        # NOT falsely flagged. Closes the asymmetry called out by the
+        # D-04 regression-net audit.
+        scrub_aliases = cls._collect_scrub_aliases(tree)
+        _is_scrub_call_static = cls._is_scrub_call
+
+        def is_scrub_call(node) -> bool:
+            return _is_scrub_call_static(node, scrub_aliases)
+
         is_subprocess_call = cls._is_subprocess_call_with_bindings
         offenders: list[int] = []
 
@@ -1376,6 +1421,126 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "accepted an unscrubbed env=dict literal after a bare "
             "annotation — visit_AnnAssign must guard ``node.value is "
             "not None`` AND must not bind a name without a scrub call",
+        )
+
+    def test_scrub_import_alias_is_tracked(self) -> None:
+        """``from <anywhere> import scrub_env_for_subprocess as <alias>``
+        must register ``<alias>`` as an accepted scrub-call name — same
+        as the canonical bare-name ``scrub_env_for_subprocess`` is
+        accepted directly.
+
+        Without an ``ImportFrom`` collection pass mirroring
+        :py:meth:`_collect_subprocess_bindings` (lines 710-739), a
+        contributor writing ``from .audit import
+        scrub_env_for_subprocess as s`` followed by
+        ``subprocess.run(..., env=s())`` is silently flagged as
+        unscrubbed by the D-04 audit-floor invariant — a latent
+        false-positive that breaks CI on a legitimate refactor the
+        moment somebody adopts the aliased-import idiom.
+
+        The asymmetry is the root cause: the *forbidden* subprocess
+        side already tracks ``import subprocess as sp`` and ``from
+        subprocess import run as r`` (see
+        ``_collect_subprocess_bindings`` lines 710-739), but the
+        *allowed* scrub side hard-codes the literal name. This test
+        pins the symmetric alias-collection helper
+        (``_collect_scrub_aliases``) so the gap cannot regress.
+
+        Negative case (c): a module that aliases ``scrub_env_for_subprocess``
+        in an import but then calls ``subprocess.run`` WITHOUT an env=
+        keyword must still be flagged — the alias collection must not
+        accidentally relax the unrelated env-keyword check.
+        """
+        import ast
+
+        # (a) GOOD — direct aliased call ``env=s()`` after ``from ...
+        # import scrub_env_for_subprocess as s``. This is the
+        # repro-case in the bug report.
+        aliased_direct_src = textwrap.dedent(
+            """
+            from story_automator.core.audit import scrub_env_for_subprocess as s
+            import subprocess
+
+            def safe():
+                subprocess.run(["ls"], env=s())
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(aliased_direct_src)),
+            [],
+            "Walker FALSELY flagged env=s() where ``s`` was bound to "
+            "scrub_env_for_subprocess via ``from ... import "
+            "scrub_env_for_subprocess as s`` — _is_scrub_call must "
+            "consult the import-alias map symmetric with "
+            "_collect_subprocess_bindings on the forbidden side",
+        )
+
+        # (b) GOOD — aliased assigned variant: ``scrubbed = s(env)``
+        # followed by ``env=scrubbed``. Pins that the scrubbed-name
+        # tracker recognises the aliased call AS a scrub call when
+        # binding the target name.
+        aliased_assigned_src = textwrap.dedent(
+            """
+            from story_automator.core.audit import scrub_env_for_subprocess as s
+            import subprocess
+
+            def safe(env):
+                scrubbed = s(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(aliased_assigned_src)),
+            [],
+            "Walker FALSELY flagged env=scrubbed where ``scrubbed`` was "
+            "bound to s(env) and ``s`` was an alias for "
+            "scrub_env_for_subprocess — visit_Assign must treat aliased "
+            "scrub calls as scrub calls for binding purposes",
+        )
+
+        # (c) BAD — alias is imported but the actual call still lacks
+        # any env= keyword. The alias map must not relax the unrelated
+        # env-keyword check. This pins that the alias-collection helper
+        # is additive (accept more scrub calls) rather than subtractive
+        # (skip the env= check entirely once any scrub alias is seen).
+        aliased_but_no_env_src = textwrap.dedent(
+            """
+            from story_automator.core.audit import scrub_env_for_subprocess as s
+            import subprocess
+
+            def leak():
+                subprocess.run(["ls"])
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(aliased_but_no_env_src))),
+            1,
+            "Walker FAILED to flag subprocess.run with NO env= keyword "
+            "after an aliased-import line — alias collection must be "
+            "additive (accept more scrub calls), not subtractive (skip "
+            "the env-keyword check)",
+        )
+
+        # (d) GOOD — bare ``from ... import scrub_env_for_subprocess``
+        # without ``as``. The canonical name must continue to work
+        # exactly as before; the alias collection must not regress the
+        # zero-alias case. (Without this control, the bare-name path
+        # could be silently broken by a refactor of the alias map.)
+        bare_import_src = textwrap.dedent(
+            """
+            from story_automator.core.audit import scrub_env_for_subprocess
+            import subprocess
+
+            def safe():
+                subprocess.run(["ls"], env=scrub_env_for_subprocess())
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(bare_import_src)),
+            [],
+            "Walker FALSELY flagged the canonical bare-name "
+            "scrub_env_for_subprocess() form — alias collection must "
+            "not regress the non-aliased import path",
         )
 
     def test_scrub_binding_is_function_scoped(self) -> None:
