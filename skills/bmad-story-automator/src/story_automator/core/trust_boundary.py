@@ -104,12 +104,24 @@ def verify_sandbox_env(env: dict[str, str]) -> tuple[bool, list[str]]:
     return (len(violations) == 0, violations)
 
 
-def sandbox_tmux_env_args(agent: str = "") -> list[str]:
+def sandbox_tmux_env_args(
+    agent: str = "",
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> list[str]:
     """Return tmux ``-e`` flag pairs for a sandboxed child session.
 
     Deterministic order: forced vars, then agent (if set), then
-    stripped vars (alphabetical).  Matches the env semantics of
-    ``tmux new-session -e KEY=VALUE``.
+    stripped vars (alphabetical), then ``extra_env`` keys (alphabetical).
+    Matches the env semantics of ``tmux new-session -e KEY=VALUE``.
+
+    ``extra_env`` is the explicit forwarding channel for keys that the
+    tmux server's start-time env would NOT otherwise propagate to a new
+    pane (e.g. ``BMAD_AUTO_*`` hook env). Mutating ``os.environ`` does
+    not reach the pane shell when the tmux server is already running —
+    panes inherit the server's frozen env plus any ``-e`` flags on
+    ``new-session``. Keys clashing with forced/stripped/agent slots are
+    rejected so the trust boundary cannot be bypassed via this kwarg.
     """
     args: list[str] = []
     for var in sorted(CHILD_FORCED_VARS):
@@ -118,6 +130,21 @@ def sandbox_tmux_env_args(agent: str = "") -> list[str]:
         args.extend(["-e", f"AI_AGENT={agent}"])
     for var in sorted(CHILD_STRIPPED_VARS):
         args.extend(["-e", f"{var}="])
+    if extra_env:
+        reserved = (
+            set(CHILD_FORCED_VARS)
+            | set(CHILD_STRIPPED_VARS)
+            | {"AI_AGENT"}
+        )
+        for key in sorted(extra_env):
+            if key in reserved:
+                raise TrustBoundaryError(
+                    f"extra_env key {key!r} collides with a sandbox-managed "
+                    f"slot; refusing to forward via -e to preserve the "
+                    f"trust boundary"
+                )
+            value = extra_env[key]
+            args.extend(["-e", f"{key}={value}"])
     return args
 
 

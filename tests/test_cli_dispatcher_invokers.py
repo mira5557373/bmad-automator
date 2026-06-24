@@ -278,6 +278,51 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 else:
                     os.environ[k] = v
 
+    def test_spawn_session_receives_bmad_auto_keys_via_extra_env_kwarg(
+        self,
+    ) -> None:
+        # Regression for the tmux-server-already-running env propagation
+        # bug: mutating ``os.environ`` is NOT sufficient because
+        # ``tmux new-session`` is a client RPC and the server's pane
+        # shells inherit from the server's frozen start-time env plus
+        # ``-e`` flags, NOT from the caller's transient env. The
+        # invoker MUST forward BMAD_AUTO_* keys to ``spawn_session`` via
+        # an ``extra_env`` kwarg so they land as ``tmux new-session -e
+        # KEY=VAL`` args. (Pre-fix the kwarg simply did not exist and
+        # the keys were silently lost for every invocation after the
+        # first one in a tmux-server lifetime.)
+        spawn = mock.Mock(return_value=("ok", 0))
+        with _StubHooks(spawn=spawn):
+            invokers.claude_code_invoker(
+                profile=claude_default(),
+                intent=_intent(),
+            )
+        spawn.assert_called_once()
+        _args, kwargs = spawn.call_args
+        # The kwarg must be present...
+        self.assertIn(
+            "extra_env",
+            kwargs,
+            "claude_code_invoker must forward BMAD_AUTO_* to spawn_session "
+            "via the extra_env kwarg so they reach the tmux pane shell via "
+            "-e flags (mutating os.environ alone is not sufficient when the "
+            "tmux server is already running)",
+        )
+        extra_env = kwargs["extra_env"]
+        self.assertIsInstance(extra_env, dict)
+        # ...and must carry every BMAD_AUTO_* hook key the contract
+        # promises consumers (bmad_auto_hook.py reads these).
+        self.assertEqual(extra_env.get("BMAD_AUTO_STORY_KEY"), "STORY-1")
+        self.assertEqual(extra_env.get("BMAD_AUTO_PHASE"), "dev-running")
+        self.assertEqual(extra_env.get("BMAD_AUTO_CLI_ID"), "claude-code")
+        self.assertEqual(extra_env.get("BMAD_AUTO_COMMIT_SHA"), "b" * 40)
+        self.assertEqual(extra_env.get("BMAD_AUTO_TASK_ID"), "")
+        # And every value must be a string (tmux -e is byte-oriented).
+        for k, v in extra_env.items():
+            self.assertIsInstance(
+                v, str, f"extra_env[{k!r}] must be a string, got {type(v)}"
+            )
+
     def test_head_sha_matches_git_hook_result(self) -> None:
         # 10. head_sha in returned dict matches the git rev-parse HEAD hook
         # output for intent.workspace.

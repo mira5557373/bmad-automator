@@ -192,17 +192,26 @@ def claude_code_invoker(
             f"claude_code_invoker called with cli_id={profile.cli_id!r}"
         )
 
-    # 1. BMAD_AUTO_* env injection — parent process env so the subprocess
-    # spawned by ``_spawn_session_hook`` (which copies ``os.environ``) sees
-    # the keys when issuing ``tmux new-session -e KEY=VAL ...``.
+    # 1. BMAD_AUTO_* env propagation — forwarded to ``tmux new-session -e``
+    # via the spawn hook's ``extra_env`` kwarg so pane shells inherit the
+    # keys regardless of whether the tmux server was started before or
+    # after this process. (Mutating ``os.environ`` is NOT sufficient: when
+    # the tmux server is already running, ``tmux new-session`` is a client
+    # RPC and the server's pane shells inherit from the server's frozen
+    # start-time env plus ``-e`` flags, NOT from the caller's transient
+    # env. Pre-fix this contract was silently broken for every invocation
+    # after the first one in a tmux-server lifetime.)
     #
     # Bug E2_C9_D-SEC-04: prior implementation permanently mutated
     # ``os.environ`` and never restored it, leaking BMAD_AUTO_* across
     # sequential invocations and contaminating any cleanup/attribution
-    # code that reads the parent env. The fix snapshots prior values,
-    # applies the mutation only across the spawn call, and restores the
-    # parent env in a ``finally`` block (including removing keys that
-    # did not previously exist).
+    # code that reads the parent env. The current fix snapshots prior
+    # values, applies the mutation only across the spawn call, and
+    # restores the parent env in a ``finally`` block. The mutation is
+    # kept as a belt-and-suspenders guard for in-process consumers that
+    # may read ``os.environ`` from the spawn hook (e.g. existing test
+    # contracts and runtime hooks); the authoritative pane-shell
+    # propagation channel is ``extra_env``.
     enriched = tmux_runtime.inject_bmad_auto_env(
         dict(os.environ),
         story_key=intent.story_key,
@@ -236,15 +245,19 @@ def claude_code_invoker(
         if bypass
         else f"{binary} {rendered_prompt}".strip()
     )
+    # Stringify values; tmux -e is byte-oriented and we never want a
+    # ``None`` slipping in for a key whose source kwarg was unset.
+    _bmad_extra_env = {k: str(v) for k, v in _bmad_keys.items()}
     try:
         # Apply BMAD_AUTO_* keys only across the spawn call. The spawn
         # subprocess (run_cmd → subprocess.run(env=os.environ.copy()))
-        # snapshots its env at exec time, so tmux's child shell inherits
-        # the keys without the parent's env staying mutated afterwards.
-        for k, v in _bmad_keys.items():
-            os.environ[k] = str(v)
+        # snapshots its env at exec time. The authoritative propagation
+        # to the pane shell happens via the ``extra_env`` kwarg below,
+        # which becomes explicit ``tmux new-session -e KEY=VAL`` args.
+        for k, v in _bmad_extra_env.items():
+            os.environ[k] = v
         spawn_out, spawn_code = _spawn_session_hook(
-            session, command, "claude", workspace
+            session, command, "claude", workspace, extra_env=_bmad_extra_env
         )
     finally:
         # Restore parent env regardless of spawn outcome (success, failure,

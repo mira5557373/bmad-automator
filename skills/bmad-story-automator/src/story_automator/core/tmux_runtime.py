@@ -383,6 +383,8 @@ def spawn_session(
     selected_agent: str,
     project_root: str | None = None,
     mode: str | None = None,
+    *,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     # Refuse a duplicate spawn for a session that already exists. Both spawn
     # paths immediately call cleanup_runtime_artifacts(), which unlinks the
@@ -391,13 +393,23 @@ def spawn_session(
     # (doomed) tmux new-session even fails. Returning early leaves the live
     # session untouched. (Inert when tmux is unavailable: tmux_has_session
     # short-circuits to False.)
+    #
+    # ``extra_env`` is forwarded to ``tmux new-session -e KEY=VAL`` so that
+    # pane shells inherit those keys even when the tmux server is already
+    # running (panes inherit the server's start-time env plus -e flags, NOT
+    # the caller's transient os.environ). Defaults to ``None`` so existing
+    # callers stay byte-identical.
     if tmux_has_session(session):
         return (f"session {session} already exists\n", 1)
     resolved_mode = _resolve_spawn_mode(mode)
     if resolved_mode == "legacy":
-        output, code = _spawn_legacy(session, command, selected_agent, project_root)
+        output, code = _spawn_legacy(
+            session, command, selected_agent, project_root, extra_env=extra_env
+        )
     else:
-        output, code = _spawn_runner(session, command, selected_agent, project_root)
+        output, code = _spawn_runner(
+            session, command, selected_agent, project_root, extra_env=extra_env
+        )
     if code == 0:
         _emit_tmux_spawned(session, project_root)
     return output, code
@@ -676,7 +688,12 @@ def estimate_wait(task: str, done: int, total: int) -> int:
 
 
 def _spawn_runner(
-    session: str, command: str, selected_agent: str, project_root: str | None
+    session: str,
+    command: str,
+    selected_agent: str,
+    project_root: str | None,
+    *,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     if not command_exists("tmux"):
         return ("tmux not found\n", 1)
@@ -709,7 +726,7 @@ def _spawn_runner(
         str(DEFAULT_HEIGHT),
         "-c",
         str(root),
-        *sandbox_tmux_env_args(agent=selected_agent),
+        *sandbox_tmux_env_args(agent=selected_agent, extra_env=extra_env),
         # Never expose the audit HMAC signing key to the child agent's shell.
         # tmux -e VAR= sets it empty in the pane; load_key_from_env treats empty
         # as absent, so the child cannot forge/verify audit records while the
@@ -789,7 +806,12 @@ def _spawn_runner(
 
 
 def _spawn_legacy(
-    session: str, command: str, selected_agent: str, project_root: str | None
+    session: str,
+    command: str,
+    selected_agent: str,
+    project_root: str | None,
+    *,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     if not command_exists("tmux"):
         return ("tmux not found\n", 1)
@@ -808,7 +830,7 @@ def _spawn_legacy(
         str(DEFAULT_HEIGHT),
         "-c",
         root,
-        *sandbox_tmux_env_args(agent=selected_agent),
+        *sandbox_tmux_env_args(agent=selected_agent, extra_env=extra_env),
         # Never expose the audit HMAC signing key to the child agent's shell
         # (see _spawn_runner): empty value reads as absent in load_key_from_env.
     )
