@@ -1343,5 +1343,182 @@ class CliDispatcherSiblingModuleDocConsistencyTests(unittest.TestCase):
         )
 
 
+class CliDispatcherDocsCliIdVocabularyTests(unittest.TestCase):
+    """Doc-quoted ``cli_id`` tokens match the live ``KNOWN_CLI_IDS`` allowlist.
+
+    Pre-fix ``CLAUDE.md:56`` and ``docs/spec/frozen-gate-surface.md:84``
+    listed ``codex`` / ``gemini`` / ``none`` as ``cli_id`` values the
+    dispatcher "resolves stop-hook dialects per ``cli_id``" — but the
+    live closed vocabularies in ``core/cli_profile.py`` are:
+
+    - ``KNOWN_CLI_IDS = ('claude-code', 'codex', 'gemini-cli')``
+    - ``KNOWN_HOOK_DIALECTS = ('claude', 'codex', 'gemini', 'none')``
+
+    The bare token ``gemini`` is a ``hook_dialect`` value, not a
+    ``cli_id``; the canonical ``cli_id`` for the future Gemini CLI is
+    ``gemini-cli``. Similarly, ``none`` belongs in the
+    ``hook_dialect`` axis, not in ``cli_id``. An operator copying
+    ``cli_id='gemini'`` from the docs would be rejected at
+    ``CLIProfile`` construction with ``CLIProfileError: cli_id must be
+    one of ['claude-code', 'codex', 'gemini-cli']``.
+
+    The regression test pins the doc-vs-code drift: every backticked
+    token quoted inside the dispatcher's "per ``cli_id``" parenthetical
+    must be a member of the live ``KNOWN_CLI_IDS`` tuple, OR be
+    explicitly disclaimed as a ``hook_dialect``-axis token.
+    """
+
+    # Tokens that, if quoted inside the "per cli_id" parenthetical
+    # without an explicit hook_dialect disclaimer, would mislead an
+    # operator into authoring an invalid CLIProfile. ``gemini`` is the
+    # primary failure-mode anchor — it is a live hook_dialect token
+    # whose cli_id counterpart is the suffixed ``gemini-cli``.
+    BARE_GEMINI_TOKEN_RE = re.compile(r"`gemini`")
+
+    def _live_known_cli_ids(self) -> tuple[str, ...]:
+        cli_profile = importlib.import_module(
+            "story_automator.core.cli_profile"
+        )
+        return tuple(cli_profile.KNOWN_CLI_IDS)
+
+    def _live_known_hook_dialects(self) -> tuple[str, ...]:
+        cli_profile = importlib.import_module(
+            "story_automator.core.cli_profile"
+        )
+        return tuple(cli_profile.KNOWN_HOOK_DIALECTS)
+
+    def _n65_bullet_in_claude_md(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*CLI dispatcher \(N6\.5\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **CLI dispatcher (N6.5)**' "
+            "bullet; update this regression test to match the new shape.",
+        )
+        return match.group(0)
+
+    def _frozen_surface_cli_dispatcher_line(self) -> str:
+        text = _read("docs/spec/frozen-gate-surface.md")
+        match = re.search(
+            r"^- Stop-hook dialect resolver per `cli_id`.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "frozen-gate-surface.md no longer has the 'Stop-hook dialect "
+            "resolver per `cli_id`' bullet; update this regression test "
+            "to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_known_cli_ids_anchor_matches_expected_live_set(self) -> None:
+        """Defensive: the live KNOWN_CLI_IDS tuple matches the doc fix's
+        assumption that ``gemini-cli`` is the canonical Gemini ``cli_id``.
+
+        If a future refactor renames the cli_id to bare ``gemini``,
+        this test trips and forces the doc text to be re-audited at
+        the same commit.
+        """
+        live = self._live_known_cli_ids()
+        self.assertIn(
+            "gemini-cli",
+            live,
+            "KNOWN_CLI_IDS no longer contains 'gemini-cli'; the doc fix "
+            "at CLAUDE.md:56 + frozen-gate-surface.md:84 now references a "
+            "non-existent cli_id. Either restore 'gemini-cli' or rewrite "
+            "the docs to use the new canonical token.",
+        )
+        self.assertNotIn(
+            "gemini",
+            live,
+            "KNOWN_CLI_IDS contains bare 'gemini' as a cli_id; the doc "
+            "fix's hook_dialect disclaimer is now stale because the two "
+            "axes have collapsed.",
+        )
+
+    def test_known_hook_dialects_anchor_matches_expected_live_set(self) -> None:
+        """Defensive: ``gemini`` + ``none`` remain hook_dialect tokens.
+
+        The doc fix's disclaimer ("the ``none`` token is a
+        ``hook_dialect`` value, not a ``cli_id``") and the canonical
+        ``gemini-cli`` rename depend on this two-axis split staying in
+        place. If a future refactor collapses the axes, the disclaimer
+        becomes misleading and this test trips.
+        """
+        live = self._live_known_hook_dialects()
+        self.assertIn(
+            "gemini",
+            live,
+            "KNOWN_HOOK_DIALECTS no longer contains 'gemini'; the doc "
+            "fix's hook_dialect disclaimer is stale.",
+        )
+        self.assertIn(
+            "none",
+            live,
+            "KNOWN_HOOK_DIALECTS no longer contains 'none'; the doc "
+            "fix's 'none is a hook_dialect, not a cli_id' disclaimer "
+            "is stale.",
+        )
+
+    def test_claude_md_n65_bullet_uses_gemini_cli_not_bare_gemini(self) -> None:
+        """CLAUDE.md's N6.5 bullet must not quote the bare ``gemini`` token.
+
+        Pin the specific regression: pre-fix the bullet listed
+        ``future codex/gemini/none`` as cli_id values. Post-fix the
+        bullet must use ``gemini-cli`` (the canonical KNOWN_CLI_IDS
+        token) and either drop ``none`` or disclaim it as a
+        hook_dialect-axis token.
+        """
+        bullet = self._n65_bullet_in_claude_md()
+        # The bare backticked ``gemini`` token must not appear inside
+        # the "per cli_id" parenthetical without a hook_dialect
+        # disclaimer chained to it.
+        self.assertNotRegex(
+            bullet,
+            r"`gemini`(?![- `])",
+            "CLAUDE.md N6.5 bullet still quotes bare `gemini` as a cli_id "
+            "value; the live KNOWN_CLI_IDS tuple uses `gemini-cli` "
+            "(bare `gemini` is a hook_dialect token).",
+        )
+        # And the canonical token must appear.
+        self.assertIn(
+            "gemini-cli",
+            bullet,
+            "CLAUDE.md N6.5 bullet no longer names `gemini-cli` as a "
+            "future cli_id; an operator following the docs would author "
+            "an invalid CLIProfile.",
+        )
+
+    def test_frozen_surface_cli_dispatcher_uses_gemini_cli_not_bare_gemini(self) -> None:
+        """frozen-gate-surface.md's cli_dispatcher line uses the canonical token.
+
+        Pin the specific regression: pre-fix the line listed
+        ``codex / gemini / none raise NotImplementedError until
+        implemented``. Post-fix the line must use ``gemini-cli`` and
+        either drop ``none`` from the ``cli_id`` enumeration or
+        explicitly disclaim it as a ``hook_dialect`` token.
+        """
+        line = self._frozen_surface_cli_dispatcher_line()
+        self.assertNotRegex(
+            line,
+            r"`gemini`(?![- `])",
+            "frozen-gate-surface.md cli_dispatcher line still quotes bare "
+            "`gemini` as a cli_id value; the live KNOWN_CLI_IDS tuple "
+            "uses `gemini-cli`.",
+        )
+        self.assertIn(
+            "gemini-cli",
+            line,
+            "frozen-gate-surface.md cli_dispatcher line no longer names "
+            "`gemini-cli` as a future cli_id; the doc would mislead "
+            "operators into authoring an invalid CLIProfile.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

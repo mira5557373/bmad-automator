@@ -82,7 +82,7 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 - Trust-boundary invariant (pinned by `PluginTrustBoundaryInvariant` in `tests/test_audit_regression.py`): no `importlib` / `__import__` / `import_module` in this module's source.
 
 ### `core/cli_dispatcher.py` (Path B / N6.5)
-- Stop-hook dialect resolver per `cli_id` (currently `claude-code`; `codex` / `gemini` / `none` raise `NotImplementedError` until implemented).
+- Stop-hook dialect resolver per `cli_id` (currently `claude-code`; `codex` / `gemini-cli` raise `NotImplementedError` until implemented; the `none` token is a `hook_dialect` value, not a `cli_id`, so it is dispatched via the `hook_dialect` axis rather than `cli_id`).
 - `_default_invoker` for `claude-code` is read-only-consumer of `core/tmux_runtime.py`'s existing public surface — `core/tmux_runtime.py` is not modified by Path B.
 - Lie-detector fallback when the child reports success without a baseline-commit advance.
 
