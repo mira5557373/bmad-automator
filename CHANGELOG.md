@@ -33,7 +33,8 @@ detailed per-workflow status reports live under `docs/audit/`.
   from subprocess env at the trust boundary; sibling helper module
   `core/audit_env_scrub.py` + structural AST invariant so the rule
   is rename-proof
-  (`compat-bugfix-d-04-audit-key-env-scrub`).
+  (`compat-secfix-D-04-audit-key-env-scrub` `1c24a86`,
+  `compat-secfix-D-04-sibling-module` `789a7c9`).
 - K-5 quarantine evidence — quarantine-under-lock +
   rmtree-outside-lock + startup janitor for orphaned trees
   (`compat-bugfix-k5-quarantine-rmtree` `ee215b8`).

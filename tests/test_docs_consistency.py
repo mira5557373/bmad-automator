@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import importlib
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -547,6 +548,96 @@ class FrozenSurfaceLOCWaiverConsistencyTests(unittest.TestCase):
             "frozen-gate-surface.md still claims 'currently 746 LOC "
             "pre-B / 834 LOC post-B' — that figure is the post-B "
             "historical snapshot, not the current file size.",
+        )
+
+
+class ChangelogTagReferencesResolveTests(unittest.TestCase):
+    """Every ``compat-*`` tag mentioned in CHANGELOG.md resolves via ``git tag``.
+
+    Pre-fix CHANGELOG.md:36 referenced ``compat-bugfix-d-04-audit-key-env-scrub``
+    while the actual tags are ``compat-secfix-D-04-audit-key-env-scrub`` and
+    ``compat-secfix-D-04-sibling-module`` (note ``secfix`` not ``bugfix``,
+    uppercase ``D-04`` not lowercase, and the follow-up sibling-module tag
+    was unreferenced anywhere). An operator running
+    ``git checkout compat-bugfix-d-04-audit-key-env-scrub`` got
+    ``not a valid object name``.
+
+    This regression test enumerates every backticked ``compat-*`` token in
+    the CHANGELOG and asserts each one is reachable via ``git rev-parse``.
+    Catches any future doc-vs-tag drift (typos, case mismatches, dropped
+    follow-up tags).
+    """
+
+    # Regex for backticked compat-* tag tokens in CHANGELOG markdown. The
+    # CHANGELOG enumerates tags inside backticks like:
+    #   (`compat-secfix-D-04-audit-key-env-scrub` `1c24a86`)
+    # We match the leading backticked token only.
+    COMPAT_TAG_RE = re.compile(r"`(compat-[A-Za-z0-9_./-]+)`")
+
+    def _git_tag_exists(self, tag: str) -> bool:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def test_every_referenced_compat_tag_exists_in_git(self) -> None:
+        text = _read("CHANGELOG.md")
+        tokens = set(self.COMPAT_TAG_RE.findall(text))
+        # Sanity-check: we should at minimum see the new D-04 secfix tag
+        # after the fix lands; if this assertion fails the regex broke.
+        self.assertIn(
+            "compat-secfix-D-04-audit-key-env-scrub",
+            tokens,
+            "CHANGELOG.md no longer references the D-04 audit-key secfix "
+            "tag; the regression test's anchor has drifted.",
+        )
+        missing = sorted(t for t in tokens if not self._git_tag_exists(t))
+        self.assertEqual(
+            missing,
+            [],
+            f"CHANGELOG.md references compat-* tags that do not exist in "
+            f"git (operators cannot resolve via git checkout / rev-parse): "
+            f"{missing}",
+        )
+
+    def test_d04_sibling_module_tag_is_referenced(self) -> None:
+        """The follow-up sibling-module tag must be cited explicitly.
+
+        Pre-fix the bullet at CHANGELOG.md:36 listed only the original
+        D-04 tag and left the follow-up ``compat-secfix-D-04-sibling-module``
+        commit (789a7c9) undocumented. Post-fix the bullet must cite
+        BOTH tags so a forensic bisecter can find the full work.
+        """
+        text = _read("CHANGELOG.md")
+        self.assertIn(
+            "compat-secfix-D-04-sibling-module",
+            text,
+            "CHANGELOG.md does not reference the D-04 follow-up tag "
+            "compat-secfix-D-04-sibling-module; the sibling-module work "
+            "(789a7c9) is undocumented for forensic bisecting.",
+        )
+
+    def test_legacy_d04_misspelling_is_gone(self) -> None:
+        """The pre-fix mis-typed tag must not reappear.
+
+        Pin the specific regression: CHANGELOG.md previously read
+        ``compat-bugfix-d-04-audit-key-env-scrub`` (wrong prefix
+        ``bugfix``, wrong case ``d-04``). The fix replaced it with the
+        actual tag ``compat-secfix-D-04-audit-key-env-scrub``. Re-introducing
+        the old spelling would re-introduce the original drift.
+        """
+        text = _read("CHANGELOG.md")
+        self.assertNotIn(
+            "compat-bugfix-d-04-audit-key-env-scrub",
+            text,
+            "CHANGELOG.md re-introduces the legacy mis-typed "
+            "'compat-bugfix-d-04-audit-key-env-scrub' tag; the actual tag "
+            "is 'compat-secfix-D-04-audit-key-env-scrub' (secfix prefix, "
+            "uppercase D-04).",
         )
 
 
