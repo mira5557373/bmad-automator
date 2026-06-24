@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from fractions import Fraction
 
 from ..usage_parsers import UsageMetrics
 
@@ -133,6 +134,12 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
 
     Uses floor-then-distribute-remainder so the sum of the returned
     list equals ``total`` exactly. Negative weights are treated as 0.
+
+    The apportionment is done in exact rational arithmetic via
+    :class:`fractions.Fraction` so the sum-of-shares invariant holds
+    for any ``int`` total — including totals larger than ``2**53``
+    where ``total * w / total_w`` in pure float arithmetic would lose
+    integer precision (the float64 mantissa is 53 bits).
     """
 
     n = len(weights)
@@ -145,16 +152,25 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
         # huge-but-finite weights overflowed to ``inf`` on summation) so
         # the invariant (sum of shares == total) still holds.
         return _split_int(total, [1.0] * n)
-    raw = [total * w / total_w for w in clean]
-    floors = [int(x) for x in raw]
+    # Exact rational apportionment: convert each finite non-negative
+    # float weight to a :class:`Fraction` and compute
+    # ``total * w / sum(w)`` in rational space. ``int(Fraction)``
+    # truncates toward zero, which equals floor for non-negative values.
+    frac_weights = [Fraction(w) for w in clean]
+    frac_total_w = sum(frac_weights, Fraction(0))
+    frac_total = Fraction(total)
+    raw_fracs = [frac_total * w / frac_total_w for w in frac_weights]
+    floors = [int(rf) for rf in raw_fracs]
     remainder = total - sum(floors)
     # Distribute the leftover units to the largest fractional parts.
-    fractions = sorted(
+    # ``remainder`` is bounded by ``n - (#zero-weight collectors)`` so
+    # the slice never runs past the end of ``fractions``.
+    fractions_sorted = sorted(
         range(n),
-        key=lambda i: (raw[i] - floors[i], clean[i]),
+        key=lambda i: (raw_fracs[i] - floors[i], clean[i]),
         reverse=True,
     )
-    for idx in fractions[: max(0, remainder)]:
+    for idx in fractions_sorted[: max(0, remainder)]:
         floors[idx] += 1
     return floors
 

@@ -65,6 +65,31 @@ class UniformAttributionTests(unittest.TestCase):
         self.assertEqual(sum(s.input_tokens for s in shares), 901)
         self.assertEqual(sum(s.output_tokens for s in shares), 901)
 
+    def test_uniform_int_token_sum_invariant_beyond_float64_mantissa(self) -> None:
+        # Regression for round-2 bug sweep finding:
+        # ``_split_int`` used to apportion via ``total * w / total_w``
+        # in float arithmetic, which silently dropped integer precision
+        # once ``total`` exceeded ``2**53`` (the float64 mantissa is 53
+        # bits). The leftover-remainder loop then could not recover the
+        # lost units when the drop exceeded ``n``. Pre-fix reproducer:
+        # ``_split_int(2**63, [1.0]*3)`` summed to ``2**63 - 509``
+        # instead of ``2**63``. The fix uses exact rational arithmetic
+        # via :class:`fractions.Fraction` so the documented "sum equals
+        # total exactly" invariant holds at any int scale.
+        for total in (2**53 + 7, 2**56 + 13, 2**63):
+            session = UsageMetrics(input_tokens=total, output_tokens=total)
+            shares = attribute_cost_uniform(session, ["a", "b", "c"])
+            self.assertEqual(
+                sum(s.input_tokens for s in shares),
+                total,
+                f"input_tokens sum drift at total={total}",
+            )
+            self.assertEqual(
+                sum(s.output_tokens for s in shares),
+                total,
+                f"output_tokens sum drift at total={total}",
+            )
+
 
 class DurationWeightedAttributionTests(unittest.TestCase):
     def test_by_duration_weighted_correctly(self) -> None:
