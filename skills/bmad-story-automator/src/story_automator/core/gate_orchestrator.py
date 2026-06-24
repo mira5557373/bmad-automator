@@ -656,11 +656,25 @@ def _run_collectors(
 def _collect_error_evidence(
     project_root: str | Path, gate_id: str,
 ) -> list[str]:
-    """Return ``"<category>/<collector>"`` labels for every error-status
-    evidence record persisted under ``gate_id``. Used by the
-    ``fail_closed`` policy to decide whether to override the verdict to
-    FAIL. Returns ``[]`` if the evidence dir is missing — fail_closed
-    cannot meaningfully fire without persisted evidence.
+    """Return ``"<category>/<collector>"`` labels for every
+    error-or-timeout-status evidence record persisted under
+    ``gate_id``. Used by the ``fail_closed`` policy to decide whether
+    to override the verdict to FAIL. Returns ``[]`` if the evidence
+    dir is missing — fail_closed cannot meaningfully fire without
+    persisted evidence.
+
+    Both ``status="error"`` (crashed collector, stamped by
+    :mod:`collector_runner`) and ``status="timeout"`` (stamped by
+    :func:`gate_schema.make_timeout_evidence` when ``subprocess.run``
+    raises ``TimeoutExpired``) are treated identically here — they are
+    distinct, equally fail-closed-relevant statuses per
+    ``VALID_EVIDENCE_STATUSES`` and the shared collector invariant
+    "fail-closed: error/timeout never count as PASS". This matches the
+    parallel treatment in :mod:`category_rules` (`status in ("error",
+    "timeout")` checked at every category aggregator) so the
+    operator-facing audit trail (``fail_closed_triggered`` +
+    ``fail_closed_categories``) stays consistent with the verdict
+    engine's category-level fail-closed semantics.
     """
     try:
         # K-2: same gate_id is read by the Merkle exporter and verdict
@@ -673,7 +687,7 @@ def _collect_error_evidence(
     for record in bundle:
         if not isinstance(record, dict):
             continue
-        if record.get("status") == "error":
+        if record.get("status") in ("error", "timeout"):
             cat = record.get("category", "?")
             collector = record.get("collector", "?")
             labels.append(f"{cat}/{collector}")
@@ -722,16 +736,18 @@ def run_production_gate(
     "branched somewhere unexpected" (see :func:`detect_baseline_drift`).
 
     ``fail_closed`` (Phase 2, default ``False``) — when True, any
-    evidence record with ``status="error"`` forces ``overall=FAIL``
-    regardless of the verdict_engine's decision. The override is
-    auditable: the returned gate file gains
+    evidence record with ``status="error"`` OR ``status="timeout"``
+    forces ``overall=FAIL`` regardless of the verdict_engine's
+    decision. The override is auditable: the returned gate file gains
     ``fail_closed_triggered=True`` and a sorted
     ``fail_closed_categories`` list. ``status="error"`` is what the
-    collector_runner stamps on a crashed collector (Phase 1) and what
-    timeouts produce — both situations where fail-open might
-    let a real bug ship. ``False`` (default) preserves prior behavior:
-    error-evidence is still surfaced in categories but the
-    verdict_engine decides whether it sinks the gate.
+    collector_runner stamps on a crashed collector (Phase 1);
+    ``status="timeout"`` is what :func:`gate_schema.make_timeout_evidence`
+    stamps when ``subprocess.run`` raises ``TimeoutExpired`` — both
+    situations where fail-open might let a real bug ship. ``False``
+    (default) preserves prior behavior: error/timeout evidence is still
+    surfaced in categories but the verdict_engine decides whether it
+    sinks the gate.
 
     ``drift_watcher`` (C1 follow-up, default ``None``) — when a
     :class:`SpecDriftWatcher` is provided, the orchestrator calls

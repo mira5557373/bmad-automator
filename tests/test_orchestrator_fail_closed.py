@@ -24,7 +24,11 @@ from story_automator.core.evidence_io import (
     persist_gate_file,
 )
 from story_automator.core.gate_orchestrator import run_production_gate
-from story_automator.core.gate_schema import make_evidence_record, make_gate_file
+from story_automator.core.gate_schema import (
+    make_evidence_record,
+    make_gate_file,
+    make_timeout_evidence,
+)
 from story_automator.core.product_profile import compute_profile_hash
 
 
@@ -265,6 +269,96 @@ class FailClosedReusePathTests(unittest.TestCase):
         self.assertEqual(result["overall"], "PASS")
         self.assertNotIn("fail_closed_triggered", result)
         self.assertNotIn("fail_closed_categories", result)
+
+
+class FailClosedTimeoutEvidenceTests(unittest.TestCase):
+    """Regression: ``fail_closed`` must catch ``status="timeout"`` too.
+
+    Before the fix, ``_collect_error_evidence`` only matched
+    ``record.get("status") == "error"``, but
+    :func:`gate_schema.make_timeout_evidence` stamps
+    ``status="timeout"`` (a distinct value in
+    ``VALID_EVIDENCE_STATUSES``). The docstring at
+    ``gate_orchestrator.py`` explicitly promises timeouts ARE caught
+    ("status='error' is what the collector_runner stamps on a crashed
+    collector and what timeouts produce" — false: timeouts produce
+    ``status="timeout"``). The result was that a timeout-only gate
+    silently lost the operator-facing audit trail
+    (``fail_closed_triggered`` + ``fail_closed_categories``), even
+    though ``category_rules`` still incidentally drove the verdict to
+    FAIL via defense-in-depth. This test pins the docstring contract
+    end-to-end on the fresh path.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="sa-fc-timeout-")
+        self.project_root = Path(self.tmpdir)
+        self.registry = CollectorRegistry()
+        self.profile = _minimal_profile()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_timeout_only_evidence_triggers_fail_closed_audit(
+        self, mock_run,
+    ) -> None:
+        # Persist ONLY a status="timeout" record — no status="error" at
+        # all. Pre-fix this returned no labels from
+        # _collect_error_evidence, so the gate file silently lacked
+        # fail_closed_triggered/fail_closed_categories.
+        record = make_timeout_evidence(
+            collector="slowpoke", tool="ruff",
+            category="correctness", timeout_s=60,
+        )
+        persist_evidence_record(self.project_root, "g-timeout", record)
+        mock_run.return_value = []
+        gate = run_production_gate(
+            self.project_root, "g-timeout",
+            commit_sha="abc", target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            fail_closed=True,
+        )
+        self.assertEqual(gate["overall"], "FAIL")
+        self.assertTrue(gate.get("fail_closed_triggered"))
+        self.assertEqual(
+            gate.get("fail_closed_categories"),
+            ["correctness/slowpoke"],
+        )
+
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_mixed_error_and_timeout_evidence_both_in_categories(
+        self, mock_run,
+    ) -> None:
+        # Mix one error + one timeout in different (category, collector)
+        # pairs — both must appear sorted in fail_closed_categories.
+        records = [
+            make_evidence_record(
+                collector="boom", tool="t", category="correctness",
+                status="error", findings=["x"],
+            ),
+            make_timeout_evidence(
+                collector="slowpoke", tool="t",
+                category="security", timeout_s=60,
+            ),
+        ]
+        for r in records:
+            persist_evidence_record(self.project_root, "g-mixed", r)
+        mock_run.return_value = []
+        gate = run_production_gate(
+            self.project_root, "g-mixed",
+            commit_sha="abc", target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            fail_closed=True,
+        )
+        self.assertEqual(gate["overall"], "FAIL")
+        self.assertTrue(gate.get("fail_closed_triggered"))
+        self.assertEqual(
+            gate.get("fail_closed_categories"),
+            ["correctness/boom", "security/slowpoke"],
+        )
 
 
 if __name__ == "__main__":
