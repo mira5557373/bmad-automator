@@ -1572,5 +1572,658 @@ class ThresholdLockIsolationInvariant(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# G2 — WorktreePerUnitIsolationInvariant
+# ---------------------------------------------------------------------------
+# Per-unit worktree isolation (spec docs/superpowers/specs/2026-06-23-g2-...)
+# pins four safety properties:
+#
+#   1. ``core/collector_isolation.py`` MUST NOT mutate any process-global
+#      state (cwd, env, signal handlers) and MUST NOT acquire any
+#      ``_bmad/*.lock`` sidecar. Thread-safety of the parallel worker
+#      pool relies on this — a future contributor adding ``os.chdir`` or
+#      ``signal.signal(...)`` to the module would re-introduce the
+#      cross-thread races G2 is designed to close.
+#
+#   2. The per-unit dispatch is centralized: only ``collector_isolation``
+#      defines ``run_collectors_per_unit``, and the ONLY legal caller is
+#      ``run_gate_collectors``'s structurally-recognized
+#      ``if isolation_mode == "per_unit":`` branch. Anything else
+#      (alias rebinding, AnnAssign rebinding, getattr-indirect,
+#      importlib chain) bypasses the early kwarg validation in
+#      ``run_production_gate`` / ``run_system_gate`` and is rejected.
+#
+#   3. The two-direction positive-failure proof matches the C5
+#      ``ThresholdApplyIsolationInvariant`` form: synthetic violators
+#      across every binding shape are flagged, AND the residual after
+#      stripping the legitimate ``def`` from ``collector_isolation.py``
+#      with a synthetic-violator injected MUST flag — closes the
+#      vacuous-true hole the C5 post-impl review surfaced.
+#
+#   4. The safety-critical defaults ``isolation_mode="shared"`` and
+#      ``max_workers=4`` are pinned at FOUR sites (``run_gate_collectors``,
+#      ``run_production_gate``, ``_run_collectors``, ``run_system_gate``)
+#      via ``inspect.signature``. Flipping any of these to ``"per_unit"``
+#      is an operator-driven configuration change, not a default-flip.
+
+
+class WorktreePerUnitIsolationInvariant(unittest.TestCase):
+    """Pins G2 §7.5 — worktree-per-unit isolation. Four sub-tests:
+
+    1. ``collector_isolation.py`` is process-global-state-free + lock-free.
+    2. Only ``run_gate_collectors``'s ``isolation_mode == "per_unit"``
+       dispatch may call ``run_collectors_per_unit``.
+    3. Two-direction positive-failure proof: synthetic violators flagged,
+       AND the residual after stripping the legitimate ``def`` from
+       ``collector_isolation.py`` with a fake violator injected MUST flag.
+    4. Safety-critical defaults pinned via ``inspect.signature`` at all
+       four wiring sites.
+
+    Mirrors ``AuditKeyEnvScrubInvariant`` for structural exemption,
+    ``UnifiedStateWriteIsolationInvariant`` for binding tracking, and
+    ``ThresholdApplyIsolationInvariant`` (the C5 post-impl review form)
+    for the meaningful two-direction positive-failure proof.
+    """
+
+    # ------------------------------------------------------------------
+    # Sub-test 1 — no process-global state mutation in collector_isolation
+    # ------------------------------------------------------------------
+
+    _FORBIDDEN_OS_CALLS: frozenset[str] = frozenset(
+        {
+            "chdir",
+            "fchdir",
+            "umask",
+            "setpgrp",
+            "setsid",
+            "setgid",
+            "setuid",
+            "setresgid",
+            "setresuid",
+        }
+    )
+    _FORBIDDEN_ENVIRON_METHODS: frozenset[str] = frozenset(
+        {"update", "pop", "clear", "setdefault", "__setitem__", "__delitem__"}
+    )
+
+    @classmethod
+    def _is_os_environ_attribute(cls, node) -> bool:
+        """Return True iff ``node`` is the AST shape ``os.environ``."""
+        import ast
+
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr == "environ"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "os"
+        )
+
+    @classmethod
+    def _module_has_global_state_mutation(cls, tree) -> list[str]:
+        """Walk ``tree`` and return list of violation descriptions.
+
+        Rejects:
+          * ``Call(func=Attribute(value=Name("os"), attr in _FORBIDDEN_OS_CALLS))``
+          * ``Subscript(value=Attribute(value=Name("os"), attr="environ"))``
+            as ``targets`` of ``Assign|AnnAssign|AugAssign`` OR as a
+            ``Delete`` target.
+          * ``Call(func=Attribute(value=os.environ, attr in
+            _FORBIDDEN_ENVIRON_METHODS))``.
+          * ``Call(func=Name("signal"))`` OR
+            ``Call(func=Attribute(value=Name("signal"), attr="signal"))``.
+          * ``Call(func=Name("get_gate_lock"))`` OR
+            ``Call(func=Attribute(attr="get_gate_lock"))``.
+        """
+        import ast
+
+        violations: list[str] = []
+
+        def _is_environ_subscript(node) -> bool:
+            return isinstance(node, ast.Subscript) and cls._is_os_environ_attribute(node.value)
+
+        for node in ast.walk(tree):
+            # os.chdir / os.umask / os.setsid / etc. Calls.
+            if isinstance(node, ast.Call):
+                fn = node.func
+                if (
+                    isinstance(fn, ast.Attribute)
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "os"
+                    and fn.attr in cls._FORBIDDEN_OS_CALLS
+                ):
+                    violations.append(f"os.{fn.attr}() call at line {node.lineno}")
+                # os.environ.update(...) / pop / clear / etc.
+                if (
+                    isinstance(fn, ast.Attribute)
+                    and cls._is_os_environ_attribute(fn.value)
+                    and fn.attr in cls._FORBIDDEN_ENVIRON_METHODS
+                ):
+                    violations.append(f"os.environ.{fn.attr}() call at line {node.lineno}")
+                # signal.signal(...) — both bare-Name and Attribute forms.
+                if isinstance(fn, ast.Name) and fn.id == "signal":
+                    violations.append(f"signal(...) call at line {node.lineno}")
+                if (
+                    isinstance(fn, ast.Attribute)
+                    and fn.attr == "signal"
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "signal"
+                ):
+                    violations.append(f"signal.signal(...) call at line {node.lineno}")
+                # get_gate_lock(...) — both Name and Attribute forms.
+                if isinstance(fn, ast.Name) and fn.id == "get_gate_lock":
+                    violations.append(f"get_gate_lock() call at line {node.lineno}")
+                if isinstance(fn, ast.Attribute) and fn.attr == "get_gate_lock":
+                    violations.append(f"<receiver>.get_gate_lock() call at line {node.lineno}")
+            # os.environ["X"] = ... / os.environ["X"] += ... / del os.environ["X"]
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets: list = []
+                if isinstance(node, ast.Assign):
+                    targets = list(node.targets)
+                else:
+                    targets = [node.target]
+                for tgt in targets:
+                    if _is_environ_subscript(tgt):
+                        violations.append(f"os.environ[...] = ... assignment at line {node.lineno}")
+            if isinstance(node, ast.Delete):
+                for tgt in node.targets:
+                    if _is_environ_subscript(tgt):
+                        violations.append(f"del os.environ[...] at line {node.lineno}")
+
+        return violations
+
+    def test_ast_no_process_global_state_mutation_in_isolation_module(self) -> None:
+        """Walks ``core/collector_isolation.py`` and rejects every form of
+        process-global state mutation that would break the parallel
+        worker contract. Positive-failure proof: synthetic AST with each
+        violation pattern is flagged.
+        """
+        import ast
+        import textwrap
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        isolation_file = skill_src / "core" / "collector_isolation.py"
+        tree = ast.parse(isolation_file.read_text(encoding="utf-8"))
+        violations = self._module_has_global_state_mutation(tree)
+        self.assertEqual(
+            violations,
+            [],
+            "core/collector_isolation.py mutates process-global state — "
+            "G2 thread-safety invariant broken:\n  " + "\n  ".join(violations),
+        )
+
+        # Positive-failure proof: each violation pattern, synthesised
+        # individually, MUST be flagged by the walker.
+        pattern_cases = {
+            "os.chdir": "import os\ndef f():\n    os.chdir('/tmp')\n",
+            "os.umask": "import os\ndef f():\n    os.umask(0o077)\n",
+            "os.setsid": "import os\ndef f():\n    os.setsid()\n",
+            "os.environ assign": ("import os\ndef f():\n    os.environ['X'] = 'y'\n"),
+            "os.environ del": ("import os\ndef f():\n    del os.environ['X']\n"),
+            "os.environ.update": ("import os\ndef f():\n    os.environ.update(a='b')\n"),
+            "os.environ.pop": ("import os\ndef f():\n    os.environ.pop('X', None)\n"),
+            "os.environ.clear": ("import os\ndef f():\n    os.environ.clear()\n"),
+            "os.environ.setdefault": ("import os\ndef f():\n    os.environ.setdefault('X', 'y')\n"),
+            "signal bare-name": (
+                "from signal import signal\ndef f():\n    signal(1, lambda *a: None)\n"
+            ),
+            "signal attribute": (
+                "import signal\ndef f():\n    signal.signal(1, lambda *a: None)\n"
+            ),
+            "get_gate_lock name": ("def f():\n    get_gate_lock('/tmp')\n"),
+            "get_gate_lock attribute": ("import x\ndef f():\n    x.get_gate_lock('/tmp')\n"),
+            "os.environ AnnAssign": ("import os\ndef f():\n    os.environ['X']: str = 'y'\n"),
+            "os.environ AugAssign": ("import os\ndef f():\n    os.environ['X'] += 'z'\n"),
+        }
+        for label, src in pattern_cases.items():
+            synth_tree = ast.parse(textwrap.dedent(src))
+            flagged = self._module_has_global_state_mutation(synth_tree)
+            self.assertNotEqual(
+                flagged,
+                [],
+                f"Walker FAILED to flag synthetic violator [{label}] — "
+                f"invariant is vacuously true for this pattern",
+            )
+
+    # ------------------------------------------------------------------
+    # Sub-test 2 — no implicit per_unit dispatch outside isolation module
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _defines_isolation_runner(tree) -> bool:
+        """Return True iff the module's top level defines
+        ``def run_collectors_per_unit(...)`` — rename-proof signal that
+        this *is* the implementation file (current home:
+        ``core/collector_isolation.py``). Mirrors ``_defines_scrub_helper``
+        in ``AuditKeyEnvScrubInvariant``.
+        """
+        import ast
+
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "run_collectors_per_unit":
+                return True
+        return False
+
+    @staticmethod
+    def _dispatches_via_isolation_mode(tree) -> bool:
+        """Return True iff the module's top level defines
+        ``def run_gate_collectors(...)`` whose body contains an ``If``
+        whose test references ``Name("isolation_mode")`` AND whose
+        comparators include ``Constant("per_unit")``.
+
+        Refactor-tolerant: handles ``==``, ``in {...}``, ``match ... case
+        "per_unit":``, AND intermediate-variable forms like
+        ``mode = isolation_mode; if mode == "per_unit": ...``. The
+        walker collects every ``Name`` ID that is rebound from
+        ``isolation_mode`` (Assign / AnnAssign) and treats those as
+        equivalent to the kwarg name when scanning ``If.test``.
+
+        Mirrors the rename-proof exemption pattern from
+        ``ThresholdApplyIsolationInvariant._is_cli_apply_handler``.
+        """
+        import ast
+
+        def _test_references_isolation_alias(test_node, aliases) -> bool:
+            for sub in ast.walk(test_node):
+                if isinstance(sub, ast.Name) and sub.id in aliases:
+                    return True
+            return False
+
+        def _test_contains_per_unit_constant(test_node) -> bool:
+            for sub in ast.walk(test_node):
+                if isinstance(sub, ast.Constant) and sub.value == "per_unit":
+                    return True
+            return False
+
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef) or node.name != "run_gate_collectors":
+                continue
+            # Build the alias set: any local Name bound from
+            # isolation_mode (intermediate-variable shape).
+            aliases: set[str] = {"isolation_mode"}
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Assign):
+                    if isinstance(sub.value, ast.Name) and sub.value.id in aliases:
+                        for tgt in sub.targets:
+                            if isinstance(tgt, ast.Name):
+                                aliases.add(tgt.id)
+                elif isinstance(sub, ast.AnnAssign) and sub.value is not None:
+                    if (
+                        isinstance(sub.value, ast.Name)
+                        and sub.value.id in aliases
+                        and isinstance(sub.target, ast.Name)
+                    ):
+                        aliases.add(sub.target.id)
+            # Look for an If whose test ties an alias to the
+            # "per_unit" constant.
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.If):
+                    if _test_references_isolation_alias(
+                        sub.test, aliases
+                    ) and _test_contains_per_unit_constant(sub.test):
+                        return True
+                # Python 3.10+ match statement on isolation_mode.
+                if isinstance(sub, ast.Match):
+                    if isinstance(sub.subject, ast.Name) and sub.subject.id in aliases:
+                        for case in sub.cases:
+                            for pat_sub in ast.walk(case.pattern):
+                                if (
+                                    isinstance(pat_sub, ast.MatchValue)
+                                    and isinstance(pat_sub.value, ast.Constant)
+                                    and pat_sub.value.value == "per_unit"
+                                ):
+                                    return True
+        return False
+
+    @classmethod
+    def _module_violates(cls, tree) -> bool:
+        """Return True iff ``tree`` contains a direct or indirect call to
+        ``run_collectors_per_unit`` and is NOT covered by either structural
+        exemption. Binding-tracking walker modeled on
+        ``UnifiedStateWriteIsolationInvariant._module_violates`` and
+        ``ThresholdApplyIsolationInvariant._module_violates``.
+
+        Tracks:
+          * ``from X import run_collectors_per_unit as ALIAS`` → ALIAS
+            forbidden (handles parenthesized form).
+          * ``ALIAS = run_collectors_per_unit`` → LHS forbidden.
+          * ``ALIAS: object = run_collectors_per_unit`` → LHS forbidden
+            (the C5 post-impl AnnAssign branch fix).
+          * Aliasing through ``Attribute`` value with
+            ``attr == "run_collectors_per_unit"``.
+
+        Flags:
+          * ``Call(func=Name(N))`` with N in the forbidden set.
+          * ``Call(func=Attribute(attr="run_collectors_per_unit"))``.
+          * ``Call(func=Name("getattr"), args=[_, Constant("run_collectors_per_unit"), ...])``.
+          * ``Attribute(attr="run_collectors_per_unit",
+            value=Call(func=Attribute(attr="import_module"), ...))``.
+        """
+        import ast
+
+        forbidden: set[str] = {"run_collectors_per_unit"}
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "run_collectors_per_unit":
+                        forbidden.add(alias.asname or alias.name)
+            elif isinstance(node, ast.Assign):
+                if isinstance(node.value, ast.Name) and node.value.id in forbidden:
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            forbidden.add(tgt.id)
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "run_collectors_per_unit"
+                ):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            forbidden.add(tgt.id)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                if (
+                    isinstance(node.value, ast.Name)
+                    and node.value.id in forbidden
+                    and isinstance(node.target, ast.Name)
+                ):
+                    forbidden.add(node.target.id)
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "run_collectors_per_unit"
+                    and isinstance(node.target, ast.Name)
+                ):
+                    forbidden.add(node.target.id)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Name):
+                    if fn.id in forbidden:
+                        return True
+                    if fn.id == "getattr" and len(node.args) >= 2:
+                        second = node.args[1]
+                        if (
+                            isinstance(second, ast.Constant)
+                            and second.value == "run_collectors_per_unit"
+                        ):
+                            return True
+                if isinstance(fn, ast.Attribute) and fn.attr == "run_collectors_per_unit":
+                    return True
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "run_collectors_per_unit"
+                and isinstance(node.value, ast.Call)
+            ):
+                inner = node.value.func
+                if isinstance(inner, ast.Attribute) and inner.attr == "import_module":
+                    return True
+                if isinstance(inner, ast.Name) and inner.id == "import_module":
+                    return True
+        return False
+
+    def test_ast_no_implicit_per_unit_dispatch_outside_isolation(self) -> None:
+        """Walk every .py under BOTH ``core/`` AND ``commands/``; flag any
+        call (direct, aliased, AnnAssign-rebound, getattr-indirect,
+        importlib-indirect) to ``run_collectors_per_unit`` from a module
+        not covered by either structural exemption.
+        """
+        import ast
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        scan_dirs = (skill_src / "core", skill_src / "commands")
+        offenders: list[str] = []
+        py_files: list[Path] = []
+        for d in scan_dirs:
+            if d.is_dir():
+                py_files.extend(d.rglob("*.py"))
+        for py_file in sorted(py_files):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            # Exemption (a): the file that owns the helper.
+            if self._defines_isolation_runner(tree):
+                continue
+            # Exemption (b): the structurally-recognized dispatcher
+            # (``run_gate_collectors`` with ``isolation_mode == "per_unit"``).
+            if self._dispatches_via_isolation_mode(tree):
+                continue
+            if self._module_violates(tree):
+                offenders.append(str(py_file.relative_to(skill_src)))
+        self.assertEqual(
+            offenders,
+            [],
+            "Modules calling run_collectors_per_unit outside the "
+            "structurally-recognized dispatch — G2 isolation invariant "
+            "broken:\n  " + "\n  ".join(offenders),
+        )
+
+    # ------------------------------------------------------------------
+    # Sub-test 3 — meaningful two-direction positive-failure proof
+    # ------------------------------------------------------------------
+
+    def test_positive_failure_synthetic_violator_is_caught(self) -> None:
+        """Two-direction proof matching
+        ``ThresholdApplyIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``:
+
+        (a) Synthesize source containing direct call + alias-rebinding
+            call + AnnAssign-rebinding call + getattr-indirect call +
+            importlib chain; assert ALL flagged.
+        (b) Read the real ``collector_isolation.py`` source, AST-strip
+            the ``def run_collectors_per_unit`` top-level FunctionDef,
+            INJECT a synthetic ``_residual_check = run_collectors_per_unit;
+            _residual_check(...)`` violator into the residual; walker
+            MUST flag it. The C5 post-impl review found that residual-
+            stripping alone was vacuously true (zero Call nodes
+            referenced the name); injecting a synthetic call AFTER the
+            strip makes the residual exercise the rule.
+        """
+        import ast
+        import textwrap
+
+        # (a) Direct call.
+        direct_src = textwrap.dedent(
+            """
+            from story_automator.core.collector_isolation import (
+                run_collectors_per_unit,
+            )
+
+            def evil_direct():
+                run_collectors_per_unit('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(direct_src)),
+            "AST walker FAILED to flag a direct call — invariant is vacuously true",
+        )
+
+        # (a) Alias rebinding call.
+        alias_src = textwrap.dedent(
+            """
+            from story_automator.core.collector_isolation import (
+                run_collectors_per_unit as _rcpu,
+            )
+
+            def evil_alias():
+                _rcpu('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(alias_src)),
+            "AST walker FAILED to flag an alias-rebinding call",
+        )
+
+        # (a) AnnAssign rebinding via Name (the C5 post-impl review fix).
+        annassign_name_src = textwrap.dedent(
+            """
+            from story_automator.core.collector_isolation import (
+                run_collectors_per_unit,
+            )
+
+            def evil_annassign_name():
+                fn: object = run_collectors_per_unit
+                fn('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(annassign_name_src)),
+            "AST walker FAILED to flag AnnAssign(Name) rebind — first-pass "
+            "binding tracker is missing the AnnAssign branch",
+        )
+
+        # (a) AnnAssign rebinding via Attribute.
+        annassign_attr_src = textwrap.dedent(
+            """
+            from story_automator.core import collector_isolation as ci
+
+            def evil_annassign_attr():
+                fn: object = ci.run_collectors_per_unit
+                fn('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(annassign_attr_src)),
+            "AST walker FAILED to flag AnnAssign(Attribute) rebind",
+        )
+
+        # (a) Indirect getattr call.
+        getattr_src = textwrap.dedent(
+            """
+            from story_automator.core import collector_isolation as ci
+
+            def evil_getattr():
+                fn = getattr(ci, 'run_collectors_per_unit')
+                fn('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(getattr_src)),
+            "AST walker FAILED to flag a getattr-indirect call",
+        )
+
+        # (a) importlib.import_module(...).run_collectors_per_unit chain.
+        importlib_src = textwrap.dedent(
+            """
+            import importlib
+
+            def evil_importlib():
+                mod = importlib.import_module(
+                    'story_automator.core.collector_isolation'
+                )
+                mod.run_collectors_per_unit('.', 'g', 'sha', {}, [])
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(ast.parse(importlib_src)),
+            "AST walker FAILED to flag importlib.import_module chain",
+        )
+
+        # (b) Real collector_isolation.py — meaningful two-direction proof.
+        #     Strip the top-level def and INJECT a synthetic violator so
+        #     the residual actually exercises the rule (C5 post-impl
+        #     lesson: residual-only stripping was vacuously true).
+        from story_automator.core import collector_isolation as ci_mod
+
+        real_tree = ast.parse(Path(ci_mod.__file__).read_text(encoding="utf-8"))
+        stripped_body = [
+            n
+            for n in real_tree.body
+            if not (isinstance(n, ast.FunctionDef) and n.name == "run_collectors_per_unit")
+        ]
+
+        # (b.1) Inject a fake top-level violator into the residual.
+        # Use the "residual_check = run_collectors_per_unit; residual_check(...)"
+        # shape the spec calls out explicitly.
+        violator_src = textwrap.dedent(
+            """
+            def _residual_check_caller():
+                _residual_check = run_collectors_per_unit
+                _residual_check('.', 'g', 'sha', {}, [])
+            """
+        )
+        violator_def = ast.parse(violator_src).body[0]
+        stripped_with_violator = ast.Module(
+            body=stripped_body + [violator_def],
+            type_ignores=[],
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(stripped_with_violator),
+            "Injecting a real violator into the residual collector_isolation.py "
+            "tree did NOT trip the rule — the rule may be vacuously true",
+        )
+
+        # (b.2) Same residual without the injected violator must NOT trip.
+        stripped = ast.Module(body=stripped_body, type_ignores=[])
+        self.assertFalse(
+            WorktreePerUnitIsolationInvariant._module_violates(stripped),
+            "collector_isolation.py residual (without its own def) trips the "
+            "violation rule — the file should not call run_collectors_per_unit "
+            "anywhere else",
+        )
+
+    # ------------------------------------------------------------------
+    # Sub-test 4 — safety-critical defaults pinned at four sites
+    # ------------------------------------------------------------------
+
+    def test_default_isolation_mode_is_shared(self) -> None:
+        """Pin safety-critical defaults at FOUR sites via ``inspect.signature``.
+
+        Flipping any of these defaults from ``"shared"`` to ``"per_unit"``
+        is an operator-driven configuration change, NOT a default-flip.
+        Likewise, ``max_workers=4`` is the documented default in §13 row
+        2 ("No ``max_workers=None`` auto-tune. Explicit int default of 4.").
+        """
+        import inspect
+
+        from story_automator.core.collector_runner import run_gate_collectors
+        from story_automator.core.gate_orchestrator import (
+            _run_collectors,
+            run_production_gate,
+        )
+        from story_automator.core.system_gate import run_system_gate
+
+        for fn in (
+            run_gate_collectors,
+            run_production_gate,
+            _run_collectors,
+            run_system_gate,
+        ):
+            sig = inspect.signature(fn)
+            self.assertIn(
+                "isolation_mode",
+                sig.parameters,
+                f"{fn.__qualname__} missing isolation_mode kwarg",
+            )
+            self.assertIn(
+                "max_workers",
+                sig.parameters,
+                f"{fn.__qualname__} missing max_workers kwarg",
+            )
+            self.assertEqual(
+                sig.parameters["isolation_mode"].default,
+                "shared",
+                f"{fn.__qualname__}(isolation_mode=...) default MUST be "
+                f'"shared" — flipping to "per_unit" is an operator-driven '
+                f"configuration change (spec §13 row 4)",
+            )
+            self.assertEqual(
+                sig.parameters["max_workers"].default,
+                4,
+                f"{fn.__qualname__}(max_workers=...) default MUST be 4 "
+                f"(spec §13 row 2 — explicit int, no auto-tune)",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
