@@ -818,6 +818,33 @@ def run_production_gate(
                 audit_policy=audit_policy, audit_path=audit_path,
             )
             if existing is not None:
+                # Reuse path must populate the same UNCONDITIONAL in-memory
+                # additive fields the fresh path always sets (lines 887-928
+                # below) so callers see a consistent return shape regardless
+                # of cache hit/miss. The on-disk gate JSON is by design
+                # byte-identical between fresh and reused (persist_gate_file
+                # ran at verdict_engine.py:272 BEFORE these mutations on
+                # the original fresh run), so we re-derive the two unconditional
+                # fields here without rewriting disk. Conditional fields
+                # (cost_total_usd / threshold_proposal_ref) stay opt-in via
+                # the corresponding kwargs and are NOT recomputed on reuse —
+                # the caller's session_usage/threshold_proposer pertain to
+                # the current call, not the cached run.
+                from .evidence_cache import cached_load_evidence_bundle
+                from .innovation.lineage_ledger import load_lineage_root
+                try:
+                    _bundle = cached_load_evidence_bundle(
+                        project_root, gate_id,
+                    )
+                except FileNotFoundError:
+                    _bundle = []
+                if _bundle:
+                    existing["evidence_merkle_root"] = (
+                        compute_evidence_bundle_merkle_root(_bundle)
+                    )
+                else:
+                    existing["evidence_merkle_root"] = ""
+                existing["lineage_root"] = load_lineage_root(project_root)
                 return existing
 
             if enable_lie_detector:

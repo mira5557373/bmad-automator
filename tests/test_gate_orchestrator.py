@@ -429,6 +429,59 @@ class RunProductionGateTests(unittest.TestCase):
         )
         self.assertEqual(result["overall"], "PASS")
 
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_reuse_path_populates_unconditional_additive_fields(
+        self, mock_run: MagicMock,
+    ) -> None:
+        """Reuse path must return the same in-memory shape as fresh runs.
+
+        Regression for the latent bug where ``check_gate_reuse`` short-
+        circuits ``run_production_gate`` before the post-evaluate block
+        that unconditionally assigns ``evidence_merkle_root`` and
+        ``lineage_root``. Without the fix the reuse path return dict
+        lacked both keys while the fresh path always populated them, so
+        a caller doing ``result["evidence_merkle_root"]`` would
+        ``KeyError`` only on a cache hit.
+        """
+        # Fresh-path run produces a gate with both unconditional fields.
+        evidence = [make_evidence_record(
+            collector="c", tool="t", category="correctness",
+            status="ok", metrics={"coverage_pct": 95, "regressions": 0},
+        )]
+        self._persist_evidence("gate-cache-keys", evidence)
+        mock_run.return_value = []
+        fresh = run_production_gate(
+            self.project_root, "gate-cache-keys", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertIn("evidence_merkle_root", fresh)
+        self.assertIn("lineage_root", fresh)
+
+        # Second invocation with same (gate_id, commit, profile, fv) hits
+        # the reuse path. Pre-fix this branch returned the on-disk dict
+        # verbatim and the two keys were missing.
+        reused = run_production_gate(
+            self.project_root, "gate-cache-keys", commit_sha="abc",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+        )
+        self.assertIn(
+            "evidence_merkle_root", reused,
+            "reuse path must populate evidence_merkle_root to match fresh",
+        )
+        self.assertIn(
+            "lineage_root", reused,
+            "reuse path must populate lineage_root to match fresh",
+        )
+        # The two paths' values must agree (same on-disk evidence/lineage).
+        self.assertEqual(
+            reused["evidence_merkle_root"], fresh["evidence_merkle_root"],
+        )
+        self.assertEqual(reused["lineage_root"], fresh["lineage_root"])
+
 
 class RouteGateVerdictTests(unittest.TestCase):
     """Task 9: verdict routing."""
