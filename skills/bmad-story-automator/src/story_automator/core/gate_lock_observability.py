@@ -33,6 +33,21 @@ from filelock import Timeout
 from .evidence_io import GateMarkerCorruptedError, read_gate_marker
 
 
+def _rebuild_gate_lock_timeout(
+    lock_file: str,
+    holder: dict[str, Any] | None,
+    timeout: float,
+) -> "GateLockTimeoutError":
+    """Module-level constructor used by ``GateLockTimeoutError.__reduce__``.
+
+    The pickle protocol needs a callable that accepts positional args. The
+    subclass ``__init__`` marks ``holder`` and ``timeout`` as keyword-only,
+    so we route through this helper to translate the positional tuple from
+    ``__reduce__`` back into the keyword-only signature.
+    """
+    return GateLockTimeoutError(lock_file, holder=holder, timeout=timeout)
+
+
 class GateLockTimeoutError(Timeout):
     """``filelock.Timeout`` subclass carrying holder identity for operability.
 
@@ -58,6 +73,24 @@ class GateLockTimeoutError(Timeout):
         super().__init__(lock_file)
         self.holder = holder
         self.timeout_s = timeout
+
+    def __reduce__(
+        self,
+    ) -> tuple[Any, tuple[str, dict[str, Any] | None, float]]:
+        # The inherited ``filelock.Timeout.__reduce__`` returns
+        # ``(self.__class__, (self._lock_file,))`` — i.e. it only passes the
+        # positional ``lock_file``. Because ``__init__`` adds ``holder`` and
+        # ``timeout`` as required keyword-only arguments, the inherited
+        # reduction is incompatible with this subclass: ``pickle.loads``,
+        # ``copy.copy``, and ``copy.deepcopy`` would all raise
+        # ``TypeError: missing 2 required keyword-only arguments``.
+        # Route through ``_rebuild_gate_lock_timeout`` so the positional
+        # tuple from ``__reduce__`` is translated back into the kw-only
+        # ``__init__`` signature.
+        return (
+            _rebuild_gate_lock_timeout,
+            (self._lock_file, self.holder, self.timeout_s),
+        )
 
     def __str__(self) -> str:
         base = (

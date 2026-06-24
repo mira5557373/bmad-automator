@@ -237,5 +237,109 @@ class RecoverFromCrashLockTimeoutTests(_Mixin, unittest.TestCase):
         self.assertEqual(exc.holder["pid"], os.getpid())
 
 
+# ---------------------------------------------------------------------------
+# Round-trip regression — pickle / copy / deepcopy must preserve holder + timeout
+# ---------------------------------------------------------------------------
+
+
+class GateLockTimeoutErrorRoundTripTests(unittest.TestCase):
+    """``GateLockTimeoutError`` must survive pickle / copy / deepcopy.
+
+    The inherited ``filelock.Timeout.__reduce__`` returns
+    ``(self.__class__, (self._lock_file,))`` — i.e. only the positional
+    ``lock_file``. Because the subclass ``__init__`` adds ``holder`` and
+    ``timeout`` as REQUIRED keyword-only arguments, the inherited reduction
+    is incompatible: ``pickle.loads`` / ``copy.copy`` / ``copy.deepcopy``
+    would all raise ``TypeError: missing 2 required keyword-only
+    arguments: 'holder' and 'timeout'``. This regression test pins the
+    ``__reduce__`` override that makes the subclass picklable/copyable
+    while preserving holder + timeout context.
+    """
+
+    def _assert_round_trip_preserves_state(
+        self,
+        original: GateLockTimeoutError,
+        revived: GateLockTimeoutError,
+    ) -> None:
+        self.assertIsInstance(revived, GateLockTimeoutError)
+        self.assertIsInstance(revived, Timeout)  # subclass inheritance
+        self.assertEqual(revived.lock_file, original.lock_file)
+        self.assertEqual(revived.holder, original.holder)
+        self.assertEqual(revived.timeout_s, original.timeout_s)
+        # ``__str__`` is computed from the three public attributes, so a
+        # successful round-trip must produce the same rendered message.
+        self.assertEqual(str(revived), str(original))
+
+    def test_pickle_round_trip_with_well_formed_holder(self) -> None:
+        import pickle
+
+        exc = GateLockTimeoutError(
+            "/tmp/foo.lock",
+            holder={
+                "pid": 1234,
+                "started_at": "2026-06-24T00:00:00Z",
+                "hostname": "host1",
+            },
+            timeout=30.0,
+        )
+        revived = pickle.loads(pickle.dumps(exc))
+        self._assert_round_trip_preserves_state(exc, revived)
+
+    def test_copy_copy_round_trip_with_well_formed_holder(self) -> None:
+        import copy
+
+        exc = GateLockTimeoutError(
+            "/tmp/bar.lock",
+            holder={
+                "pid": 9999,
+                "started_at": "2026-06-24T01:02:03Z",
+                "hostname": "h2",
+            },
+            timeout=60.0,
+        )
+        revived = copy.copy(exc)
+        self._assert_round_trip_preserves_state(exc, revived)
+
+    def test_copy_deepcopy_round_trip_with_well_formed_holder(self) -> None:
+        import copy
+
+        exc = GateLockTimeoutError(
+            "/tmp/baz.lock",
+            holder={
+                "pid": 7777,
+                "started_at": "2026-06-24T02:03:04Z",
+                "hostname": "h3",
+            },
+            timeout=120.0,
+        )
+        revived = copy.deepcopy(exc)
+        self._assert_round_trip_preserves_state(exc, revived)
+        # deepcopy must produce an independent ``holder`` dict.
+        self.assertIsNot(revived.holder, exc.holder)
+
+    def test_pickle_round_trip_with_none_holder(self) -> None:
+        import pickle
+
+        exc = GateLockTimeoutError(
+            "/tmp/none.lock", holder=None, timeout=0.5,
+        )
+        revived = pickle.loads(pickle.dumps(exc))
+        self._assert_round_trip_preserves_state(exc, revived)
+        self.assertIsNone(revived.holder)
+
+    def test_pickle_round_trip_with_state_sentinel_holder(self) -> None:
+        import pickle
+
+        for state in ("missing", "corrupt"):
+            with self.subTest(state=state):
+                exc = GateLockTimeoutError(
+                    "/tmp/sentinel.lock",
+                    holder={"_state": state},
+                    timeout=1.5,
+                )
+                revived = pickle.loads(pickle.dumps(exc))
+                self._assert_round_trip_preserves_state(exc, revived)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
