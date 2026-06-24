@@ -890,5 +890,94 @@ class ReadmeQuickStartKwargsCoverageTests(unittest.TestCase):
         )
 
 
+class SpecDriftWatcherLOCSoftLimitTests(unittest.TestCase):
+    """``spec_drift_watcher.py`` stays under the CLAUDE.md 500-LOC soft limit.
+
+    Pre-fix the watcher sat at 528 LOC, breaching the soft cap that
+    the sibling ``spec_drift_persistence.py`` module's docstring
+    explicitly cites as the reason for its own existence ("split out
+    of ``spec_drift_watcher.py`` ... to keep the 500-LOC soft limit
+    in play"). The C1 follow-ups (persistence_key wiring, atomic
+    set_baseline, clobber-guard) added ~55 lines without a
+    corresponding split. The fix extracted the dataclasses, error
+    class, severity constants, and the four standalone helpers
+    (``_validate_thresholds``, ``_now_iso``, ``_satisfied_ids``,
+    ``_score``) into a new ``spec_drift_types`` sibling, mirroring
+    the ``threshold_proposer`` / ``threshold_proposer_helpers``
+    pattern.
+
+    The regression test pins both halves of the contract: (a) the
+    canonical watcher stays under the soft limit, and (b) the new
+    sibling exists and re-exports the symbols so the public surface
+    is preserved.
+    """
+
+    SPEC_DRIFT_WATCHER_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+        / "spec_drift_watcher.py"
+    )
+    SPEC_DRIFT_TYPES_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+        / "spec_drift_types.py"
+    )
+    SOFT_LIMIT_LOC = 500
+
+    def test_spec_drift_watcher_under_soft_limit(self) -> None:
+        text = self.SPEC_DRIFT_WATCHER_PATH.read_text(encoding="utf-8")
+        loc = len(text.splitlines())
+        self.assertLessEqual(
+            loc,
+            self.SOFT_LIMIT_LOC,
+            f"spec_drift_watcher.py is {loc} LOC but the CLAUDE.md "
+            f"soft cap is {self.SOFT_LIMIT_LOC}. Extract another helper "
+            "into the sibling spec_drift_types module to recover headroom.",
+        )
+
+    def test_spec_drift_types_sibling_exists_and_reexports(self) -> None:
+        """The split must preserve the public surface of the watcher.
+
+        If a future refactor moves ``SpecDriftError`` / ``SpecDriftEvent``
+        / ``SpecDriftSnapshot`` back into the watcher but forgets to
+        delete the sibling, this test still passes — we only assert the
+        sibling exposes the moved symbols. If the watcher stops
+        re-exporting them, the existing
+        ``tests/test_spec_drift_watcher.py`` import line breaks first.
+        """
+        self.assertTrue(
+            self.SPEC_DRIFT_TYPES_PATH.exists(),
+            "spec_drift_types.py sibling missing; the LOC split has "
+            "regressed and the watcher will breach the soft cap again.",
+        )
+        types_module = importlib.import_module(
+            "story_automator.core.innovation.spec_drift_types"
+        )
+        for symbol in (
+            "SpecDriftError",
+            "SpecDriftEvent",
+            "SpecDriftSnapshot",
+            "_validate_thresholds",
+            "_now_iso",
+            "_satisfied_ids",
+            "_score",
+        ):
+            self.assertTrue(
+                hasattr(types_module, symbol),
+                f"spec_drift_types no longer exposes {symbol!r}; the "
+                "sibling-split contract has regressed.",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
