@@ -8,11 +8,13 @@ across process restarts and emit a complete drift event-log for audit.
 
 Layout under ``<project_root>/_bmad/drift/<persistence_key>/``:
 
-* ``baseline.json`` — canonical-JSON serialization of the
-  ``SpecDriftSnapshot`` baseline. Written atomically via
-  ``core.atomic_io.write_atomic_text``; readers tolerate a missing file
-  and return ``None`` so the watcher's first ``poll()`` can establish
-  the baseline.
+* ``baseline.json`` — compact JSON (deterministic insertion-ordered
+  field shape, NOT the project's ``gate_schema.canonical_json``
+  ``sort_keys=True`` flavor — drift is advisory telemetry, not part of
+  the audit hash chain) serialization of the ``SpecDriftSnapshot``
+  baseline. Written atomically via ``core.atomic_io.write_atomic_text``;
+  readers tolerate a missing file and return ``None`` so the watcher's
+  first ``poll()`` can establish the baseline.
 * ``events.jsonl`` — append-only JSON-Lines log of every
   ``SpecDriftEvent`` returned by ``poll()``. Each line is one event so
   a corrupted line bounds the blast radius to that line alone (the

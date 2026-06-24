@@ -979,5 +979,103 @@ class SpecDriftWatcherLOCSoftLimitTests(unittest.TestCase):
             )
 
 
+class SpecDriftPersistenceDocstringConsistencyTests(unittest.TestCase):
+    """``spec_drift_persistence`` docstring matches the bytes its writer emits.
+
+    Pre-fix the module docstring at ``spec_drift_persistence.py:11``
+    described ``baseline.json`` as a "canonical-JSON serialization" while
+    ``persist_baseline`` writes through ``core.common.compact_json`` —
+    which only sets ``separators=(',', ':')`` and does NOT pass
+    ``sort_keys=True``. The project's own ``gate_schema.canonical_json``
+    helper defines "canonical JSON" as ``sort_keys=True`` everywhere
+    audit-grade serialization matters (evidence_io, lineage_ledger,
+    runtime_policy). The byte sequence happened to be stable today
+    because ``_snapshot_to_dict`` builds the dict with a fixed literal
+    field order, but the "canonical" promise was aspirational: any
+    future contributor migrating to ``dataclasses.asdict`` or
+    ``**kwargs``-style extension would silently break it without
+    tripping any existing semantic round-trip test.
+
+    The fix weakens the docstring to say "compact JSON
+    (deterministic insertion-ordered ... NOT ... ``sort_keys=True``)"
+    so the contract matches the bytes its writer emits. This
+    regression test pins both halves:
+
+    1. The docstring no longer carries the misleading
+       "canonical-JSON" promise.
+    2. The docstring explicitly disclaims being the project's
+       ``gate_schema.canonical_json`` flavor so a future contributor
+       reading just this module knows where to look for the
+       audit-grade flavor.
+    """
+
+    def test_baseline_docstring_does_not_claim_canonical_json(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.innovation.spec_drift_persistence"
+        )
+        doc = module.__doc__ or ""
+        # The exact pre-fix phrase that promised audit-grade canonicality.
+        # Note: we look for the precise "canonical-JSON" hyphenated form
+        # so a legitimate post-fix mention of "NOT ... canonical_json"
+        # (the helper name) survives.
+        self.assertNotIn(
+            "canonical-JSON serialization",
+            doc,
+            "spec_drift_persistence docstring still claims "
+            "'canonical-JSON serialization' for baseline.json, but "
+            "persist_baseline writes through common.compact_json which "
+            "does NOT pass sort_keys=True. Either weaken the docstring "
+            "or switch the writer to gate_schema.canonical_json.",
+        )
+
+    def test_baseline_docstring_disclaims_gate_schema_flavor(self) -> None:
+        # Post-fix docstring must explicitly disclaim the audit-grade
+        # flavor so a future contributor knows where the project's
+        # sort_keys=True canonical JSON lives.
+        module = importlib.import_module(
+            "story_automator.core.innovation.spec_drift_persistence"
+        )
+        doc = module.__doc__ or ""
+        self.assertIn(
+            "sort_keys=True",
+            doc,
+            "spec_drift_persistence docstring no longer disclaims the "
+            "gate_schema.canonical_json sort_keys=True flavor. Future "
+            "contributors will assume baseline.json is audit-grade JSON.",
+        )
+
+    def test_writer_helper_is_compact_json_not_canonical_json(self) -> None:
+        """Defensive: the writer must still be ``compact_json``.
+
+        If a future contributor swaps the writer to
+        ``gate_schema.canonical_json`` (the suggested-fix alternative),
+        the docstring weakening above would itself become stale. This
+        test pins the choice so the docstring and the writer stay in
+        sync: as long as the writer is ``compact_json``, the docstring
+        must NOT claim "canonical-JSON". If someone bumps the writer
+        to ``canonical_json``, this test trips and forces a docstring
+        re-audit at the same time.
+        """
+        persistence_src = (
+            REPO_ROOT
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "innovation"
+            / "spec_drift_persistence.py"
+        ).read_text(encoding="utf-8")
+        # The persist_baseline writer call site.
+        self.assertIn(
+            "compact_json(_snapshot_to_dict(snapshot))",
+            persistence_src,
+            "persist_baseline no longer writes through compact_json; "
+            "if the writer was bumped to canonical_json, the docstring "
+            "may need to revert to claiming 'canonical-JSON' — re-audit "
+            "the docstring weakening and update this regression test.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
