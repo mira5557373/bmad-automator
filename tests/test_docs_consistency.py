@@ -126,6 +126,91 @@ class ClaudeMdModuleReferenceTests(unittest.TestCase):
                 )
 
 
+class ClaudeMdInnovationModuleMapEnumerationTests(unittest.TestCase):
+    """CLAUDE.md's module-map line for ``core/innovation/`` enumerates every
+    session-shipped module family in its parenthetical capability summary.
+
+    Pre-fix the parenthetical at CLAUDE.md:20 listed 12 capability hints
+    (spec-drift watcher + persistence, lineage ledger, cost attribution +
+    cost evidence + session usage capture, RAMR, ledger, kernel classifier,
+    adversarial review, replay diff, phase budget, stack risk weights) while
+    the C5 self-improving-gate landed FOUR new modules in the same
+    subdirectory: ``threshold_apply.py``, ``threshold_decisions.py``,
+    ``threshold_proposer.py``, ``threshold_proposer_helpers.py``. The four
+    threshold_* modules ARE fully documented 54 lines later under the
+    "Self-improving gate (C5)" bullet, but the module-map summary line was
+    a self-contained capability enumeration and an operator skimming the
+    map would miss the C5 family. ``threshold_proposer_helpers.py`` in
+    particular was not mentioned anywhere in CLAUDE.md prior to this fix.
+
+    The regression test pins the line-20 parenthetical against a token
+    list that must mention at minimum "threshold" so the C5 family is
+    surfaced in the high-level module map.
+    """
+
+    INNOVATION_DIR = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "innovation"
+    )
+
+    def _module_map_innovation_line(self) -> str:
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^  - `src/story_automator/core/innovation/`.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '  - `src/story_automator/core/"
+            "innovation/`' module-map line; update this regression test "
+            "to match the new shape.",
+        )
+        return match.group(0)
+
+    def test_innovation_line_mentions_threshold_family(self) -> None:
+        line = self._module_map_innovation_line()
+        self.assertIn(
+            "threshold",
+            line.lower(),
+            "CLAUDE.md module-map line for core/innovation/ does not mention "
+            "the C5 threshold_* module family (threshold_apply, "
+            "threshold_decisions, threshold_proposer, threshold_proposer_helpers). "
+            "An operator skimming the module map would miss the C5 "
+            "self-improving-gate substrate even though the directory ships "
+            "four threshold_* modules.",
+        )
+
+    def test_innovation_dir_actually_carries_threshold_modules(self) -> None:
+        """Defensive: the disk genuinely carries the four C5 threshold_* modules.
+
+        If a future refactor moves the threshold_* modules out of
+        ``core/innovation/`` (say, into a dedicated ``core/calibration/``
+        subdirectory), the line-20 mention becomes stale; this test trips
+        so the module-map line gets re-audited at the same commit.
+        """
+        expected = {
+            "threshold_apply.py",
+            "threshold_decisions.py",
+            "threshold_proposer.py",
+            "threshold_proposer_helpers.py",
+        }
+        actual = {p.name for p in self.INNOVATION_DIR.glob("threshold_*.py")}
+        missing = expected - actual
+        self.assertEqual(
+            missing,
+            set(),
+            f"core/innovation/ no longer carries the expected C5 threshold_* "
+            f"modules: missing {sorted(missing)}. Either restore them or "
+            "update this regression test (and the CLAUDE.md module-map line).",
+        )
+
+
 class CostAttributionDocstringTests(unittest.TestCase):
     """``cost_attribution`` module docstring reflects C3 having shipped.
 
