@@ -545,6 +545,63 @@ class RunCollectorsPerUnitTests(unittest.TestCase):
                     [cfg_a, cfg_b],
                 )
 
+    # Post-impl review fold-in: AC-I-14 production-path coverage.
+    # Earlier tests patched ``_run_isolated`` itself, bypassing the
+    # inner ``try/except`` and the cleanup ``finally``. These tests
+    # patch ``run_single_collector`` (the real failure surface) so
+    # the BaseException propagates through the production
+    # ``_run_isolated`` body, proving the swallow-fix lands on the
+    # path operators actually hit.
+    def test_memory_error_in_invoke_propagates_through_production_path(self) -> None:
+        cfg = _cfg("alpha")
+
+        def patched_run_single(*args: Any, **kwargs: Any) -> CollectorOutcome:
+            raise MemoryError("synthetic OOM in run_single_collector")
+
+        from story_automator.core import collector_runner
+
+        with (
+            mock.patch.dict(os.environ, _host_env(), clear=True),
+            mock.patch.object(
+                collector_runner,
+                "run_single_collector",
+                side_effect=patched_run_single,
+            ),
+        ):
+            with self.assertRaises(MemoryError):
+                run_collectors_per_unit(
+                    self.fx.project_root,
+                    "gate-001",
+                    self.fx.sha,
+                    _make_profile(),
+                    [cfg],
+                )
+
+    def test_system_exit_in_invoke_propagates_through_production_path(self) -> None:
+        cfg = _cfg("alpha")
+
+        def patched_run_single(*args: Any, **kwargs: Any) -> CollectorOutcome:
+            raise SystemExit(2)
+
+        from story_automator.core import collector_runner
+
+        with (
+            mock.patch.dict(os.environ, _host_env(), clear=True),
+            mock.patch.object(
+                collector_runner,
+                "run_single_collector",
+                side_effect=patched_run_single,
+            ),
+        ):
+            with self.assertRaises(SystemExit):
+                run_collectors_per_unit(
+                    self.fx.project_root,
+                    "gate-001",
+                    self.fx.sha,
+                    _make_profile(),
+                    [cfg],
+                )
+
     # §7.2 #16 — AuditLockTimeout retried once.
     def test_audit_lock_timeout_retried_once(self) -> None:
         cfg = _cfg("alpha")

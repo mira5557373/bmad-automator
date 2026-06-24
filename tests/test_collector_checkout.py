@@ -456,7 +456,7 @@ class CreateCollectorCheckoutRetryTests(unittest.TestCase):
                 side_effect=fake_run,
             ),
             mock.patch(
-                "story_automator.core.collector_checkout.time.sleep",
+                "story_automator.core.collector_checkout._sleep_for_retry",
                 side_effect=fake_sleep,
             ),
         ):
@@ -502,7 +502,7 @@ class CreateCollectorCheckoutRetryTests(unittest.TestCase):
                 side_effect=fake_run,
             ),
             mock.patch(
-                "story_automator.core.collector_checkout.time.sleep",
+                "story_automator.core.collector_checkout._sleep_for_retry",
                 side_effect=fake_sleep,
             ),
         ):
@@ -548,7 +548,7 @@ class CreateCollectorCheckoutRetryTests(unittest.TestCase):
                 side_effect=fake_run,
             ),
             mock.patch(
-                "story_automator.core.collector_checkout.time.sleep",
+                "story_automator.core.collector_checkout._sleep_for_retry",
                 side_effect=fake_sleep,
             ),
         ):

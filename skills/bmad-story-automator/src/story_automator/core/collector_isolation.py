@@ -44,9 +44,18 @@ from .collector_checkout import (
     create_collector_checkout,
 )
 from .collector_config import CollectorConfig, CollectorOutcome
-from .evidence_io import persist_evidence_record
-from .gate_audit import EvidenceCollectedAudit, emit_gate_audit
-from .gate_schema import make_evidence_record
+from .collector_isolation_outcomes import (
+    audit_timeout_outcome as _audit_timeout_outcome,
+)
+from .collector_isolation_outcomes import (
+    crash_outcome as _crash_outcome,
+)
+from .collector_isolation_outcomes import (
+    error_outcome as _error_outcome,
+)
+from .collector_isolation_outcomes import (
+    make_error_outcome as _make_error_outcome,  # noqa: F401 — re-exported for test compat.
+)
 
 __all__ = [
     "IsolationMode",
@@ -194,112 +203,6 @@ def _cleanup_unit_checkout(
         pass
 
 
-def _make_error_outcome(
-    config: CollectorConfig,
-    findings: list[str],
-    project_root: str | Path,
-    gate_id: str,
-    audit_policy: dict[str, Any] | None,
-    audit_path: Path | None,
-) -> CollectorOutcome:
-    """Mirror ``collector_runner``'s error path: persist evidence + emit audit."""
-    evidence = make_evidence_record(
-        collector=config.collector_id,
-        tool=config.tool,
-        category=config.category,
-        status="error",
-        findings=findings,
-        exit_code=-1,
-        deterministic=config.deterministic,
-    )
-    try:
-        persisted = persist_evidence_record(project_root, gate_id, evidence)
-    except Exception:
-        persisted = None
-    if audit_policy is not None and audit_path is not None:
-        try:
-            emit_gate_audit(
-                audit_policy,
-                audit_path,
-                EvidenceCollectedAudit(
-                    gate_id=gate_id,
-                    category=config.category,
-                    collector=config.collector_id,
-                    tool=config.tool,
-                    status="error",
-                    duration_ms=0,
-                ),
-            )
-        except Exception:
-            # Audit emission failure here is observability-only and
-            # must not corrupt the outcome.
-            pass
-    return CollectorOutcome(
-        config=config,
-        evidence=evidence,
-        persisted_path=persisted,
-    )
-
-
-def _error_outcome(
-    config: CollectorConfig,
-    exc: BaseException,
-    project_root: str | Path,
-    gate_id: str,
-    audit_policy: dict[str, Any] | None = None,
-    audit_path: Path | None = None,
-) -> CollectorOutcome:
-    """Reify a checkout-creation failure as an ``error`` outcome."""
-    return _make_error_outcome(
-        config, [f"checkout failed: {exc}"], project_root, gate_id, audit_policy, audit_path
-    )
-
-
-def _crash_outcome(
-    config: CollectorConfig,
-    exc: BaseException,
-    project_root: str | Path,
-    gate_id: str,
-    audit_policy: dict[str, Any] | None = None,
-    audit_path: Path | None = None,
-) -> CollectorOutcome:
-    """Reify a worker-thread Exception / BaseException as ``error`` outcome.
-
-    The finding string carries the exception type name so operators can
-    distinguish a crash from a slow-disk audit timeout.
-    """
-    return _make_error_outcome(
-        config,
-        [f"worker terminated: {type(exc).__name__}: {exc}"],
-        project_root,
-        gate_id,
-        audit_policy,
-        audit_path,
-    )
-
-
-def _audit_timeout_outcome(
-    config: CollectorConfig,
-    exc: BaseException,
-    project_root: str | Path,
-    gate_id: str,
-    audit_policy: dict[str, Any] | None = None,
-    audit_path: Path | None = None,
-) -> CollectorOutcome:
-    """Reify an ``AuditLockTimeout`` (after retry) as an ``error`` outcome.
-
-    Finding string is intentionally distinct from ``_crash_outcome``.
-    """
-    return _make_error_outcome(
-        config,
-        [f"audit lock timeout after retry: {exc}"],
-        project_root,
-        gate_id,
-        audit_policy,
-        audit_path,
-    )
-
-
 def _run_isolated(
     config: CollectorConfig,
     project_root: str | Path,
@@ -363,13 +266,25 @@ def _run_isolated(
                 return _invoke()
             except AuditLockTimeout as exc2:
                 return _audit_timeout_outcome(config, exc2, project_root, gate_id, **kw)
+            except _FATAL_BASEEXC:
+                # Post-impl AC-I-14 fix: KeyboardInterrupt / SystemExit /
+                # MemoryError (which is an Exception subclass — would
+                # otherwise be silently downgraded) / GeneratorExit
+                # MUST propagate so ``fut.result()`` re-raises them on
+                # the main thread.
+                raise
+            except Exception as exc:
+                return _crash_outcome(config, exc, project_root, gate_id, **kw)
+        except _FATAL_BASEEXC:
+            # Same propagate-don't-swallow rule on the first attempt.
+            raise
         except Exception as exc:
             return _crash_outcome(config, exc, project_root, gate_id, **kw)
-        except BaseException as exc:
-            # HIGH #7 fix: BaseException at worker boundary. Outcome
-            # is recorded; the original exception is propagated AGAIN
-            # from the as_completed loop in run_collectors_per_unit.
-            return _crash_outcome(config, exc, project_root, gate_id, **kw)
+        # NOTE: BaseException not in _FATAL_BASEEXC (e.g. a custom
+        # operator-defined subclass) still falls through to the outer
+        # ``except BaseException`` in run_collectors_per_unit's
+        # as_completed loop, which reifies the crash outcome and sets
+        # pending_baseexc only when the type is in _FATAL_BASEEXC.
     finally:
         if checkout is not None:
             _cleanup_unit_checkout(checkout, project_root)
@@ -407,6 +322,7 @@ def run_collectors_per_unit(
     outcomes: list[CollectorOutcome] = []
     pending_baseexc: BaseException | None = None
     future_to_config: dict[Future[CollectorOutcome], CollectorConfig] = {}
+    collected_futures: set[int] = set()
 
     pool = ThreadPoolExecutor(
         max_workers=clamped,
@@ -428,6 +344,7 @@ def run_collectors_per_unit(
         try:
             for fut in as_completed(future_to_config):
                 cfg = future_to_config[fut]
+                collected_futures.add(id(fut))
                 try:
                     outcomes.append(fut.result())
                 except BaseException as exc:
@@ -452,17 +369,55 @@ def run_collectors_per_unit(
                         # flag for re-raise after outcome sort.
                         pending_baseexc = exc
         except KeyboardInterrupt as exc:
-            # HIGH #7 fix: drain the queue; in-flight subprocesses
-            # complete to their per-category timeout.
+            # AC-I-13: drain the queue but allow IN-FLIGHT workers'
+            # subprocess.run to complete to their per-category timeout
+            # and have their outcomes collected. The earlier shape used
+            # ``cancel_futures=True`` + ``wait=False`` which abandoned
+            # already-started workers AND their persisted evidence,
+            # breaking the 1:1 outcomes-to-disk invariant.
+            #
+            # Correct shape:
+            #   1. Issue shutdown(wait=True) so currently-running
+            #      workers may finish (queued-but-not-started workers
+            #      will run too because we cannot reliably distinguish
+            #      "started" from "queued"; this is acceptable because
+            #      the operator already accepted the per-category
+            #      timeout bound by submitting work in the first place
+            #      — a second Ctrl-C delivers OS-level signal).
+            #   2. After shutdown, drain any futures that finished by
+            #      iterating future_to_config and reading results from
+            #      futures that ``done()`` returns True for, appending
+            #      outcomes the as_completed loop didn't yet pick up.
             try:
-                pool.shutdown(wait=False, cancel_futures=True)
+                pool.shutdown(wait=True)
             except Exception:
                 pass
+            # Drain futures the as_completed loop didn't pick up.
+            for fut2, cfg2 in future_to_config.items():
+                if id(fut2) in collected_futures:
+                    continue
+                if not fut2.done():
+                    continue
+                collected_futures.add(id(fut2))
+                try:
+                    outcomes.append(fut2.result())
+                except BaseException as exc2:
+                    outcomes.append(
+                        _crash_outcome(
+                            cfg2,
+                            exc2,
+                            project_root,
+                            gate_id,
+                            audit_policy=audit_policy,
+                            audit_path=audit_path,
+                        )
+                    )
             pending_baseexc = exc
     finally:
         # If we exited via KeyboardInterrupt we already drained; the
-        # second shutdown with wait=False is a no-op. For the normal
-        # path we still need to release the worker threads.
+        # second shutdown with wait=True (no-op for already-shutdown
+        # pool) is harmless. For the normal path we still need to
+        # release the worker threads.
         try:
             pool.shutdown(wait=(pending_baseexc is None))
         except Exception:

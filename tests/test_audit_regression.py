@@ -1714,6 +1714,33 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
                     violations.append(f"get_gate_lock() call at line {node.lineno}")
                 if isinstance(fn, ast.Attribute) and fn.attr == "get_gate_lock":
                     violations.append(f"<receiver>.get_gate_lock() call at line {node.lineno}")
+                # Post-impl review fold-in (MED #2): broaden the lock
+                # surface to any FileLock(...) constructor and any
+                # ``*_lock(...)`` helper. The spec §3 "Lock ordering"
+                # row promised "Worker threads MUST NOT acquire ANY
+                # ``_bmad/*.lock``" — the prior pin only caught
+                # ``get_gate_lock``, missing ``FileLock``,
+                # ``unified_state_lock``, ``calibration_lock_path``,
+                # ``get_lineage_lock``, ``get_drift_lock``, etc.
+                if isinstance(fn, ast.Name) and fn.id == "FileLock":
+                    violations.append(f"FileLock(...) call at line {node.lineno}")
+                if isinstance(fn, ast.Attribute) and fn.attr == "FileLock":
+                    violations.append(f"<receiver>.FileLock(...) call at line {node.lineno}")
+                # Generic ``*_lock(...)`` helpers (both Name and
+                # Attribute forms). Excludes ``get_gate_lock`` (already
+                # flagged above) to avoid double-counting.
+                _GENERIC_LOCK_NAMES = {
+                    "unified_state_lock",
+                    "calibration_lock_path",
+                    "get_lineage_lock",
+                    "get_drift_lock",
+                    "acquire_lock",
+                    "gate_lock",
+                }
+                if isinstance(fn, ast.Name) and fn.id in _GENERIC_LOCK_NAMES:
+                    violations.append(f"{fn.id}() call at line {node.lineno}")
+                if isinstance(fn, ast.Attribute) and fn.attr in _GENERIC_LOCK_NAMES:
+                    violations.append(f"<receiver>.{fn.attr}() call at line {node.lineno}")
             # os.environ["X"] = ... / os.environ["X"] += ... / del os.environ["X"]
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
                 targets: list = []
@@ -1779,6 +1806,18 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
             "get_gate_lock attribute": ("import x\ndef f():\n    x.get_gate_lock('/tmp')\n"),
             "os.environ AnnAssign": ("import os\ndef f():\n    os.environ['X']: str = 'y'\n"),
             "os.environ AugAssign": ("import os\ndef f():\n    os.environ['X'] += 'z'\n"),
+            # Post-impl review fold-in (MED #2) — broader lock surface.
+            "FileLock name": (
+                "from filelock import FileLock\ndef f():\n    FileLock('/tmp/x.lock')\n"
+            ),
+            "FileLock attribute": (
+                "import filelock\ndef f():\n    filelock.FileLock('/tmp/x.lock')\n"
+            ),
+            "unified_state_lock": "def f():\n    unified_state_lock('.')\n",
+            "unified_state_lock attribute": "import m\ndef f():\n    m.unified_state_lock('.')\n",
+            "calibration_lock_path": "def f():\n    calibration_lock_path('.')\n",
+            "get_lineage_lock": "def f():\n    get_lineage_lock('.')\n",
+            "get_drift_lock": "def f():\n    get_drift_lock('.')\n",
         }
         for label, src in pattern_cases.items():
             synth_tree = ast.parse(textwrap.dedent(src))
@@ -1997,7 +2036,17 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
                 continue
             # Exemption (b): the structurally-recognized dispatcher
             # (``run_gate_collectors`` with ``isolation_mode == "per_unit"``).
-            if self._dispatches_via_isolation_mode(tree):
+            # Post-impl review fold-in: scope the dispatcher exemption to
+            # STRICTLY ``core/collector_runner.py`` so an unrelated core/*
+            # or commands/* module cannot self-exempt by defining a
+            # confirm-shaped helper. Mirrors the path constraint that
+            # the C5 ThresholdApplyIsolationInvariant tightened to
+            # ``skill_src / "commands"``.
+            collector_runner_path = skill_src / "core" / "collector_runner.py"
+            if (
+                py_file.resolve() == collector_runner_path.resolve()
+                and self._dispatches_via_isolation_mode(tree)
+            ):
                 continue
             if self._module_violates(tree):
                 offenders.append(str(py_file.relative_to(skill_src)))

@@ -54,6 +54,18 @@ _MAX_WORKTREE_ADD_ATTEMPTS: int = 3
 _WORKTREE_ADD_BACKOFF_S: float = 0.05
 
 
+def _sleep_for_retry(seconds: float) -> None:
+    """Module-level indirection for the inter-attempt backoff sleep.
+
+    Exists ONLY so tests can patch this symbol directly without also
+    intercepting subprocess.py's internal ``time.sleep`` polling (which
+    runs an unrelated exponential backoff and pollutes any ``time.sleep``
+    monkey-patch). Production behavior is byte-identical to
+    ``time.sleep``.
+    """
+    time.sleep(seconds)
+
+
 class CollectorCheckoutError(RuntimeError):
     """Raised when a collector checkout cannot be created or validated."""
 
@@ -186,7 +198,7 @@ def create_collector_checkout(
                 break
             # Avoid sleeping after the FINAL attempt — it can't help.
             if attempt < _MAX_WORKTREE_ADD_ATTEMPTS - 1:
-                time.sleep(_WORKTREE_ADD_BACKOFF_S)
+                _sleep_for_retry(_WORKTREE_ADD_BACKOFF_S)
         assert result is not None  # loop runs at least once
         if result.returncode != 0:
             shutil.rmtree(checkout_dir, ignore_errors=True)
