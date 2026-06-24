@@ -737,7 +737,16 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                     if alias.name == "subprocess":
                         module_aliases.add(alias.asname or alias.name)
             elif isinstance(node, ast.ImportFrom):
-                if node.module == "subprocess":
+                # Gate on ``node.level == 0`` so a relative import like
+                # ``from .subprocess import run`` (level=1, referring to a
+                # project-local sibling module named ``subprocess.py``) is
+                # NOT mis-classified as a stdlib ``subprocess`` binding.
+                # No file under skills/ currently shadows the stdlib name,
+                # so this is a precision-contract guard: the walker's
+                # negative test at the end of
+                # ``test_positive_failure_bypass_idioms_are_caught``
+                # promises binding-tracking is "precise, not over-broad".
+                if node.module == "subprocess" and node.level == 0:
                     for alias in node.names:
                         if alias.name in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES:
                             callable_aliases.add(alias.asname or alias.name)
@@ -1905,6 +1914,42 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             _flag(unrelated_src),
             "Walker FALSELY flagged unrelated `run(...)` with no subprocess "
             "import — binding-tracking is over-broad",
+        )
+
+        # Negative — ``from .subprocess import run`` (level=1, relative
+        # import of a project-local sibling module named
+        # ``subprocess.py``) MUST NOT be flagged. The walker collects
+        # ``ast.ImportFrom`` only when ``node.level == 0`` (absolute
+        # import of the stdlib name). A level >= 1 import targets a
+        # package-local module; treating its ``run`` as a stdlib
+        # subprocess callable would over-flag innocent ``run(...)`` calls
+        # inside that module and contradict the precision contract
+        # documented above. Also exercises the level=2 ``..`` case.
+        relative_import_src = """
+            from .subprocess import run
+
+            def innocent():
+                run(["ls"], env={"FOO": "bar"})
+        """
+        self.assertFalse(
+            _flag(relative_import_src),
+            "Walker FALSELY flagged ``from .subprocess import run`` (level=1, "
+            "project-local sibling module) — relative imports do not target "
+            "the stdlib ``subprocess`` module and must be excluded from the "
+            "binding collector",
+        )
+
+        relative_import_parent_src = """
+            from ..subprocess import run
+
+            def innocent():
+                run(["ls"], env={"FOO": "bar"})
+        """
+        self.assertFalse(
+            _flag(relative_import_parent_src),
+            "Walker FALSELY flagged ``from ..subprocess import run`` (level=2, "
+            "parent-package local module) — same precision contract as the "
+            "level=1 case applies to any ``node.level >= 1`` import",
         )
 
 
