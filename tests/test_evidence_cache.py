@@ -156,6 +156,30 @@ class EvidenceCacheTests(unittest.TestCase):
         after = evidence_cache_stats()
         self.assertEqual(after["misses"], before["misses"] + 2)
 
+    def test_invalidate_all_resets_stats_to_zero(self) -> None:
+        """``invalidate_all_evidence_cache`` is a test-isolation API: it
+        must zero the hit/miss/invalidations counters so consecutive test
+        methods can make absolute (not just delta) assertions against
+        :func:`evidence_cache_stats`. Without this, module-global
+        ``_STATS`` accumulates indefinitely across the test run and any
+        absolute-value assertion becomes ordering-sensitive.
+        """
+        _seed_record(self.root, "g1")
+        # Generate some non-zero counter activity.
+        cached_load_evidence_bundle(self.root, "g1")  # miss
+        cached_load_evidence_bundle(self.root, "g1")  # hit
+        invalidate_evidence_cache(self.root, "g1")
+        warm = evidence_cache_stats()
+        self.assertGreater(warm["hits"], 0)
+        self.assertGreater(warm["misses"], 0)
+        self.assertGreater(warm["invalidations"], 0)
+        # Bulk-drop should also reset stats — test-isolation contract.
+        invalidate_all_evidence_cache()
+        cleared = evidence_cache_stats()
+        self.assertEqual(cleared["hits"], 0)
+        self.assertEqual(cleared["misses"], 0)
+        self.assertEqual(cleared["invalidations"], 0)
+
     def test_cache_returns_copy_or_immutable(self) -> None:
         _seed_record(self.root, "g1")
         first = cached_load_evidence_bundle(self.root, "g1")

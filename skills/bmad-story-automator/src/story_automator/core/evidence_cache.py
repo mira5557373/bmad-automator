@@ -139,10 +139,20 @@ def invalidate_all_evidence_cache() -> None:
     Resets the generation map too: bulk-drop is a test-isolation tool,
     so any in-flight loader observing a stale generation post-clear
     will see ``current_gen == gen_at_entry == 0`` and proceed normally.
+
+    Also resets the ``_STATS`` hit/miss/invalidations counters to zero so
+    that consecutive test methods see a fresh observability baseline.
+    Without this reset, a test method querying
+    :func:`evidence_cache_stats` after ``setUp`` would observe historical
+    totals carried over from earlier methods, forcing every test to use
+    delta-baseline assertions even when the cache is logically empty.
     """
     with _LOCK:
         _CACHE.clear()
         _GEN.clear()
+        _STATS["hits"] = 0
+        _STATS["misses"] = 0
+        _STATS["invalidations"] = 0
 
 
 def evidence_cache_stats() -> dict[str, int]:
