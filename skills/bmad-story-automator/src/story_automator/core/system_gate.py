@@ -196,7 +196,22 @@ def run_system_gate(
                             tier="system",
                         )
             finally:
-                clear_gate_marker(project_root)
+                # R2 fix #17 (mirror of gate_orchestrator.py): swallow any
+                # OSError raised by ``clear_gate_marker`` so a
+                # ``KeyboardInterrupt`` / ``SystemExit`` propagating from
+                # ``run_gate_collectors`` or ``evaluate_gate`` is not
+                # clobbered by a secondary unlink failure (read-only fs,
+                # permission denied, IsADirectoryError, etc.).
+                # ``clear_gate_marker`` only handles ``FileNotFoundError``;
+                # any other OSError raised inside a ``finally`` would
+                # override the operator's SIGINT, breaking shutdown
+                # handlers that match ``except KeyboardInterrupt``. The
+                # startup janitor / ``recover_from_crash`` mops up
+                # orphan markers.
+                try:
+                    clear_gate_marker(project_root)
+                except OSError:
+                    pass
         finally:
             _gate_lock.release()
     finally:

@@ -341,6 +341,39 @@ class RunProductionGateLockSemanticsTests(_MarkerFreeMixin, unittest.TestCase):
             )
         self.assertFalse(self._marker_path().exists())
 
+    @patch.dict(os.environ, {}, clear=False)
+    @patch("story_automator.core.gate_orchestrator.clear_gate_marker")
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_clear_gate_marker_oserror_does_not_clobber_keyboard_interrupt(
+        self,
+        mock_run: MagicMock,
+        mock_clear: MagicMock,
+    ) -> None:
+        # R2 fix #17 regression: when ``_run_collectors`` raises
+        # KeyboardInterrupt AND ``clear_gate_marker`` then raises a
+        # non-FileNotFoundError OSError (read-only fs, permission denied,
+        # etc.) inside the inner ``finally``, the secondary OSError must
+        # NOT replace the operator's SIGINT in the propagating exception.
+        # The original ``except KeyboardInterrupt`` clauses (shutdown
+        # handlers, signal-aware code) MUST still match. The
+        # marker-not-cleared edge is acceptable — the K-5 startup janitor
+        # / recover_from_crash mops up orphan markers.
+        mock_run.side_effect = KeyboardInterrupt()
+        mock_clear.side_effect = OSError("permission denied")
+        with self.assertRaises(KeyboardInterrupt):
+            run_production_gate(
+                self.project_root,
+                "gate-marker-oserror",
+                commit_sha="abc",
+                target={"kind": "story", "id": "s1"},
+                profile=self.profile,
+                factory_version="1.0.0",
+                registry=self.registry,
+            )
+        # ``clear_gate_marker`` was called exactly once from the inner
+        # finally (the OSError did not prevent invocation).
+        mock_clear.assert_called_once_with(self.project_root)
+
 
 class RunProductionGateVerdictEquivalenceTests(_MarkerFreeMixin, unittest.TestCase):
     """AC-G-03 + AC-G-02: shared and per_unit produce IDENTICAL

@@ -983,7 +983,25 @@ def run_production_gate(
                     audit_policy=audit_policy, audit_path=audit_path,
                 )
             finally:
-                clear_gate_marker(project_root)
+                # R2 fix #17: raising in a ``finally`` clobbers a
+                # propagating ``KeyboardInterrupt`` (or any other in-flight
+                # exception). ``clear_gate_marker`` only handles
+                # ``FileNotFoundError`` — a permission / read-only-fs /
+                # IsADirectoryError on the unlink would override the
+                # operator's SIGINT, silently converting it to OSError and
+                # contradicting the contract pinned by
+                # ``test_marker_cleared_when_collectors_raise``. The
+                # original exception (Ctrl+C) is preserved only as
+                # ``__context__`` and ``except KeyboardInterrupt`` clauses
+                # will NOT match. Swallow the secondary OSError so the
+                # primary exception keeps propagating; the K-5 startup
+                # janitor / ``recover_from_crash`` already mops up orphan
+                # markers, so the marker-not-cleared edge is the lesser
+                # evil.
+                try:
+                    clear_gate_marker(project_root)
+                except OSError:
+                    pass
         finally:
             _gate_lock.release()
     finally:
