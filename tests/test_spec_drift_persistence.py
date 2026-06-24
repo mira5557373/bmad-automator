@@ -144,6 +144,49 @@ class TestBaselinePersistence(unittest.TestCase):
             root = Path(td)
             self.assertIsNone(load_baseline(root, "missing-key"))
 
+    def test_load_baseline_wraps_structural_corruption_as_spec_drift_error(
+        self,
+    ) -> None:
+        # Regression: load_baseline docstring promises corrupt JSON
+        # raises SpecDriftError so silent data loss surfaces loudly.
+        # Pre-fix, only OSError/JSONDecodeError were wrapped; structural
+        # corruption (missing field, wrong top-level type, non-numeric
+        # score) leaked raw KeyError/TypeError/ValueError to the caller.
+        # Each shape below must surface as SpecDriftError.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            drift_root_dir(root, "k1", create=True)
+            # S1: missing required field -> KeyError pre-fix
+            baseline_path(root, "k1").write_text(
+                json.dumps({"score": 0.5}), encoding="utf-8",
+            )
+            with self.assertRaises(SpecDriftError):
+                load_baseline(root, "k1")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            drift_root_dir(root, "k1", create=True)
+            # S2: JSON list (wrong top-level type) -> TypeError pre-fix
+            baseline_path(root, "k1").write_text(
+                json.dumps([1, 2, 3]), encoding="utf-8",
+            )
+            with self.assertRaises(SpecDriftError):
+                load_baseline(root, "k1")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            drift_root_dir(root, "k1", create=True)
+            # S3: non-numeric score -> ValueError pre-fix
+            baseline_path(root, "k1").write_text(
+                json.dumps({
+                    "score": "abc",
+                    "requirements_total": 5,
+                    "requirements_satisfied": 3,
+                    "timestamp_iso": "x",
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SpecDriftError):
+                load_baseline(root, "k1")
+
 
 class TestEventPersistence(unittest.TestCase):
     def test_append_drift_event_creates_file(self) -> None:

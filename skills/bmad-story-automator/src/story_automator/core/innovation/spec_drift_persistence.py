@@ -218,14 +218,14 @@ def load_baseline(
         return None
     try:
         data = json.loads(path.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError) as err:
+        return _dict_to_snapshot(data)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as err:
         from story_automator.core.innovation.spec_drift_watcher import (
             SpecDriftError,
         )
         raise SpecDriftError(
             f"corrupt baseline at {path}: {err!r}"
         ) from err
-    return _dict_to_snapshot(data)
 
 
 # ---------------------------------------------------------------------------
