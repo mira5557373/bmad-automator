@@ -1051,10 +1051,23 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 self._visit_function(node)
 
             def visit_Assign(self, node: ast.Assign) -> None:
+                # When the RHS is a scrub call, ADD the target names; on
+                # any other RHS, DISCARD them so a rebind from a
+                # scrub-bound name to a raw value (dict literal,
+                # os.environ.copy(), arbitrary Name) cannot silently
+                # pass the D-04 walker. Without the discard branch, a
+                # function that scrubs first and then reassigns the
+                # same identifier to a raw env dict gets a free pass —
+                # see the rebind-attack regression test
+                # ``test_rebind_to_raw_invalidates_scrubbed_binding``.
                 if is_scrub_call(node.value):
                     for tgt in node.targets:
                         if isinstance(tgt, ast.Name):
                             self.scrubbed_names.add(tgt.id)
+                else:
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            self.scrubbed_names.discard(tgt.id)
                 self.generic_visit(node)
 
             def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -1068,12 +1081,16 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 # for the same pattern. ``node.value`` is optional on
                 # AnnAssign (bare annotations like ``x: int`` have
                 # value=None) so guard before probing.
-                if (
-                    node.value is not None
-                    and is_scrub_call(node.value)
-                    and isinstance(node.target, ast.Name)
-                ):
-                    self.scrubbed_names.add(node.target.id)
+                #
+                # Symmetric to ``visit_Assign``: when the RHS exists
+                # but is NOT a scrub call, DISCARD the target so an
+                # ``sandboxed: dict = {...}`` after a prior scrub
+                # binding cannot silently leak through.
+                if node.value is not None and isinstance(node.target, ast.Name):
+                    if is_scrub_call(node.value):
+                        self.scrubbed_names.add(node.target.id)
+                    else:
+                        self.scrubbed_names.discard(node.target.id)
                 self.generic_visit(node)
 
             def visit_Call(self, node: ast.Call) -> None:
@@ -1430,6 +1447,141 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "accepted an unscrubbed env=dict literal after a bare "
             "annotation — visit_AnnAssign must guard ``node.value is "
             "not None`` AND must not bind a name without a scrub call",
+        )
+
+    def test_rebind_to_raw_invalidates_scrubbed_binding(self) -> None:
+        """A name bound to ``scrub_env_for_subprocess(...)`` that is
+        later REBOUND to a raw value (dict literal, ``os.environ.copy()``,
+        another ``Name``, AnnAssign of a dict literal) must NOT remain
+        in ``scrubbed_names`` — the subsequent
+        ``subprocess.run(..., env=<rebound>)`` must be flagged as
+        unscrubbed.
+
+        Without the discard branch in ``visit_Assign`` /
+        ``visit_AnnAssign``, the walker only ADDS to
+        ``scrubbed_names``; it never removes. A function that
+        scrubs first and then silently rebinds the same identifier
+        to a raw env dict containing ``BMAD_AUDIT_KEY`` passes the
+        walker as safe — a real false-negative on the D-04
+        audit-floor trust-boundary invariant.
+
+        Four bypass variants are covered:
+          (a) ``sandboxed = scrub_env_for_subprocess(env)`` then
+              ``sandboxed = {'BMAD_AUDIT_KEY': 'leaked'}``
+          (b) rebind to ``os.environ.copy()``
+          (c) rebind to a plain ``Name`` (the function's other
+              parameter)
+          (d) AnnAssign rebind: ``sandboxed: dict = {...}`` after
+              a prior scrub binding
+
+        Each variant asserts ``offenders`` is non-empty AND that
+        the unscrubbed ``subprocess.run`` line is the one flagged.
+        """
+        import ast
+
+        # (a) Plain Assign rebind to a raw dict literal — the
+        # canonical bypass in the bug report.
+        rebind_dict_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed = {"BMAD_AUDIT_KEY": "leaked"}
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(rebind_dict_src))),
+            1,
+            "Walker FAILED to flag rebind from scrub call to raw dict "
+            "literal — scrubbed_names tracker never invalidates on "
+            "rebind, defeating the D-04 audit-floor invariant",
+        )
+
+        # (b) Plain Assign rebind to os.environ.copy().
+        rebind_environ_src = textwrap.dedent(
+            """
+            import os
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed = os.environ.copy()
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(rebind_environ_src))),
+            1,
+            "Walker FAILED to flag rebind from scrub call to "
+            "os.environ.copy() — visit_Assign must discard the target "
+            "name on any non-scrub RHS",
+        )
+
+        # (c) Plain Assign rebind to another Name (raw env parameter).
+        rebind_name_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, raw):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed = raw
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(rebind_name_src))),
+            1,
+            "Walker FAILED to flag rebind from scrub call to a raw "
+            "Name — the scrubbed-name tracker must invalidate on any "
+            "non-scrub RHS, not only literal dict rebinds",
+        )
+
+        # (d) AnnAssign rebind to a raw dict literal after a prior
+        # plain-Assign scrub binding. Mirrors the visit_AnnAssign gap.
+        rebind_annassign_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed: dict = {"BMAD_AUDIT_KEY": "leaked"}
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(rebind_annassign_src))),
+            1,
+            "Walker FAILED to flag AnnAssign rebind from a prior scrub "
+            "binding to a raw dict literal — visit_AnnAssign must "
+            "discard the target name on any non-scrub RHS, symmetric "
+            "with visit_Assign",
+        )
+
+        # Sanity: the canonical safe pattern (scrub then use directly,
+        # no rebind) must STILL pass — the discard branch must not
+        # accidentally invalidate a legitimately-scrubbed binding.
+        safe_pattern_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(safe_pattern_src)),
+            [],
+            "Discard branch falsely invalidated a legitimately-scrubbed "
+            "binding — the fix must only discard on REBIND, not on the "
+            "initial bind",
         )
 
     def test_scrub_import_alias_is_tracked(self) -> None:
