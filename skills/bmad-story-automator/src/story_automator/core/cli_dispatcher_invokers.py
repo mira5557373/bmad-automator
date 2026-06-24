@@ -165,7 +165,18 @@ def _session_name_for(intent: "SessionIntent") -> str:
     # Sanitize story_key to the allowed charset (alnum + dash + underscore).
     raw = (intent.story_key or "STORY").strip() or "STORY"
     sane = "".join(c if c.isalnum() else "-" for c in raw).strip("-") or "STORY"
-    phase = (intent.phase or "phase").replace("_", "-").replace("/", "-")
+    # Sanitize phase to the same charset. ``_phase_for_step`` lowercases and
+    # strips ``step`` but does NOT collapse interior whitespace, so an operator
+    # invoking ``--step "my step"`` (a legal CLI arg with quoting) propagates
+    # a literal space into ``intent.phase`` and would otherwise produce a
+    # session name that fails ``tmux_runtime._validated_session_name`` (regex
+    # ``^[A-Za-z0-9._-]{1,160}$``). Mirror the story_key path so the docstring
+    # contract above ("must satisfy ``_validated_session_name``") always holds
+    # regardless of caller hygiene.
+    raw_phase = (intent.phase or "phase").strip() or "phase"
+    phase = (
+        "".join(c if c.isalnum() else "-" for c in raw_phase).strip("-") or "phase"
+    )
     return f"sa-disp-{sane}-{phase}"[:80]
 
 

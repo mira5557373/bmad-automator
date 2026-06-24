@@ -475,6 +475,50 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 )
                 self.assertFalse(raw["timed_out"])
 
+    def test_session_name_satisfies_validated_session_name_for_dirty_phase(
+        self,
+    ) -> None:
+        # Regression: ``_session_name_for``'s docstring says the produced
+        # name "must satisfy ``tmux_runtime._validated_session_name``"
+        # (regex ``^[A-Za-z0-9._-]{1,160}$``). Pre-fix the implementation
+        # only replaced ``_`` and ``/`` in ``intent.phase``, leaving
+        # whitespace, colons, and other invalid chars intact — so a phase
+        # produced by ``commands.tmux._phase_for_step('my step')`` (which
+        # only does ``.strip().lower()`` and yields ``"my step-running"``)
+        # would render a name that the validator rejects. Verify the
+        # docstring contract holds for a realistic dirty phase that
+        # production paths can produce.
+        from story_automator.core import (
+            cli_dispatcher_invokers as invokers_mod,
+            tmux_runtime as tmux_mod,
+        )
+
+        # The exact phase that ``commands.tmux._phase_for_step('my step')``
+        # produces — a literal space passes through ``.strip().lower()``.
+        intent = SessionIntent(
+            story_key="S1",
+            phase="my step-running",
+            baseline_sha="b" * 40,
+            prompt="/p",
+            workspace="/tmp",
+        )
+        name = invokers_mod._session_name_for(intent)
+        # Must satisfy the validator (no exception).
+        tmux_mod._validated_session_name(name)
+        # And the invalid char must have been replaced (not just dropped):
+        self.assertNotIn(" ", name)
+        # Also check colon (another realistic dirty char from operator args).
+        intent2 = SessionIntent(
+            story_key="S1",
+            phase="dev:running",
+            baseline_sha="b" * 40,
+            prompt="/p",
+            workspace="/tmp",
+        )
+        name2 = invokers_mod._session_name_for(intent2)
+        tmux_mod._validated_session_name(name2)
+        self.assertNotIn(":", name2)
+
     def test_polling_loop_hook_failure_does_not_propagate_or_leak_session(
         self,
     ) -> None:
