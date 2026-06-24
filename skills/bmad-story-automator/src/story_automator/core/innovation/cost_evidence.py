@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CostEvidenceError",
     "GateCostReport",
+    "RESERVED_COLLECTOR_IDS",
     "VALID_COST_ATTRIBUTION_MODES",
     "collector_cost_path",
     "emit_gate_cost_report",
@@ -78,6 +79,20 @@ __all__ = [
     "load_gate_cost_report",
     "summary_path",
 ]
+
+
+# Per-collector files share a directory with the gate summary
+# (``summary.json``) so any collector_id whose ``<id>.json`` collides
+# with an internal filename would silently overwrite either the share
+# or the summary depending on write order. ``emit_gate_cost_report``
+# writes per-collector files BEFORE the summary, so a collector named
+# ``"summary"`` would have its share destroyed by the summary write at
+# l.~407-409 — losing the per-collector record AND breaking the
+# "on-disk collector set always matches summary" invariant the prune
+# step at l.~376-381 documents. Reject reserved names BEFORE touching
+# disk so a half-written tree is impossible. Lowercase only — match
+# the registry convention documented at :func:`collector_cost_path`.
+RESERVED_COLLECTOR_IDS: frozenset[str] = frozenset({"summary"})
 
 
 class CostEvidenceError(ValueError):
@@ -340,6 +355,19 @@ def emit_gate_cost_report(
         raise CostEvidenceError(
             "duplicate collector_id in outcomes: "
             f"{', '.join(repr(d) for d in dupes)}",
+        )
+    # Reserved-name guard — per-collector files (``<id>.json``) share
+    # a directory with internal files like ``summary.json``. A
+    # collector_id collision with a reserved name would silently
+    # overwrite either the share or the summary depending on write
+    # order, breaking the "on-disk collector set matches summary"
+    # invariant at l.~376-381 and turning load_collector_cost_share
+    # into a malformed-share error path. Reject BEFORE disk touch.
+    reserved = [cid for cid in cids if cid in RESERVED_COLLECTOR_IDS]
+    if reserved:
+        raise CostEvidenceError(
+            "collector_id collides with reserved internal filename: "
+            f"{', '.join(repr(r) for r in reserved)}",
         )
 
     try:

@@ -257,6 +257,88 @@ class EmissionTests(unittest.TestCase):
         after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
         self.assertEqual(before, after)
 
+    def test_reserved_collector_id_summary_raises_before_disk_touch(
+        self,
+    ) -> None:
+        """Regression — a collector with ``collector_id='summary'`` used
+        to silently destroy its own share. The emit loop wrote
+        ``<dir>/summary.json`` carrying the per-collector payload, then
+        the gate-summary writer at the end of :func:`emit_gate_cost_report`
+        clobbered that same path with the :class:`GateCostReport` payload.
+        The per-collector record was permanently lost, the cost dir
+        listing diverged from ``summary.json``'s ``per_collector`` tuple
+        (breaking the "on-disk collector set always matches summary"
+        invariant the prune step documents), and a subsequent
+        :func:`load_collector_cost_share` call raised
+        :class:`CostEvidenceError` ('malformed collector share') because
+        the gate-summary payload has no ``collector_id`` field.
+
+        Reachable in production because the registry does not validate
+        ``collector_id`` against an internal-filename allowlist; any
+        future meta/aggregator collector named "summary" would silently
+        corrupt cost evidence.
+
+        Fix: reserve ``summary`` (and any future internal filenames) at
+        the duplicate-id guard so emission raises BEFORE touching disk
+        — symmetric with the empty-list / duplicate-id / invalid-mode
+        guards already in place.
+        """
+
+        outcomes = [
+            _make_outcome("summary", "static", duration_ms=1000),
+        ]
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        # Duration mode (the bug's natural reproducer).
+        with self.assertRaises(CostEvidenceError) as ctx_dur:
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+                attribution_mode="duration",
+            )
+        self.assertIn(
+            "collides with reserved internal filename",
+            str(ctx_dur.exception),
+        )
+        self.assertIn("summary", str(ctx_dur.exception))
+        # Uniform mode — same rejection for symmetry parity with the
+        # duplicate-id / invalid-mode guards.
+        with self.assertRaises(CostEvidenceError) as ctx_uni:
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+                attribution_mode="uniform",
+            )
+        self.assertIn(
+            "collides with reserved internal filename",
+            str(ctx_uni.exception),
+        )
+        # Pre-disk-touch invariant — neither call should have written
+        # cost files for a rejected input, otherwise the summary.json
+        # destruction window would still be reachable.
+        after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        self.assertEqual(before, after)
+
+    def test_reserved_collector_id_summary_in_mixed_set_raises(self) -> None:
+        """Even when one valid collector accompanies a reserved-id
+        collector, emission must reject the batch before any disk
+        write — otherwise the valid collector's share would land first
+        and the gate-summary write would still overwrite the
+        ``summary`` collector's slot, producing the same broken
+        invariant the dedicated test above exercises.
+        """
+
+        outcomes = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("summary", "static", duration_ms=1000),
+        ]
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        with self.assertRaises(CostEvidenceError):
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+            )
+        after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        self.assertEqual(before, after)
+
     def test_report_is_frozen_dataclass(self) -> None:
         outcomes = [_make_outcome("a", "static")]
         report = emit_gate_cost_report(
