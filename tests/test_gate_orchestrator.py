@@ -639,6 +639,77 @@ class RunProductionGateTests(unittest.TestCase):
             "no-marker fast path must not add 'recovery' (additive invariant)",
         )
 
+    def test_quarantine_error_only_descriptor_surfaces_on_gate_file(
+        self,
+    ) -> None:
+        """Round-3: ``_attach_recovery_signal`` MUST surface the C-1 third
+        descriptor shape (``quarantined=False`` + ``quarantine_error=<msg>``).
+
+        Pre-fix: ``_quarantine_corrupted_marker``'s C-1 hardening made
+        the descriptor honest about THREE shapes when corruption is
+        detected: (a) happy quarantined=True; (b) marker moved but inner
+        evidence rename failed (quarantined=True + quarantine_error);
+        (c) outer mkdir failed before any rename (quarantined=False +
+        quarantine_error). The orchestrator-side surfacing only
+        recognized (a) and (b); shape (c) — the WORST case (corrupted
+        marker STILL on disk + I/O failure during recovery) — fell
+        through ``if not (quarantined or cleanup_failed): return`` and
+        was silently swallowed. Operators saw a green PASS with no
+        signal that the disk failed mid-quarantine and the corrupted
+        marker would re-trip the next run.
+
+        Post-fix: a descriptor carrying ``quarantine_error`` (regardless
+        of ``quarantined``) attaches a ``recovery`` subdict exposing the
+        error message, corruption reason, and intended quarantine dir,
+        so the operator can investigate at the right altitude.
+        """
+        from story_automator.core.gate_orchestrator import (
+            _attach_recovery_signal,
+        )
+
+        # Exact descriptor shape returned by `_quarantine_corrupted_marker`
+        # at lines 219-226 when the outer `quarantine_root.mkdir(...)`
+        # raises OSError("ENOSPC") at line 182.
+        descriptor = {
+            "recovered": False,
+            "quarantined": False,
+            "quarantine_dir": (
+                "/proj/_bmad/gate/quarantine/2026-06-24T12-00-00"
+            ),
+            "corruption_reason": (
+                "GateMarkerCorruptedError: not valid JSON"
+            ),
+            "quarantine_error": "[Errno 28] No space left on device",
+        }
+        gate_file: dict = {"overall": "PASS", "gate_id": "g123"}
+
+        _attach_recovery_signal(gate_file, descriptor)
+
+        # The §9.2 "loud, not silent" contract must hold at this
+        # integration boundary even when quarantined=False.
+        self.assertIn(
+            "recovery", gate_file,
+            "C-1 third descriptor shape (quarantined=False + "
+            "quarantine_error) must surface on gate_file['recovery']",
+        )
+        recovery = gate_file["recovery"]
+        self.assertEqual(recovery.get("quarantined"), False)
+        self.assertEqual(
+            recovery.get("quarantine_error"),
+            "[Errno 28] No space left on device",
+        )
+        self.assertEqual(
+            recovery.get("quarantine_dir"),
+            "/proj/_bmad/gate/quarantine/2026-06-24T12-00-00",
+        )
+        self.assertEqual(
+            recovery.get("corruption_reason"),
+            "GateMarkerCorruptedError: not valid JSON",
+        )
+        # Quarantine error path is mutually exclusive with success;
+        # cleanup_failed must not bleed in.
+        self.assertNotIn("cleanup_failed", recovery)
+
     @patch("story_automator.core.gate_orchestrator.detect_baseline_drift")
     @patch("story_automator.core.gate_orchestrator._run_collectors")
     def test_lie_detector_early_return_surfaces_quarantine_recovery(

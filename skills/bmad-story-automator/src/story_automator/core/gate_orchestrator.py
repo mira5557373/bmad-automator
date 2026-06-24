@@ -457,8 +457,12 @@ def _attach_recovery_signal(
 
     The subdict is attached ONLY when the descriptor indicates something
     operator-actionable: ``quarantined=True`` (corruption was loud and
-    moved) or ``cleanup_failed`` (orphan-cleanup failed mid-recovery).
-    The common ``{"recovered": False}`` (no marker) and the routine
+    moved), ``cleanup_failed`` (orphan-cleanup failed mid-recovery), or
+    ``quarantine_error`` present without ``quarantined=True`` (the C-1
+    fix's third descriptor shape: corruption detected but quarantine
+    setup itself failed mid-mkdir — e.g. ENOSPC/EACCES/EROFS — leaving
+    the corrupted marker on disk for the NEXT run to re-trip on). The
+    common ``{"recovered": False}`` (no marker) and the routine
     ``{"recovered": True, ...}`` (clean orphan reaper) cases add NOTHING
     — preserving byte-identical pre-fix behavior on the
     frozen-gate-surface and keeping the change purely additive.
@@ -471,7 +475,17 @@ def _attach_recovery_signal(
         return
     quarantined = bool(descriptor.get("quarantined"))
     cleanup_failed = bool(descriptor.get("cleanup_failed"))
-    if not (quarantined or cleanup_failed):
+    quarantine_error_present = bool(descriptor.get("quarantine_error"))
+    # Round-3 fix: the C-1 hardening of ``_quarantine_corrupted_marker``
+    # made the descriptor honest about a third shape — ``quarantined=False``
+    # plus ``quarantine_error=<msg>`` — when the outer mkdir itself fails
+    # (ENOSPC, EACCES on quarantine dir, EROFS). The previous gating
+    # predicate dropped that shape entirely, silently swallowing the
+    # WORST case (corrupted marker still on disk + I/O failure during
+    # recovery, both hidden behind a green PASS). Including
+    # ``quarantine_error`` in the gate honors the §9.2 "loud, not silent"
+    # contract at the integration boundary where C-1 left it half-fixed.
+    if not (quarantined or cleanup_failed or quarantine_error_present):
         return
     recovery: dict[str, Any] = {}
     if quarantined:
@@ -482,6 +496,18 @@ def _attach_recovery_signal(
             recovery["corruption_reason"] = descriptor["corruption_reason"]
         if "quarantine_error" in descriptor:
             recovery["quarantine_error"] = descriptor["quarantine_error"]
+    elif quarantine_error_present:
+        # C-1 third shape: corruption detected, quarantine setup
+        # failed → corrupted marker is STILL on disk. Surface
+        # quarantined=False explicitly so the operator can distinguish
+        # "moved successfully" from "failed to move", plus the disk
+        # error message and (when known) the corruption reason.
+        recovery["quarantined"] = False
+        recovery["quarantine_error"] = descriptor["quarantine_error"]
+        if "quarantine_dir" in descriptor:
+            recovery["quarantine_dir"] = descriptor["quarantine_dir"]
+        if "corruption_reason" in descriptor:
+            recovery["corruption_reason"] = descriptor["corruption_reason"]
     if cleanup_failed:
         recovery["cleanup_failed"] = True
         if "cleanup_error" in descriptor:
