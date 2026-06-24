@@ -164,11 +164,11 @@ Once an invariant lands, it MUST NOT be skipped, narrowed, or
 removed; regressing the class count below 11 is a release-blocking
 condition.
 
-### Sibling-module pattern (audit_env_scrub, spec_drift_persistence, gate_lock_observability)
+### Sibling-module pattern (audit_env_scrub, spec_drift_persistence, gate_lock_observability, collector_isolation_outcomes, threshold_proposer_helpers, _unified_state_repair)
 
 When a module approaches the 500-LOC soft limit OR when a new
 behavior is conceptually orthogonal to the parent, extract it into
-a sibling module rather than growing the parent. Three examples
+a sibling module rather than growing the parent. Six examples
 land this session:
 
 - `core/audit_env_scrub.py` — extracted from `core/audit.py` so the
@@ -184,6 +184,24 @@ land this session:
   `core/gate_orchestrator.py` to host the
   `GateLockTimeoutError` raise + `_describe_lock_holder` helpers;
   cut a +145 LOC budget excursion to +88.
+- `core/collector_isolation_outcomes.py` — extracted from
+  `core/collector_isolation.py` (G2 fold-in) to host the four pure
+  outcome-reifier helpers that match `collector_runner`'s error-path
+  shape; keeps the canonical isolation module under the soft cap
+  after the AC-I-13 / AC-I-14 fold-in.
+- `core/innovation/threshold_proposer_helpers.py` — extracted from
+  `core/innovation/threshold_proposer.py` (C5 post-impl review
+  fold-in) to host the symbol-locator + AST walker + deterministic-id
+  payload + priority/coverage/target-equality readers + on-disk
+  durable-append sidecars; canonical proposer landed at 799 LOC
+  pre-split, breaching the cap.
+- `core/integration/_unified_state_repair.py` — pre-authorized
+  private split of `core/integration/unified_state.py` (G7) hosting
+  the LWW conflict resolver, canonical-key reconciliation helpers,
+  and stat-twice escalation primitives; keeps the public-surface
+  module comfortably under 500 LOC while the docstring depth on
+  conflict-resolution semantics stays intact. No `__all__`; imports
+  exclusively through `unified_state.py`.
 
 When extracting, keep the parent module's public surface stable
 (re-export the moved symbol if it is part of the frozen surface or

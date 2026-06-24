@@ -380,6 +380,152 @@ class ContributingSectionHeadingsTests(unittest.TestCase):
         )
 
 
+class SiblingModulePatternExemplarCompletenessTests(unittest.TestCase):
+    """``### Sibling-module pattern`` enumerates every session-shipped sibling.
+
+    Pre-fix CONTRIBUTING.md:171 read "Three examples land this session"
+    and listed `core/audit_env_scrub.py`,
+    `core/innovation/spec_drift_persistence.py`, and
+    `core/gate_lock_observability.py` — but the same session window
+    also shipped three other sibling-module extractions whose own
+    module docstrings self-describe as applications of the same pattern:
+
+    - `core/collector_isolation_outcomes.py` (added by `ee69149 fix(g2):
+      post-impl review fold-in`, 2026-06-24) — docstring says
+      "Extracted from ``collector_isolation.py`` to keep that module
+      under the 500-LOC soft limit".
+    - `core/innovation/threshold_proposer_helpers.py` (added by
+      `10eb18a fix(c5): post-impl review fold-in`, 2026-06-23) —
+      docstring says "split sibling of ``threshold_proposer``".
+    - `core/integration/_unified_state_repair.py` (added by
+      `f5c8cdf feat(integration): G7`, 2026-06-22) — docstring says
+      "Kept as a sibling private module so the public-surface module
+      (``unified_state.py``) stays comfortably under the 500-LOC soft
+      limit".
+
+    The "Three examples" framing understated the pattern's prevalence
+    by a factor of two and silently omitted half the actual exemplar
+    set. The regression test pins both halves of the contract:
+
+    1. The numeric framing must be at least "Six" (so future additions
+       can bump to "Seven", "Eight", etc., but a regression back to
+       "Three" trips this test).
+    2. The bullet list must mention every sibling-module Python file
+       whose docstring self-describes as an application of the pattern
+       — caught by a leaf-name presence check against the section body.
+    """
+
+    CORE_DIR = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+    )
+    # Word forms accepted as the numeric framing in the section's
+    # introductory sentence. Pre-fix said "Three"; post-fix says "Six".
+    # We accept "Six" or any higher count word so future sibling-module
+    # additions can grow this without breaking the test.
+    ACCEPTED_COUNT_WORDS = ("Six", "Seven", "Eight", "Nine", "Ten")
+    # Bullets the post-fix doc MUST carry. These are the six siblings
+    # the disk currently ships whose docstrings self-describe the
+    # pattern. If a future session adds a seventh, add its leaf name
+    # here and bump ACCEPTED_COUNT_WORDS coverage.
+    REQUIRED_SIBLING_LEAVES = (
+        "audit_env_scrub.py",
+        "spec_drift_persistence.py",
+        "gate_lock_observability.py",
+        "collector_isolation_outcomes.py",
+        "threshold_proposer_helpers.py",
+        "_unified_state_repair.py",
+    )
+
+    def _section_body(self) -> str:
+        text = _read("CONTRIBUTING.md")
+        # The section is delimited by the '### Sibling-module pattern'
+        # heading and the next '### ' heading (or end-of-file).
+        match = re.search(
+            r"^### Sibling-module pattern.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md no longer carries a '### Sibling-module "
+            "pattern' heading; this regression test cannot locate the "
+            "section.",
+        )
+        start = match.end()
+        next_heading = re.search(r"^### ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return text[start:end]
+
+    def test_intro_sentence_uses_post_fix_count_word(self) -> None:
+        body = self._section_body()
+        # The introductory sentence is shaped:
+        #   "<Word> examples land this session:"
+        # Pre-fix this was "Three". Post-fix at least "Six".
+        intro_re = re.compile(
+            r"\b([A-Z][a-z]+)\s+examples\s+land\s+this\s+session\b",
+        )
+        match = intro_re.search(body)
+        self.assertIsNotNone(
+            match,
+            "Sibling-module section no longer carries a '<Count> "
+            "examples land this session' framing sentence.",
+        )
+        word = match.group(1)
+        self.assertIn(
+            word,
+            self.ACCEPTED_COUNT_WORDS,
+            f"Sibling-module section intro says '{word} examples land "
+            "this session' but the disk ships at least six self-described "
+            "sibling-module extractions; pre-fix said 'Three' and the "
+            "regression test pins the post-fix count word to one of "
+            f"{self.ACCEPTED_COUNT_WORDS}.",
+        )
+
+    def test_every_required_sibling_leaf_appears_in_section_body(self) -> None:
+        body = self._section_body()
+        missing = [
+            leaf for leaf in self.REQUIRED_SIBLING_LEAVES if leaf not in body
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "Sibling-module section omits sibling-module Python files "
+            "whose docstrings self-describe as applications of the "
+            f"pattern: {missing}. Either add a bullet for each missing "
+            "leaf or update REQUIRED_SIBLING_LEAVES in this regression "
+            "test if the file moved.",
+        )
+
+    def test_required_sibling_files_self_describe_on_disk(self) -> None:
+        """Defensive: every leaf in ``REQUIRED_SIBLING_LEAVES`` exists.
+
+        If a future refactor renames or removes any of these, the
+        bullet list in CONTRIBUTING.md would still trivially pass the
+        leaf-presence check above (the string would just be stale
+        prose). This test confirms each leaf is a live Python file on
+        disk so the bullet list is anchored against reality.
+        """
+        # Search the full ``core/`` subtree because the siblings live in
+        # several subdirectories (``core/``, ``core/innovation/``,
+        # ``core/integration/``).
+        leaves_on_disk = {p.name for p in self.CORE_DIR.rglob("*.py")}
+        missing = [
+            leaf for leaf in self.REQUIRED_SIBLING_LEAVES
+            if leaf not in leaves_on_disk
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "Sibling-module bullet list references files no longer on "
+            f"disk under core/: {missing}. The bullet list is stale.",
+        )
+
+
 class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
     """The "N green" count in CONTRIBUTING.md matches the live class count.
 
