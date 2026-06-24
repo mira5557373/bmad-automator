@@ -36,6 +36,7 @@ illegal input (e.g. empty collector list).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ..usage_parsers import UsageMetrics
@@ -114,11 +115,12 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
     n = len(weights)
     if total <= 0 or n == 0:
         return [0] * n
-    clean = [w if w > 0 else 0.0 for w in weights]
+    clean = [w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights]
     total_w = sum(clean)
-    if total_w <= 0:
-        # Fall back to uniform when weights are degenerate so the
-        # invariant (sum of shares == total) still holds.
+    if not math.isfinite(total_w) or total_w <= 0:
+        # Fall back to uniform when weights are degenerate (or when two
+        # huge-but-finite weights overflowed to ``inf`` on summation) so
+        # the invariant (sum of shares == total) still holds.
         return _split_int(total, [1.0] * n)
     raw = [total * w / total_w for w in clean]
     floors = [int(x) for x in raw]
@@ -144,9 +146,9 @@ def _split_float(total: float, weights: list[float]) -> list[float]:
     n = len(weights)
     if total <= 0 or n == 0:
         return [0.0] * n
-    clean = [w if w > 0 else 0.0 for w in weights]
+    clean = [w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights]
     total_w = sum(clean)
-    if total_w <= 0:
+    if not math.isfinite(total_w) or total_w <= 0:
         return _split_float(total, [1.0] * n)
     raw = [total * w / total_w for w in clean]
     # Absorb floating-point drift into the final non-zero entry so the
@@ -212,6 +214,14 @@ def _check_weight_map(weights: dict[str, float], label: str) -> None:
             raise AttributionError(
                 f"{label}[{cid!r}] must be numeric; got {val!r}"
             ) from exc
+        if not math.isfinite(fval):
+            # ``NaN`` and ``inf`` would later flow into ``_split_int`` /
+            # ``_split_float`` and produce ``NaN`` shares (``int(NaN)``
+            # raises a bare ``ValueError`` that bypasses the
+            # ``AttributionError`` contract). Reject up-front instead.
+            raise AttributionError(
+                f"{label}[{cid!r}] must be finite; got {fval}"
+            )
         if fval < 0:
             raise AttributionError(
                 f"{label}[{cid!r}] must be non-negative; got {fval}"

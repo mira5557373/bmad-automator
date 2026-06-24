@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from dataclasses import FrozenInstanceError
 
@@ -98,6 +99,38 @@ class DurationWeightedAttributionTests(unittest.TestCase):
     def test_by_duration_empty_raises(self) -> None:
         with self.assertRaises(AttributionError):
             attribute_cost_by_duration(SESSION, {})
+
+    def test_by_duration_inf_weight_raises_attribution_error(self) -> None:
+        # Regression: before the fix, ``inf`` slipped past the
+        # ``fval < 0`` guard (because ``inf < 0`` is False) and later
+        # crashed ``int(NaN)`` inside ``_split_int`` with a bare
+        # ``ValueError``, bypassing the ``AttributionError`` contract.
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_duration(
+                UsageMetrics(input_tokens=100, total_cost_usd=1.0),
+                {"a": float("inf"), "b": 1.0},
+            )
+
+    def test_by_duration_nan_weight_raises_attribution_error(self) -> None:
+        # Regression: ``NaN`` is also non-finite and slipped past the
+        # ``fval < 0`` guard (``NaN < 0`` is False) before the fix.
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_duration(
+                UsageMetrics(input_tokens=100, total_cost_usd=1.0),
+                {"a": float("nan"), "b": 1.0},
+            )
+
+    def test_by_duration_overflow_sum_degrades_to_uniform(self) -> None:
+        # Regression: two finite-but-huge weights can overflow to
+        # ``inf`` on summation, which would then turn the share ratios
+        # into ``NaN``. The hardened helpers detect a non-finite
+        # ``total_w`` and fall back to uniform attribution so the
+        # sum-of-shares-equals-total invariant still holds.
+        huge = sys.float_info.max
+        session = UsageMetrics(input_tokens=100, total_cost_usd=1.0)
+        shares = attribute_cost_by_duration(session, {"a": huge, "b": huge})
+        self.assertEqual(sum(s.input_tokens for s in shares), 100)
+        self.assertAlmostEqual(sum(s.cost_usd for s in shares), 1.0)
 
 
 class ToolCallWeightedAttributionTests(unittest.TestCase):
