@@ -186,6 +186,55 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
             data = json.loads(idx_path.read_text())
             self.assertNotIn("brainstorm/s0", data.get("entries", {}))
 
+    def test_index_write_failure_rolls_back_orphan_entry_file(self) -> None:
+        # Symmetric crash-safety check. ``write_atomic_text(target_path)``
+        # succeeds, then ``_write_index`` raises (e.g. ENOSPC/EACCES on the
+        # index parent). Before the fix the entry file was left orphaned on
+        # disk while ``load_lineage_root`` returned ``""`` — silent
+        # provenance loss. The fix best-effort deletes the just-written
+        # entry file so the on-disk shape matches the untouched index.
+        entry = _entry("brainstorm", "s0", body="alpha")
+        target_path = (
+            self.project_root / "_bmad" / "lineage" / "brainstorm" / "s0.json"
+        )
+        with patch(
+            "story_automator.core.innovation.lineage_ledger._write_index",
+            side_effect=OSError("simulated index write failure"),
+        ):
+            with self.assertRaises(OSError):
+                persist_lineage_entry(self.project_root, entry)
+        # No orphan entry file lurking outside the index.
+        self.assertFalse(
+            target_path.exists(),
+            "entry file must be rolled back when index write fails",
+        )
+        # Index never advanced (genesis case) — no stale advertising either.
+        self.assertEqual(load_lineage_root(self.project_root), "")
+
+    def test_index_write_failure_preserves_already_indexed_entry(self) -> None:
+        # Idempotent-re-persist guard: when the entry was already in the
+        # index, the file pre-existed and the index still advertises it.
+        # An ``_write_index`` failure on the re-persist must NOT delete the
+        # already-advertised payload, or the read APIs would dangle the
+        # index's reference.
+        entry = _entry("brainstorm", "s0", body="alpha")
+        target_path = persist_lineage_entry(self.project_root, entry)
+        self.assertTrue(target_path.exists())
+        baseline_root = load_lineage_root(self.project_root)
+
+        with patch(
+            "story_automator.core.innovation.lineage_ledger._write_index",
+            side_effect=OSError("simulated index write failure"),
+        ):
+            with self.assertRaises(OSError):
+                persist_lineage_entry(self.project_root, entry)
+        # Pre-existing payload retained; index still references it.
+        self.assertTrue(
+            target_path.exists(),
+            "already-indexed entry file must not be deleted on re-persist failure",
+        )
+        self.assertEqual(load_lineage_root(self.project_root), baseline_root)
+
 
 class CorruptIndexTests(_TempProjectMixin, unittest.TestCase):
     def test_corrupt_index_raises_lineage_error(self) -> None:

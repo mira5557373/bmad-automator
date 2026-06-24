@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -427,7 +428,12 @@ def persist_lineage_entry(
 
     Crash safety: entry JSON via :func:`atomic_io.write_atomic_text`. If
     the entry write raises, the index is NOT updated — a partial write
-    can never leave the index advertising a missing payload.
+    can never leave the index advertising a missing payload. Symmetrically,
+    if the index write raises after the entry write succeeded, the
+    just-written entry file is best-effort rolled back so the on-disk
+    state matches the (untouched) index — an orphan payload can never
+    silently sit outside the index advertising provenance the chain
+    cannot prove.
     """
     target_path = _entry_disk_path(project_root, entry.genre, entry.slug)
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -440,6 +446,12 @@ def persist_lineage_entry(
     try:
         # Read index BEFORE entry write so a corrupt index aborts up-front.
         entries = _read_index(project_root)
+        # Capture pre-write state so a downstream index-write failure can
+        # roll back to the pre-call on-disk shape. For a brand-new entry
+        # the rollback is "delete the just-written file"; for an idempotent
+        # re-persist of an already-indexed entry the file existed before
+        # and is left in place (the index still advertises it).
+        entry_pre_existed = composite_key in entries
         # Entry write first; on failure the index stays untouched.
         write_atomic_text(target_path, rendered)
         # Insertion order tracked via ``seq`` so :func:`load_lineage_chain`
@@ -456,7 +468,24 @@ def persist_lineage_entry(
             "timestamp_iso": entry.timestamp_iso,
             "seq": seq,
         }
-        _write_index(project_root, entries)
+        try:
+            _write_index(project_root, entries)
+        except BaseException:
+            # Symmetric crash safety: roll back the orphan entry file so
+            # the on-disk state matches the untouched index. Only delete
+            # files this call created; an already-indexed re-persist must
+            # leave its prior advertised payload behind (the index still
+            # references it). Cleanup is best-effort so it cannot mask
+            # the original failure.
+            if not entry_pre_existed:
+                try:
+                    os.unlink(str(target_path))
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    # Do not mask the original index-write error.
+                    pass
+            raise
     finally:
         lock.release()
 
