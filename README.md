@@ -59,8 +59,9 @@ plus the operability + bug-sweep cleanup that preceded it. Highlights:
   markers, `GateLockTimeoutError` carrying holder PID + started_at +
   hostname, opt-in `.githooks/pre-commit`.
 
-Tests: 4070 at session start → 4644 passing at HEAD (the session
-closed at 4348; C5 + G2 landed afterward and added ~296 more tests).
+Tests: 4070 at session start → 4720 passing at HEAD (the session
+closed at 4348; C5 + G2 + post-session bug-fix rounds landed afterward
+and added ~372 more tests).
 Ruff clean. Audit-floor invariants: 24 → 26 (G7 added two
 write-isolation invariants). Zero new Python dependencies. No edits
 to `core/telemetry_events.py`. See `CHANGELOG.md` and the per-workflow

@@ -659,11 +659,13 @@ class ReadmeTestCountFreshnessTests(unittest.TestCase):
     """
 
     # The frozen lower bound: live test count at the time this test was
-    # added (4644). README must not claim fewer than this when it cites
-    # a HEAD count. Tolerance band allows the live count to grow without
-    # breaking this test — only a regression below the floor (or the
-    # pre-fix 4348 anchor) trips it.
-    HEAD_TEST_COUNT_FLOOR = 4644
+    # added (4644), bumped to 4720 after the round-2 bug-fix sweep
+    # landed +76 tests across the post-session bug-fix rounds. README
+    # must not claim fewer than this when it cites a HEAD count.
+    # Tolerance band allows the live count to grow without breaking
+    # this test — only a regression below the floor (or the pre-fix
+    # 4348 anchor) trips it.
+    HEAD_TEST_COUNT_FLOOR = 4720
 
     # Specific stale anchor the pre-fix README carried. Must not appear
     # in the README's tests-line unqualified by "session closed at" or
