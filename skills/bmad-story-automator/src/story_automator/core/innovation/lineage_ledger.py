@@ -377,8 +377,14 @@ def _entry_disk_path(
     return get_lineage_root_dir(project_root) / genre / f"{slug}.json"
 
 
-def _read_index(project_root: str | Path) -> dict[str, dict[str, str]]:
+def _read_index(project_root: str | Path) -> dict[str, dict[str, str | int]]:
     """Parse index.json. Empty dict on absence; LineageError on corruption.
+
+    The inner-dict value variant is ``str | int`` because the ``seq`` key
+    is written as a Python ``int`` (insertion order, see
+    :func:`persist_lineage_entry`) while ``path``, ``merkle_root``, and
+    ``timestamp_iso`` are strings. Consumers must coerce ``seq`` via
+    ``int(...)`` before arithmetic.
 
     Silent rebuild would mask provenance gaps that the operator must
     consciously acknowledge (audit-chain analog from M04).
@@ -403,7 +409,7 @@ def _read_index(project_root: str | Path) -> dict[str, dict[str, str]]:
 
 
 def _write_index(
-    project_root: str | Path, entries: dict[str, dict[str, str]],
+    project_root: str | Path, entries: dict[str, dict[str, str | int]],
 ) -> None:
     """Atomically rewrite index.json with alpha-sorted keys for determinism.
 
@@ -523,7 +529,7 @@ def load_lineage_entry(
         ) from err
 
 
-def _index_sort_key(item: tuple[str, dict[str, str]]) -> tuple[int, str]:
+def _index_sort_key(item: tuple[str, dict[str, str | int]]) -> tuple[int, str]:
     """Sort by ``seq`` (insertion order); alpha composite key as tie-break."""
     composite_key, meta = item
     try:

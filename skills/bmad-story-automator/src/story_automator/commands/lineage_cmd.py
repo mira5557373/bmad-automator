@@ -94,7 +94,7 @@ def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
     if not entries_meta:
         return []
 
-    def _seq_key(item: tuple[str, dict[str, str]]) -> tuple[int, str]:
+    def _seq_key(item: tuple[str, dict[str, str | int]]) -> tuple[int, str]:
         composite_key, meta = item
         try:
             seq_value = int(meta.get("seq", -1))

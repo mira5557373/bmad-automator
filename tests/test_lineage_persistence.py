@@ -112,6 +112,65 @@ class PersistRoundTripTests(_TempProjectMixin, unittest.TestCase):
         self.assertEqual(len(index["entries"]), 1)
 
 
+class IndexAnnotationContractTests(_TempProjectMixin, unittest.TestCase):
+    """Pin the ``_read_index`` / ``_write_index`` / ``_index_sort_key``
+    annotations against the actual on-disk shape. ``seq`` is written as a
+    Python ``int`` and round-trips through JSON as ``int`` — the inner
+    value variant must therefore include ``int``, not just ``str``.
+
+    Regression for a type-annotation drift that understated the variant:
+    static checkers honouring the annotation would have treated
+    ``meta["seq"]`` as ``str`` and could have inserted ``.lower()`` or
+    similar string-only operations during a future refactor.
+    """
+
+    def test_seq_field_round_trips_as_int(self) -> None:
+        # Insertion-order proof: persist a single entry; seq must be int(0).
+        from story_automator.core.innovation.lineage_ledger import _read_index
+
+        entry = _entry("brainstorm", "s0", body="alpha")
+        persist_lineage_entry(self.project_root, entry)
+        meta = _read_index(self.project_root)
+        seq_value = meta["brainstorm/s0"]["seq"]
+        self.assertIsInstance(
+            seq_value, int,
+            "seq must round-trip as int — Path/index ordering relies on it",
+        )
+        # Not isinstance bool — bool is a subclass of int but the writer
+        # uses len(entries) which is a true non-bool int.
+        self.assertNotIsInstance(seq_value, bool)
+        self.assertEqual(seq_value, 0)
+
+    def test_read_index_annotation_includes_int_variant(self) -> None:
+        # Inspect the declared annotation directly; this is the
+        # documentation-contract check that the inner value variant
+        # acknowledges ``seq``'s int type. Uses raw __annotations__ so the
+        # check works on Python versions without typing.get_type_hints
+        # resolution gymnastics.
+        from story_automator.core.innovation.lineage_ledger import (
+            _index_sort_key,
+            _read_index,
+            _write_index,
+        )
+
+        # ``_read_index`` return type: must mention ``int`` in the variant.
+        read_ret = _read_index.__annotations__["return"]
+        # Under ``from __future__ import annotations`` the annotation is a
+        # string literal at runtime; the contract check is substring-based.
+        self.assertIn("int", str(read_ret),
+                      f"_read_index return annotation must include int: {read_ret!r}")
+
+        # ``_write_index`` ``entries`` param: same contract.
+        write_param = _write_index.__annotations__["entries"]
+        self.assertIn("int", str(write_param),
+                      f"_write_index entries annotation must include int: {write_param!r}")
+
+        # ``_index_sort_key`` ``item`` param: same contract.
+        sort_param = _index_sort_key.__annotations__["item"]
+        self.assertIn("int", str(sort_param),
+                      f"_index_sort_key item annotation must include int: {sort_param!r}")
+
+
 class IndexOrderingTests(_TempProjectMixin, unittest.TestCase):
     def test_index_alpha_sorted_for_determinism(self) -> None:
         # Persist in non-alpha order; on-disk index must serialise sorted.
