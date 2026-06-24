@@ -342,6 +342,50 @@ class RunProductionGateLockSemanticsTests(_MarkerFreeMixin, unittest.TestCase):
         self.assertFalse(self._marker_path().exists())
 
     @patch.dict(os.environ, {}, clear=False)
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_marker_cleared_when_drift_watcher_poll_raises_base_exception(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        # R3 fix regression: the C1 ``drift_watcher.poll()`` call at
+        # lifecycle start MUST live inside the try whose finally
+        # clears the marker. The pre-fix code wrapped poll() in
+        # ``try: ... except Exception: pass`` BEFORE the try whose
+        # finally clears the marker — a BaseException subclass
+        # (KeyboardInterrupt / SystemExit / MemoryError) escaping
+        # poll() would skip the bare except, propagate past the
+        # write_gate_marker call, and skip the inner finally,
+        # leaking the marker on disk. ``_recover_from_crash_locked``
+        # mops it up on the next gate run, but the inner-finally
+        # contract "marker MUST be cleared on every exit path after
+        # it is written" was violated for the drift_watcher window.
+        mock_run.return_value = []
+
+        class _BaseExcWatcher:
+            def poll(self) -> None:
+                raise KeyboardInterrupt()
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_production_gate(
+                self.project_root,
+                "gate-drift-ki",
+                commit_sha="abc",
+                target={"kind": "story", "id": "s1"},
+                profile=self.profile,
+                factory_version="1.0.0",
+                registry=self.registry,
+                drift_watcher=_BaseExcWatcher(),
+            )
+        self.assertFalse(
+            self._marker_path().exists(),
+            "Marker leaked after BaseException in drift_watcher.poll()",
+        )
+        # Collectors never ran — the KeyboardInterrupt aborted the
+        # gate inside the inner try BEFORE _run_collectors was
+        # called. The finally still ran, clearing the marker.
+        mock_run.assert_not_called()
+
+    @patch.dict(os.environ, {}, clear=False)
     @patch("story_automator.core.gate_orchestrator.clear_gate_marker")
     @patch("story_automator.core.gate_orchestrator._run_collectors")
     def test_clear_gate_marker_oserror_does_not_clobber_keyboard_interrupt(

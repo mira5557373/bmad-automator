@@ -1078,15 +1078,27 @@ def run_production_gate(
                 )
 
             write_gate_marker(project_root, gate_id, commit_sha)
-            # C1 follow-up: optional spec-drift watcher polled at lifecycle
-            # start. Failures are strictly advisory and must never abort
-            # the gate — drift is telemetry, not gating.
-            if drift_watcher is not None:
-                try:
-                    drift_watcher.poll()
-                except Exception:
-                    pass
             try:
+                # C1 follow-up: optional spec-drift watcher polled at
+                # lifecycle start. Failures are strictly advisory and
+                # must never abort the gate — drift is telemetry, not
+                # gating. R3 fix: the poll() call MUST live inside the
+                # try whose finally clears the marker, or a
+                # BaseException (KeyboardInterrupt / SystemExit /
+                # MemoryError) escaping poll() would skip ``except
+                # Exception`` AND skip the marker cleanup at the
+                # finally below, leaving an orphan
+                # ``gate-in-progress.json`` for the next process to
+                # recover. The orphan is operationally recoverable via
+                # ``_recover_from_crash_locked``, but the inner-finally
+                # contract ("marker MUST be cleared on every exit path
+                # after it is written" — see R2 fix #17 comment below)
+                # is violated.
+                if drift_watcher is not None:
+                    try:
+                        drift_watcher.poll()
+                    except Exception:
+                        pass
                 collector_outcomes = _run_collectors(
                     project_root, gate_id, commit_sha, profile, registry,
                     audit_policy=audit_policy, audit_path=audit_path,
