@@ -2289,6 +2289,89 @@ class RecentlyShippedSiblingModuleMentionTests(unittest.TestCase):
             "the file or rewrite the bullet.",
         )
 
+    def test_k2_bullet_call_site_count_matches_reality(self) -> None:
+        """CLAUDE.md K-2 bullet's call-site count word matches the source.
+
+        Pre-fix the K-2 bullet ended with "and six call sites in
+        ``gate_orchestrator.py``", but ``grep`` against the actual module
+        shows exactly 5 imports of ``cached_load_evidence_bundle`` /
+        ``invalidate_evidence_cache`` and exactly 5 call expressions. The
+        word "six" was an off-by-one drift carried over from the
+        introducing commit message (which itself contradicted its own
+        adjacent "7 times" figure — 1+1+6=8, not 7). This regression test
+        pins the count word in the doc to the actual call-site count in
+        ``core/gate_orchestrator.py`` so a future refactor that adds or
+        removes a call site forces the doc to be re-audited.
+
+        The test counts import lines (``from .evidence_cache import``) in
+        ``gate_orchestrator.py`` and matches them against the English
+        count word in the K-2 bullet. Imports — rather than call
+        expressions — are the stable proxy because every call site does a
+        local import (the module follows the established lazy-import
+        idiom of this codebase to avoid circular imports).
+        """
+        bullet = self._k2_bullet()
+        orchestrator_path = (
+            REPO_ROOT
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+            / "core"
+            / "gate_orchestrator.py"
+        )
+        orchestrator_src = orchestrator_path.read_text(encoding="utf-8")
+        import_count = len(
+            re.findall(
+                r"^\s*from \.evidence_cache import\b",
+                orchestrator_src,
+                re.MULTILINE,
+            )
+        )
+        # English number words 0..10 — covers any realistic drift band
+        # for a single helper module's call sites.
+        number_words = {
+            0: "zero",
+            1: "one",
+            2: "two",
+            3: "three",
+            4: "four",
+            5: "five",
+            6: "six",
+            7: "seven",
+            8: "eight",
+            9: "nine",
+            10: "ten",
+        }
+        expected_word = number_words.get(import_count)
+        self.assertIsNotNone(
+            expected_word,
+            f"evidence_cache imports in gate_orchestrator.py = {import_count}, "
+            "outside the 0..10 number-word table this test knows about; "
+            "extend the table or rewrite the K-2 bullet to drop the count.",
+        )
+        match = re.search(
+            r"and (zero|one|two|three|four|five|six|seven|eight|nine|ten) "
+            r"call sites in `gate_orchestrator\.py`",
+            bullet,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md K-2 bullet no longer carries an "
+            "'and <count-word> call sites in `gate_orchestrator.py`' phrase; "
+            "either restore it (so the count stays auditable) or update "
+            "this regression test to match the new phrasing.",
+        )
+        doc_word = match.group(1)
+        self.assertEqual(
+            doc_word,
+            expected_word,
+            f"CLAUDE.md K-2 bullet says '{doc_word} call sites in "
+            f"gate_orchestrator.py' but grep finds {import_count} "
+            f"evidence_cache imports there. Update the doc to "
+            f"'{expected_word} call sites' (or drop the count word).",
+        )
+
 
 class ValidateCliIdDocstringGrammarTests(unittest.TestCase):
     """``_validate_cli_id`` docstring uses third-person-singular "Raises".
