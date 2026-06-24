@@ -62,10 +62,14 @@ plus the operability + bug-sweep cleanup that preceded it. Highlights:
 Tests: 4070 at session start → 4720 passing at HEAD (the session
 closed at 4348; C5 + G2 + post-session bug-fix rounds landed afterward
 and added ~372 more tests).
-Ruff clean. Audit-floor invariants: 24 → 26 (G7 added two
-write-isolation invariants). Zero new Python dependencies. No edits
-to `core/telemetry_events.py`. See `CHANGELOG.md` and the per-workflow
-status reports under `docs/audit/` for the dated trail.
+Ruff clean. Audit-floor invariants: 11 invariant classes / 45 test
+methods at HEAD (G7 added the `UnifiedStateWriteIsolationInvariant`
+class with two test methods; C5 + G2 subsequently added three more
+invariant classes — `ThresholdApplyIsolationInvariant`,
+`ThresholdLockIsolationInvariant`, `WorktreePerUnitIsolationInvariant`).
+Zero new Python dependencies. No edits to `core/telemetry_events.py`.
+See `CHANGELOG.md` and the per-workflow status reports under
+`docs/audit/` for the dated trail.
 
 ## Quick start (Python gate API)
 

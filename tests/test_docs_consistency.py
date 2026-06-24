@@ -636,6 +636,139 @@ class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
         )
 
 
+class ReadmeAuditFloorInvariantClaimFreshnessTests(unittest.TestCase):
+    """README's audit-floor invariant claim is not anchored to a stale snapshot.
+
+    Pre-fix README.md:65 read ``Audit-floor invariants: 24 -> 26 (G7 added
+    two write-isolation invariants).`` while the live suite at HEAD has
+    11 invariant classes / 45 test methods (C5 + G2 added three more
+    invariant classes after G7: ``ThresholdApplyIsolationInvariant``,
+    ``ThresholdLockIsolationInvariant``, and ``WorktreePerUnitIsolationInvariant``).
+    CONTRIBUTING.md (commit 6dba1ac) bumped to "11 green" and added an
+    explanatory paragraph reconciling the per-class vs per-method metric
+    ambiguity ("the same suite currently exposes 45 test methods across
+    those 11 classes"), but the README's parallel claim was untouched in
+    that commit — leaving an unqualified ceiling of "26" presented as a
+    current-state fact in operator-facing prose. An operator reading the
+    README would either suspect a regression or chase ~19 phantom methods.
+
+    The regression test pins both halves of the post-fix contract:
+
+    1. The stale unqualified "24 -> 26" anchor must NOT appear in the
+       README's audit-floor invariant line.
+    2. If the README cites a current-HEAD class or method count, it must
+       match the live suite class count (11) or method count (45) so a
+       future invariant addition either updates the README or trips this
+       test.
+    """
+
+    AUDIT_REGRESSION_PATH = REPO_ROOT / "tests" / "test_audit_regression.py"
+    CLASS_DEF_RE = re.compile(
+        r"^class\s+\w+(?:Invariant|Baseline)\b",
+        re.MULTILINE,
+    )
+    # Anchor on the audit-floor invariant line in the README. Pre-fix
+    # this line read "Audit-floor invariants: 24 -> 26 (G7 added two
+    # write-isolation invariants).", so we capture everything after the
+    # "Audit-floor invariants:" prefix up to the next sentence break or
+    # newline-period boundary. The regex is intentionally lax around the
+    # arrow glyph so both ASCII ("->") and Unicode ("→") survive.
+    README_AUDIT_FLOOR_LINE_RE = re.compile(
+        r"Audit-floor invariants:\s*([^\n]+(?:\n[^\n]+)?)",
+    )
+
+    def _live_class_count(self) -> int:
+        text = self.AUDIT_REGRESSION_PATH.read_text(encoding="utf-8")
+        return len(self.CLASS_DEF_RE.findall(text))
+
+    def _live_method_count(self) -> int:
+        text = self.AUDIT_REGRESSION_PATH.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        return sum(
+            1
+            for cls in tree.body
+            if isinstance(cls, ast.ClassDef)
+            for n in cls.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("test_")
+        )
+
+    def _readme_audit_floor_text(self) -> str:
+        text = _read("README.md")
+        match = self.README_AUDIT_FLOOR_LINE_RE.search(text)
+        self.assertIsNotNone(
+            match,
+            "README.md no longer has an 'Audit-floor invariants:' line; "
+            "either restore the line or update this regression test.",
+        )
+        return match.group(1)
+
+    def test_readme_does_not_carry_stale_24_to_26_anchor(self) -> None:
+        """The pre-fix 'Audit-floor invariants: 24 -> 26' shape must be gone.
+
+        Pin the specific regression: the README previously cited "24 -> 26"
+        (a G7-era method-count snapshot) as the current ceiling. C5 + G2
+        landed three more invariant classes afterward (5+ test methods),
+        so "26" is stale on both axes. Re-introducing the unqualified
+        ``24 -> 26`` shape would re-introduce the original drift.
+        """
+        line = self._readme_audit_floor_text()
+        stale_shape_re = re.compile(
+            r"24\s*(?:->|→)\s*26\b",
+        )
+        self.assertNotRegex(
+            line,
+            stale_shape_re,
+            "README.md still cites '24 -> 26' as the current audit-floor "
+            "invariant ceiling. The live suite has 11 invariant classes / "
+            "45 test methods at HEAD (C5 + G2 added three more invariant "
+            "classes post-G7). Update the audit-floor line to match the "
+            "current state or use a 'class count + method count' framing.",
+        )
+
+    def test_readme_audit_floor_line_cites_live_counts(self) -> None:
+        """If the README cites a class or method count, it must match the live suite.
+
+        The post-fix README may quote either the class count (11), the
+        method count (45), or both. We extract every 2-digit integer
+        appearing on the audit-floor line and assert one of them matches
+        the live class count and that no integer larger than the live
+        method count appears (so a phantom ceiling like "26" trips this).
+        """
+        line = self._readme_audit_floor_text()
+        live_classes = self._live_class_count()
+        live_methods = self._live_method_count()
+        numbers = [int(n) for n in re.findall(r"\b(\d{1,3})\b", line)]
+        self.assertTrue(
+            numbers,
+            "README.md audit-floor line carries no numeric counts; "
+            "either restore numeric counts or update this regression test.",
+        )
+        # The live class count (11) must appear somewhere on the line —
+        # this is the metric CONTRIBUTING.md pins as canonical.
+        self.assertIn(
+            live_classes,
+            numbers,
+            f"README.md audit-floor line does not cite the live invariant "
+            f"class count ({live_classes}). Numbers found on the line: "
+            f"{numbers}. Update the line to match CONTRIBUTING.md's "
+            "class-count convention.",
+        )
+        # No number on the line may exceed the live method count, otherwise
+        # the README cites a phantom ceiling. We allow numbers up to the
+        # live method count (so 45 is fine, 26 is fine when stale-shape
+        # test above is also active, but a hypothetical "100" trips here).
+        too_high = [n for n in numbers if n > live_methods]
+        self.assertEqual(
+            too_high,
+            [],
+            f"README.md audit-floor line cites numbers exceeding the live "
+            f"method count ({live_methods}): {too_high}. These are phantom "
+            "ceilings — an operator running the audit suite would not find "
+            "this many invariants. Update the line to match the live counts.",
+        )
+
+
 class ReadmeTestCountFreshnessTests(unittest.TestCase):
     """README test-count claim is not anchored to a known-stale snapshot.
 
