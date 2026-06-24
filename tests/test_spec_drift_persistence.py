@@ -271,6 +271,56 @@ class TestWatcherPersistenceIntegration(unittest.TestCase):
                     persistence_key="../escape",
                 )
 
+    def test_init_supplied_baseline_with_persistence_key_writes_to_disk(self) -> None:
+        # Regression: a caller passing BOTH baseline_snapshot AND
+        # persistence_key would have the snapshot held in memory only,
+        # silently lost on the next process restart.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            snap = SpecDriftSnapshot(
+                score=0.8, requirements_total=10, requirements_satisfied=8,
+                timestamp_iso="2026-06-22T00:00:00Z",
+            )
+            SpecDriftWatcher(
+                project_root=root, spec_path=root / "spec.md",
+                baseline_snapshot=snap, persistence_key="k1",
+            )
+            # On-disk baseline must have been written so a later watcher
+            # can recover it.
+            self.assertTrue(baseline_path(root, "k1").exists())
+            self.assertEqual(load_baseline(root, "k1"), snap)
+            # Simulated process restart: new watcher with only the key
+            # must rehydrate the baseline supplied at original init.
+            w2 = SpecDriftWatcher(
+                project_root=root, spec_path=root / "spec.md",
+                persistence_key="k1",
+            )
+            self.assertTrue(w2.is_baseline_set())
+
+    def test_init_supplied_baseline_does_not_clobber_existing_on_disk_baseline(
+        self,
+    ) -> None:
+        # The init-time persist must NOT clobber a baseline already on
+        # disk — a stale caller-supplied snapshot could otherwise erase
+        # the legitimately persisted one from a prior session.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old = SpecDriftSnapshot(
+                score=0.5, requirements_total=10, requirements_satisfied=5,
+                timestamp_iso="2026-06-22T00:00:00Z",
+            )
+            persist_baseline(root, "k1", old)
+            stale = SpecDriftSnapshot(
+                score=0.9, requirements_total=10, requirements_satisfied=9,
+                timestamp_iso="2026-06-23T00:00:00Z",
+            )
+            SpecDriftWatcher(
+                project_root=root, spec_path=root / "spec.md",
+                baseline_snapshot=stale, persistence_key="k1",
+            )
+            # On-disk baseline must remain the previously persisted one.
+            self.assertEqual(load_baseline(root, "k1"), old)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

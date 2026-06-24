@@ -303,11 +303,27 @@ class SpecDriftWatcher:
             # ``set_baseline``.
             from story_automator.core.innovation.spec_drift_persistence import (
                 load_baseline,
+                persist_baseline,
                 validate_persistence_key,
             )
             validate_persistence_key(persistence_key)
             if self._baseline is None:
                 self._baseline = load_baseline(self._project_root, persistence_key)
+            else:
+                # Caller supplied ``baseline_snapshot`` AND opted into
+                # disk persistence. Without this write the in-memory
+                # snapshot would silently vanish on the next process
+                # restart, contradicting the persistence_key contract.
+                # We only persist when no on-disk baseline already
+                # exists, so a previously-persisted baseline is never
+                # clobbered by a stale caller-supplied snapshot.
+                from story_automator.core.innovation.spec_drift_persistence import (
+                    baseline_path,
+                )
+                if not baseline_path(self._project_root, persistence_key).exists():
+                    persist_baseline(
+                        self._project_root, persistence_key, self._baseline,
+                    )
 
     # ------------------------------------------------------------------
     # Snapshot / baseline management
