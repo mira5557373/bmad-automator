@@ -45,8 +45,21 @@ _LOCK = threading.Lock()
 
 
 def _key(project_root: str | Path, gate_id: str) -> tuple[str, str]:
-    """Normalize cache keys so ``Path`` and ``str`` inputs collide."""
-    return (str(Path(project_root)), gate_id)
+    """Normalize cache keys so equivalent path forms collide.
+
+    ``str(Path(x))`` alone collapses trailing slashes and ``/./`` segments
+    but does NOT canonicalize relative-vs-absolute paths or follow
+    symlinks. Without ``.resolve()``, the same physical project directory
+    accessed via two surface forms (e.g. relative ``'project'`` vs
+    absolute ``'/abs/project'``, or a symlink vs its target) hashes to
+    DISTINCT cache keys. A persist via one form would then fail to
+    invalidate a hit cached under the other form, so subsequent readers
+    would be served stale bundles until another persist via the matching
+    form fires. ``Path.resolve(strict=False)`` tolerates not-yet-created
+    directories (the persist may precede the on-disk dir) while still
+    collapsing surface-form divergence.
+    """
+    return (str(Path(project_root).resolve(strict=False)), gate_id)
 
 
 def cached_load_evidence_bundle(

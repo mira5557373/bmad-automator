@@ -7,6 +7,7 @@ record is persisted.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import threading
 import unittest
@@ -298,6 +299,98 @@ class EvidenceCacheTests(unittest.TestCase):
         )
         # And it must match a fresh disk read.
         self.assertEqual(next_read, load_evidence_bundle(self.root, "g1"))
+
+
+    def test_persist_via_relative_path_invalidates_cache_for_absolute_form(
+        self,
+    ) -> None:
+        """Regression: ``_key`` MUST canonicalize so equivalent surface forms
+        of the same project_root (relative vs absolute, symlink vs target)
+        collide on a single cache entry.
+
+        Without ``.resolve()`` in ``_key``, a persist via the relative
+        form would only invalidate the relative-form key, leaving an
+        absolute-form cache entry stale after disk has advanced. The
+        next absolute-form reader would be served the pre-persist
+        bundle until another persist via the matching form fires.
+
+        Reproducer: warm cache with absolute path → persist V2 via
+        relative path from a different cwd → re-read with absolute
+        path. Without the fix, the read serves a stale 1-record
+        bundle; with the fix, both forms key the same canonical entry
+        so the relative-form persist invalidates the absolute-form
+        cache and the re-read sees the on-disk 2-record state.
+        """
+        # Seed initial record so the gate evidence directory exists
+        # with exactly one record. Use absolute path everywhere first.
+        _seed_record(self.root, "g1", tool="ruff")
+        invalidate_all_evidence_cache()
+        # Warm cache via the absolute form.
+        first = cached_load_evidence_bundle(self.root, "g1")
+        self.assertEqual(len(first), 1)
+        # Persist V2 via the RELATIVE form of the same project_root,
+        # from a different cwd. Build a relative path that points at
+        # self.root from os.getcwd().
+        cwd = os.getcwd()
+        try:
+            os.chdir(os.path.dirname(str(self.root)))
+            rel_path = os.path.basename(str(self.root))
+            self.assertNotEqual(
+                str(Path(rel_path)),
+                str(self.root),
+                "relative and absolute string forms must differ",
+            )
+            _seed_record(Path(rel_path), "g1", tool="mypy", collector="mypy")
+        finally:
+            os.chdir(cwd)
+        # Disk now has 2 records.
+        disk_after = load_evidence_bundle(self.root, "g1")
+        self.assertEqual(len(disk_after), 2)
+        # The next absolute-form read MUST observe the new on-disk
+        # state. With unfixed ``_key`` the relative-form persist
+        # invalidated only the relative key, leaving the absolute
+        # cache entry stale at 1 record.
+        second = cached_load_evidence_bundle(self.root, "g1")
+        self.assertEqual(
+            len(second),
+            2,
+            "Cache served stale bundle after cross-form persist: "
+            f"got {len(second)} records, disk has {len(disk_after)}",
+        )
+        self.assertEqual(second, disk_after)
+
+    def test_symlink_and_target_share_cache_entry(self) -> None:
+        """Regression: a symlink to the project_root and its target MUST
+        collide on the same cache key. Without ``.resolve()`` in ``_key``,
+        the two paths produce distinct str(Path(...)) values and the
+        cache holds two divergent entries for the same physical evidence
+        directory.
+        """
+        # Build a symlink that points at self.root inside another tmpdir.
+        with tempfile.TemporaryDirectory() as link_parent:
+            sym_path = Path(link_parent) / "link-to-root"
+            os.symlink(str(self.root), str(sym_path))
+            # Seed via the target path. Cache starts clean.
+            _seed_record(self.root, "g1", tool="ruff")
+            invalidate_all_evidence_cache()
+            # Warm via the symlink form.
+            via_sym = cached_load_evidence_bundle(sym_path, "g1")
+            self.assertEqual(len(via_sym), 1)
+            # Persist V2 via the TARGET form — this must invalidate the
+            # symlink-form cache because both canonicalize to the same
+            # real path under ``.resolve()``.
+            _seed_record(self.root, "g1", tool="mypy", collector="mypy")
+            disk_after = load_evidence_bundle(self.root, "g1")
+            self.assertEqual(len(disk_after), 2)
+            # Next read via the symlink form MUST see the new bundle.
+            second = cached_load_evidence_bundle(sym_path, "g1")
+            self.assertEqual(
+                len(second),
+                2,
+                "Cache served stale bundle via symlink after target persist: "
+                f"got {len(second)} records, disk has {len(disk_after)}",
+            )
+            self.assertEqual(second, disk_after)
 
 
 if __name__ == "__main__":
