@@ -109,6 +109,64 @@ def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
     return out
 
 
+def _topological_reorder(
+    entries: list[LineageEntry],
+) -> list[LineageEntry] | None:
+    """Reorder entries by following parent_root pointers from genesis.
+
+    Returns the topologically-ordered chain when:
+      * exactly one entry has ``parent_root == ""`` (the genesis), AND
+      * every other entry is reachable by following parent_root pointers
+        (i.e. ``find_orphans`` would return ``[]``).
+
+    Returns ``None`` when the chain is structurally broken (no genesis,
+    multiple genesis claimants, or any dangling parent_root). Callers can
+    then fall back to strict-loader semantics for the diagnostic error.
+
+    This mirrors the topological walk inside :func:`find_orphans` so the
+    ``verify`` CLI surface agrees with ``stats`` / ``orphans`` on chain
+    integrity for the same on-disk bytes — even when the disk index lacks
+    a usable ``seq`` field (legacy / migrated indices) AND the persist
+    order differs from alphabetical ``<genre>/<slug>`` order. Under those
+    conditions the strict loader (``_load_entries``) sorts entries
+    alphabetically and ``build_lineage_chain`` rejects position-0 having
+    a non-empty parent_root, while ``find_orphans`` walks topologically
+    and (correctly) reports zero orphans.
+    """
+    if not entries:
+        return []
+
+    # Phase 1: identify genesis. Multi-genesis corruption is left to the
+    # strict loader / find_orphans surfaces — we refuse to reorder.
+    genesis_candidates = [e for e in entries if e.parent_root == ""]
+    if len(genesis_candidates) != 1:
+        return None
+    genesis = genesis_candidates[0]
+
+    # Phase 2: index non-genesis entries by parent_root for O(1) lookup,
+    # then walk the chain. A fork (>1 entries claiming the same parent_root)
+    # is left to the strict loader to surface as a verify failure.
+    by_parent: dict[str, list[LineageEntry]] = {}
+    for entry in entries:
+        if entry.parent_root == "":
+            continue
+        by_parent.setdefault(entry.parent_root, []).append(entry)
+
+    chain: list[LineageEntry] = [genesis]
+    running_root = compute_lineage_root(chain)
+    while running_root in by_parent:
+        candidates = by_parent[running_root]
+        if len(candidates) != 1:
+            return None  # fork — refuse to reorder
+        chain.append(candidates[0])
+        running_root = compute_lineage_root(chain)
+
+    # Phase 3: every entry must be placed; any unreached entry is an orphan.
+    if len(chain) != len(entries):
+        return None
+    return chain
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing.
 # ---------------------------------------------------------------------------
@@ -338,8 +396,11 @@ def verify_action(args: list[str]) -> int:
     if ns is None or not ns.project_root:
         _emit({"error": "missing --project-root", "ok": False})
         return 2
+    # Load leniently so on-disk ``seq`` absence does NOT mask structural
+    # chain integrity. Per-entry JSON corruption still surfaces as
+    # LineageError (matches stats / orphans semantics on the same bytes).
     try:
-        entries = _load_entries(ns.project_root)
+        entries = _load_entries_lenient(ns.project_root)
     except LineageError as exc:
         _emit({"error": str(exc), "ok": False})
         return 1
@@ -347,11 +408,27 @@ def verify_action(args: list[str]) -> int:
         # Empty chain = trivially intact (mirrors load_lineage_root sentinel).
         _emit({"merkle_root": "", "ok": True})
         return 0
+    # Try the lenient-loader order first (this is the common case — seq
+    # metadata is present and persist order matches chain order).
     try:
         chain = build_lineage_chain(entries)
-    except LineageError as exc:
-        _emit({"error": str(exc), "ok": False})
-        return 1
+    except LineageError as initial_exc:
+        # Strict loader rejected the lenient order. Try a topological
+        # reorder (parent_root walk from genesis) — this is what
+        # ``find_orphans`` (and therefore ``stats`` / ``orphans``) uses
+        # to assess chain integrity. If the chain is structurally intact
+        # but just out of input order (legacy / migrated index with no
+        # ``seq``, persist order != alpha order), the reorder succeeds
+        # and verify reports ``ok: true`` in agreement with stats.
+        reordered = _topological_reorder(entries)
+        if reordered is None:
+            _emit({"error": str(initial_exc), "ok": False})
+            return 1
+        try:
+            chain = build_lineage_chain(reordered)
+        except LineageError as exc:
+            _emit({"error": str(exc), "ok": False})
+            return 1
     if not verify_lineage(chain):
         _emit({
             "error": "lineage verification failed (tampered chain)",

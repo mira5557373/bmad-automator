@@ -210,6 +210,56 @@ class VerifyActionTests(_Base):
         self.assertFalse(payload["ok"])
         self.assertIn("error", payload)
 
+    def test_verify_non_alpha_persist_order_without_seq_agrees_with_stats(
+        self,
+    ) -> None:
+        # Companion to ``test_orphans_non_alpha_persist_order_without_seq_*``
+        # — same disk state, different surface. The chain is structurally
+        # intact (kernel/s1 genesis -> brainstorm/s1) but persisted in
+        # non-alpha order. After stripping ``seq`` from the index, the
+        # strict ``verify`` loader fell back to alpha tie-break and rejected
+        # position-0 (brainstorm) for having a non-empty parent_root, while
+        # ``stats`` / ``orphans`` walked the chain topologically and reported
+        # ok:true. The docstring contract at
+        # ``commands/lineage_cmd.py::p_stats.description`` claims the two
+        # surfaces agree on chain integrity for the same bytes — verify
+        # must use a topological reorder so that holds.
+        e_kernel = _entry("kernel", "s1", parent_root="", body="k1")
+        persist_lineage_entry(self.project_root, e_kernel)
+        parent_after_kernel = compute_lineage_root([e_kernel])
+        e_brainstorm = _entry(
+            "brainstorm", "s1", parent_root=parent_after_kernel, body="b1"
+        )
+        persist_lineage_entry(self.project_root, e_brainstorm)
+        # Strip the seq keys so the lenient loader falls back to alpha order
+        # (brainstorm < kernel) — opposite of persist/chain order.
+        idx_path = self.project_root / "_bmad" / "lineage" / "index.json"
+        idx_data = json.loads(idx_path.read_text())
+        for key in list(idx_data["entries"].keys()):
+            idx_data["entries"][key].pop("seq", None)
+        idx_path.write_text(
+            json.dumps(idx_data, sort_keys=True, separators=(",", ":"))
+        )
+        # Verify must walk topologically and report ok:true (chain intact).
+        code_v, raw_v = self._run(verify_action, [])
+        self.assertEqual(code_v, 0)
+        payload_v = json.loads(raw_v)
+        self.assertTrue(
+            payload_v["ok"],
+            "verify must topologically reorder when seq is missing so it"
+            " agrees with stats/orphans on the same on-disk bytes.",
+        )
+        # The merkle_root must be over the topologically-correct order
+        # (kernel -> brainstorm), NOT the alpha order (brainstorm -> kernel).
+        self.assertEqual(
+            payload_v["merkle_root"],
+            compute_lineage_root([e_kernel, e_brainstorm]),
+        )
+        # Cross-check: stats agrees on the integrity verdict for the same bytes.
+        code_s, raw_s = self._run(stats_action, [])
+        payload_s = json.loads(raw_s)
+        self.assertEqual(payload_v["ok"], payload_s["ok"])
+
 
 class OrphansActionTests(_Base):
     def test_orphans_returns_empty_on_intact_chain(self) -> None:
