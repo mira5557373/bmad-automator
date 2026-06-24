@@ -33,6 +33,14 @@ from typing import Any
 
 _CACHE: dict[tuple[str, str], list[dict[str, Any]]] = {}
 _STATS: dict[str, int] = {"hits": 0, "misses": 0, "invalidations": 0}
+# Per-key generation counter: incremented on every invalidation event so
+# a cache-miss loader that releases the lock to read disk can detect
+# whether a concurrent ``persist_evidence_record`` invalidated the key
+# between its lock-drop and its lock re-acquire. Stored alongside the
+# bundle in ``_CACHE`` would be more compact, but a sidecar dict keeps
+# the on-cache-hit path unchanged and makes the generation visible even
+# when the key has been popped (the post-invalidate counter persists).
+_GEN: dict[tuple[str, str], int] = {}
 _LOCK = threading.Lock()
 
 
@@ -65,6 +73,12 @@ def cached_load_evidence_bundle(
         if cached is not None:
             _STATS["hits"] += 1
             return copy.deepcopy(cached)
+        # Snapshot the per-key generation BEFORE we release the lock.
+        # If invalidate_evidence_cache fires between here and the
+        # post-load re-acquire below, the generation will have advanced
+        # and we must NOT trust our load (the disk snapshot it captured
+        # via sorted(glob) may pre-date the concurrent persist's write).
+        gen_at_entry = _GEN.get(key, 0)
     # Cache miss: load OUTSIDE the lock so a slow disk read does not
     # block concurrent readers of unrelated gate_ids. Two concurrent
     # misses on the same key may both call ``load_evidence_bundle`` —
@@ -72,12 +86,22 @@ def cached_load_evidence_bundle(
     # cost is a duplicated read, never a corrupted cache.
     bundle = load_evidence_bundle(project_root, gate_id)
     with _LOCK:
+        _STATS["misses"] += 1
+        current_gen = _GEN.get(key, 0)
+        if current_gen != gen_at_entry:
+            # A concurrent persist_evidence_record invalidated this key
+            # mid-load. Our bundle may be a pre-persist snapshot; storing
+            # it would let stale data win the cache until the next
+            # persist. Skip the store and return the freshly-loaded
+            # value to the caller (still correct for THIS call, just
+            # uncached for the next reader who will reload from disk).
+            return copy.deepcopy(bundle)
         # Last-writer-wins on the rare double-miss path. The bundle is
         # by construction a sorted, validated list of records for the
-        # same (project_root, gate_id) — any concurrent loader produces
-        # an equal value.
+        # same (project_root, gate_id) — two concurrent loaders that
+        # observe the same generation read identical disk snapshots and
+        # therefore produce equal values.
         _CACHE[key] = bundle
-        _STATS["misses"] += 1
         return copy.deepcopy(bundle)
 
 
@@ -91,10 +115,16 @@ def invalidate_evidence_cache(
     successful write so the next read sees the new record. Idempotent —
     invalidating a key that was never cached is a no-op and still bumps
     the ``invalidations`` counter (observability over correctness here).
+
+    Also advances the per-key generation counter so a concurrent
+    cache-miss loader that released the lock to read disk before this
+    invalidation fires will detect the change on re-acquire and refuse
+    to store its (possibly stale) snapshot.
     """
     key = _key(project_root, gate_id)
     with _LOCK:
         _CACHE.pop(key, None)
+        _GEN[key] = _GEN.get(key, 0) + 1
         _STATS["invalidations"] += 1
 
 
@@ -105,9 +135,14 @@ def invalidate_all_evidence_cache() -> None:
     so unrelated gates retain their cached bundles. Does NOT bump the
     per-key invalidation counter — bulk drops are tracked implicitly by
     the absence of subsequent hits.
+
+    Resets the generation map too: bulk-drop is a test-isolation tool,
+    so any in-flight loader observing a stale generation post-clear
+    will see ``current_gen == gen_at_entry == 0`` and proceed normally.
     """
     with _LOCK:
         _CACHE.clear()
+        _GEN.clear()
 
 
 def evidence_cache_stats() -> dict[str, int]:

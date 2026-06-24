@@ -171,6 +171,110 @@ class EvidenceCacheTests(unittest.TestCase):
         fresh = load_evidence_bundle(self.root, "g1")
         self.assertEqual(second, fresh)
 
+    def test_persist_during_miss_load_does_not_cache_stale_bundle(self) -> None:
+        """Regression: a persist that fires between a cache-miss loader's
+        lock-drop and its lock re-acquire must NOT let the stale snapshot
+        win the cache.
+
+        Without the per-key generation counter, Thread A's miss-path stores
+        a pre-persist bundle (1 record) into the cache even though
+        ``persist_evidence_record`` (Thread B) wrote a second record and
+        called ``invalidate_evidence_cache`` mid-load. Subsequent readers
+        would see only 1 record until the next persist+invalidate.
+        """
+        from story_automator.core import evidence_cache, evidence_io
+
+        # Seed an initial record so the gate evidence directory exists
+        # and contains exactly 1 record. The cache starts empty.
+        _seed_record(self.root, "g1", tool="ruff")
+        invalidate_all_evidence_cache()
+
+        # Coordinate the race deterministically via two events:
+        # a_started_load: A has called load_evidence_bundle and is about
+        #                 to return — held inside the wrapper.
+        # a_can_finish_load: B has persisted V2 and invalidated; A may
+        #                    return its (stale-at-this-point) bundle.
+        a_started_load = threading.Event()
+        a_can_finish_load = threading.Event()
+
+        real_load = evidence_io.load_evidence_bundle
+
+        def slow_load(project_root: object, gate_id: str) -> list[dict]:
+            result = real_load(project_root, gate_id)
+            a_started_load.set()
+            # Wait for the driver to persist V2 + invalidate before we
+            # let A return — this models a real disk/scheduler stall
+            # between glob() return and the Python-side cache store.
+            a_can_finish_load.wait(timeout=5.0)
+            return result
+
+        thread_a_result: list[list[dict]] = []
+        thread_a_error: list[BaseException] = []
+
+        def thread_a_worker() -> None:
+            try:
+                # Patch load_evidence_bundle on the evidence_io module
+                # AND on the lazy-imported reference inside the cache
+                # module's miss path. The cache imports it lazily inside
+                # cached_load_evidence_bundle, so patching the source
+                # module is sufficient.
+                original = evidence_io.load_evidence_bundle
+                evidence_io.load_evidence_bundle = slow_load
+                try:
+                    bundle = evidence_cache.cached_load_evidence_bundle(
+                        self.root, "g1",
+                    )
+                    thread_a_result.append(bundle)
+                finally:
+                    evidence_io.load_evidence_bundle = original
+            except BaseException as exc:  # noqa: BLE001
+                thread_a_error.append(exc)
+
+        thread_a = threading.Thread(target=thread_a_worker)
+        thread_a.start()
+        try:
+            # Wait for Thread A to be parked inside slow_load — at this
+            # point A has captured an empty cache, snapshotted gen=0,
+            # released the lock, AND completed the disk read for the
+            # 1-record state.
+            self.assertTrue(
+                a_started_load.wait(timeout=5.0),
+                "Thread A never reached the slow-load checkpoint",
+            )
+            # Driver thread B: persist V2 (a new record) — this writes
+            # the file AND calls invalidate_evidence_cache, which advances
+            # the per-key generation counter from 0 to 1.
+            _seed_record(self.root, "g1", tool="mypy", collector="mypy")
+            # Disk now has 2 records; cache is empty; generation = 1.
+            disk_after_persist = load_evidence_bundle(self.root, "g1")
+            self.assertEqual(
+                len(disk_after_persist), 2,
+                "Driver persist did not actually land on disk",
+            )
+            # Release Thread A. It will re-acquire the lock and, with
+            # the fix, observe the generation advance and refuse to
+            # cache its 1-record snapshot.
+            a_can_finish_load.set()
+        finally:
+            thread_a.join(timeout=5.0)
+            self.assertFalse(thread_a.is_alive(), "Thread A hung")
+        if thread_a_error:
+            raise thread_a_error[0]
+        self.assertEqual(len(thread_a_result), 1)
+        # Thread A's own return value reflects whatever it read off
+        # disk — could be 1 or 2 records depending on filesystem
+        # snapshot timing; we don't assert on it. The contract we
+        # MUST hold is: the NEXT reader sees the current disk state
+        # (2 records), not the stale 1-record snapshot.
+        next_read = cached_load_evidence_bundle(self.root, "g1")
+        self.assertEqual(
+            len(next_read), 2,
+            f"Cache served stale bundle: got {len(next_read)} records, "
+            f"disk has {len(disk_after_persist)}",
+        )
+        # And it must match a fresh disk read.
+        self.assertEqual(next_read, load_evidence_bundle(self.root, "g1"))
+
 
 if __name__ == "__main__":
     unittest.main()
