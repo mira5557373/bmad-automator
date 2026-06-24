@@ -1,13 +1,13 @@
 """Cost attribution — distribute a session :class:`UsageMetrics` across
 the collectors that ran inside it.
 
-This module is the substrate for a future per-collector cost-attribution
-milestone (the "C3" follow-up). The full milestone wires
-:func:`attribute_cost_uniform` (or one of its weighted siblings) into
-:mod:`story_automator.core.gate_orchestrator`, so that each
-:class:`CollectorOutcome` can record the share of session cost it was
-responsible for. Today we ship the helpers + tests; the orchestrator
-wiring is intentionally **not** included.
+This module is the substrate for per-collector cost attribution. The
+"C3" follow-up has shipped: :mod:`story_automator.core.innovation.cost_evidence`
+(via :func:`~story_automator.core.innovation.cost_evidence.emit_gate_cost_report`)
+calls :func:`attribute_cost_uniform` and :func:`attribute_cost_by_duration`
+from inside :func:`story_automator.core.gate_orchestrator.run_production_gate`,
+so each :class:`CollectorOutcome` records the share of session cost it was
+responsible for.
 
 Three attribution modes are supported, in order of fidelity:
 

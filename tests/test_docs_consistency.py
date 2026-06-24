@@ -124,6 +124,43 @@ class ClaudeMdModuleReferenceTests(unittest.TestCase):
                 )
 
 
+class CostAttributionDocstringTests(unittest.TestCase):
+    """``cost_attribution`` module docstring reflects C3 having shipped.
+
+    Pre-fix the docstring asserted the orchestrator wiring was
+    "intentionally **not** included" while ``gate_orchestrator`` already
+    imports and calls :func:`cost_evidence.emit_gate_cost_report`, which
+    dispatches to the helpers in ``cost_attribution``. The regression test
+    pins both halves of the contract: (a) the stale "not included" claim
+    is gone, and (b) the orchestrator-wiring claim is still backed by the
+    actual call site.
+    """
+
+    def test_cost_attribution_docstring_no_longer_disclaims_wiring(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.innovation.cost_attribution"
+        )
+        doc = module.__doc__ or ""
+        self.assertNotIn(
+            "intentionally **not** included",
+            doc,
+            "cost_attribution docstring still disclaims orchestrator wiring; "
+            "C3 has shipped (gate_orchestrator calls emit_gate_cost_report).",
+        )
+
+    def test_gate_orchestrator_still_wires_cost_evidence(self) -> None:
+        # Defensive: if the wiring ever gets removed, the docstring fix
+        # would be a lie. Pin both sides of the C3 contract.
+        orch = importlib.import_module(
+            "story_automator.core.gate_orchestrator"
+        )
+        self.assertTrue(
+            hasattr(orch, "emit_gate_cost_report"),
+            "gate_orchestrator no longer re-exports emit_gate_cost_report; "
+            "cost_attribution docstring must be re-checked.",
+        )
+
+
 class ContributingSectionHeadingsTests(unittest.TestCase):
     """The four polish-docs sections are present in CONTRIBUTING.md."""
 
