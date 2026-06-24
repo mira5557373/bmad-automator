@@ -193,6 +193,17 @@ def _quarantine_corrupted_marker(
                 quar_evidence.mkdir(exist_ok=True)
                 try:
                     evidence_dir.rename(quar_evidence / salvaged_gate_id)
+                    # Bug fix: the on-disk bundle for ``salvaged_gate_id``
+                    # has just been moved out from under any in-process
+                    # cache entry warmed before quarantine. The cache
+                    # module's contract (evidence_cache.py:11-17) names
+                    # ``persist_evidence_record`` as the SINGLE source of
+                    # invalidation; a quarantine rename violates that
+                    # invariant silently unless we mirror the
+                    # invalidation hook here. Lazy import matches the
+                    # rest of this module's evidence_cache call sites.
+                    from .evidence_cache import invalidate_evidence_cache
+                    invalidate_evidence_cache(root, salvaged_gate_id)
                 except OSError as inner_exc:
                     # Marker is in quarantine; evidence rename failed.
                     # Surface but do not flip quarantined to False —
@@ -402,6 +413,18 @@ def _recover_from_crash_locked(
                 target = cleanup_root / f"{gate_id}-{uuid.uuid4().hex}"
                 os.rename(evidence_dir, target)
                 pending_cleanup.append(target)
+                # Bug fix: a long-running orchestrator (or any other
+                # in-process caller) that previously warmed the cache
+                # for ``gate_id`` via ``cached_load_evidence_bundle``
+                # would otherwise keep serving the pre-rename records.
+                # The cache contract (evidence_cache.py:11-17) names
+                # ``persist_evidence_record`` as the SINGLE source of
+                # invalidation, so we mirror the hook here whenever
+                # recovery atomically relocates a bundle. Lazy import
+                # matches the rest of this module's evidence_cache
+                # call sites.
+                from .evidence_cache import invalidate_evidence_cache
+                invalidate_evidence_cache(project_root, gate_id)
             except OSError as exc:
                 cleanup_error = str(exc)
 
