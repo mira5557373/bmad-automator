@@ -639,6 +639,121 @@ class RunProductionGateTests(unittest.TestCase):
             "no-marker fast path must not add 'recovery' (additive invariant)",
         )
 
+    @patch("story_automator.core.gate_orchestrator.detect_baseline_drift")
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_lie_detector_early_return_surfaces_quarantine_recovery(
+        self, mock_run: MagicMock, mock_detect: MagicMock,
+    ) -> None:
+        """Round-3 fix: the lie-detector ``baseline_drift`` early-return MUST
+        also surface ``_recovery_descriptor`` so a mid-startup corrupted-marker
+        quarantine is loud-on-return on this branch too.
+
+        Pre-fix: the early-return at ``run_production_gate`` lines 1020-1025
+        constructed a fresh ``{"action": "baseline_drift", ...}`` dict and
+        returned it WITHOUT calling ``_attach_recovery_signal``. If
+        ``_recover_from_crash_locked`` (just upstream at line 950-952)
+        quarantined a corrupted marker — populating the descriptor with
+        ``quarantined=True``, ``quarantine_dir``, ``corruption_reason`` —
+        that signal was silently dropped. The reuse path (line 1011) and
+        the fresh-success path (line 1202) both surface it; only this
+        branch leaked it.
+
+        Post-fix: the lie-detector early-return is funneled through
+        ``_attach_recovery_signal`` so the §9.2 "loud, not silent" contract
+        is honored on every reachable return path.
+        """
+        from story_automator.core.verify_outcome import VerifyOutcome
+
+        # Pre-seed a corrupted marker with salvageable gate_id so the
+        # recover-from-crash path goes through the quarantine branch.
+        marker_path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(
+            '{"gate_id": "lost-gate", not valid json',
+            encoding="utf-8",
+        )
+        # Pre-seed an evidence dir for the lost gate so quarantine has
+        # something to move (also exercises the bundle-move branch).
+        evidence_dir = (
+            self.project_root / "_bmad" / "gate" / "evidence" / "lost-gate"
+        )
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        (evidence_dir / "dummy.json").write_text("{}", encoding="utf-8")
+
+        # Force the lie-detector branch to take the early-return.
+        mock_detect.return_value = VerifyOutcome.retry(
+            "unexpected_head", fixable=False,
+        )
+        mock_run.return_value = []
+
+        result = run_production_gate(
+            self.project_root, "fresh-gate-after-corruption",
+            commit_sha="freshsha",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            enable_lie_detector=True,
+            baseline_sha="baselinesha",
+        )
+
+        # Sanity: confirm we actually took the lie-detector early-return.
+        self.assertEqual(result.get("action"), "baseline_drift")
+        self.assertEqual(result.get("gate_id"), "fresh-gate-after-corruption")
+        # Round-3 contract: the mid-startup quarantine MUST be surfaced.
+        self.assertIn(
+            "recovery", result,
+            "lie-detector early-return must surface 'recovery' subdict "
+            "(round-3 fix: matches reuse/fresh-success paths)",
+        )
+        self.assertTrue(result["recovery"].get("quarantined"))
+        self.assertIn("quarantine_dir", result["recovery"])
+        self.assertIn("corruption_reason", result["recovery"])
+        # On-disk quarantine artifact still exists (observability fix,
+        # not a behavior change).
+        quar_dir = Path(result["recovery"]["quarantine_dir"])
+        self.assertTrue(quar_dir.is_dir())
+
+    @patch("story_automator.core.gate_orchestrator.detect_baseline_drift")
+    @patch("story_automator.core.gate_orchestrator._run_collectors")
+    def test_lie_detector_early_return_omits_recovery_when_no_marker(
+        self, mock_run: MagicMock, mock_detect: MagicMock,
+    ) -> None:
+        """Additive invariant: the lie-detector ``baseline_drift`` early-return
+        MUST NOT add a ``recovery`` key on the common no-marker path.
+
+        Mirrors ``test_no_marker_path_omits_recovery_key`` for the
+        lie-detector branch. Without this guard the round-3 fix could
+        accidentally regress to attaching an empty recovery dict on every
+        baseline_drift return.
+        """
+        from story_automator.core.verify_outcome import VerifyOutcome
+
+        # No pre-seeded marker — _recover_from_crash_locked returns
+        # ``{"recovered": False}`` and the descriptor stays empty.
+        mock_detect.return_value = VerifyOutcome.retry(
+            "unexpected_head", fixable=False,
+        )
+        mock_run.return_value = []
+
+        result = run_production_gate(
+            self.project_root, "gate-no-marker-drift",
+            commit_sha="sha",
+            target={"kind": "story", "id": "s1"},
+            profile=self.profile, factory_version="1.15.0",
+            registry=self.registry,
+            enable_lie_detector=True,
+            baseline_sha="baselinesha",
+        )
+
+        self.assertEqual(result.get("action"), "baseline_drift")
+        self.assertNotIn(
+            "recovery", result,
+            "no-marker fast path must not add 'recovery' on baseline_drift "
+            "early-return (additive invariant)",
+        )
+
 
 class RouteGateVerdictTests(unittest.TestCase):
     """Task 9: verdict routing."""

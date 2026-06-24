@@ -1018,11 +1018,29 @@ def run_production_gate(
                     baseline_sha=baseline_sha,
                 )
                 if not outcome.ok:
-                    return {
+                    # R3 fix: the lie-detector early-return path runs
+                    # AFTER ``_recover_from_crash_locked`` so it MUST
+                    # surface ``_recovery_descriptor`` to preserve the
+                    # §9.2 "loud, not silent" contract that the reuse
+                    # path (line 1011) and fresh-success path (line 1202)
+                    # both honor. Without this call, a mid-startup
+                    # corrupted-marker quarantine succeeded only on-disk
+                    # under a timestamp-named ``_bmad/gate/quarantine/``
+                    # directory the operator had no reason to inspect,
+                    # while the return dict carried only an opaque
+                    # ``baseline_drift`` action. ``_attach_recovery_signal``
+                    # is a no-op for empty / no-op descriptors, so this
+                    # is purely additive on the common (no marker / clean
+                    # orphan reaper) paths.
+                    drift_return: dict[str, Any] = {
                         "action": "baseline_drift",
                         "gate_id": gate_id,
                         "verify": outcome.to_dict(),
                     }
+                    _attach_recovery_signal(
+                        drift_return, _recovery_descriptor,
+                    )
+                    return drift_return
 
             if audit_policy is not None and audit_path is not None:
                 emit_gate_audit(
