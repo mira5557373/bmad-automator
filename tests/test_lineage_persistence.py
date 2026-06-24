@@ -396,6 +396,55 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
         # Index never advanced (genesis case) — no stale advertising either.
         self.assertEqual(load_lineage_root(self.project_root), "")
 
+    def test_write_atomic_text_partial_failure_exercises_rollback(self) -> None:
+        # Finer-granularity sibling of
+        # ``test_index_write_failure_rolls_back_orphan_entry_file``. The
+        # ``_write_index`` patch above intercepts at the helper boundary;
+        # this test intercepts one level lower at ``write_atomic_text`` so
+        # the FIRST call (entry write at line 484) goes through to the
+        # real implementation and the SECOND call (inside ``_write_index``
+        # at line 445) raises. This exercises the actual partial-write
+        # window — entry file lands on disk, index write fails — and pins
+        # the rollback path end-to-end without trusting that the
+        # ``_write_index`` helper is the only path through the second
+        # ``write_atomic_text`` call.
+        entry = _entry("brainstorm", "s0", body="alpha")
+        target_path = (
+            self.project_root / "_bmad" / "lineage" / "brainstorm" / "s0.json"
+        )
+        from story_automator.core.innovation import lineage_ledger as _ll
+
+        real_write = _ll.write_atomic_text
+        call_log: list[Path] = []
+
+        def _side_effect(path, text):  # type: ignore[no-untyped-def]
+            call_log.append(Path(path))
+            if len(call_log) == 1:
+                # First call = entry write at line 484. Let it through.
+                return real_write(path, text)
+            # Second call = ``_write_index`` -> ``write_atomic_text`` for
+            # ``index.json`` (line 445). Simulate ENOSPC/EACCES here.
+            raise OSError("simulated index-write crash")
+
+        with patch.object(_ll, "write_atomic_text", side_effect=_side_effect):
+            with self.assertRaises(OSError):
+                persist_lineage_entry(self.project_root, entry)
+        # Confirm both calls were attempted — the test would be vacuous
+        # if the patch raised on call #1.
+        self.assertEqual(
+            len(call_log), 2,
+            f"expected two write_atomic_text calls (entry + index); got {call_log!r}",
+        )
+        # No orphan entry file lurking outside the index — the rollback
+        # path at ``persist_lineage_entry`` lines 501-516 must have
+        # best-effort deleted the just-written payload.
+        self.assertFalse(
+            target_path.exists(),
+            "entry file must be rolled back when the index write_atomic_text fails",
+        )
+        # Index never advanced (genesis case) — no stale advertising.
+        self.assertEqual(load_lineage_root(self.project_root), "")
+
     def test_index_write_failure_preserves_already_indexed_entry(self) -> None:
         # Idempotent-re-persist guard: when the entry was already in the
         # index, the file pre-existed and the index still advertises it.
