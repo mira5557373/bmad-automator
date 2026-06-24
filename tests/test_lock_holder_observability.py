@@ -133,6 +133,73 @@ class LockTimeoutIncludesHolderTests(_Mixin, unittest.TestCase):
             )
         self.assertIn("marker present but unparseable", str(cm.exception))
 
+    def test_describe_lock_holder_reports_legacy_marker_distinctly(
+        self,
+    ) -> None:
+        # Round-3/fix-18 regression: a legacy marker (pre-L1+J-03 — no
+        # ``pid`` field) is part of the supported back-compat contract
+        # (see write_gate_marker docstring + recover_from_crash B1
+        # fallback). ``read_gate_marker`` accepts it; the observability
+        # path must NOT misreport it as corrupt.
+        import json
+
+        from story_automator.core.utils import iso_now
+
+        gate_dir = self.tmp / "_bmad" / "gate"
+        gate_dir.mkdir(parents=True)
+        marker_path = gate_dir / "gate-in-progress.json"
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "gate_id": "legacy-gate",
+                    "commit_sha": "abc123",
+                    "started_at": iso_now(),
+                }
+            )
+        )
+
+        holder = _describe_lock_holder(self.tmp)
+        self.assertEqual(holder, {"_state": "legacy"})
+
+        # And the rendered timeout message must NOT claim the marker is
+        # unparseable — that misleads operators into investigating a
+        # nonexistent corruption.
+        with self.assertRaises(GateLockTimeoutError) as cm:
+            _handle_gate_lock_timeout(
+                self.tmp, gate_lock_path(self.tmp), 0.1,
+                Timeout(str(gate_lock_path(self.tmp))),
+            )
+        rendered = str(cm.exception)
+        self.assertNotIn("unparseable", rendered)
+        self.assertIn("legacy marker", rendered)
+        self.assertIn("PID unavailable", rendered)
+
+    def test_describe_lock_holder_rejects_bool_pid_as_corrupt(self) -> None:
+        # ``isinstance(True, int)`` is True — a marker carrying
+        # ``"pid": true`` must be reported as corrupt rather than
+        # rendered as ``PID=True``. Pins the bool guard in the
+        # tightened check.
+        import json
+
+        from story_automator.core.utils import iso_now
+
+        gate_dir = self.tmp / "_bmad" / "gate"
+        gate_dir.mkdir(parents=True)
+        marker_path = gate_dir / "gate-in-progress.json"
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "gate_id": "bool-pid",
+                    "commit_sha": "deadbee",
+                    "started_at": iso_now(),
+                    "pid": True,
+                }
+            )
+        )
+
+        holder = _describe_lock_holder(self.tmp)
+        self.assertEqual(holder, {"_state": "corrupt"})
+
 
 # ---------------------------------------------------------------------------
 # B-H2 — third call site at system_gate.run_system_gate

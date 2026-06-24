@@ -108,6 +108,11 @@ class GateLockTimeoutError(Timeout):
             )
         if state == "corrupt":
             return f"{base}; holder unknown (marker present but unparseable)"
+        if state == "legacy":
+            return (
+                f"{base}; held by a pre-L1 process (PID unavailable — legacy "
+                f"marker)"
+            )
         # Well-formed marker subset.
         pid = holder.get("pid")
         started_at = holder.get("started_at")
@@ -128,7 +133,15 @@ def _describe_lock_holder(
       present and well-formed.
     * ``{"_state": "missing"}`` — marker file absent (holder may have
       just released the lock).
-    * ``{"_state": "corrupt"}`` — marker file present but unparseable.
+    * ``{"_state": "legacy"}`` — marker present and well-formed but
+      written by a pre-L1+J-03 process (no ``pid`` field). The legacy
+      shape is part of the supported back-compat contract (see
+      ``write_gate_marker`` docstring + ``recover_from_crash`` B1
+      fallback) — distinguishing it from "corrupt" prevents an
+      operator-misleading diagnostic.
+    * ``{"_state": "corrupt"}`` — marker file present but unparseable
+      (e.g. ``pid`` field present but wrong type, or marker raises
+      :class:`GateMarkerCorruptedError`).
     * ``None`` — internal/unrecognized error (caller treats as "unknown").
 
     Never raises. Observability code must not amplify a primary failure.
@@ -144,7 +157,22 @@ def _describe_lock_holder(
     pid = marker.get("pid")
     started_at = marker.get("started_at")
     hostname = marker.get("hostname")
-    if not (isinstance(pid, int) and isinstance(started_at, str)):
+    # Legacy markers (pre-L1+J-03) carry gate_id/commit_sha/started_at
+    # but no pid — read_gate_marker tolerates that shape (evidence_io.py
+    # only validates the three required string fields). Treat the missing
+    # pid as ``"_state": "legacy"`` so the operator sees an accurate
+    # diagnostic rather than the misleading "marker present but
+    # unparseable" rendering.
+    if pid is None:
+        return {"_state": "legacy"}
+    # ``isinstance(pid, int)`` returns True for bool — guard against the
+    # int/bool gotcha so a marker carrying ``"pid": true`` is reported as
+    # corrupt rather than rendered as ``PID=True``.
+    if not (
+        isinstance(pid, int)
+        and not isinstance(pid, bool)
+        and isinstance(started_at, str)
+    ):
         return {"_state": "corrupt"}
     return {
         "pid": pid,
