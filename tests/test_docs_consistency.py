@@ -641,5 +641,126 @@ class ChangelogTagReferencesResolveTests(unittest.TestCase):
         )
 
 
+class RecentlyShippedSectionDateBoundsTests(unittest.TestCase):
+    """The "Recently shipped (...)" section heading bounds its bullets.
+
+    Pre-fix CLAUDE.md:59 read ``### Recently shipped (session 2026-06-23)``
+    while the bullet at CLAUDE.md:75 (``Worktree-per-unit isolation (G2)``)
+    referenced work whose authoritative changelog file is
+    ``docs/changelog/2026-06-24-g2-worktree-per-unit.md`` (entry heading
+    ``## 260624 - [FULL] G2 worktree-per-unit isolation``). The header
+    asserted every milestone in its body shipped on 2026-06-23, but G2
+    actually shipped 2026-06-24 — drift that misleads operators reading
+    CLAUDE.md as the authoritative session log.
+
+    The regression test parses the section header for the latest
+    bounding date and asserts every dated changelog file referenced by
+    a bullet in that section has a date <= the bounding date.
+    """
+
+    DATED_CHANGELOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+    SECTION_HEADING_RE = re.compile(
+        r"^### Recently shipped \((.+?)\)$",
+        re.MULTILINE,
+    )
+    DATE_IN_HEADING_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+    CHANGELOG_DIR = REPO_ROOT / "docs" / "changelog"
+
+    def _section_body(self, text: str) -> tuple[str, str]:
+        """Return (heading_inner, body) for the Recently shipped section.
+
+        ``heading_inner`` is the parenthetical content (e.g. "sessions
+        2026-06-23 + 2026-06-24"). ``body`` is everything between the
+        section heading and the next ``### `` heading.
+        """
+        match = self.SECTION_HEADING_RE.search(text)
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has a '### Recently shipped (...)' heading; "
+            "update this regression test to match the new shape.",
+        )
+        start = match.end()
+        # Find the next '###' heading after the section start.
+        next_heading = re.search(r"^### ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return match.group(1), text[start:end]
+
+    def _bounding_date(self, heading_inner: str) -> tuple[int, int, int]:
+        """Latest YYYY-MM-DD date mentioned in the section heading."""
+        dates = self.DATE_IN_HEADING_RE.findall(heading_inner)
+        self.assertTrue(
+            dates,
+            f"Section heading '{heading_inner}' carries no YYYY-MM-DD "
+            "date; the section header must bound its bullets by date.",
+        )
+        return max((int(y), int(m), int(d)) for (y, m, d) in dates)
+
+    def _milestone_tags_in_body(self, body: str) -> set[str]:
+        """Lower-case milestone slugs hinted by the bullet boldface labels.
+
+        Bullet shape is ``- **<title> (<tag>)** ...``. We extract the
+        bracketed ``<tag>`` (e.g. ``G2``, ``C5``, ``N7.1``) and the
+        trailing parenthetical hint and lower-case both for matching
+        against changelog filenames.
+        """
+        tags: set[str] = set()
+        for line in body.splitlines():
+            m = re.match(r"^- \*\*[^*]*\(([A-Za-z0-9./_+ -]+)\)\*\*", line)
+            if not m:
+                continue
+            label = m.group(1).strip().lower()
+            # Split a compound bullet label like "C1 + follow-up" or
+            # "N7 + C3" into individual milestone tags. We anchor on
+            # the leading alphanumeric token of each ``+``-delimited
+            # part so e.g. "N7 + C3" -> {"n7", "c3"}.
+            for part in label.split("+"):
+                token_match = re.match(r"\s*([a-z0-9.]+)", part)
+                if token_match:
+                    tags.add(token_match.group(1))
+        return tags
+
+    def test_section_heading_bounds_dated_changelog_milestones(self) -> None:
+        text = _read("CLAUDE.md")
+        heading_inner, body = self._section_body(text)
+        bound = self._bounding_date(heading_inner)
+        tags = self._milestone_tags_in_body(body)
+        # For each tag, find the matching dated changelog file (if any)
+        # and assert its date <= the section's bounding date. We accept
+        # tags that have no matching changelog file (e.g. follow-up
+        # work folded into a parent file) — only positive matches are
+        # asserted.
+        violations: list[str] = []
+        for changelog in self.CHANGELOG_DIR.iterdir():
+            if not changelog.is_file():
+                continue
+            name = changelog.name
+            if not self.DATED_CHANGELOG_RE.match(name):
+                continue
+            # Filename shape: YYYY-MM-DD-<slug>.md where slug starts
+            # with the milestone tag, e.g. ``2026-06-24-g2-worktree-...``.
+            head = name[:10]
+            slug = name[11:-3] if name.endswith(".md") else name[11:]
+            # The leading slug segment up to the first '-' is the tag.
+            tag_segment = slug.split("-", 1)[0].lower()
+            if tag_segment not in tags:
+                continue
+            try:
+                y, m, d = (int(head[0:4]), int(head[5:7]), int(head[8:10]))
+            except ValueError:
+                continue
+            if (y, m, d) > bound:
+                violations.append(
+                    f"{name} (date {head}) > section bound "
+                    f"{bound[0]:04d}-{bound[1]:02d}-{bound[2]:02d}",
+                )
+        self.assertEqual(
+            violations,
+            [],
+            "CLAUDE.md 'Recently shipped (...)' section heading does not "
+            "bound the latest changelog date of its bullets: "
+            f"{violations}",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -56,7 +56,7 @@ The production-ready factory gate. **Read these existing modules before planning
 - **CLI dispatcher (N6.5)** `core/cli_dispatcher.py` — resolves stop-hook dialects per `cli_id` (`claude-code`, future `codex`/`gemini`/`none`) and falls back to a lie-detector when the child reports success without a baseline-commit advance. `_default_invoker` for `claude-code` wires into `core/tmux_runtime.py` (read-only consumer of its existing public surface). 500-LOC soft limit watched; split into `core/cli_dispatcher_invokers.py` if approached.
 - **Action enum (N6.6)** `core/action_enum.py` — `Literal` type for verifier actions consumed by `route_gate_verdict` and `success_verifiers.production_ready_gate`; closed vocabulary `{"continue", "remediate", "park", "halt"}`.
 
-### Recently shipped (session 2026-06-23)
+### Recently shipped (sessions 2026-06-23 + 2026-06-24)
 
 The following milestones landed in addition to the gate subsystem
 above; all under the additive-only contract (optional kwargs,
