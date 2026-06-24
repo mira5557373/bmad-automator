@@ -584,6 +584,121 @@ class DispatchSessionInvokerExceptionTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# dispatch_session — non-str raw-dict field defensive coercion
+# ---------------------------------------------------------------------------
+
+
+class DispatchSessionNonStrFieldCoercionTests(unittest.TestCase):
+    """Regression: a contract-violating runner returning ``None`` (or any
+    non-str) for ``head_sha`` / ``stdout_tail`` / ``session_id`` /
+    ``stderr_tail`` must NOT produce the literal string ``"None"`` (or
+    ``"False"`` / ``"0"`` / etc.) in the wire-stable :class:`DispatchResult`.
+    The naive ``str(raw.get(key, ""))`` path mints such tokens because
+    ``raw.get`` returns the present-but-None value, not the default.
+    Those tokens would then propagate into gate-file payloads and feed
+    git plumbing as if they were real SHAs. The dispatcher must coerce
+    non-str values to ``""`` defensively.
+    """
+
+    def _non_str_runner(self, **overrides: Any):
+        defaults: dict[str, Any] = {
+            "stdout_tail": None,
+            "head_sha": None,
+            "session_id": None,
+            "stderr_tail": None,
+            "timed_out": False,
+        }
+        defaults.update(overrides)
+
+        def _invoke(*, profile: CLIProfile, intent: SessionIntent) -> dict[str, Any]:
+            return defaults
+
+        return _invoke
+
+    def test_none_head_sha_coerced_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            _add_commit(Path(tmp), "b")
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._non_str_runner(),
+            )
+            # Must NOT be the literal 'None' token.
+            self.assertNotEqual(res.head_sha, "None")
+            self.assertEqual(res.head_sha, "")
+
+    def test_none_session_id_and_stderr_tail_coerced_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            _add_commit(Path(tmp), "b")
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._non_str_runner(),
+            )
+            self.assertNotEqual(res.session_id, "None")
+            self.assertNotEqual(res.stderr_tail, "None")
+            self.assertEqual(res.session_id, "")
+            self.assertEqual(res.stderr_tail, "")
+
+    def test_non_str_stdout_tail_does_not_match_stop_marker(self) -> None:
+        # If ``stdout_tail`` is None, ``str(None) == 'None'`` would not
+        # contain a stop marker, but it would still be silently coerced
+        # to a token. Confirm we route to the lie-detector with an empty
+        # stdout_tail rather than a non-empty 'None' token.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            head = _add_commit(Path(tmp), "b")
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._non_str_runner(head_sha=head),
+            )
+            # Lie-detector path (not stop-hook) because no marker.
+            self.assertEqual(res.stop_reason, "lie-detector")
+            # head_sha was a real str, must survive untouched.
+            self.assertEqual(res.head_sha, head)
+
+    def test_timed_out_path_coerces_non_str_stderr_tail(self) -> None:
+        # The timed_out=True branch also went through str(raw.get(key, ""))
+        # at line 485; verify None becomes "" not "None".
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            _add_commit(Path(tmp), "b")
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._non_str_runner(timed_out=True),
+            )
+            self.assertEqual(res.stop_reason, "timeout")
+            self.assertNotEqual(res.stderr_tail, "None")
+            self.assertEqual(res.stderr_tail, "")
+
+    def test_non_str_head_sha_does_not_trip_lie_detector_pre_check(self) -> None:
+        # A non-str head_sha must NOT slip past the pre-check guard
+        # ``if head_sha and same_commit(head_sha, intent.baseline_sha)``
+        # by appearing as a non-empty truthy token. After coercion the
+        # field is "", so the pre-check falls through cleanly and the
+        # lie-detector observes the actual repo HEAD.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            head = _add_commit(Path(tmp), "b")
+            # Pass non-str head_sha (False); naive str(False) -> "False"
+            # would be a 5-char token that the lie-detector would treat
+            # as an expected_sha. The coerced "" version triggers no
+            # mismatch since detect_baseline_drift sees the real head.
+            res = dispatch_session(
+                _make_intent(tmp, base),
+                profile=claude_default(),
+                runtime_invoker=self._non_str_runner(head_sha=False),
+            )
+            # head_sha on wire must be "" — never "False".
+            self.assertEqual(res.head_sha, "")
+            del head  # real head observed inside detect_baseline_drift
+
+
+# ---------------------------------------------------------------------------
 # dispatch_session — plugin integration (HookBusShim)
 # ---------------------------------------------------------------------------
 

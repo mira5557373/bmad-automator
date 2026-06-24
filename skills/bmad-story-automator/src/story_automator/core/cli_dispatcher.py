@@ -294,6 +294,27 @@ def _default_invoker(*, profile: CLIProfile, intent: SessionIntent) -> dict[str,
 # ---------------------------------------------------------------------------
 
 
+def _coerce_str_field(value: Any) -> str:
+    """Coerce a runner-supplied raw-dict value to ``str`` defensively.
+
+    The invoker contract (see :func:`dispatch_session`) requires str-typed
+    ``stdout_tail`` / ``head_sha`` / ``session_id`` / ``stderr_tail``
+    fields, but a misbehaving runner may yield ``None`` (or any non-str).
+    The naive ``str(value)`` path silently mints the literal token
+    ``"None"`` (or ``"False"``, ``"0"``, etc.), which then propagates
+    into :class:`DispatchResult.head_sha` — a wire-stable field embeddable
+    in gate-file payloads per the frozen-gate-surface contract. We
+    instead coerce non-str inputs (including ``None``) to ``""`` so a
+    contract-violating runner produces an empty field rather than a
+    deceptive token. The empty-string head_sha flows through the
+    lie-detector to a SAFE retryable verdict (``baseline_drift``), not a
+    false PASS.
+    """
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _build_timeout_result(
     *,
     profile: CLIProfile,
@@ -482,13 +503,13 @@ def dispatch_session(
         return _build_timeout_result(
             profile=profile,
             intent=intent,
-            stderr_tail=str(raw.get("stderr_tail", "")),
+            stderr_tail=_coerce_str_field(raw.get("stderr_tail")),
         )
 
-    stdout_tail = str(raw.get("stdout_tail", ""))
-    head_sha = str(raw.get("head_sha", ""))
-    session_id = str(raw.get("session_id", ""))
-    stderr_tail = str(raw.get("stderr_tail", ""))
+    stdout_tail = _coerce_str_field(raw.get("stdout_tail"))
+    head_sha = _coerce_str_field(raw.get("head_sha"))
+    session_id = _coerce_str_field(raw.get("session_id"))
+    stderr_tail = _coerce_str_field(raw.get("stderr_tail"))
 
     # 1. Stop-hook detection wins when the CLI told us it's done.
     if detect_stop(stdout_tail, profile.hook_dialect):
