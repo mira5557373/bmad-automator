@@ -711,21 +711,26 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         """Return ``(module_aliases, callable_aliases)`` for ``tree``.
 
         ``module_aliases`` are names bound to the ``subprocess`` module
-        via ``import subprocess`` / ``import subprocess as sp``.
+        via ``import subprocess`` / ``import subprocess as sp`` AND via
+        plain rebinding (``sub = subprocess`` / ``sub: object =
+        subprocess``).
         ``callable_aliases`` are names bound to one of
         :pyattr:`SUBPROCESS_CALLABLES` via ``from subprocess import run``
-        or ``from subprocess import run as r``.
+        or ``from subprocess import run as r`` AND via plain rebinding
+        (``r = run`` / ``r: object = run``).
 
         Mirrors the binding-tracking idiom in
-        :py:meth:`ThresholdApplyIsolationInvariant._module_violates` so
-        future ``import subprocess as sp``, ``from subprocess import
-        run``, and ``from subprocess import run as r`` idioms cannot
+        :py:meth:`ThresholdApplyIsolationInvariant._module_violates`
+        (lines 1942-1965) so future ``import subprocess as sp``, ``from
+        subprocess import run``, ``from subprocess import run as r``,
+        AND ``sub = subprocess`` / ``r = run`` rebinding idioms cannot
         silently bypass the D-04 trust-boundary net.
         """
         import ast
 
         module_aliases: set[str] = set()
         callable_aliases: set[str] = set()
+        # First pass — direct imports.
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -736,6 +741,42 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                     for alias in node.names:
                         if alias.name in AuditKeyEnvScrubInvariant.SUBPROCESS_CALLABLES:
                             callable_aliases.add(alias.asname or alias.name)
+        # Second pass — fixed-point rebinding closure. ``sub = subprocess``
+        # rebinds the module; ``r = run`` rebinds a callable. Iterate to
+        # a fixed point so chains like ``a = subprocess; b = a; b.run(...)``
+        # are also caught. Modeled on
+        # ``ThresholdApplyIsolationInvariant._module_violates`` lines
+        # 1942-1965 (Assign + AnnAssign rebind tracking).
+        changed = True
+        while changed:
+            changed = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    if isinstance(node.value, ast.Name):
+                        if node.value.id in module_aliases:
+                            for tgt in node.targets:
+                                if isinstance(tgt, ast.Name) and tgt.id not in module_aliases:
+                                    module_aliases.add(tgt.id)
+                                    changed = True
+                        elif node.value.id in callable_aliases:
+                            for tgt in node.targets:
+                                if isinstance(tgt, ast.Name) and tgt.id not in callable_aliases:
+                                    callable_aliases.add(tgt.id)
+                                    changed = True
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    if isinstance(node.value, ast.Name) and isinstance(node.target, ast.Name):
+                        if (
+                            node.value.id in module_aliases
+                            and node.target.id not in module_aliases
+                        ):
+                            module_aliases.add(node.target.id)
+                            changed = True
+                        elif (
+                            node.value.id in callable_aliases
+                            and node.target.id not in callable_aliases
+                        ):
+                            callable_aliases.add(node.target.id)
+                            changed = True
         return module_aliases, callable_aliases
 
     @staticmethod
@@ -1513,12 +1554,19 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
 
     def test_positive_failure_bypass_idioms_are_caught(self) -> None:
         """Two-direction proof for D-04 binding-tracking — the walker
-        must catch THREE idiomatic Python aliasing patterns that a
+        must catch SEVEN idiomatic Python aliasing patterns that a
         literal ``subprocess.<name>(...)`` predicate silently misses:
 
           (a) ``import subprocess as sp`` → ``sp.run(...)``
           (b) ``from subprocess import run`` → ``run(...)``
           (c) ``from subprocess import run as r`` → ``r(...)``
+          (e) ``sub = subprocess`` plain Assign rebind → ``sub.run(...)``
+          (f) ``sub: object = subprocess`` AnnAssign rebind →
+              ``sub.run(...)``
+          (g) chained rebind ``a = subprocess; b = a`` →
+              ``b.run(...)`` (transitive closure)
+          (h) callable rebind ``from subprocess import run; r = run`` →
+              ``r(...)``
 
         Plus the canonical baseline:
           (d) ``import subprocess`` → ``subprocess.run(...)``
@@ -1535,7 +1583,10 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         recognised ``ast.Attribute(value=ast.Name('subprocess'),
         attr in {run,Popen,...})``), patterns (a)/(b)/(c) silently exit
         the D-04 trust-boundary net while the audit-floor suite stays
-        green — the regression net itself is broken.
+        green — the regression net itself is broken. The (e)/(f)/(g)/(h)
+        rebind cases close the gap with sibling C5/G2 invariants that
+        track ``ast.Assign`` / ``ast.AnnAssign`` rebinding (lines
+        1942-1965 / 2911-2935).
         """
         import ast
 
@@ -1602,6 +1653,78 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             _flag(from_import_as_src),
             "Walker FAILED to flag `from subprocess import run as r` + `r(...)` — "
             "binding-tracking missing for ast.ImportFrom asname",
+        )
+
+        # (e) ``sub = subprocess`` plain Assign rebind. Pins the
+        # ast.Assign arm of the rebind closure mirroring
+        # ThresholdApplyIsolationInvariant._module_violates lines
+        # 1942-1952. Without the rebind closure, ``sub.run(...)`` is
+        # silently treated as a non-subprocess call.
+        assign_rebind_src = """
+            import subprocess
+
+            sub = subprocess
+
+            def leak():
+                sub.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(assign_rebind_src),
+            "Walker FAILED to flag `sub = subprocess` + `sub.run(...)` — "
+            "binding-tracking missing for ast.Assign module-rebind "
+            "(strictly weaker than C5/G2 sibling invariants)",
+        )
+
+        # (f) ``sub: object = subprocess`` AnnAssign rebind. Pins the
+        # ast.AnnAssign arm of the rebind closure mirroring lines
+        # 1953-1965.
+        annassign_rebind_src = """
+            import subprocess
+
+            sub: object = subprocess
+
+            def leak():
+                sub.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(annassign_rebind_src),
+            "Walker FAILED to flag `sub: object = subprocess` + `sub.run(...)` — "
+            "binding-tracking missing for ast.AnnAssign module-rebind",
+        )
+
+        # (g) Chained rebind ``a = subprocess; b = a; b.run(...)`` —
+        # transitive closure. The fixed-point loop in
+        # _collect_subprocess_bindings must propagate through chains.
+        chained_rebind_src = """
+            import subprocess
+
+            a = subprocess
+            b = a
+
+            def leak():
+                b.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(chained_rebind_src),
+            "Walker FAILED to flag chained rebind `a = subprocess; b = a` + "
+            "`b.run(...)` — rebind closure must iterate to fixed point",
+        )
+
+        # (h) Callable rebind — ``from subprocess import run; r = run``.
+        # Pins that the rebind closure also propagates callable aliases,
+        # not just module aliases.
+        callable_rebind_src = """
+            from subprocess import run
+
+            r = run
+
+            def leak():
+                r(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+        """
+        self.assertTrue(
+            _flag(callable_rebind_src),
+            "Walker FAILED to flag callable rebind `r = run` + `r(...)` — "
+            "binding-tracking missing for callable-alias rebinding",
         )
 
         # Negative — `run(...)` without any subprocess import MUST NOT
