@@ -86,6 +86,22 @@ class TestPersistenceKeyValidation(unittest.TestCase):
             with self.assertRaises(SpecDriftError):
                 validate_persistence_key(key)
 
+    def test_over_long_keys_rejected_as_spec_drift_error(self) -> None:
+        # Regression: pre-fix, _PERSISTENCE_KEY_RE had no length cap so
+        # a 256+ char key passed validation, then drift_root_dir(...,
+        # create=True) raised a raw OSError(ENAMETOOLONG) on POSIX
+        # filesystems whose single path component is capped at 255
+        # bytes. Callers using `except SpecDriftError` (the module's
+        # documented wrapping convention) would have missed it. The
+        # length cap surfaces the failure as SpecDriftError where it
+        # belongs, before any mkdir is attempted.
+        for n in (65, 256, 5000):
+            with self.assertRaises(SpecDriftError):
+                validate_persistence_key("a" * n)
+        # Boundary: 64-char key must still be accepted (cap is
+        # inclusive at the documented maximum).
+        validate_persistence_key("a" * 64)
+
 
 # ---------------------------------------------------------------------------
 # Path helpers

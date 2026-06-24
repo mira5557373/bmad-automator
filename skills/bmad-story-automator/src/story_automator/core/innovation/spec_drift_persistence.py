@@ -76,6 +76,18 @@ modules use the same 30s convention for short-lived metadata locks."""
 
 _PERSISTENCE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]*$")
 
+_PERSISTENCE_KEY_MAX_LEN: int = 64
+"""Upper bound on persistence-key length in characters.
+
+POSIX caps a single path component at 255 bytes (Linux ext4, tmpfs,
+etc.); 64 sits comfortably under that ceiling while leaving headroom
+for the surrounding ``_bmad/drift/<key>/`` layout and any future
+sidecar suffixes. Without this bound an over-long key would silently
+pass regex validation and then surface as a raw ``OSError(ENAMETOOLONG)``
+out of :func:`drift_root_dir` — bypassing the module's own
+SpecDriftError-wrapping convention and breaking the docstring promise
+that the resulting directory is "well-formed on every supported FS"."""
+
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -90,7 +102,10 @@ def validate_persistence_key(key: str) -> None:
     risk (``../etc``) or a name that breaks the layout invariant
     (``foo/bar`` accidentally nests). We allow only ASCII alphanumeric
     plus ``-`` and ``_`` and require a non-symbol first character so
-    the resulting directory is well-formed on every supported FS.
+    the resulting directory is well-formed on every supported FS. The
+    length is capped at :data:`_PERSISTENCE_KEY_MAX_LEN` so an
+    over-long key fails fast as ``SpecDriftError`` rather than leaking
+    a raw ``OSError(ENAMETOOLONG)`` from ``Path.mkdir`` downstream.
     """
     # Local import keeps the module-load graph cheap and avoids a
     # circular import: spec_drift_watcher imports this module.
@@ -101,6 +116,12 @@ def validate_persistence_key(key: str) -> None:
         raise SpecDriftError(
             f"invalid persistence_key {key!r}: must match "
             f"[A-Za-z0-9][A-Za-z0-9_-]*"
+        )
+    if len(key) > _PERSISTENCE_KEY_MAX_LEN:
+        raise SpecDriftError(
+            f"invalid persistence_key (length {len(key)} > "
+            f"{_PERSISTENCE_KEY_MAX_LEN}): keep keys short so the "
+            f"_bmad/drift/<key>/ directory stays within FS limits"
         )
 
 
