@@ -363,11 +363,37 @@ def emit_gate_cost_report(
     # Persist — atomic writes so a crash mid-emit never leaves a
     # partially-written summary. Per-collector files are written
     # FIRST so a successful summary.json implies all collector
-    # records are durable.
+    # records are durable. Stale ``<collector_id>.json`` files from a
+    # previous emit for the same gate_id are unlinked AFTER the new
+    # files land — so a partial re-emit (write succeeded but unlink
+    # didn't reach summary) doesn't lose data, and the on-disk
+    # collector set always matches the new summary.
     cost_dir = get_cost_root_dir(project_root, gate_id)
     for share in shares:
         share_path = cost_dir / f"{share.collector_id}.json"
         write_atomic_text(share_path, compact_json(_share_to_json(share)))
+
+    # Prune ghost per-collector files left over from prior emissions
+    # for the same gate_id (e.g. crashed-recovery / remediation cycles
+    # where the collector set shrank between runs). Without this, the
+    # cost dir listing diverges from summary.json's ``per_collector``
+    # tuple and load_collector_cost_share returns stale data.
+    kept = {f"{s.collector_id}.json" for s in shares}
+    kept.add("summary.json")
+    try:
+        existing = list(cost_dir.iterdir())
+    except OSError:
+        existing = []
+    for entry in existing:
+        name = entry.name
+        if not name.endswith(".json") or name in kept:
+            continue
+        try:
+            entry.unlink()
+        except OSError:
+            # Best-effort prune — observability, not gating. A leftover
+            # ghost is worse than ignored, but emission must not abort.
+            pass
 
     summary_payload = {
         "gate_id": report.gate_id,

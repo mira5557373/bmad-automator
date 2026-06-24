@@ -318,6 +318,65 @@ class EmissionTests(unittest.TestCase):
         with self.assertRaises(CostEvidenceError):
             load_collector_cost_share(self.root, self.gate_id, "c1")
 
+    def test_emit_prunes_ghost_collector_files_on_reemit_with_smaller_set(
+        self,
+    ) -> None:
+        """Regression — re-emitting for the same gate_id with a smaller
+        collector set used to leave ghost ``<collector_id>.json`` files
+        on disk for the dropped collector. ``summary.json`` correctly
+        reported the new ``collector_count``, but the cost dir listing
+        diverged from ``per_collector`` and ``load_collector_cost_share``
+        for a dropped id returned stale data.
+
+        Reachable in production via the FAIL → remediation cycle
+        (``request_review_continuation`` propagates the same gate_id
+        forward, but the new commit_sha makes ``check_gate_reuse`` re-
+        run collectors) or via kill-switch flips in
+        ``profile.categories_na`` between runs.
+        """
+
+        first = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("mypy", "static", duration_ms=1000),
+            _make_outcome("black", "static", duration_ms=1000),
+        ]
+        emit_gate_cost_report(self.root, self.gate_id, SESSION, first)
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = sorted(p.name for p in cost_dir.iterdir())
+        self.assertEqual(
+            before, ["black.json", "mypy.json", "ruff.json", "summary.json"],
+        )
+
+        second = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("mypy", "static", duration_ms=1000),
+        ]
+        emit_gate_cost_report(self.root, self.gate_id, SESSION, second)
+
+        after = sorted(p.name for p in cost_dir.iterdir())
+        # Ghost black.json must be gone.
+        self.assertEqual(after, ["mypy.json", "ruff.json", "summary.json"])
+
+        # Summary and on-disk listing must agree.
+        summary = load_gate_cost_report(self.root, self.gate_id)
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.collector_count, 2)
+        self.assertEqual(
+            sorted(s.collector_id for s in summary.per_collector),
+            ["mypy", "ruff"],
+        )
+
+        # And load_collector_cost_share for the dropped id returns None
+        # rather than the stale share from emission #1.
+        self.assertIsNone(
+            load_collector_cost_share(self.root, self.gate_id, "black"),
+        )
+        # Survivors still load.
+        self.assertIsNotNone(
+            load_collector_cost_share(self.root, self.gate_id, "ruff"),
+        )
+
     def test_load_collector_cost_share_wrong_type_raises_CostEvidenceError(
         self,
     ) -> None:
