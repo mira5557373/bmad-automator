@@ -2560,10 +2560,24 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
         return violations
 
     def test_ast_no_process_global_state_mutation_in_isolation_module(self) -> None:
-        """Walks ``core/collector_isolation.py`` and rejects every form of
-        process-global state mutation that would break the parallel
+        """Walks every ``core/collector_isolation*.py`` file and rejects every
+        form of process-global state mutation that would break the parallel
         worker contract. Positive-failure proof: synthetic AST with each
         violation pattern is flagged.
+
+        Post-impl review fold-in: the G2 plan extracted
+        ``core/collector_isolation_outcomes.py`` as a sibling helper to keep
+        ``collector_isolation.py`` under the 500-LOC soft limit. The four
+        reifier helpers (``make_error_outcome`` / ``error_outcome`` /
+        ``crash_outcome`` / ``audit_timeout_outcome``) ARE invoked from
+        inside the ``ThreadPoolExecutor`` worker threads via
+        ``_run_isolated`` — so a future contributor adding ``os.chdir``
+        / ``os.environ[...]`` / ``signal.signal`` / ``FileLock`` to that
+        sibling re-introduces the cross-thread races G2 was designed to
+        close. The glob ``collector_isolation*.py`` covers the parent
+        AND every sibling under the same prefix, matching the rename-
+        proof exemption pattern used by ``AuditKeyEnvScrubInvariant``
+        (``_defines_scrub_helper`` over ``rglob``).
         """
         import ast
         import textwrap
@@ -2575,14 +2589,36 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
             / "src"
             / "story_automator"
         )
-        isolation_file = skill_src / "core" / "collector_isolation.py"
-        tree = ast.parse(isolation_file.read_text(encoding="utf-8"))
-        violations = self._module_has_global_state_mutation(tree)
+        isolation_files = sorted((skill_src / "core").glob("collector_isolation*.py"))
+        # Guard against an accidental empty glob — there MUST always be at
+        # least the canonical ``collector_isolation.py`` parent module.
+        self.assertTrue(
+            isolation_files,
+            "No core/collector_isolation*.py files found — glob expansion "
+            "broken or the parent module was renamed without updating "
+            "the audit-floor invariant",
+        )
+        canonical = skill_src / "core" / "collector_isolation.py"
+        self.assertIn(
+            canonical,
+            isolation_files,
+            "core/collector_isolation.py missing from glob expansion — "
+            "the canonical isolation module must be scanned",
+        )
+        all_violations: list[str] = []
+        for isolation_file in isolation_files:
+            tree = ast.parse(isolation_file.read_text(encoding="utf-8"))
+            file_violations = self._module_has_global_state_mutation(tree)
+            for v in file_violations:
+                all_violations.append(
+                    f"{isolation_file.relative_to(skill_src)}: {v}"
+                )
         self.assertEqual(
-            violations,
+            all_violations,
             [],
-            "core/collector_isolation.py mutates process-global state — "
-            "G2 thread-safety invariant broken:\n  " + "\n  ".join(violations),
+            "core/collector_isolation*.py module(s) mutate process-global "
+            "state — G2 thread-safety invariant broken:\n  "
+            + "\n  ".join(all_violations),
         )
 
         # Positive-failure proof: each violation pattern, synthesised
@@ -2629,6 +2665,88 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
                 f"Walker FAILED to flag synthetic violator [{label}] — "
                 f"invariant is vacuously true for this pattern",
             )
+
+    def test_glob_scan_covers_sibling_collector_isolation_modules(self) -> None:
+        """Regression for the round-1-fix-37 sibling-coverage gap.
+
+        The G2 plan extracted ``core/collector_isolation_outcomes.py`` to
+        keep the parent module under the 500-LOC soft limit. The four
+        reifier helpers in that sibling (``make_error_outcome`` /
+        ``error_outcome`` / ``crash_outcome`` /
+        ``audit_timeout_outcome``) are invoked from inside the
+        ``ThreadPoolExecutor`` worker threads via ``_run_isolated``, so
+        they are subject to the same "no process-global state mutation"
+        contract as the parent.
+
+        Pre-fix, sub-test 1 hard-coded the scan target as
+        ``core/collector_isolation.py`` and silently passed even when a
+        violator (e.g. ``os.chdir('/tmp')``) was injected into the
+        sibling. Post-fix, the glob ``collector_isolation*.py`` expands
+        to BOTH files and the audit-floor structurally rejects any
+        global-state mutation in either module.
+
+        This regression test pins the structural property: the sibling
+        module MUST be present in the glob expansion, and a synthetic
+        violator placed in a sibling-shaped path MUST be flagged by the
+        scan loop.
+        """
+        import ast
+
+        skill_src = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+            / "story_automator"
+        )
+        isolation_files = sorted((skill_src / "core").glob("collector_isolation*.py"))
+        names = {p.name for p in isolation_files}
+        self.assertIn(
+            "collector_isolation.py",
+            names,
+            "Glob must include the canonical parent module",
+        )
+        self.assertIn(
+            "collector_isolation_outcomes.py",
+            names,
+            "Glob must include the sibling helper module — pre-fix the "
+            "sub-test only scanned the parent, so any contributor adding "
+            "os.chdir / os.environ / signal.signal / FileLock to the "
+            "sibling would silently re-introduce the cross-thread races "
+            "the G2 milestone was designed to close",
+        )
+
+        # End-to-end positive-failure proof: simulating a violator inside
+        # the sibling-module source MUST be flagged by the walker. This
+        # closes the vacuous-pass that the round-1 reviewer reproduced
+        # by injecting ``os.chdir('/tmp')`` into ``make_error_outcome``.
+        # The walker is shape-based on ``os.chdir(...)`` (matching the
+        # canonical ``import os`` form), so the appended violator MUST
+        # use that exact AST shape.
+        sibling_path = skill_src / "core" / "collector_isolation_outcomes.py"
+        clean_src = sibling_path.read_text(encoding="utf-8")
+        violator_src = clean_src + "\nimport os\nos.chdir('/tmp')\n"
+        violator_tree = ast.parse(violator_src)
+        flagged = self._module_has_global_state_mutation(violator_tree)
+        self.assertNotEqual(
+            flagged,
+            [],
+            "Walker FAILED to flag a synthetic violator injected into "
+            "the sibling module shape — the glob-based scan in sub-test "
+            "1 is vacuously true for collector_isolation_outcomes.py",
+        )
+
+        # Also assert that the CLEAN sibling source does NOT trip the
+        # walker — pins the present-day baseline that the sibling is
+        # mutation-free.
+        clean_tree = ast.parse(clean_src)
+        self.assertEqual(
+            self._module_has_global_state_mutation(clean_tree),
+            [],
+            "Clean collector_isolation_outcomes.py source already trips "
+            "the global-state-mutation walker — the sibling is supposed "
+            "to be a PURE helper module per its docstring",
+        )
 
     # ------------------------------------------------------------------
     # Sub-test 2 — no implicit per_unit dispatch outside isolation module
