@@ -367,6 +367,63 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 profile=_codex_profile(), intent=_intent(),
             )
 
+    def test_empty_story_key_and_phase_do_not_crash_invoker(self) -> None:
+        # Regression: ``_session_name_for`` defaults empty ``story_key`` to
+        # ``"STORY"`` and empty ``phase`` to ``"phase"``, but
+        # ``inject_bmad_auto_env`` strictly rejects empty values with
+        # ``ValueError``. Pre-fix the invoker called ``inject_bmad_auto_env``
+        # unguarded, so ``SessionIntent(story_key="", ...)`` would raise
+        # ``ValueError: story_key must be a non-empty string`` before the
+        # try/finally env-restore block, propagating uncaught through
+        # ``default_invoker``. ``dispatch_session`` would only convert it to
+        # an error result via its ``except Exception`` catch; the cleaner
+        # fix is to unify the invoker's empty-value contract with
+        # ``_session_name_for`` so neither helper crashes on bootstrap inputs.
+        for sk, ph in (("", "dev-running"), ("STORY-1", ""), ("   ", "  ")):
+            with self.subTest(story_key=repr(sk), phase=repr(ph)):
+                bad_intent = SessionIntent(
+                    story_key=sk,
+                    phase=ph,
+                    baseline_sha="b" * 40,
+                    prompt="/skill do-thing",
+                    workspace="/tmp/ws",
+                )
+                with _StubHooks():
+                    raw = invokers.claude_code_invoker(
+                        profile=claude_default(), intent=bad_intent,
+                    )
+                # Wire-shape preserved; no crash.
+                self.assertEqual(
+                    set(raw.keys()),
+                    {"stdout_tail", "head_sha", "session_id",
+                     "stderr_tail", "timed_out"},
+                )
+                self.assertFalse(raw["timed_out"])
+
+    def test_empty_story_key_dispatches_to_error_or_classifies(self) -> None:
+        # End-to-end regression at the dispatch_session boundary: an empty
+        # story_key flowing into the invoker must not raise out of
+        # ``dispatch_session`` as a bare ``ValueError``. Per the
+        # ``dispatch_session`` docstring contract ("Never raises on CLI-side
+        # or git-side failure"), the result must be a ``DispatchResult``.
+        with _StubHooks():
+            res = dispatch_session(
+                SessionIntent(
+                    story_key="",
+                    phase="dev-running",
+                    baseline_sha="b" * 40,
+                    prompt="/skill do-thing",
+                    workspace="/tmp",
+                ),
+                profile=claude_default(),
+                runtime_invoker=None,
+            )
+        self.assertIsInstance(res, DispatchResult)
+        # Must NOT classify as an unhandled invoker_error from a
+        # ValueError — that would mean the invoker still crashed and the
+        # dispatcher only caught it via the generic Exception fallback.
+        self.assertNotIn("ValueError", res.stderr_tail)
+
 
 # ---------------------------------------------------------------------------
 # Integration: dispatch_session w/ no runtime_invoker hits default_invoker

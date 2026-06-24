@@ -212,10 +212,22 @@ def claude_code_invoker(
     # may read ``os.environ`` from the spawn hook (e.g. existing test
     # contracts and runtime hooks); the authoritative pane-shell
     # propagation channel is ``extra_env``.
+    #
+    # Unify the empty-story_key/phase contract with :func:`_session_name_for`
+    # which already tolerates empty values by defaulting to ``"STORY"`` /
+    # ``"phase"``. Without this normalization, a bootstrap path that
+    # constructs a ``SessionIntent`` with ``story_key=""`` would crash with
+    # an unhandled ``ValueError`` from ``inject_bmad_auto_env``'s strict
+    # non-empty precondition, violating :func:`dispatch_session`'s
+    # docstring promise ("Never raises on CLI-side or git-side failure").
+    # The same fallback values flow into both the tmux session name and
+    # the ``BMAD_AUTO_*`` env keys, so consumers see a consistent identity.
+    _story_key_clean = (intent.story_key or "").strip() or "STORY"
+    _phase_clean = (intent.phase or "").strip() or "phase"
     enriched = tmux_runtime.inject_bmad_auto_env(
         dict(os.environ),
-        story_key=intent.story_key,
-        phase=intent.phase,
+        story_key=_story_key_clean,
+        phase=_phase_clean,
         cli_id=profile.cli_id,
         commit_sha=intent.baseline_sha,
     )
