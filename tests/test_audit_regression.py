@@ -735,6 +735,103 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, f"child failed: {proc.stderr}")
         self.assertEqual(proc.stdout.strip(), "NONE")
 
+    @staticmethod
+    def _is_scrub_call(node) -> bool:
+        """Return True iff ``node`` is a call to ``scrub_env_for_subprocess``
+        (bare-name or attribute form). Lifted to a staticmethod so the
+        positive-failure regression test can exercise the env-keyword
+        check directly without scanning the real skill tree.
+        """
+        import ast
+
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "scrub_env_for_subprocess":
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == "scrub_env_for_subprocess":
+            return True
+        return False
+
+    @staticmethod
+    def _defines_scrub_helper(tree) -> bool:
+        """Return True iff the module's top level defines
+        ``scrub_env_for_subprocess`` — rename-proof signal that this
+        *is* the helper's implementation file (current home:
+        ``audit_env_scrub.py``; ``audit.py`` only re-exports). The
+        invariant must not apply to the file that owns the helper, no
+        matter which filename hosts it.
+        """
+        import ast
+
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "scrub_env_for_subprocess":
+                return True
+        return False
+
+    @classmethod
+    def _module_offenders(cls, tree) -> list[int]:
+        """Return line numbers of every subprocess call in ``tree`` that
+        does NOT pass ``env=scrub_env_for_subprocess(...)`` (or a name
+        bound to such a result). Returns ``[]`` if the module defines
+        the scrub helper itself (structural exemption) or imports no
+        subprocess form.
+
+        Lifted to a classmethod so the positive-failure regression test
+        can exercise the FULL walker (binding-tracking + env-keyword
+        check + scrubbed-name tracking) directly on synthetic source,
+        proving the invariant is not vacuously true. Modeled on
+        ``ThresholdApplyIsolationInvariant._module_violates`` /
+        ``WorktreePerUnitIsolationInvariant._module_violates``.
+        """
+        import ast
+
+        if cls._defines_scrub_helper(tree):
+            return []
+
+        module_aliases, callable_aliases = cls._collect_subprocess_bindings(tree)
+        if not module_aliases and not callable_aliases:
+            return []
+
+        is_scrub_call = cls._is_scrub_call
+        is_subprocess_call = cls._is_subprocess_call_with_bindings
+        offenders: list[int] = []
+
+        # Track names bound to scrub_env_for_subprocess(...) per visit so
+        # callers may write:
+        #   sandboxed = scrub_env_for_subprocess(env)
+        #   subprocess.run(..., env=sandboxed)
+        class _Visitor(ast.NodeVisitor):
+            def __init__(self) -> None:
+                self.scrubbed_names: set[str] = set()
+
+            def visit_Assign(self, node: ast.Assign) -> None:
+                if is_scrub_call(node.value):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            self.scrubbed_names.add(tgt.id)
+                self.generic_visit(node)
+
+            def visit_Call(self, node: ast.Call) -> None:
+                if is_subprocess_call(node, module_aliases, callable_aliases):
+                    env_kw = next(
+                        (kw for kw in node.keywords if kw.arg == "env"),
+                        None,
+                    )
+                    ok = False
+                    if env_kw is not None:
+                        val = env_kw.value
+                        if is_scrub_call(val):
+                            ok = True
+                        elif isinstance(val, ast.Name) and val.id in self.scrubbed_names:
+                            ok = True
+                    if not ok:
+                        offenders.append(node.lineno)
+                self.generic_visit(node)
+
+        _Visitor().visit(tree)
+        return offenders
+
     def test_ast_no_unscrubbed_subprocess_in_core(self) -> None:
         """Every subprocess.run / Popen / call in core/ and commands/
         MUST pass env=scrub_env_for_subprocess(...).
@@ -760,36 +857,6 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         scan_dirs = (skill_src / "core", skill_src / "commands")
         offenders: list[str] = []
 
-        def _is_scrub_call(node: ast.AST) -> bool:
-            if not isinstance(node, ast.Call):
-                return False
-            func = node.func
-            if isinstance(func, ast.Name) and func.id == "scrub_env_for_subprocess":
-                return True
-            if isinstance(func, ast.Attribute) and func.attr == "scrub_env_for_subprocess":
-                return True
-            return False
-
-        # ``_collect_subprocess_bindings`` and
-        # ``_is_subprocess_call_with_bindings`` are staticmethods on this
-        # class — lifted so the positive-failure regression test can
-        # exercise the binding-tracking walker directly without scanning
-        # the real skill tree. See class docstring for the idiom.
-        _is_subprocess_call = self._is_subprocess_call_with_bindings
-
-        def _defines_scrub_helper(tree: ast.Module) -> bool:
-            """Return True iff the module's top level defines
-            ``scrub_env_for_subprocess`` — rename-proof signal that this
-            *is* the helper's implementation file (current home:
-            ``audit_env_scrub.py``; ``audit.py`` only re-exports). The
-            invariant must not apply to the file that owns the helper, no
-            matter which filename hosts it.
-            """
-            for node in tree.body:
-                if isinstance(node, ast.FunctionDef) and node.name == "scrub_env_for_subprocess":
-                    return True
-            return False
-
         py_files: list[Path] = []
         for d in scan_dirs:
             if d.is_dir():
@@ -799,65 +866,216 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
-            # Skip the helper's implementation file (it defines the helper
-            # and has no subprocess calls). Structural — not filename-based —
-            # so a future rename of audit.py / audit_env_scrub.py / split
-            # cannot break the invariant.
-            if _defines_scrub_helper(tree):
-                continue
-
-            # First pass — collect subprocess module + callable aliases so
-            # ``import subprocess as sp`` → ``sp.run(...)`` and
-            # ``from subprocess import run [as r]`` → ``run(...) / r(...)``
-            # are caught alongside the canonical ``subprocess.run(...)``.
-            module_aliases, callable_aliases = self._collect_subprocess_bindings(tree)
-            # If nothing imports subprocess in any form, no calls can be
-            # subprocess calls — skip the visit to save work.
-            if not module_aliases and not callable_aliases:
-                continue
-
-            # Track names bound to scrub_env_for_subprocess(...) per function
-            # scope, so callers may write:
-            #   sandboxed = scrub_env_for_subprocess(env)
-            #   subprocess.run(..., env=sandboxed)
-            class _Visitor(ast.NodeVisitor):
-                def __init__(self) -> None:
-                    self.scrubbed_names: set[str] = set()
-
-                def visit_Assign(self, node: ast.Assign) -> None:
-                    if _is_scrub_call(node.value):
-                        for tgt in node.targets:
-                            if isinstance(tgt, ast.Name):
-                                self.scrubbed_names.add(tgt.id)
-                    self.generic_visit(node)
-
-                def visit_Call(self, node: ast.Call) -> None:
-                    if _is_subprocess_call(node, module_aliases, callable_aliases):
-                        env_kw = next(
-                            (kw for kw in node.keywords if kw.arg == "env"),
-                            None,
-                        )
-                        ok = False
-                        if env_kw is not None:
-                            val = env_kw.value
-                            if _is_scrub_call(val):
-                                ok = True
-                            elif isinstance(val, ast.Name) and val.id in self.scrubbed_names:
-                                ok = True
-                        if not ok:
-                            offenders.append(
-                                f"{py_file.relative_to(skill_src)}:{node.lineno} — "
-                                f"subprocess call without scrub_env_for_subprocess"
-                            )
-                    self.generic_visit(node)
-
-            _Visitor().visit(tree)
+            for lineno in self._module_offenders(tree):
+                offenders.append(
+                    f"{py_file.relative_to(skill_src)}:{lineno} — "
+                    f"subprocess call without scrub_env_for_subprocess"
+                )
 
         self.assertEqual(
             offenders,
             [],
             "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
             + "\n  ".join(offenders),
+        )
+
+    def test_positive_failure_synthetic_violator_is_caught(self) -> None:
+        """Two-direction proof matching
+        ``ThresholdApplyIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``
+        / ``WorktreePerUnitIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``
+        / ``UnifiedStateWriteIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``:
+
+        Without this proof ``test_ast_no_unscrubbed_subprocess_in_core``
+        could be vacuously true — a future refactor that breaks the
+        env-keyword check, the scrubbed-name tracker, the binding
+        collector, OR the structural skip would still produce
+        ``offenders == []`` on the real skill tree and pass silently.
+        The convention exists precisely so each AST-walker invariant
+        carries a synthetic-source proof that the rule is operative.
+
+        (a) Synthesize FOUR known-bad subprocess call patterns and
+            assert the walker flags ALL of them:
+              * subprocess.run(['ls'])             — no env at all
+              * subprocess.run(['ls'], env=os.environ.copy())
+              * sp.run(['ls'], env={'X': 'y'})     — import-as alias bypass
+              * run(['ls'], env=child_env)         — from-import bare name,
+                                                    env=name NOT bound to
+                                                    scrub_env_for_subprocess
+        (b) Synthesize FOUR known-good subprocess call patterns and
+            assert the walker flags NONE of them:
+              * env=scrub_env_for_subprocess(...)  — direct scrub call
+              * scrubbed = scrub_env_for_subprocess(env); env=scrubbed
+              * env=audit.scrub_env_for_subprocess(...)
+                                                   — attribute form
+              * (no subprocess import at all)      — unrelated run() call
+        (c) Structural-skip proof: a synthetic module that DEFINES
+            ``scrub_env_for_subprocess`` at top level must be exempt
+            even if it contains a known-bad subprocess call — pins the
+            rename-proof skip helper.
+        """
+        import ast
+
+        # (a) BAD — no env at all.
+        no_env_src = textwrap.dedent(
+            """
+            import subprocess
+
+            def leak():
+                subprocess.run(["ls"])
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(no_env_src))),
+            1,
+            "Walker FAILED to flag subprocess call with no env= at all — "
+            "env-keyword check is broken or vacuous",
+        )
+
+        # (a) BAD — env=os.environ.copy().
+        environ_copy_src = textwrap.dedent(
+            """
+            import os
+            import subprocess
+
+            def leak():
+                subprocess.run(["ls"], env=os.environ.copy())
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(environ_copy_src))),
+            1,
+            "Walker FAILED to flag env=os.environ.copy() — env value "
+            "check is not rejecting unscrubbed dict construction",
+        )
+
+        # (a) BAD — ``import subprocess as sp`` alias bypass with
+        # env={} (NOT a scrub call). Pins the binding-tracker AND
+        # env-keyword check together.
+        sp_alias_src = textwrap.dedent(
+            """
+            import subprocess as sp
+
+            def leak():
+                sp.run(["ls"], env={"BMAD_AUDIT_KEY": "leak"})
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(sp_alias_src))),
+            1,
+            "Walker FAILED to flag `import subprocess as sp` + "
+            "sp.run(..., env={}) — alias-binding bypass",
+        )
+
+        # (a) BAD — ``from subprocess import run`` + env=<name> where
+        # <name> was NOT bound to scrub_env_for_subprocess.
+        from_import_src = textwrap.dedent(
+            """
+            from subprocess import run
+
+            def leak(child_env):
+                run(["ls"], env=child_env)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(from_import_src))),
+            1,
+            "Walker FAILED to flag bare `run(..., env=child_env)` where "
+            "child_env was never bound to scrub_env_for_subprocess",
+        )
+
+        # (b) GOOD — env=scrub_env_for_subprocess() direct call.
+        scrub_direct_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe():
+                subprocess.run(["ls"], env=scrub_env_for_subprocess())
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(scrub_direct_src)),
+            [],
+            "Walker FALSELY flagged env=scrub_env_for_subprocess() — "
+            "direct scrub call is the canonical safe form",
+        )
+
+        # (b) GOOD — scrubbed = scrub_env_for_subprocess(env); env=scrubbed.
+        scrub_assigned_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(scrub_assigned_src)),
+            [],
+            "Walker FALSELY flagged env=<name> where <name> was bound "
+            "to scrub_env_for_subprocess(...) — scrubbed-name tracker broken",
+        )
+
+        # (b) GOOD — env=audit.scrub_env_for_subprocess() attribute form.
+        scrub_attr_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core import audit
+
+            def safe():
+                subprocess.run(["ls"], env=audit.scrub_env_for_subprocess())
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(scrub_attr_src)),
+            [],
+            "Walker FALSELY flagged env=audit.scrub_env_for_subprocess() — "
+            "attribute-form scrub call must be accepted",
+        )
+
+        # (b) GOOD — no subprocess import at all. Unrelated bare run()
+        # must NOT trip the walker.
+        no_import_src = textwrap.dedent(
+            """
+            def run(args, env=None):
+                return None
+
+            def innocent():
+                run(["ls"], env={"FOO": "bar"})
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(no_import_src)),
+            [],
+            "Walker FALSELY flagged unrelated run() with no subprocess "
+            "import — binding-tracker is over-broad",
+        )
+
+        # (c) Structural-skip proof — a module defining
+        # ``scrub_env_for_subprocess`` at top level is exempt even with
+        # a known-bad call. Pins the rename-proof skip helper used at
+        # line ~780.
+        defines_helper_src = textwrap.dedent(
+            """
+            import subprocess
+
+            def scrub_env_for_subprocess(env=None):
+                return {}
+
+            def self_test():
+                # The implementation file itself may shell out without
+                # scrubbing — e.g. for a smoke test of the helper.
+                subprocess.run(["ls"])
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(defines_helper_src)),
+            [],
+            "Walker FAILED to honour the structural skip for modules "
+            "defining scrub_env_for_subprocess at top level — "
+            "rename-proof skip helper is broken",
         )
 
     def test_positive_failure_bypass_idioms_are_caught(self) -> None:
