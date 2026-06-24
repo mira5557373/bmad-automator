@@ -1040,6 +1040,34 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 saved = self.scrubbed_names
                 self.scrubbed_names = set(saved)
                 try:
+                    # Register parameters whose DEFAULT VALUE is a scrub
+                    # call as scrubbed-name bindings inside the function
+                    # body. Without this branch, ``def safe(env=
+                    # scrub_env_for_subprocess()): subprocess.run(...,
+                    # env=env)`` is falsely flagged — the parameter
+                    # ``env`` is bound at def-time to a scrubbed dict
+                    # but the walker only tracks bindings via
+                    # ``visit_Assign`` / ``visit_AnnAssign``. Mirrors
+                    # the symmetric AnnAssign branch in visit_AnnAssign
+                    # to keep the binding tracker uniform across all
+                    # bind-by-name forms. ``node.args.defaults`` are
+                    # right-aligned to ``args.posonlyargs + args.args``;
+                    # ``node.args.kw_defaults`` map 1:1 with
+                    # ``args.kwonlyargs`` and may contain ``None`` for
+                    # keyword-only params with no default.
+                    positional = list(node.args.posonlyargs) + list(node.args.args)
+                    defaults = list(node.args.defaults)
+                    # Right-align defaults to positional params.
+                    offset = len(positional) - len(defaults)
+                    for idx, default in enumerate(defaults):
+                        if is_scrub_call(default):
+                            param = positional[offset + idx]
+                            self.scrubbed_names.add(param.arg)
+                    for param, default in zip(
+                        node.args.kwonlyargs, node.args.kw_defaults
+                    ):
+                        if default is not None and is_scrub_call(default):
+                            self.scrubbed_names.add(param.arg)
                     self.generic_visit(node)
                 finally:
                     self.scrubbed_names = saved
@@ -1087,6 +1115,26 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 # ``sandboxed: dict = {...}`` after a prior scrub
                 # binding cannot silently leak through.
                 if node.value is not None and isinstance(node.target, ast.Name):
+                    if is_scrub_call(node.value):
+                        self.scrubbed_names.add(node.target.id)
+                    else:
+                        self.scrubbed_names.discard(node.target.id)
+                self.generic_visit(node)
+
+            def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+                # Mirror visit_Assign for PEP 572 walrus-operator
+                # assignments (e.g. ``if (scrubbed :=
+                # scrub_env_for_subprocess(env)): subprocess.run(...,
+                # env=scrubbed)``). Without this branch, a benign
+                # walrus binding of a correctly-scrubbed call site
+                # falsely trips the D-04 audit-floor invariant —
+                # ``node.target`` is always a single ``ast.Name`` per
+                # the Python grammar (PEP 572).
+                #
+                # Symmetric to ``visit_Assign``: when the RHS is NOT a
+                # scrub call, DISCARD the target so a rebind via walrus
+                # to a raw value cannot silently leak through.
+                if isinstance(node.target, ast.Name):
                     if is_scrub_call(node.value):
                         self.scrubbed_names.add(node.target.id)
                     else:
@@ -1447,6 +1495,184 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "accepted an unscrubbed env=dict literal after a bare "
             "annotation — visit_AnnAssign must guard ``node.value is "
             "not None`` AND must not bind a name without a scrub call",
+        )
+
+    def test_default_arg_and_walrus_scrub_bindings_are_tracked(self) -> None:
+        """Function default arguments bound to a scrub call AND PEP 572
+        walrus-operator bindings must register the target name in
+        ``scrubbed_names`` — same as a plain ``ast.Assign`` /
+        ``ast.AnnAssign``. Without ``_visit_function`` walking
+        ``node.args.defaults`` / ``node.args.kw_defaults`` AND a
+        ``visit_NamedExpr`` mirroring ``visit_Assign``, two latent
+        false-positives in the D-04 walker silently break CI on
+        legitimate refactors:
+
+          (a) ``def safe(env=scrub_env_for_subprocess()):
+                 subprocess.run(..., env=env)``
+          (b) ``if (scrubbed := scrub_env_for_subprocess(env)):
+                 subprocess.run(..., env=scrubbed)``
+
+        Both are functionally-safe forms but the pre-fix walker only
+        tracked bindings via ``visit_Assign`` / ``visit_AnnAssign``.
+        Mirrors the AnnAssign coverage in
+        ``test_annassign_scrub_binding_is_tracked`` — the convention is
+        that every binding form the audit-floor docstring promises
+        must be exercised by a positive-and-negative pair.
+
+        Also asserts the DISCARD semantics of the walrus branch:
+        ``scrubbed = scrub_env_for_subprocess(env)`` followed by
+        ``if (scrubbed := {...}):`` must INVALIDATE the prior binding,
+        symmetric with the ``visit_Assign`` discard branch pinned by
+        ``test_rebind_to_raw_invalidates_scrubbed_binding``.
+        """
+        import ast
+
+        # (a) GOOD — positional default bound to a direct scrub call.
+        # The reproducer in the bug report. Parameter ``env`` is bound
+        # at def-time to a scrubbed dict; the follow-up
+        # ``subprocess.run(..., env=env)`` must be accepted.
+        positional_default_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env=scrub_env_for_subprocess()):
+                subprocess.run(["ls"], env=env)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(positional_default_src)),
+            [],
+            "Walker FALSELY flagged env=<param> where <param>'s default "
+            "value is scrub_env_for_subprocess(...) — _visit_function "
+            "must walk node.args.defaults and register parameter names "
+            "whose default is a scrub call",
+        )
+
+        # (a) GOOD — keyword-only default bound to a scrub call.
+        # ``node.args.kw_defaults`` maps 1:1 with ``args.kwonlyargs``
+        # and may contain ``None``; the walker must guard against the
+        # None entries and accept the scrub-call entries.
+        kw_only_default_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(*, env=scrub_env_for_subprocess()):
+                subprocess.run(["ls"], env=env)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(kw_only_default_src)),
+            [],
+            "Walker FALSELY flagged env=<kwonly param> where the kwonly "
+            "default is scrub_env_for_subprocess(...) — _visit_function "
+            "must walk node.args.kw_defaults symmetrically with "
+            "node.args.defaults",
+        )
+
+        # (a) GOOD — attribute-form scrub call as positional default.
+        attr_form_default_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core import audit
+
+            def safe(env=audit.scrub_env_for_subprocess()):
+                subprocess.run(["ls"], env=env)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(attr_form_default_src)),
+            [],
+            "Walker FALSELY flagged env=<param> where the default is "
+            "audit.scrub_env_for_subprocess(...) — attribute-form scrub "
+            "call in a default must be accepted",
+        )
+
+        # (a) BAD — default IS NOT a scrub call. Parameter ``env``
+        # defaults to a raw dict literal; the follow-up
+        # ``subprocess.run(..., env=env)`` must be flagged. Pins that
+        # the default-walking branch only ADDS to ``scrubbed_names``
+        # for genuine scrub calls.
+        unsafe_default_src = textwrap.dedent(
+            """
+            import subprocess
+
+            def leak(env={"BMAD_AUDIT_KEY": "leak"}):
+                subprocess.run(["ls"], env=env)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(unsafe_default_src))),
+            1,
+            "Walker FAILED to flag env=<param> where the default is a "
+            "raw dict literal — default-walking must only register "
+            "scrub-call defaults, not all defaults indiscriminately",
+        )
+
+        # (b) GOOD — walrus-operator binding of a scrub call. Pins the
+        # ``visit_NamedExpr`` branch.
+        walrus_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                if (scrubbed := scrub_env_for_subprocess(env)):
+                    subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(walrus_src)),
+            [],
+            "Walker FALSELY flagged env=<name> where <name> was bound "
+            "to scrub_env_for_subprocess(...) via a walrus operator "
+            "(NamedExpr) — visit_NamedExpr branch is missing from the "
+            "binding tracker",
+        )
+
+        # (b) BAD — walrus-operator binding to a raw dict literal. Pins
+        # the env-keyword check still catches the unsafe case even when
+        # the unsafe value is bound via walrus.
+        walrus_unsafe_src = textwrap.dedent(
+            """
+            import subprocess
+
+            def leak():
+                if (sandboxed := {"BMAD_AUDIT_KEY": "leak"}):
+                    subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(walrus_unsafe_src))),
+            1,
+            "Walker FAILED to flag env=<name> where <name> was bound "
+            "via walrus to a raw dict literal — visit_NamedExpr must "
+            "only register scrub-call walrus bindings, not all walrus "
+            "bindings",
+        )
+
+        # (b) BAD — walrus REBIND from a prior scrub binding to a raw
+        # dict literal. Symmetric with the visit_Assign discard branch
+        # pinned by ``test_rebind_to_raw_invalidates_scrubbed_binding``.
+        walrus_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                if (scrubbed := {"BMAD_AUDIT_KEY": "leak"}):
+                    subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(walrus_rebind_src))),
+            1,
+            "Walker FAILED to flag walrus REBIND from a prior scrub "
+            "binding to a raw dict literal — visit_NamedExpr must "
+            "DISCARD the target name on any non-scrub RHS, symmetric "
+            "with visit_Assign",
         )
 
     def test_rebind_to_raw_invalidates_scrubbed_binding(self) -> None:
