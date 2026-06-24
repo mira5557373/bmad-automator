@@ -385,6 +385,35 @@ def read_gate_marker(
         raise GateMarkerCorruptedError(
             f"gate marker must be a JSON object, got {type(data).__name__}: {path}"
         )
+    # §9.2 "corruption is loud, not silent" — applies to structurally
+    # malformed dicts as well as unparseable JSON. The marker contract
+    # documented in ``write_gate_marker`` requires three string fields:
+    # ``gate_id``, ``commit_sha``, ``started_at``. A dict missing any of
+    # these (or carrying wrong types) is corruption: downstream callers
+    # such as ``_recover_from_crash_locked`` previously fell back to
+    # ``marker.get("gate_id", "")`` which collapsed to the evidence root
+    # itself (``Path('.../evidence') / "" == evidence``), and a single
+    # corrupted-but-parseable marker could wipe ALL historical gate
+    # evidence. Raise loud at the parse boundary so the corruption is
+    # routed to ``_quarantine_corrupted_marker`` instead.
+    # ``gate_id`` must also satisfy ``_SAFE_GATE_ID`` so a marker carrying
+    # a path-unsafe id (``"../"``, empty string, etc.) is rejected here
+    # rather than at the downstream defense-in-depth check.
+    for field in ("gate_id", "commit_sha", "started_at"):
+        value = data.get(field)
+        if not isinstance(value, str):
+            raise GateMarkerCorruptedError(
+                f"gate marker missing/invalid {field!r} "
+                f"(got {type(value).__name__}): {path}"
+            )
+        if not value:
+            raise GateMarkerCorruptedError(
+                f"gate marker {field!r} is empty: {path}"
+            )
+    if not _SAFE_GATE_ID.match(data["gate_id"]) or ".." in data["gate_id"]:
+        raise GateMarkerCorruptedError(
+            f"gate marker gate_id contains invalid path characters: {path}"
+        )
     return data
 
 

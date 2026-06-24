@@ -563,6 +563,111 @@ class GateMarkerLifecycleTests(unittest.TestCase):
                 read_gate_marker(tmp)
             self.assertIn("must be a JSON object", str(cm.exception))
 
+    # Regression: a marker that parses as valid JSON object but is missing
+    # the required contract fields (gate_id, commit_sha, started_at) or
+    # carries wrong-typed values used to slip through ``read_gate_marker``
+    # silently. Downstream ``_recover_from_crash_locked`` then fell back
+    # to ``marker.get("gate_id", "")`` whose empty-string path-join
+    # collapsed to the evidence root, scheduling the ENTIRE historical
+    # ``_bmad/gate/evidence/`` tree for rmtree. §9.2 ("corruption is loud,
+    # not silent") demands this case raise GateMarkerCorruptedError so
+    # the orchestrator routes through ``_quarantine_corrupted_marker``.
+
+    def test_empty_object_marker_raises(self) -> None:
+        # The catastrophic-blast-radius case: ``{}``.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("gate_id", str(cm.exception))
+
+    def test_marker_missing_gate_id_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"commit_sha": "abc", "started_at": "2026-01-01T00:00:00Z"}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("gate_id", str(cm.exception))
+
+    def test_marker_missing_commit_sha_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"gate_id": "g-x", "started_at": "2026-01-01T00:00:00Z"}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("commit_sha", str(cm.exception))
+
+    def test_marker_missing_started_at_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"gate_id": "g-x", "commit_sha": "abc"}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("started_at", str(cm.exception))
+
+    def test_marker_empty_gate_id_raises(self) -> None:
+        # The exact shape that produced the evidence-wipe blast: gate_id
+        # is present but empty, so downstream path-join collapses.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "gate_id": "",
+                    "commit_sha": "abc",
+                    "started_at": "2026-01-01T00:00:00Z",
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError):
+                read_gate_marker(tmp)
+
+    def test_marker_wrong_typed_gate_id_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "gate_id": 12345,
+                    "commit_sha": "abc",
+                    "started_at": "2026-01-01T00:00:00Z",
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("gate_id", str(cm.exception))
+
+    def test_marker_path_unsafe_gate_id_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "_bmad" / "gate" / "gate-in-progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "gate_id": "../escape",
+                    "commit_sha": "abc",
+                    "started_at": "2026-01-01T00:00:00Z",
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(GateMarkerCorruptedError) as cm:
+                read_gate_marker(tmp)
+            self.assertIn("path characters", str(cm.exception))
+
     def test_absent_marker_still_returns_none(self) -> None:
         # Regression: corruption-detection didn't change the absent path.
         with tempfile.TemporaryDirectory() as tmp:
