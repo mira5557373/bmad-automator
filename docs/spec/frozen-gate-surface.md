@@ -72,7 +72,7 @@ This doc is the authoritative "what not to break" list for any adoption work tha
 - `compose_profiles(base, overlay) -> dict` — the merge authority used by `core/product_profile.load_effective_profile`. Defines union semantics for `categories`, precedence for `timeouts`, and `categories_na` carry-over. Callers must not re-implement profile merging.
 
 ### `core/bauto_bridge/hookbus_shim.py` (Path B / N6.2)
-- Public in-process callback bus. `core/gate_orchestrator.run_production_gate` fires it at 6 lifecycle stages: `pre_gate`, `pre_collect`, `post_collect`, `pre_adjudicate`, `post_adjudicate`, `post_gate`. Registration order = dispatch order; listener exceptions are fail-closed.
+- Public in-process callback bus. The dispatch sites live in `commands/orchestrator.py` (Path B / N6.3 orchestrator-helper CLI), not in `core/gate_orchestrator.py`. `KNOWN_EVENTS` is the closed allowlist of 6 lifecycle stages: `post_dev_phase`, `pre_review`, `post_review`, `pre_gate`, `post_gate`, `pre_commit`. Registration order = dispatch order; listener exceptions are fail-closed.
 
 ### `core/plugins.py` (Path B / N6.4)
 - `PLUGIN_MANIFEST_KEYS` — closed allowlist `{name, version, hooks, timeout_s, fail_closed}`; widening requires a spec-level decision.

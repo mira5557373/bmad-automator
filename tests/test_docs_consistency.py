@@ -2370,5 +2370,263 @@ class SpecDriftWatcherPersistenceKeyDocstringTests(unittest.TestCase):
         )
 
 
+class HookBusDocsConsistencyTests(unittest.TestCase):
+    """CLAUDE.md + frozen-gate-surface.md HookBus stage names match KNOWN_EVENTS.
+
+    Pre-fix CLAUDE.md (the N6.2/N6.3 bullet) and
+    ``docs/spec/frozen-gate-surface.md`` (the hookbus_shim section)
+    both claimed: ``core/gate_orchestrator.py`` fires HookBus at 6
+    lifecycle stages ``{pre_gate, pre_collect, post_collect,
+    pre_adjudicate, post_adjudicate, post_gate}``. Two independent
+    drifts:
+
+    1. **Wrong module.** ``grep -i 'hookbus\\|emit_hook' core/gate_orchestrator.py``
+       returns ZERO matches. The actual wiring lives in
+       ``commands/orchestrator.py`` (N6.3 orchestrator-helper CLI).
+    2. **Wrong stage names.** ``hookbus_shim.KNOWN_EVENTS`` is
+       ``{post_dev_phase, pre_review, post_review, pre_gate, post_gate,
+       pre_commit}``. The four names ``pre_collect``, ``post_collect``,
+       ``pre_adjudicate``, ``post_adjudicate`` are not in the
+       allowlist; a plugin author registering on them would get
+       ``HookbusShimError``.
+
+    The regression test pins three independent halves of the post-fix
+    contract:
+
+    1. ``core/gate_orchestrator.py`` truly carries no HookBus import or
+       emit call so a future re-introduction of the doc drift is
+       caught at the same commit.
+    2. Both docs name the six stages currently in ``KNOWN_EVENTS`` and
+       avoid the four non-existent ones.
+    3. Both docs attribute the dispatch to ``commands/orchestrator.py``
+       (not ``core/gate_orchestrator.py``).
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+    FROZEN_SURFACE_PATH = REPO_ROOT / "docs" / "spec" / "frozen-gate-surface.md"
+    # Stage names the pre-fix docs claimed but that do NOT exist in
+    # ``hookbus_shim.KNOWN_EVENTS``. A plugin author copying these from
+    # the docs would get ``HookbusShimError`` at registration.
+    NON_EXISTENT_STAGE_NAMES = (
+        "pre_collect",
+        "post_collect",
+        "pre_adjudicate",
+        "post_adjudicate",
+    )
+
+    def _live_known_events(self) -> frozenset[str]:
+        shim = importlib.import_module(
+            "story_automator.core.bauto_bridge.hookbus_shim"
+        )
+        return shim.KNOWN_EVENTS
+
+    def test_gate_orchestrator_carries_no_hookbus_wiring(self) -> None:
+        """Defensive: the live source backs the post-fix doc claim.
+
+        If a future milestone wires HookBus into ``core/gate_orchestrator.py``,
+        this test trips so both docs get re-audited at the same commit
+        (the post-fix doc text says ``core/gate_orchestrator.py`` does
+        NOT call HookBus — that claim must remain true).
+        """
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        # Use a regex that ignores case so 'HookBus' / 'hookbus' both
+        # trip. The shim's import path token uniquely anchors any
+        # HookBus reference because the only public type is
+        # HookBusShim and its only module is hookbus_shim.
+        forbidden = re.compile(
+            r"hookbus_shim|HookBusShim",
+            re.IGNORECASE,
+        )
+        match = forbidden.search(text)
+        self.assertIsNone(
+            match,
+            "core/gate_orchestrator.py now references HookBus "
+            f"({match.group(0) if match else '?'}); CLAUDE.md + "
+            "frozen-gate-surface.md both claim the file does NOT "
+            "wire HookBus. Either re-audit those doc bullets or "
+            "revert the new import.",
+        )
+
+    def test_known_events_anchor_matches_post_fix_doc_text(self) -> None:
+        """Defensive: the live ``KNOWN_EVENTS`` matches the doc's named six.
+
+        The post-fix CLAUDE.md + frozen-gate-surface.md bullets
+        enumerate ``post_dev_phase, pre_review, post_review, pre_gate,
+        post_gate, pre_commit``. If a future refactor widens or shrinks
+        ``KNOWN_EVENTS``, this test trips so both doc enumerations get
+        re-audited at the same commit.
+        """
+        live = self._live_known_events()
+        expected = frozenset({
+            "post_dev_phase",
+            "pre_review",
+            "post_review",
+            "pre_gate",
+            "post_gate",
+            "pre_commit",
+        })
+        self.assertEqual(
+            live,
+            expected,
+            f"hookbus_shim.KNOWN_EVENTS is {sorted(live)} but CLAUDE.md "
+            f"+ frozen-gate-surface.md enumerate {sorted(expected)}; "
+            "either widen/shrink the doc enumerations or rebind "
+            "KNOWN_EVENTS.",
+        )
+
+    def test_claude_md_hookbus_bullet_names_real_stage_names(self) -> None:
+        """CLAUDE.md's HookBus bullet must name every live stage name.
+
+        Pin the specific regression: pre-fix CLAUDE.md listed four
+        stage names (``pre_collect``, ``post_collect``,
+        ``pre_adjudicate``, ``post_adjudicate``) that are NOT in
+        ``KNOWN_EVENTS`` and omitted the four real ones that are.
+        """
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*HookBus \(N6\.2/N6\.3\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "CLAUDE.md no longer has the '- **HookBus (N6.2/N6.3)**' "
+            "bullet; update this regression test to match the new shape.",
+        )
+        bullet = match.group(0)
+        # Every live KNOWN_EVENTS name must appear backticked in the
+        # bullet so the doc enumeration matches the allowlist.
+        for stage in self._live_known_events():
+            self.assertIn(
+                f"`{stage}`",
+                bullet,
+                f"CLAUDE.md HookBus bullet no longer names `{stage}` "
+                "as a lifecycle stage. The live KNOWN_EVENTS allowlist "
+                "carries this token; the doc enumeration must match or "
+                "operators following the spec will register on the "
+                "wrong stage names.",
+            )
+        # The four pre-fix non-existent stage names MUST be gone.
+        for stage in self.NON_EXISTENT_STAGE_NAMES:
+            self.assertNotIn(
+                f"`{stage}`",
+                bullet,
+                f"CLAUDE.md HookBus bullet still lists `{stage}` as a "
+                "lifecycle stage, but the token is not in "
+                "hookbus_shim.KNOWN_EVENTS. A plugin author registering "
+                "on this stage name would get HookbusShimError.",
+            )
+
+    def test_claude_md_hookbus_bullet_attributes_dispatch_to_commands(
+        self,
+    ) -> None:
+        """CLAUDE.md must point operators at the actual dispatch site.
+
+        Pre-fix CLAUDE.md said ``core/gate_orchestrator.py`` fires
+        HookBus; post-fix it must name ``commands/orchestrator.py``
+        because that is where the six emit call sites actually live.
+        """
+        text = _read("CLAUDE.md")
+        match = re.search(
+            r"^- \*\*HookBus \(N6\.2/N6\.3\)\*\*.*$",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(match)
+        bullet = match.group(0)
+        self.assertIn(
+            "commands/orchestrator.py",
+            bullet,
+            "CLAUDE.md HookBus bullet no longer names "
+            "`commands/orchestrator.py` as the dispatch site; the "
+            "actual emit call sites live there (the bus is not wired "
+            "into core/gate_orchestrator.py).",
+        )
+
+    def test_frozen_surface_hookbus_section_names_real_stage_names(
+        self,
+    ) -> None:
+        """frozen-gate-surface.md's hookbus_shim section enumerates the live six.
+
+        Pin the spec's HookBus enumeration to ``KNOWN_EVENTS`` so a
+        future doc edit cannot silently regress to the pre-fix
+        four-bogus-stages enumeration.
+        """
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        # The section is delimited by the
+        # ``### `core/bauto_bridge/hookbus_shim.py` (Path B / N6.2)``
+        # heading and the next ``### `` heading.
+        section_re = re.compile(
+            r"^### `core/bauto_bridge/hookbus_shim\.py`.*?$",
+            re.MULTILINE,
+        )
+        match = section_re.search(text)
+        self.assertIsNotNone(
+            match,
+            "frozen-gate-surface.md no longer has the "
+            "'### `core/bauto_bridge/hookbus_shim.py`' section heading; "
+            "update this regression test to match the new shape.",
+        )
+        start = match.end()
+        next_heading = re.search(r"^### ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        body = text[start:end]
+        for stage in self._live_known_events():
+            self.assertIn(
+                f"`{stage}`",
+                body,
+                f"frozen-gate-surface.md hookbus_shim section no longer "
+                f"names `{stage}` as a lifecycle stage. The live "
+                "KNOWN_EVENTS allowlist carries this token; the doc "
+                "enumeration must match.",
+            )
+        for stage in self.NON_EXISTENT_STAGE_NAMES:
+            self.assertNotIn(
+                f"`{stage}`",
+                body,
+                f"frozen-gate-surface.md hookbus_shim section still "
+                f"lists `{stage}` as a lifecycle stage, but the token "
+                "is not in hookbus_shim.KNOWN_EVENTS.",
+            )
+
+    def test_frozen_surface_hookbus_section_attributes_dispatch_to_commands(
+        self,
+    ) -> None:
+        """frozen-gate-surface.md must point operators at the real dispatch site.
+
+        Pre-fix the section said
+        ``core/gate_orchestrator.run_production_gate fires it`` — but
+        ``core/gate_orchestrator.py`` carries no HookBus import or call.
+        Post-fix the section must name ``commands/orchestrator.py``.
+        """
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        section_re = re.compile(
+            r"^### `core/bauto_bridge/hookbus_shim\.py`.*?$",
+            re.MULTILINE,
+        )
+        match = section_re.search(text)
+        self.assertIsNotNone(match)
+        start = match.end()
+        next_heading = re.search(r"^### ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        body = text[start:end]
+        self.assertIn(
+            "commands/orchestrator.py",
+            body,
+            "frozen-gate-surface.md hookbus_shim section no longer "
+            "names `commands/orchestrator.py` as the dispatch site; "
+            "the bus emit call sites live there, not in "
+            "core/gate_orchestrator.py.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
