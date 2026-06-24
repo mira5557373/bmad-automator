@@ -3531,5 +3531,127 @@ class ContributingAdditiveGateFileFieldRuleConsistencyTests(unittest.TestCase):
         )
 
 
+class EvidenceCacheGenGrowthDocstringTests(unittest.TestCase):
+    """``evidence_cache`` module docstring documents the ``_GEN`` growth profile.
+
+    Pre-fix the module docstring at ``evidence_cache.py:14-15`` only spoke
+    about the cache having "no TTL, no size cap, no background refresh"
+    in the context of ``_CACHE``. The sidecar ``_GEN`` dict (declared at
+    line 43) has the SAME unbounded-by-distinct-gate_ids growth profile —
+    :func:`invalidate_evidence_cache` always creates an entry via
+    ``_GEN[key] = _GEN.get(key, 0) + 1``, and
+    :func:`invalidate_all_evidence_cache` BUMPS rather than CLEARS the
+    counter (intentionally, to preserve the gen-advance signal for
+    in-flight miss-loaders — see
+    ``test_invalidate_all_does_not_unmask_stale_load``). The grow-only
+    property of ``_GEN`` is a correctness REQUIREMENT, not a bug, but
+    operators of long-running orchestrator processes that touch many
+    distinct ``gate_id`` values would not anticipate this from the
+    docstring's existing ``_CACHE``-only memory contract.
+
+    The post-fix docstring adds a "Memory profile:" section that
+    explicitly documents:
+
+    1. ``_CACHE`` grows one entry per distinct ``(project_root, gate_id)``
+       pair and is bounded by invalidation events (per-key pop on persist,
+       bulk clear on test isolation).
+    2. ``_GEN`` is intentionally NEVER popped — it grows by one small
+       integer per distinct key for the process lifetime, with the
+       grow-only property pinned by a named regression test.
+    3. Long-running daemon-style orchestrators should plan a periodic
+       restart if they process >100k distinct gate_ids.
+
+    The regression test pins the post-fix contract: the docstring must
+    carry a "Memory profile:" heading and must name BOTH ``_CACHE`` and
+    ``_GEN`` so future doc edits can rephrase but cannot silently drop
+    the ``_GEN`` growth-profile disclosure that operators rely on.
+    """
+
+    def _module_docstring(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.evidence_cache"
+        )
+        return module.__doc__ or ""
+
+    def test_docstring_carries_memory_profile_section(self) -> None:
+        doc = self._module_docstring()
+        self.assertIn(
+            "Memory profile:",
+            doc,
+            "evidence_cache module docstring no longer carries the "
+            "'Memory profile:' section that documents _CACHE + _GEN "
+            "growth profiles for operators of long-running orchestrator "
+            "processes. The pre-fix docstring's 'no TTL, no size cap, "
+            "no background refresh' bullet only described _CACHE; the "
+            "sidecar _GEN dict has the same growth profile and an "
+            "operator skimming only the correctness-boundary section "
+            "would not anticipate _GEN's grow-only retention.",
+        )
+
+    def test_docstring_names_gen_in_memory_profile(self) -> None:
+        doc = self._module_docstring()
+        # Extract the Memory profile section body so we don't match a
+        # passing _GEN mention elsewhere in the docstring.
+        match = re.search(
+            r"Memory profile:\s*(.+?)(?:\nThis module|\Z)",
+            doc,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            match,
+            "Memory profile section is present but its body could not "
+            "be extracted; update this regression test to match the "
+            "new shape.",
+        )
+        body = match.group(1)
+        self.assertIn(
+            "``_GEN``",
+            body,
+            "Memory profile section does not name ``_GEN`` (the sidecar "
+            "generation counter declared at evidence_cache.py:43); "
+            "operators would not learn that the dict has the same "
+            "growth profile as ``_CACHE``.",
+        )
+        self.assertIn(
+            "``_CACHE``",
+            body,
+            "Memory profile section does not name ``_CACHE``; the "
+            "section must compare the two dicts' growth profiles so "
+            "operators understand which dict is bounded by invalidation "
+            "vs which is grow-only.",
+        )
+
+    def test_docstring_calls_out_gen_grow_only_property(self) -> None:
+        """The Memory profile section names the grow-only property of ``_GEN``.
+
+        Pre-fix the docstring had no Memory profile section; post-fix
+        the section must explicitly state that ``_GEN`` is "intentionally
+        NEVER" popped (or equivalent wording). A future doc edit that
+        silently demotes this to "may be popped" or removes the
+        intentionality framing would re-introduce the operator-facing
+        ambiguity this fix closed.
+        """
+        doc = self._module_docstring()
+        match = re.search(
+            r"Memory profile:\s*(.+?)(?:\nThis module|\Z)",
+            doc,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        body = match.group(1)
+        # Accept either "NEVER popped" or "never popped" with the
+        # intentionality framing. The pre-fix doc was silent on this
+        # entirely; post-fix the body must make the choice explicit.
+        self.assertRegex(
+            body,
+            r"(?i)\bnever\b",
+            "Memory profile section does not call out that ``_GEN`` is "
+            "never popped; without this framing an operator reading the "
+            "section would assume per-key cleanup happens at some point. "
+            "The grow-only property is a correctness requirement pinned "
+            "by ``test_invalidate_all_does_not_unmask_stale_load``.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

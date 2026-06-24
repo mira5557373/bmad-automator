@@ -19,6 +19,29 @@ Correctness boundary:
   bundle (e.g. appends to it, edits a record in place) cannot poison
   subsequent cache hits.
 
+Memory profile:
+
+* ``_CACHE`` grows by one entry per distinct ``(project_root, gate_id)``
+  pair loaded in-process. Entries are popped by
+  :func:`invalidate_evidence_cache` (on persist) and cleared en masse by
+  :func:`invalidate_all_evidence_cache` (test isolation), but in steady
+  state a cache hit retains its entry for the process lifetime.
+* ``_GEN`` (the sidecar generation counter declared below) ALSO grows by
+  one entry per distinct key and is intentionally NEVER popped:
+  :func:`invalidate_evidence_cache` always creates the entry, and
+  :func:`invalidate_all_evidence_cache` BUMPS rather than clears it. This
+  preserves the "gen-advance ⇒ refuse to cache" invariant for in-flight
+  miss-loaders that snapshotted a generation before the bulk drop — see
+  ``test_invalidate_all_does_not_unmask_stale_load``. Operators of
+  long-running orchestrator processes that touch many distinct
+  ``gate_id`` values should expect ``_GEN`` to retain one small integer
+  per gate_id for the process lifetime; each entry is ~150 bytes so 100k
+  distinct gate_ids is ~15 MiB. This is bounded by the number of
+  distinct gate_ids seen, not by wall-clock time, and is acceptable for
+  the project's single-operator threat model. A short-lived gate-run
+  process is naturally bounded; a long-lived daemon-style orchestrator
+  should plan a periodic restart if it processes >100k distinct gate_ids.
+
 This module is intentionally a sibling of :mod:`evidence_io` so that
 ``evidence_io.py`` stays under its current LOC and the cache lifecycle
 is isolated for testing.
