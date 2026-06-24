@@ -161,6 +161,99 @@ class CostAttributionDocstringTests(unittest.TestCase):
         )
 
 
+class ValidateIsolationKwargsDocstringTests(unittest.TestCase):
+    """``_validate_isolation_kwargs`` docstring matches the live caller set.
+
+    Pre-fix the docstring listed four entry points that "call at the
+    TOP" of the helper:
+    ``run_gate_collectors``, ``run_production_gate``,
+    ``run_system_gate``, ``_run_collectors``. Grepping the codebase
+    confirmed only three direct call sites; ``_run_collectors`` is a
+    thin wrapper in ``gate_orchestrator.py`` that forwards to
+    ``run_gate_collectors`` (which validates), so validation runs by
+    delegation rather than via a direct call from ``_run_collectors``.
+    The regression test pins the docstring to (a) not claim
+    ``_run_collectors`` as a direct caller and (b) acknowledge the
+    delegation pattern, while also verifying the live grep still finds
+    exactly three direct call sites in ``core/``.
+    """
+
+    CORE_DIR = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+    )
+
+    def _isolation_docstring(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.collector_isolation"
+        )
+        return module._validate_isolation_kwargs.__doc__ or ""
+
+    def test_docstring_does_not_claim_run_collectors_as_direct_caller(self) -> None:
+        doc = self._isolation_docstring()
+        # The pre-fix docstring listed ``_run_collectors`` inside the
+        # "entry point" enumeration. Post-fix, ``_run_collectors`` must
+        # appear only in the parenthetical that explains the delegation
+        # pattern, never inside an "entry point" enumeration.
+        self.assertNotRegex(
+            doc,
+            r"entry point.*_run_collectors",
+            "_validate_isolation_kwargs docstring still lists "
+            "_run_collectors as a direct entry-point caller; it "
+            "validates by delegation through run_gate_collectors.",
+        )
+
+    def test_docstring_acknowledges_delegation_pattern(self) -> None:
+        doc = self._isolation_docstring()
+        self.assertIn(
+            "delegation",
+            doc,
+            "_validate_isolation_kwargs docstring no longer mentions "
+            "the _run_collectors delegation pattern; future contributors "
+            "will assume _run_collectors validates directly.",
+        )
+
+    def test_live_caller_set_matches_docstring(self) -> None:
+        """Defensive: grep ``core/`` for direct call sites of the helper.
+
+        The docstring promises three direct callers
+        (``run_gate_collectors``, ``run_production_gate``,
+        ``run_system_gate``). Any drift in either direction (a new
+        wrapper that forgets to validate, or someone removing a
+        validation site) shows up as a mismatch here.
+        """
+        call_sites: set[str] = set()
+        callsite_re = re.compile(r"_validate_isolation_kwargs\s*\(")
+        for path in sorted(self.CORE_DIR.glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            # Skip the defining module itself.
+            if path.name == "collector_isolation.py":
+                continue
+            for line in text.splitlines():
+                # Ignore the ``from ... import`` line — that's not a call.
+                if "import" in line:
+                    continue
+                if callsite_re.search(line):
+                    call_sites.add(path.name)
+        # The docstring's three direct callers live in exactly these
+        # three modules.
+        self.assertEqual(
+            call_sites,
+            {
+                "collector_runner.py",
+                "gate_orchestrator.py",
+                "system_gate.py",
+            },
+            "Live call sites of _validate_isolation_kwargs no longer "
+            "match the three modules its docstring promises; either "
+            "update the docstring or add the missing validation.",
+        )
+
+
 class ContributingSectionHeadingsTests(unittest.TestCase):
     """The four polish-docs sections are present in CONTRIBUTING.md."""
 

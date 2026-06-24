@@ -100,10 +100,13 @@ def _validate_isolation_kwargs(
     """Early kwarg validation (HIGH #6).
 
     Called at the TOP of every entry point (``run_gate_collectors``,
-    ``run_production_gate``, ``run_system_gate``, ``_run_collectors``)
-    BEFORE any other work — before ``assert_host_context``, before
-    gate-lock acquisition. Validates BOTH modes (no silent acceptance
-    of ``max_workers="four"`` in ``shared`` mode).
+    ``run_production_gate``, ``run_system_gate``) BEFORE any other
+    work — before ``assert_host_context``, before gate-lock
+    acquisition. ``gate_orchestrator._run_collectors`` validates by
+    delegation (it is a thin wrapper that forwards to
+    ``run_gate_collectors``); it does NOT call this helper directly.
+    Validates BOTH modes (no silent acceptance of
+    ``max_workers="four"`` in ``shared`` mode).
 
     Raises:
         TypeError: ``max_workers`` is not an int (booleans excluded —
