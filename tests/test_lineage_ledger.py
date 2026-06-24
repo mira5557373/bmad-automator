@@ -252,6 +252,60 @@ class FindOrphansTests(unittest.TestCase):
             build_lineage_chain([e0, e1])
 
 
+class VerifyLineageEmptyChainContractTests(unittest.TestCase):
+    """Pin the intentional empty-chain asymmetry with the CLI surface.
+
+    The CLI ``lineage verify`` action short-circuits BEFORE constructing a
+    :class:`LineageChain` and emits ``ok:true`` / ``merkle_root:""`` when
+    ``_bmad/lineage/`` is empty, mirroring the :func:`load_lineage_root`
+    sentinel.
+
+    By contrast, :func:`verify_lineage` is asked a different question:
+    "is this constructed :class:`LineageChain` value internally consistent?"
+    An empty-entries :class:`LineageChain` is unreachable through any
+    documented builder (:func:`build_lineage_chain` and
+    :func:`load_lineage_chain` both raise on empty input), so the only way
+    to obtain ``LineageChain(entries=(), merkle_root='')`` is via direct
+    dataclass instantiation with malformed inputs. Rejecting that value is
+    the correct defensive behavior — pin it so a future contributor cannot
+    silently widen the surface to accept forged empty chains.
+    """
+
+    def test_verify_lineage_rejects_synthetic_empty_chain(self) -> None:
+        # Direct dataclass instantiation bypasses the public builders;
+        # ``verify_lineage`` correctly rejects this defensive sanity case.
+        synthetic_empty = LineageChain(entries=(), merkle_root="")
+        self.assertFalse(verify_lineage(synthetic_empty))
+
+    def test_verify_lineage_rejects_synthetic_empty_with_bogus_root(
+        self,
+    ) -> None:
+        # Even with a non-empty (but bogus) merkle_root, an empty-entries
+        # chain is still a forged value — reject it.
+        synthetic = LineageChain(entries=(), merkle_root="f" * 64)
+        self.assertFalse(verify_lineage(synthetic))
+
+    def test_public_builders_refuse_empty_so_verify_never_sees_it(
+        self,
+    ) -> None:
+        # Both documented producers refuse empty input, so any caller
+        # using the public API can never hand ``verify_lineage`` an
+        # empty-entries chain. This is what makes the False-on-empty
+        # rejection a defensive sanity guard (not a production code path).
+        with self.assertRaises(LineageError):
+            build_lineage_chain([])
+        with self.assertRaises(LineageError):
+            compute_lineage_root([])
+
+    def test_verify_lineage_rejects_non_lineagechain_inputs(self) -> None:
+        # Defensive guard at line 237-238 — pin it so a future refactor
+        # doesn't accidentally drop the isinstance check (which would
+        # allow duck-typed forgeries through the predicate).
+        self.assertFalse(verify_lineage(None))  # type: ignore[arg-type]
+        self.assertFalse(verify_lineage("not a chain"))  # type: ignore[arg-type]
+        self.assertFalse(verify_lineage(object()))  # type: ignore[arg-type]
+
+
 class FullEightGenreRoundTripTests(unittest.TestCase):
     def test_full_8_genre_chain_round_trip(self) -> None:
         entries = _full_chain()

@@ -222,17 +222,39 @@ def verify_lineage(
     """Return True iff ``chain`` is internally consistent.
 
     Checks:
-        1. ``chain.merkle_root`` equals ``compute_lineage_root(chain.entries)``
+        1. ``chain`` is a :class:`LineageChain` instance (defensive guard
+           against forged values constructed via direct dataclass init).
+        2. ``chain.entries`` is non-empty. An empty-entries chain is
+           unreachable through any documented constructor
+           (:func:`build_lineage_chain` and :func:`load_lineage_chain`
+           both raise :class:`LineageError` on empty input), so reaching
+           this guard means the value was hand-constructed with malformed
+           inputs — return False as a defensive sanity rejection.
+        3. ``chain.merkle_root`` equals ``compute_lineage_root(chain.entries)``
            — detects tampering with any entry (payload_hash, parent_root,
            timestamp, genre, slug).
-        2. Each entry's ``parent_root`` matches the running Merkle root of
+        4. Each entry's ``parent_root`` matches the running Merkle root of
            the preceding entries (delegated to ``build_lineage_chain``).
-        3. If ``expected_genres`` is provided, the genres of ``chain.entries``
+        5. If ``expected_genres`` is provided, the genres of ``chain.entries``
            match it position-for-position.
 
     Any failure returns False (not an exception) so callers can use this
     as a boolean predicate; ``build_lineage_chain`` is the right tool
     when you want a diagnostic exception instead.
+
+    Note on the empty-chain semantic asymmetry with the CLI surface:
+    :func:`commands.lineage_cmd.verify_action` emits ``ok:true`` with
+    ``merkle_root:""`` when ``_bmad/lineage/`` is empty, mirroring the
+    :func:`load_lineage_root` ``""`` sentinel. That CLI path answers
+    "is the on-disk store consistent?" (empty disk = trivially yes) and
+    short-circuits BEFORE constructing a :class:`LineageChain`. This
+    function answers a different question: "is this constructed
+    :class:`LineageChain` value internally consistent?" — and since the
+    only way to obtain ``LineageChain(entries=(), merkle_root='')`` is
+    via direct dataclass instantiation with malformed inputs, rejection
+    is the correct defensive behavior. Callers wanting the CLI's
+    "trivially intact" interpretation on empty disk state should call
+    :func:`load_lineage_root` and treat ``""`` as the empty-chain sentinel.
     """
     if not isinstance(chain, LineageChain):
         return False
