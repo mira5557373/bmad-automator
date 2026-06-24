@@ -377,6 +377,71 @@ class EmissionTests(unittest.TestCase):
             load_collector_cost_share(self.root, self.gate_id, "ruff"),
         )
 
+    def test_load_gate_cost_report_collector_count_derived_from_len_shares(
+        self,
+    ) -> None:
+        """Regression — load_gate_cost_report used to read collector_count
+        straight off disk via ``int(data.get("collector_count", len(shares)))``,
+        treating ``len(shares)`` as a default-only fallback. Combined with
+        the loud-fail-on-list-type / silent-skip-on-element-type asymmetry
+        in the per_collector parse loop (which filters non-dict entries via
+        ``isinstance(entry, dict)``), a hand-edited or legacy summary.json
+        carrying mixed valid/junk per_collector entries plus a stale
+        on-disk ``collector_count`` would round-trip into a GateCostReport
+        where ``collector_count != len(per_collector)`` — silently breaking
+        the natural invariant pinned by the emit-side at l.359
+        (``collector_count=len(shares)``).
+
+        Under the project's single-trusted-operator threat model this is
+        observability-only (cost evidence is sibling-of-evidence, never
+        re-walked for Merkle reverification, never gates a workflow), but
+        the inconsistent dataclass surfaces to operator audits and the
+        loader contradicted its own fail-loud pattern. Fix derives
+        ``collector_count`` from ``len(shares)`` ALWAYS so the in-memory
+        dataclass is internally consistent regardless of on-disk drift.
+        """
+
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        sp = cost_dir / "summary.json"
+        valid_share = {
+            "collector_id": "ruff",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost_usd": 0.001,
+            "duration_s": 1.0,
+            "attribution_mode": "uniform",
+        }
+        # Mixed per_collector: one valid dict + three non-dict entries
+        # that the isinstance(entry, dict) filter silently drops. Stale
+        # collector_count=4 on disk pretends all four were valid.
+        sp.write_text(
+            json.dumps(
+                {
+                    "gate_id": self.gate_id,
+                    "session_usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_cost_usd": 0.001,
+                        "tool_calls_count": 0,
+                        "duration_s": 1.0,
+                    },
+                    "per_collector": [valid_share, "NOT-A-DICT", 42, None],
+                    "attribution_mode": "uniform",
+                    "total_cost_usd": 0.001,
+                    "collector_count": 4,  # deliberately stale
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                },
+            ),
+        )
+        loaded = load_gate_cost_report(self.root, self.gate_id)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None  # narrow for type checker
+        # The fix: collector_count must agree with len(per_collector),
+        # mirroring the emit-side invariant. Before the fix, this
+        # assertion produced collector_count=4, len(per_collector)=1.
+        self.assertEqual(loaded.collector_count, len(loaded.per_collector))
+        self.assertEqual(loaded.collector_count, 1)
+
     def test_load_collector_cost_share_wrong_type_raises_CostEvidenceError(
         self,
     ) -> None:

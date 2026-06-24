@@ -460,7 +460,16 @@ def load_gate_cost_report(
         per_collector=shares,
         attribution_mode=str(data.get("attribution_mode", "uniform")),
         total_cost_usd=float(data.get("total_cost_usd", 0.0)),
-        collector_count=int(data.get("collector_count", len(shares))),
+        # Derive collector_count from len(shares) ALWAYS — mirrors the
+        # emit-side invariant at l.359 (collector_count=len(shares)) so
+        # the in-memory dataclass is internally consistent even when
+        # legacy / hand-edited summary.json carries a stale on-disk
+        # collector_count or non-dict per_collector entries silently
+        # dropped by the isinstance(entry, dict) filter above. The
+        # asymmetric "trust on-disk number" path used to surface
+        # (collector_count=N, len(per_collector)<N) tuples to operator
+        # audits with no warning.
+        collector_count=len(shares),
         timestamp_iso=str(data.get("timestamp_iso", "")),
     )
 
