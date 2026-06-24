@@ -5,12 +5,15 @@ run against pristine source, not the child's modified working copy.
 This closes the TOCTOU gap: the child cannot modify code between
 generation and evidence collection.
 """
+
 from __future__ import annotations
 
 import re
 import shutil
+import string
 import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -31,20 +34,82 @@ _PRUNE_TIMEOUT = 15
 # SHA, not a 7-char prefix (bug A-04+G7).
 _SHA_RE = re.compile(r"[0-9a-f]{4,40}")
 
+# G2 — name_hint sanitization constants (spec §5.1, §5.3).
+# Sanitize-FIRST (drop chars not in [A-Za-z0-9._-]) then truncate-SECOND
+# (take LAST 32 chars of the sanitized string) to preserve a disambiguating
+# tail when multiple collector ids share a long prefix.
+_NAME_HINT_TAIL_CAP: int = 32
+_ALLOWED_NAME_HINT_CHARSET: frozenset[str] = frozenset(string.ascii_letters + string.digits + "._-")
+
+# G2 — transient git-lock retry constants (spec §3 add_timeout row, §4
+# collector_checkout box, AC-C-08). On `git worktree add` returning
+# non-zero with stderr matching the transient regex, sleep briefly and
+# retry up to _MAX_WORKTREE_ADD_ATTEMPTS total attempts.
+_TRANSIENT_LOCK_RE = re.compile(
+    r"(could not lock|already locked|index\.lock|"
+    r"config\.lock|locked by another process)",
+    re.IGNORECASE,
+)
+_MAX_WORKTREE_ADD_ATTEMPTS: int = 3
+_WORKTREE_ADD_BACKOFF_S: float = 0.05
+
 
 class CollectorCheckoutError(RuntimeError):
     """Raised when a collector checkout cannot be created or validated."""
 
 
+def _sanitize_name_hint(hint: str) -> str:
+    """Sanitize an operator-supplied name_hint into a worktree-suffix-safe ASCII slug.
+
+    Order is sanitize-FIRST (drop chars not in [A-Za-z0-9._-]) then
+    truncate-SECOND (take LAST 32 chars of the sanitized string). The
+    "last 32" tail preserves the disambiguating suffix when multiple
+    collector ids share a long prefix.
+
+    Empty / whitespace-only / fully-rejected input returns "".
+    """
+    if not hint:
+        return ""
+    sanitized = "".join(ch for ch in hint if ch in _ALLOWED_NAME_HINT_CHARSET)
+    if not sanitized:
+        return ""
+    return sanitized[-_NAME_HINT_TAIL_CAP:]
+
+
+def _is_transient_lock_error(stderr: str) -> bool:
+    """True iff `stderr` looks like a transient git lock collision worth retrying.
+
+    Matches case-insensitively against the union of:
+    "could not lock", "already locked", "index.lock", "config.lock",
+    "locked by another process".
+    """
+    if not stderr:
+        return False
+    return bool(_TRANSIENT_LOCK_RE.search(stderr))
+
+
 def create_collector_checkout(
     project_root: str | Path,
     commit_sha: str,
+    *,
+    name_hint: str = "",
+    add_timeout: int | None = None,
 ) -> Path:
     """Create a detached git worktree at commit_sha for collectors.
 
     Returns the path to the worktree directory.  Caller must call
     cleanup_collector_checkout() when done, or use the
     collector_checkout() context manager.
+
+    Optional kwargs (G2 — additive, byte-identical defaults):
+      - name_hint: optional disambiguating tag appended to the checkout
+        directory suffix. Empty default preserves the historical
+        `sa-collector-XXXX-<sha8>` shape. Non-empty input is run through
+        _sanitize_name_hint (sanitize-first, take-last-32 chars).
+      - add_timeout: optional override for the `git worktree add` timeout.
+        `None` (default) means use _GIT_TIMEOUT = 30 (byte-identical).
+        The per-unit isolation dispatcher passes 90 to accommodate
+        contended slow disks.
     """
     root = Path(project_root).resolve()
     if not (root / ".git").exists() and not (root / ".git").is_file():
@@ -72,43 +137,61 @@ def create_collector_checkout(
             env=scrub_env_for_subprocess(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise CollectorCheckoutError(
-            f"git rev-parse timed out resolving {sha_input}"
-        ) from exc
+        raise CollectorCheckoutError(f"git rev-parse timed out resolving {sha_input}") from exc
     if resolve.returncode != 0:
         raise CollectorCheckoutError(
-            f"commit_sha {sha_input!r} does not resolve to a commit: "
-            f"{resolve.stderr.strip()}"
+            f"commit_sha {sha_input!r} does not resolve to a commit: {resolve.stderr.strip()}"
         )
     resolved_sha = resolve.stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", resolved_sha):
-        raise CollectorCheckoutError(
-            f"git rev-parse returned non-hex output: {resolved_sha!r}"
-        )
-    checkout_dir = Path(
-        tempfile.mkdtemp(prefix="sa-collector-", suffix=f"-{resolved_sha[:8]}")
-    )
+        raise CollectorCheckoutError(f"git rev-parse returned non-hex output: {resolved_sha!r}")
+
+    # G2 — additive suffix: optional `-<sanitized_name_hint>` segment.
+    suffix_parts = [f"-{resolved_sha[:8]}"]
+    if name_hint:
+        sanitized = _sanitize_name_hint(name_hint)
+        if sanitized:
+            suffix_parts.append(f"-{sanitized}")
+    checkout_dir = Path(tempfile.mkdtemp(prefix="sa-collector-", suffix="".join(suffix_parts)))
+
+    # G2 — additive timeout override. None preserves byte-identical
+    # behavior (timeout=30).
+    timeout_s = _GIT_TIMEOUT if add_timeout is None else int(add_timeout)
+
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "worktree",
-                "add",
-                "--detach",
-                str(checkout_dir),
-                resolved_sha,
-            ],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env=scrub_env_for_subprocess(),
-        )
+        # G2 — bounded retry on transient git lock contention
+        # (AC-C-08, AC-C-09). Non-transient failures break immediately.
+        result: subprocess.CompletedProcess[str] | None = None
+        last_stderr = ""
+        for attempt in range(_MAX_WORKTREE_ADD_ATTEMPTS):
+            result = subprocess.run(
+                [
+                    "git",
+                    "worktree",
+                    "add",
+                    "--detach",
+                    str(checkout_dir),
+                    resolved_sha,
+                ],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                env=scrub_env_for_subprocess(),
+            )
+            if result.returncode == 0:
+                break
+            last_stderr = result.stderr or ""
+            if not _is_transient_lock_error(last_stderr):
+                break
+            # Avoid sleeping after the FINAL attempt — it can't help.
+            if attempt < _MAX_WORKTREE_ADD_ATTEMPTS - 1:
+                time.sleep(_WORKTREE_ADD_BACKOFF_S)
+        assert result is not None  # loop runs at least once
         if result.returncode != 0:
             shutil.rmtree(checkout_dir, ignore_errors=True)
             raise CollectorCheckoutError(
-                f"git worktree add failed (exit {result.returncode}): "
-                f"{result.stderr.strip()}"
+                f"git worktree add failed (exit {result.returncode}): {last_stderr.strip()}"
             )
         verify = subprocess.run(
             ["git", "rev-parse", "HEAD"],
