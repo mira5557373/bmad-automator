@@ -197,12 +197,25 @@ def persist_baseline(
     project_root: Path | str,
     persistence_key: str,
     snapshot: "SpecDriftSnapshot",
+    *,
+    if_absent: bool = False,
 ) -> Path:
     """Atomically write ``snapshot`` to ``baseline.json``.
 
     The directory is created lazily; the write itself is coordinated
     with ``events.jsonl`` appends via the per-key filelock so a
     concurrent reader can never observe a partial baseline.
+
+    ``if_absent=True`` makes the write conditional: the helper re-checks
+    ``baseline_path(...).exists()`` AFTER acquiring the per-key lock and
+    skips the write when a baseline already exists. This closes the
+    TOCTOU window that a caller-side ``exists() + persist_baseline()``
+    pattern leaves open (a peer process can persist between the two
+    calls, then be silently clobbered by the second write). Both call
+    sites in :mod:`spec_drift_watcher` (``__init__`` and ``poll()``
+    auto-init) use ``if_absent=True`` so a previously-persisted baseline
+    is never clobbered by a stale caller-supplied snapshot, even under
+    concurrent writers.
     """
     validate_persistence_key(persistence_key)
     drift_root_dir(project_root, persistence_key, create=True)
@@ -218,6 +231,13 @@ def persist_baseline(
             f"timeout acquiring drift lock for {persistence_key!r}"
         ) from err
     try:
+        # Re-check existence INSIDE the lock so a peer process that
+        # persisted between our caller's exists() check and our lock
+        # acquisition cannot be clobbered. The outer caller-side
+        # exists() check (e.g. spec_drift_watcher.__init__) remains as a
+        # fast-path optimization; this check is the authoritative one.
+        if if_absent and target.exists():
+            return target
         write_atomic_text(target, compact_json(_snapshot_to_dict(snapshot)))
     finally:
         lock.release()

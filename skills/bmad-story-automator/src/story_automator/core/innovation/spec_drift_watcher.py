@@ -170,13 +170,19 @@ class SpecDriftWatcher:
                 # restart, contradicting the persistence_key contract.
                 # We only persist when no on-disk baseline already
                 # exists, so a previously-persisted baseline is never
-                # clobbered by a stale caller-supplied snapshot.
+                # clobbered by a stale caller-supplied snapshot. The
+                # outer exists() check is the fast path; the
+                # ``if_absent=True`` re-check INSIDE persist_baseline's
+                # lock closes the TOCTOU window where a peer process
+                # could persist its own baseline between our exists()
+                # call and persist_baseline's lock acquire.
                 from story_automator.core.innovation.spec_drift_persistence import (
                     baseline_path,
                 )
                 if not baseline_path(self._project_root, persistence_key).exists():
                     persist_baseline(
                         self._project_root, persistence_key, self._baseline,
+                        if_absent=True,
                     )
 
     # ------------------------------------------------------------------
@@ -301,7 +307,10 @@ class SpecDriftWatcher:
                 # snapshot. Without this check the watcher would break
                 # the "previously-persisted baseline is never clobbered
                 # by a stale caller-supplied snapshot" promise that
-                # ``__init__`` honors above.
+                # ``__init__`` honors above. ``if_absent=True`` closes
+                # the TOCTOU window between our outer exists() check
+                # and persist_baseline's lock acquire — the lock-held
+                # re-check inside persist_baseline is authoritative.
                 from story_automator.core.innovation.spec_drift_persistence import (
                     baseline_path,
                     persist_baseline,
@@ -313,6 +322,7 @@ class SpecDriftWatcher:
                         self._project_root,
                         self._persistence_key,
                         current_snapshot,
+                        if_absent=True,
                     )
             event = SpecDriftEvent(
                 baseline_score=current_snapshot.score,

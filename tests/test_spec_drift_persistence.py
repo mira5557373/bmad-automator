@@ -398,6 +398,69 @@ class TestWatcherPersistenceIntegration(unittest.TestCase):
             # On-disk baseline must remain the previously persisted one.
             self.assertEqual(load_baseline(root, "k1"), old)
 
+    def test_init_supplied_baseline_does_not_clobber_in_toctou_window(
+        self,
+    ) -> None:
+        # Regression: pre-fix, ``__init__`` did ``not exists() ->
+        # persist_baseline(...)`` with NO lock continuity between the
+        # two calls. A peer process landing a legitimate baseline in
+        # the TOCTOU window (after our exists() returned False but
+        # before persist_baseline acquired its lock) would have its
+        # baseline silently overwritten by our stale caller-supplied
+        # snapshot — directly contradicting the lines 165-166 docstring
+        # promise that "a previously-persisted baseline is never
+        # clobbered by a stale caller-supplied snapshot". The fix adds
+        # ``if_absent=True`` to persist_baseline, which re-checks
+        # existence INSIDE the lock and skips the write when a baseline
+        # already exists. This test simulates the race by patching
+        # ``Path.exists`` at the spec_drift_watcher view of
+        # baseline_path so the outer check returns False AND drops a
+        # peer-persisted baseline inside the patched call (representing
+        # B's write landing in the window).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            peer = SpecDriftSnapshot(
+                score=0.95, requirements_total=20, requirements_satisfied=19,
+                timestamp_iso="2026-06-23T00:00:00Z",
+            )
+            stale = SpecDriftSnapshot(
+                score=0.5, requirements_total=10, requirements_satisfied=5,
+                timestamp_iso="2026-06-22T00:00:00Z",
+            )
+
+            # The exists() call happens on the Path returned by
+            # ``baseline_path(...)``. Patch Path.exists globally for the
+            # duration of __init__ so it returns False (mirroring an
+            # empty drift dir at check time) while we simultaneously
+            # persist the peer baseline to disk inside the same call
+            # (representing B's write landing in the TOCTOU window).
+            call_state = {"persisted_peer": False}
+            original_exists = Path.exists
+
+            def _spoofed_exists(self_path: Path) -> bool:
+                target = baseline_path(root, "k1")
+                if self_path == target and not call_state["persisted_peer"]:
+                    # Simulate peer process B persisting its baseline
+                    # in the TOCTOU window — after our outer exists()
+                    # returned False but before our persist_baseline
+                    # acquires the lock.
+                    persist_baseline(root, "k1", peer)
+                    call_state["persisted_peer"] = True
+                    # Return False so the outer guard in __init__
+                    # proceeds to call persist_baseline (as it would
+                    # have observed False before B's write landed).
+                    return False
+                return original_exists(self_path)
+
+            with mock.patch.object(Path, "exists", _spoofed_exists):
+                SpecDriftWatcher(
+                    project_root=root, spec_path=root / "spec.md",
+                    baseline_snapshot=stale, persistence_key="k1",
+                )
+            # The peer's baseline must remain on disk — the stale
+            # caller-supplied snapshot must NOT have clobbered it.
+            self.assertEqual(load_baseline(root, "k1"), peer)
+
     def test_poll_auto_init_does_not_clobber_concurrent_on_disk_baseline(
         self,
     ) -> None:
