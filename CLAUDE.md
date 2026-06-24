@@ -72,12 +72,13 @@ optional `gate_file` fields, optional CLI subcommands).
 - **Quarantine evidence cleanup (K-5)** quarantine-under-lock + rmtree-outside-lock + startup janitor for orphaned quarantine trees.
 - **N7.1 tmux→dispatcher migration** `commands/tmux.py::_spawn` is feature-flagged behind `BMAD_AUTO_USE_CLI_DISPATCHER`. Flag off (default) ⇒ byte-identical to pre-N7.1; flag on ⇒ routed through `cli_dispatcher.dispatch_session`.
 - **Self-improving gate (C5)** `core/innovation/threshold_proposer.py` + `core/innovation/threshold_apply.py` + `core/innovation/threshold_decisions.py` — close the observation→action loop on existing drift telemetry by auto-emitting `ThresholdProposal`s against `core/gate_rules.PRIORITY_THRESHOLDS`. Proposer is advisory; nothing in `core/` may mutate source automatically (pinned by `ThresholdApplyIsolationInvariant`'s binding-tracking AST walker). Apply path is a single explicit operator CLI call (`story-automator calibration apply --proposal-id <id> --confirm <8-hex-slug>`) that performs an AST-located, BOM-aware, surgical byte splice with `find_spec(target_module).origin` resolution, anti-drift pre-write `ast.literal_eval` cross-verify, pre-mutation backup, and post-splice `ast.parse` re-validation with restore-on-failure. Every decision (`accept`/`reject`/`superseded`/`confirm_failed`) is recorded in `_bmad/calibration/decisions.jsonl` via durable `os.open(O_APPEND) + os.fsync` under `.calibration.lock`. New IN-MEMORY-ONLY gate-file fields: `threshold_proposal_ref` (16-hex id or `""`) + `threshold_proposer_error` (exception class name on failure). New `GateThresholdProposalAudit` in `gate_audit._AuditEvent` — `core/telemetry_events.py` untouched. New CLI subcommands: `propose`, `list-proposals`, `show`, `apply`, `reject` (bare `calibration` invocation byte-identical, pinned by golden fixture). Drift-band proposals registered but DEFAULT OFF (`enable_drift_band_proposals=False`).
+- **Worktree-per-unit isolation (G2)** `core/collector_isolation.py` — new public surface `IsolationMode = Literal["shared", "per_unit"]`, `DEFAULT_MAX_WORKERS=4`, `MAX_PARALLEL_CEILING=16`, `ESTIMATED_PER_WORKER_BYTES=256*1024*1024`, `ADD_TIMEOUT_PER_UNIT_S=90`, `run_collectors_per_unit(...)`. Opt-in `isolation_mode="per_unit"` runs each collector inside its own fresh `git worktree --detach @SHA` checkout via a bounded `ThreadPoolExecutor` (RAM-aware clamp via `psutil.virtual_memory()`). New OPTIONAL `isolation_mode` + `max_workers` kwargs on FOUR wiring sites: `run_production_gate`, `run_system_gate`, `_run_collectors`, `run_gate_collectors` — defaults preserve byte-identical behavior. Worker boundary catches `BaseException`, reifies as `_crash_outcome`, and re-raises after outcome collection (1:1 outcomes-to-collectors invariant). `KeyboardInterrupt` drains the queue via `pool.shutdown(wait=False, cancel_futures=True)` and lets in-flight subprocesses finish to their per-category timeout. `AuditLockTimeout` is retried once before reifying as `_audit_timeout_outcome`. Mode-mode equivalence is CATEGORY-VERDICT-level (not byte-level): `duration_ms`, `evidence_merkle_root`, `evidence_bundle_hash`, `cost_total_usd` differ between modes by design. `core/collector_checkout.create_collector_checkout(...)` gains `name_hint` + `add_timeout` kwargs + bounded retry on transient git lock errors. `core/worktree_recovery.recover_orphan_worktrees(...)` gains `per_unit_window_s` safety-margin kwarg. Pinned by `WorktreePerUnitIsolationInvariant` (4 sub-tests; bumps audit-floor invariant count 10 → 11) — rejects `os.chdir`, `os.environ` mutations, `signal.signal`, AND any `_bmad/*.lock` acquisition inside `core/collector_isolation.py`.
 
 ### `run_production_gate` additive kwargs (cumulative)
 
-The seven OPTIONAL kwargs accumulated by Path B + the C1/C3/C5
-follow-ups. All default to off / `None`; every existing call site
-keeps its byte-identical behavior:
+The nine OPTIONAL kwargs accumulated by Path B + the C1/C3/C5/G2
+follow-ups. All default to off / `None` / `"shared"`; every existing
+call site keeps its byte-identical behavior:
 
 - `baseline_sha: str | None = None` — for the lie-detector (Phase 1).
 - `fail_closed: bool = False` — phase-2 error-status forces FAIL.
@@ -86,8 +87,10 @@ keeps its byte-identical behavior:
 - `drift_watcher: SpecDriftWatcher | None = None` — C1 follow-up.
 - `session_usage: UsageMetrics | None = None` — C3 cost-attribution.
 - `threshold_proposer: ThresholdProposer | None = None` — C5 self-improving gate.
+- `isolation_mode: Literal["shared", "per_unit"] = "shared"` — G2 worktree-per-unit isolation (default `"shared"` preserves byte-identical pre-G2 behavior).
+- `max_workers: int = 4` — G2 bounded parallelism for `per_unit` mode (RAM-aware clamp applied at the boundary; type-validated even in `shared` mode).
 
-`enable_lie_detector: bool = False` is the eighth Phase-1 kwarg
+`enable_lie_detector: bool = False` is the tenth Phase-1 kwarg
 predating this session; listed here for completeness.
 
 **Shared invariants for every collector** (verified by existing tests — don't break them):

@@ -160,6 +160,26 @@ Behavioral invariants: (a) read order = REVERSE of write order; (b) LWW by `st_m
 
 Pinned by `tests/test_audit_regression.py::UnifiedStateWriteIsolationInvariant` — any new module under `core/` that calls `write_phase(...)` AND `write_atomic(...)` on a sprint-status path WITHOUT acquiring `unified_state_lock(...)` fails the audit-floor suite.
 
+### `core/collector_isolation.py` (G2 — worktree-per-unit isolation)
+- Public surface:
+  - `IsolationMode = Literal["shared", "per_unit"]` — closed vocabulary; widening requires a coordinated change at the four wiring points + the audit-floor invariant.
+  - `DEFAULT_MAX_WORKERS = 4`, `MAX_PARALLEL_CEILING = 16`, `ESTIMATED_PER_WORKER_BYTES = 256 * 1024 * 1024`, `ADD_TIMEOUT_PER_UNIT_S = 90` — module-level constants exposed via `__all__`.
+  - `run_collectors_per_unit(project_root, gate_id, commit_sha, profile, collectors, *, max_workers=4, audit_policy=None, audit_path=None) -> list[CollectorOutcome]` — the per-unit dispatch target. Returns outcomes sorted ASCII-ascending by `(category, collector_id)`; length 1:1 with input `collectors`.
+- Wiring points (additive optional kwargs; defaults preserve byte-identical behavior):
+  - `core/collector_runner.run_gate_collectors(..., isolation_mode="shared", max_workers=4)`.
+  - `core/gate_orchestrator._run_collectors(..., isolation_mode="shared", max_workers=4)`.
+  - `core/gate_orchestrator.run_production_gate(..., isolation_mode="shared", max_workers=4)`.
+  - `core/system_gate.run_system_gate(..., isolation_mode="shared", max_workers=4)`.
+  - `core/collector_checkout.create_collector_checkout(..., name_hint="", add_timeout=None)` — sanitize-FIRST-truncate-SECOND-LAST-32-chars; bounded retry on transient git lock errors.
+  - `core/worktree_recovery.recover_orphan_worktrees(..., per_unit_window_s=0.0)` — operator-supplied post-crash safety margin biasing `effective_min_age = max(min_age_s, per_unit_window_s)`.
+- Behavioral invariants:
+  - **`shared` is byte-equivalent to pre-G2.** The default path in `run_gate_collectors` is untouched; on-disk `_bmad/gate/verdicts/<gate_id>.json` and the evidence Merkle root are byte-identical to pre-G2 fixtures (pinned by AC-G-01).
+  - **`per_unit` is CATEGORY-VERDICT-equivalent — NOT byte-equivalent.** `categories[*].verdict` and `overall` match `shared` for deterministic fixtures; `duration_ms`, `evidence_merkle_root`, `evidence_bundle_hash`, `cost_total_usd` are EXPECTED to differ by construction (parallel + per-collector checkout has different wall-clock and cost distribution). The byte-identical claim is advisory-only on shared mode default.
+  - **Worker boundary catches `BaseException`** and reifies as `_crash_outcome`; the original BaseException is re-raised AFTER outcome collection so the returned list is always 1:1 with input collectors and persisted evidence on disk.
+  - **`KeyboardInterrupt`** is caught on the main thread (workers never receive it). The pool drains via `pool.shutdown(wait=False, cancel_futures=True)` (queued-but-not-started workers leave NO worktree); in-flight `subprocess.run` calls complete to their per-category timeout; KI is re-raised after outcome collection.
+  - **`AuditLockTimeout`** raised by a worker's `run_single_collector` is caught specifically and retried ONCE before reifying as `_audit_timeout_outcome` with `findings=["audit lock timeout after retry"]` (distinguishes slow-disk events from true collector failures).
+  - **Lock-isolation invariant.** `core/collector_isolation.py` MUST NOT acquire ANY `_bmad/*.lock`. Pinned structurally by `tests/test_audit_regression.py::WorktreePerUnitIsolationInvariant::test_ast_no_process_global_state_mutation_in_isolation_module` (sub-test 1), which also rejects `os.chdir`, `os.environ` mutations, and `signal.signal` calls.
+
 ## Frozen behaviors (the four audit invariants + plugin trust-boundary)
 
 These are pinned by `tests/test_audit_regression.py`. Every adoption PR must keep that suite green.
