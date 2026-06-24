@@ -41,7 +41,7 @@ from story_automator.core.evidence_io import (
     read_gate_marker,
 )
 from story_automator.core.gate_orchestrator import recover_from_crash, route_gate_verdict
-from story_automator.core.gate_schema import make_gate_file
+from story_automator.core.gate_schema import canonical_json, make_gate_file
 
 
 class _Mixin:
@@ -546,10 +546,94 @@ class GateFileDeterminismBaseline(unittest.TestCase):
     def test_FAIL_gate_canonical_shape_is_stable(self) -> None:
         gate = self._build("FAIL", gate_id="corp-2")
         self.assertEqual(gate["overall"], "FAIL")
-        # JSON round-trip stable (deterministic encoding).
-        s1 = json.dumps(gate, sort_keys=True)
-        s2 = json.dumps(json.loads(s1), sort_keys=True)
-        self.assertEqual(s1, s2)
+        # Pin the FAIL field set (mirror of the PASS sibling).
+        expected_keys = {
+            "gate_id",
+            "schema_version",
+            "target",
+            "tier",
+            "commit_sha",
+            "scanner_data_snapshot",
+            "profile",
+            "factory_version",
+            "risk_profile_ref",
+            "categories",
+            "overall",
+            "waivers",
+            "evidence_bundle_hash",
+        }
+        self.assertTrue(
+            expected_keys.issubset(set(gate.keys())),
+            f"missing gate fields: {sorted(expected_keys - set(gate.keys()))}",
+        )
+        # Real canonical-encoding pin: canonical_json uses sort_keys=True AND
+        # compact separators (",", ":"). A round-trip through json.loads +
+        # json.dumps(sort_keys=True) is a tautology that cannot detect drift;
+        # comparing canonical_json's compact output against a NON-compact
+        # encoding proves the canonicalization is doing real work.
+        canonical = canonical_json(gate)
+        # Compact separators distinguish canonical from default json.dumps.
+        non_compact = json.dumps(gate, sort_keys=True)  # default separators
+        self.assertNotEqual(
+            canonical,
+            non_compact,
+            "canonical_json must produce compact-separator output distinct "
+            "from default json.dumps(..., sort_keys=True); otherwise the "
+            "audit-replay determinism contract is not actually pinned.",
+        )
+        # Canonicalization is idempotent over loads→dumps (real determinism).
+        self.assertEqual(canonical, canonical_json(json.loads(canonical)))
+        # Re-ordering the source dict's keys must not change canonical output.
+        reordered = {k: gate[k] for k in reversed(list(gate.keys()))}
+        self.assertEqual(canonical, canonical_json(reordered))
+
+    def test_canonical_json_pin_is_not_a_tautology(self) -> None:
+        """Regression: the FAIL-shape assertion must not be `s1 == s2` where
+        `s1 = json.dumps(x, sort_keys=True)` and
+        `s2 = json.dumps(json.loads(s1), sort_keys=True)`.
+
+        That form is a mathematical tautology — it holds for any
+        JSON-serializable dict because json.loads is lossless and
+        sort_keys=True is deterministic. A real canonical-encoding pin
+        MUST detect at least one of: (a) compact-separator drift,
+        (b) key-ordering drift in the source dict, (c) loss of
+        idempotency through the canonical_json helper.
+
+        This test pins the existence of the contract by demonstrating
+        that the tautological assertion passes on arbitrary inputs while
+        canonical_json comparisons against non-canonical encodings do not.
+        """
+        # The tautology holds for any dict — prove it.
+        arbitrary_dicts: list[dict] = [
+            {"z": 1, "a": 2},
+            {},
+            {"nested": {"y": [3, 1, 2], "x": "ok"}},
+            {"unrelated": "to-gate-schema"},
+        ]
+        for d in arbitrary_dicts:
+            s1 = json.dumps(d, sort_keys=True)
+            s2 = json.dumps(json.loads(s1), sort_keys=True)
+            self.assertEqual(
+                s1,
+                s2,
+                f"Tautology proof failed for {d!r}; this should never happen "
+                "unless json semantics changed.",
+            )
+        # Now show that the real canonical_json helper DOES detect the
+        # difference between compact and non-compact encoding for the same
+        # arbitrary dicts — this is what makes it a real pin.
+        for d in arbitrary_dicts:
+            if not d:
+                # Empty dict serializes identically under both separator sets.
+                continue
+            compact = canonical_json(d)
+            default = json.dumps(d, sort_keys=True)
+            self.assertNotEqual(
+                compact,
+                default,
+                "canonical_json must use compact separators that differ from "
+                f"json.dumps default output; failed for {d!r}.",
+            )
 
 
 # ---------------------------------------------------------------------------
