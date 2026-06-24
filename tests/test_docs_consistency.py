@@ -363,5 +363,92 @@ class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
         )
 
 
+class FrozenSurfaceLOCWaiverConsistencyTests(unittest.TestCase):
+    """The frozen-surface LOC waiver cites a current LOC near the live file.
+
+    Pre-fix ``docs/spec/frozen-gate-surface.md`` line 114 declared
+    ``core/gate_orchestrator.py is currently 746 LOC pre-B / 834 LOC
+    post-B`` while the actual file had grown to 1137 LOC at HEAD across
+    C1, C2, C3, C5, G2 + K-2 / K-5 + three gate-correctness follow-ups.
+    The 303-LOC undercount in the authoritative "what not to break"
+    contract doc misled operators into believing the +88-LOC waiver
+    still bounded current growth.
+
+    The fix updates the waiver to cite the current LOC value alongside
+    the historical anchor; this regression test pins the doc to a
+    current LOC that is within a generous tolerance of the live file
+    so future growth either updates the doc or trips the suite.
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+    FROZEN_SURFACE_PATH = REPO_ROOT / "docs" / "spec" / "frozen-gate-surface.md"
+    # Tolerance band: doc may lag the live file by up to ~150 LOC before
+    # the waiver becomes misleading. This catches the pre-fix 303-LOC
+    # undercount while allowing modest in-flight growth between doc
+    # bumps.
+    LOC_TOLERANCE = 150
+
+    def _live_loc(self) -> int:
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        return len(text.splitlines())
+
+    def _waiver_cited_loc(self) -> int:
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        # The post-fix waiver paragraph cites "current LOC is **N**"
+        # (with the bold markdown emphasis). Anchor the regex to the
+        # surrounding "current LOC" phrasing so unrelated numeric
+        # mentions in the doc don't accidentally match.
+        match = re.search(
+            r"current LOC is \*\*(\d+)\*\*",
+            text,
+        )
+        self.assertIsNotNone(
+            match,
+            "frozen-gate-surface.md soft-limit waiver no longer carries "
+            "a 'current LOC is **N**' marker; either restore the marker "
+            "or update this regression test to match the new shape.",
+        )
+        return int(match.group(1))
+
+    def test_waiver_cites_current_loc_within_tolerance(self) -> None:
+        live = self._live_loc()
+        cited = self._waiver_cited_loc()
+        delta = live - cited
+        self.assertLessEqual(
+            delta,
+            self.LOC_TOLERANCE,
+            f"frozen-gate-surface.md soft-limit waiver cites "
+            f"{cited} LOC for core/gate_orchestrator.py but the live "
+            f"file is {live} LOC ({delta} LOC undercount, tolerance "
+            f"{self.LOC_TOLERANCE}). Bump the cited LOC in the waiver "
+            "paragraph and enumerate the contributing milestones.",
+        )
+
+    def test_waiver_does_not_cite_stale_834_as_current(self) -> None:
+        """Pin the specific regression: pre-fix doc said 'currently 834'.
+
+        The pre-fix doc had ``currently 746 LOC pre-B / 834 LOC post-B``
+        — the word ``currently`` is what made it a load-bearing false
+        claim. Post-fix the 834 may still appear as a historical
+        anchor, but never qualified by ``currently``.
+        """
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        self.assertNotRegex(
+            text,
+            r"currently\s+746\s+LOC\s+pre-B\s*/\s*834\s+LOC\s+post-B",
+            "frozen-gate-surface.md still claims 'currently 746 LOC "
+            "pre-B / 834 LOC post-B' — that figure is the post-B "
+            "historical snapshot, not the current file size.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
