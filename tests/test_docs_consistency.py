@@ -19,6 +19,7 @@ or renames a section / module / vocabulary tag.
 """
 from __future__ import annotations
 
+import ast
 import importlib
 import re
 import subprocess
@@ -361,6 +362,46 @@ class AuditFloorInvariantCountConsistencyTests(unittest.TestCase):
             live,
             f"CONTRIBUTING.md release-blocking floor pins '{documented}' "
             f"but live class count is {live}; both must move together.",
+        )
+
+    def test_contributing_method_count_aside_matches_live_method_count(self) -> None:
+        """The illustrative 'exposes N test methods' aside in CONTRIBUTING.md
+        tracks the live test-method count in ``tests/test_audit_regression.py``.
+
+        Pre-fix CONTRIBUTING.md:144 read "exposes 40 test methods" while the
+        live suite had 45 test methods (G2's WorktreePerUnitIsolationInvariant
+        contributed 5 new methods). The class-count guard above is the
+        release-blocking metric, but this method-count aside is still
+        operator-facing prose that should not drift; pinning it here means
+        future "+ N test methods" additions update the prose at commit time.
+        """
+        text = self.AUDIT_REGRESSION_PATH.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        live_methods = sum(
+            1
+            for cls in tree.body
+            if isinstance(cls, ast.ClassDef)
+            for n in cls.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("test_")
+        )
+        contributing = _read("CONTRIBUTING.md")
+        match = re.search(
+            r"exposes\s+(\d+)\s+test\s+methods",
+            contributing,
+        )
+        self.assertIsNotNone(
+            match,
+            "CONTRIBUTING.md missing 'exposes N test methods' prose aside in "
+            "the Audit-floor invariants section.",
+        )
+        documented = int(match.group(1))
+        self.assertEqual(
+            documented,
+            live_methods,
+            f"CONTRIBUTING.md says 'exposes {documented} test methods' but "
+            f"tests/test_audit_regression.py has {live_methods} test methods; "
+            "bump the prose aside when adding/removing test methods.",
         )
 
 
