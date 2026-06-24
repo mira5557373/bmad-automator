@@ -170,10 +170,14 @@ def collector_cost_path(
 ) -> Path:
     """Path of one collector's share JSON.
 
-    No filename sanitization is performed — collector ids are produced
-    by the registry which constrains them to a safe character set
-    (lowercase, hyphen, digits). Callers passing arbitrary strings get
-    whatever ``Path`` does with them.
+    No filename sanitization is performed HERE — collector ids are
+    produced by the registry which constrains them to a safe character
+    set (lowercase, hyphen, digits). Callers passing arbitrary strings
+    get whatever ``Path`` does with them. The emit-side guard at
+    :func:`emit_gate_cost_report` rejects ``..`` / ``/`` / ``\\`` in
+    collector_ids BEFORE disk touch so the per-gate-dir isolation
+    invariant is preserved; this helper is read-only and trusts callers
+    that route through emission.
     """
 
     return get_cost_root_dir(project_root, gate_id) / f"{collector_id}.json"
@@ -368,6 +372,29 @@ def emit_gate_cost_report(
         raise CostEvidenceError(
             "collector_id collides with reserved internal filename: "
             f"{', '.join(repr(r) for r in reserved)}",
+        )
+    # Path-traversal guard — symmetric with the reserved-name guard
+    # above. ``collector_cost_path`` joins ``<id>.json`` onto the
+    # per-gate cost dir; if ``id`` contains ``..`` segments or path
+    # separators, the resulting Path resolves OUTSIDE the per-gate
+    # directory (e.g. ``id='../escaped'`` lands at
+    # ``cost/escaped.json`` — sibling of the gate dir). That breaks
+    # the prune loop at l.~436-445 (which only scans ``cost_dir``),
+    # silently round-trips through ``load_collector_cost_share``, and
+    # diverges the on-disk collector set from the persisted summary.
+    # The registry constrains production collector_ids to lowercase
+    # ASCII / digits / hyphen (see ``collector_cost_path`` docstring),
+    # but the registry does NOT enforce this — a hand-registered
+    # CollectorConfig with a traversal id reaches this point. Reject
+    # BEFORE disk touch so a half-written tree is impossible.
+    traversal: list[str] = []
+    for cid in cids:
+        if ".." in Path(cid).parts or "/" in cid or "\\" in cid:
+            traversal.append(cid)
+    if traversal:
+        raise CostEvidenceError(
+            "collector_id contains path traversal segments: "
+            f"{', '.join(repr(t) for t in traversal)}",
         )
 
     try:

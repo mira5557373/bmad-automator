@@ -339,6 +339,93 @@ class EmissionTests(unittest.TestCase):
         after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
         self.assertEqual(before, after)
 
+    def test_path_traversal_collector_id_raises_before_disk_touch(
+        self,
+    ) -> None:
+        """Regression — a collector_id containing ``..`` / ``/`` /
+        ``\\`` joined onto the per-gate cost dir resolved OUTSIDE that
+        dir. For ``collector_id='../escaped'`` the per-collector file
+        landed at ``cost/escaped.json`` (a sibling of the gate dir)
+        rather than ``cost/<gate_id>/escaped.json``.
+
+        That broke three documented invariants at once:
+
+        * the prune loop only scans ``cost_dir`` so leaked sibling
+          files survived across emissions;
+        * ``load_collector_cost_share`` silently round-tripped the
+          leaked location because it used the same Path concatenation;
+        * the on-disk per-collector set diverged from the persisted
+          summary.json's ``per_collector`` tuple — the "on-disk
+          collector set always matches summary" invariant the prune
+          step documents.
+
+        Reachable in production because the registry only checks for
+        duplicate ids (see ``CollectorRegistry.register`` at
+        ``collector_registry.py:25-33``) and ``CollectorConfig.collector_id``
+        is an untyped ``str`` — a hand-registered config with a
+        traversal id reaches emission. Reject BEFORE disk touch,
+        symmetric with the reserved-name / duplicate-id / invalid-mode
+        guards already in place.
+        """
+
+        cost_root = Path(self.root) / "_bmad" / "gate" / "cost"
+        for bad_id in ("../escaped", "a/b", "a\\b", ".."):
+            with self.subTest(bad_id=bad_id):
+                outcomes = [
+                    _make_outcome(bad_id, "static", duration_ms=1000),
+                ]
+                # Duration mode (the bug's natural reproducer).
+                with self.assertRaises(CostEvidenceError) as ctx_dur:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="duration",
+                    )
+                self.assertIn(
+                    "path traversal",
+                    str(ctx_dur.exception),
+                )
+                # Uniform mode — symmetric rejection parity with the
+                # duplicate-id / reserved-name guards.
+                with self.assertRaises(CostEvidenceError) as ctx_uni:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="uniform",
+                    )
+                self.assertIn(
+                    "path traversal",
+                    str(ctx_uni.exception),
+                )
+                # Pre-disk-touch invariant — no per-collector file may
+                # have leaked outside the per-gate directory.
+                if cost_root.is_dir():
+                    siblings = sorted(
+                        p.name for p in cost_root.iterdir() if p.is_file()
+                    )
+                    self.assertEqual(
+                        siblings, [],
+                        f"traversal id {bad_id!r} leaked file(s) "
+                        f"into cost root: {siblings}",
+                    )
+
+    def test_path_traversal_collector_id_in_mixed_set_raises(self) -> None:
+        """Mixed valid + traversal-id batch must reject the whole batch
+        before any disk write — otherwise the valid collector's share
+        lands first, and a partial emit leaves an inconsistent cost dir
+        even though emission ultimately fails."""
+
+        outcomes = [
+            _make_outcome("ruff", "static", duration_ms=1000),
+            _make_outcome("../escaped", "static", duration_ms=1000),
+        ]
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        with self.assertRaises(CostEvidenceError):
+            emit_gate_cost_report(
+                self.root, self.gate_id, SESSION, outcomes,
+            )
+        after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        self.assertEqual(before, after)
+
     def test_report_is_frozen_dataclass(self) -> None:
         outcomes = [_make_outcome("a", "static")]
         report = emit_gate_cost_report(
