@@ -86,6 +86,14 @@ def cached_load_evidence_bundle(
         if cached is not None:
             _STATS["hits"] += 1
             return copy.deepcopy(cached)
+        # Bump the miss counter NOW — under the lock that already saw
+        # the absent key — so observability reflects every disk-attempt
+        # regardless of whether ``load_evidence_bundle`` returns or
+        # raises (e.g. ``GateSchemaError`` from corrupted JSON, OSError
+        # from a disk failure). Bumping AFTER the load would make
+        # error-path misses invisible to ``evidence_cache_stats()`` and
+        # mask repeated-failure churn under load.
+        _STATS["misses"] += 1
         # Snapshot the per-key generation BEFORE we release the lock.
         # If invalidate_evidence_cache fires between here and the
         # post-load re-acquire below, the generation will have advanced
@@ -99,7 +107,6 @@ def cached_load_evidence_bundle(
     # cost is a duplicated read, never a corrupted cache.
     bundle = load_evidence_bundle(project_root, gate_id)
     with _LOCK:
-        _STATS["misses"] += 1
         current_gen = _GEN.get(key, 0)
         if current_gen != gen_at_entry:
             # A concurrent persist_evidence_record invalidated this key

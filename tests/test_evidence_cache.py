@@ -494,5 +494,56 @@ class EvidenceCacheTests(unittest.TestCase):
         self.assertEqual(next_read, load_evidence_bundle(self.root, "g1"))
 
 
+    def test_miss_counter_bumped_even_when_load_raises(self) -> None:
+        """Regression: when ``load_evidence_bundle`` raises (e.g.
+        ``GateSchemaError`` from corrupted JSON, OSError from a disk
+        failure), the miss counter MUST still be bumped so an operator
+        querying ``evidence_cache_stats()`` sees the cache traffic.
+
+        Pre-fix: ``_STATS['misses']`` was incremented only in the
+        post-load lock block AFTER ``load_evidence_bundle`` returned.
+        If the load raised, the exception propagated before the bump
+        and an operator counting repeated-failure churn could not see
+        the disk-attempts via the counters.
+
+        Reproducer: seed corrupted evidence JSON, call
+        ``cached_load_evidence_bundle`` 5 times — each raises
+        ``GateSchemaError`` — and assert the miss counter advanced by 5.
+        """
+        from story_automator.core.gate_schema import GateSchemaError
+
+        # Seed a corrupted JSON file inside the gate's evidence dir
+        # (sidesteps persist_evidence_record because we want the bad
+        # bytes to survive on disk for load_evidence_bundle to choke on).
+        gate_evidence_dir = self.root / "_bmad" / "gate" / "evidence" / "g-corrupt"
+        gate_evidence_dir.mkdir(parents=True, exist_ok=True)
+        corrupt = gate_evidence_dir / "bad.json"
+        corrupt.write_text("{ this is not valid json")
+
+        invalidate_all_evidence_cache()
+        before = evidence_cache_stats()
+
+        raises_observed = 0
+        for _ in range(5):
+            try:
+                cached_load_evidence_bundle(self.root, "g-corrupt")
+            except GateSchemaError:
+                raises_observed += 1
+
+        after = evidence_cache_stats()
+        self.assertEqual(
+            raises_observed, 5,
+            "Reproducer setup is broken: load_evidence_bundle did not raise "
+            "GateSchemaError on the corrupted fixture",
+        )
+        self.assertEqual(
+            after["misses"], before["misses"] + 5,
+            "miss counter under-counted error-path cache misses: "
+            f"delta={after['misses'] - before['misses']}, expected 5",
+        )
+        # Hits must NOT have moved — no successful cache lookups happened.
+        self.assertEqual(after["hits"], before["hits"])
+
+
 if __name__ == "__main__":
     unittest.main()
