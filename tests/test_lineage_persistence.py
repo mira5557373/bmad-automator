@@ -111,6 +111,51 @@ class PersistRoundTripTests(_TempProjectMixin, unittest.TestCase):
         index = json.loads(lineage_index_path(self.project_root).read_text())
         self.assertEqual(len(index["entries"]), 1)
 
+    def test_persist_rejects_forged_entry_via_dataclasses_replace(self) -> None:
+        # Regression: round-3 bug sweep. ``make_lineage_entry`` rejects
+        # path-traversal slugs at the write boundary, but
+        # :class:`LineageEntry` is a frozen dataclass with no
+        # ``__post_init__``, so ``dataclasses.replace(good, slug='../../evil')``
+        # routes around the constructor guard. Without re-validation at
+        # the persist boundary, the forged entry's ``slug`` flowed through
+        # ``_entry_disk_path`` and ``write_atomic_text`` landed at
+        # ``<project>/_bmad/evil.json`` — TWO directories ABOVE the
+        # intended ``_bmad/lineage/`` sandbox. The fix re-validates
+        # ``entry.genre`` and ``entry.slug`` at :func:`persist_lineage_entry`
+        # entry, raising :class:`LineageError` BEFORE mkdir + atomic write.
+        import dataclasses
+        good = _entry("brainstorm", "good", body="ok")
+        forged = dataclasses.replace(good, slug="../../evil")
+        with self.assertRaises(LineageError) as ctx:
+            persist_lineage_entry(self.project_root, forged)
+        # Error message points at the offending slug so an operator can
+        # locate the bug in the caller code.
+        self.assertIn("../../evil", str(ctx.exception))
+        # Containment proof: NOTHING was written outside the lineage
+        # sandbox. Without the fix, ``<project>/_bmad/evil.json`` would
+        # exist on disk at this point.
+        escape_path = self.project_root / "_bmad" / "evil.json"
+        self.assertFalse(
+            escape_path.exists(),
+            f"forged entry escaped the sandbox to {escape_path}",
+        )
+        # And the index was never updated with the forged composite key.
+        idx_path = lineage_index_path(self.project_root)
+        if idx_path.is_file():
+            index = json.loads(idx_path.read_text())
+            self.assertNotIn("brainstorm/../../evil", index.get("entries", {}))
+
+    def test_persist_rejects_forged_entry_via_unknown_genre(self) -> None:
+        # Symmetric: ``dataclasses.replace`` can also forge an entry with
+        # a genre outside ``_GENRES_SET``. ``persist_lineage_entry`` must
+        # re-validate the genre too, not just the slug.
+        import dataclasses
+        good = _entry("brainstorm", "s0", body="ok")
+        forged = dataclasses.replace(good, genre="manifesto")
+        with self.assertRaises(LineageError) as ctx:
+            persist_lineage_entry(self.project_root, forged)
+        self.assertIn("manifesto", str(ctx.exception))
+
 
 class IndexAnnotationContractTests(_TempProjectMixin, unittest.TestCase):
     """Pin the ``_read_index`` / ``_write_index`` / ``_index_sort_key``

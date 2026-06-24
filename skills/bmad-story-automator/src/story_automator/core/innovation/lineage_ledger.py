@@ -135,6 +135,35 @@ def _sha256_hex(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _validate_genre_and_slug(genre: str, slug: str) -> None:
+    """Enforce the closed genre vocabulary and slug whitelist.
+
+    Shared by :func:`make_lineage_entry` (write-side trust boundary) AND
+    :func:`persist_lineage_entry` (re-validation guard against forged
+    entries constructed via ``dataclasses.replace`` on the frozen
+    :class:`LineageEntry`). Both code paths must enforce the same closed
+    vocabulary so the documented on-disk shape contract
+    (``_bmad/lineage/<genre>/<slug>.json``) cannot be lexically escaped
+    via path-traversal slugs (``..`` segments, ``/`` / ``\\`` separators,
+    NUL, leading/trailing whitespace). Single-operator threat model
+    bounds the security impact, but the doc contract would otherwise be
+    silently violated and the index would advertise non-portable
+    ``..``-laden ``path`` fields.
+    """
+    if genre not in _GENRES_SET:
+        raise LineageError(
+            f"unknown lineage genre {genre!r}; must be one of "
+            f"{LINEAGE_GENRES}"
+        )
+    if not isinstance(slug, str) or not slug:
+        raise LineageError("slug must be a non-empty string")
+    if not _SLUG_RE.match(slug) or ".." in slug:
+        raise LineageError(
+            f"slug {slug!r} must match {_SLUG_RE.pattern!r} and contain no "
+            f"'..' segments (no path separators, NUL bytes, or whitespace)"
+        )
+
+
 def make_lineage_entry(
     *,
     genre: str,
@@ -148,27 +177,7 @@ def make_lineage_entry(
     All other fields are accepted as-is (the MVP does not enforce
     hash-length or ISO-8601 syntax — follow-ups can tighten these).
     """
-    if genre not in _GENRES_SET:
-        raise LineageError(
-            f"unknown lineage genre {genre!r}; must be one of "
-            f"{LINEAGE_GENRES}"
-        )
-    if not isinstance(slug, str) or not slug:
-        raise LineageError("slug must be a non-empty string")
-    # Reject path-traversal characters so a slug can never escape
-    # ``_bmad/lineage/<genre>/`` via the lexical ``_entry_disk_path``
-    # composition (``..`` segments, ``/`` / ``\`` separators, NUL,
-    # leading/trailing whitespace).  Single-operator threat model bounds
-    # the security impact, but the documented on-disk shape contract
-    # ('one canonical-JSON file per entry under
-    # ``_bmad/lineage/<genre>/<slug>.json``') would otherwise be silently
-    # violated and the index would advertise non-portable ``..``-laden
-    # ``path`` fields.
-    if not _SLUG_RE.match(slug) or ".." in slug:
-        raise LineageError(
-            f"slug {slug!r} must match {_SLUG_RE.pattern!r} and contain no "
-            f"'..' segments (no path separators, NUL bytes, or whitespace)"
-        )
+    _validate_genre_and_slug(genre, slug)
     if not isinstance(payload_hash, str):
         raise LineageError("payload_hash must be a string")
     if not isinstance(parent_root, str):
@@ -488,7 +497,18 @@ def persist_lineage_entry(
     state matches the (untouched) index — an orphan payload can never
     silently sit outside the index advertising provenance the chain
     cannot prove.
+
+    Re-validates ``entry.genre`` and ``entry.slug`` against the closed
+    vocabulary even though :func:`make_lineage_entry` already enforces
+    them at construction. :class:`LineageEntry` is a frozen dataclass
+    with no ``__post_init__``, so ``dataclasses.replace(good, slug=...)``
+    (or direct ``LineageEntry(...)`` construction) routes around every
+    constructor guard. Re-validating at the persist boundary keeps
+    :func:`_entry_disk_path` from composing a sandbox-escaping path
+    before the mkdir + atomic-write fire — symmetric with the read-path
+    validation in :func:`load_lineage_chain`.
     """
+    _validate_genre_and_slug(entry.genre, entry.slug)
     target_path = _entry_disk_path(project_root, entry.genre, entry.slug)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
