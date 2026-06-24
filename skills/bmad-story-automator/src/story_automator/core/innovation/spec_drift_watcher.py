@@ -440,14 +440,26 @@ class SpecDriftWatcher:
             self._baseline = current_snapshot
             self._baseline_ids = current_ids
             if self._persistence_key is not None:
+                # Mirror the ``__init__`` exists-guard so a baseline
+                # persisted by a concurrent writer between our
+                # construction and this first ``poll()`` is never
+                # silently clobbered by the in-memory auto-init
+                # snapshot. Without this check the watcher would break
+                # the "previously-persisted baseline is never clobbered
+                # by a stale caller-supplied snapshot" promise that
+                # ``__init__`` honors above.
                 from story_automator.core.innovation.spec_drift_persistence import (
+                    baseline_path,
                     persist_baseline,
                 )
-                persist_baseline(
-                    self._project_root,
-                    self._persistence_key,
-                    current_snapshot,
-                )
+                if not baseline_path(
+                    self._project_root, self._persistence_key,
+                ).exists():
+                    persist_baseline(
+                        self._project_root,
+                        self._persistence_key,
+                        current_snapshot,
+                    )
             event = SpecDriftEvent(
                 baseline_score=current_snapshot.score,
                 current_score=current_snapshot.score,

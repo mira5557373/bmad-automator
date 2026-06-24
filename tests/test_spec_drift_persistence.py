@@ -398,6 +398,51 @@ class TestWatcherPersistenceIntegration(unittest.TestCase):
             # On-disk baseline must remain the previously persisted one.
             self.assertEqual(load_baseline(root, "k1"), old)
 
+    def test_poll_auto_init_does_not_clobber_concurrent_on_disk_baseline(
+        self,
+    ) -> None:
+        # Regression: pre-fix, the auto-init branch in ``poll()`` (no
+        # baseline observed in memory) unconditionally called
+        # ``persist_baseline(...)``, while ``__init__`` carefully
+        # guarded its own write with an ``exists()`` check. A second
+        # process that persisted a baseline between this watcher's
+        # ``__init__`` (which observed an empty drift dir) and its
+        # first ``poll()`` would have its baseline silently overwritten
+        # by the in-memory auto-init snapshot — directly contradicting
+        # the docstring promise that "a previously-persisted baseline
+        # is never clobbered by a stale caller-supplied snapshot."
+        # The fix mirrors the __init__ exists-guard at the auto-init
+        # call site so a concurrent writer's baseline is preserved.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Step 1: construct watcher A with persistence_key but no
+            # on-disk baseline yet — __init__'s load_baseline returns
+            # None, so A._baseline stays None.
+            w = SpecDriftWatcher(
+                project_root=root, spec_path=root / "spec.md",
+                persistence_key="k1",
+            )
+            self.assertFalse(w.is_baseline_set())
+            # Step 2: simulate a peer process B persisting a baseline
+            # between A's __init__ and A's first poll().
+            peer = SpecDriftSnapshot(
+                score=0.95, requirements_total=20, requirements_satisfied=19,
+                timestamp_iso="2026-06-23T00:00:00Z",
+            )
+            persist_baseline(root, "k1", peer)
+            self.assertEqual(load_baseline(root, "k1"), peer)
+            # Step 3: A.poll() fires; check_compliance returns a
+            # regressed report so the auto-init in-memory snapshot
+            # is strictly worse than B's persisted baseline.
+            report = _report([
+                _verdict("REQ-01", "missing"),
+                _verdict("REQ-02", "missing"),
+            ])
+            with mock.patch(_TARGET, return_value=report):
+                w.poll()
+            # The peer's baseline must remain on disk.
+            self.assertEqual(load_baseline(root, "k1"), peer)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
