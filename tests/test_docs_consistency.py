@@ -2081,5 +2081,112 @@ class ValidateCliIdDocstringGrammarTests(unittest.TestCase):
         )
 
 
+class SessionUsageCaptureFailSoftDocstringTests(unittest.TestCase):
+    """``session_usage_capture`` module docstring matches its conditional warning.
+
+    Pre-fix the module docstring at ``session_usage_capture.py:30-31``
+    promised "Unparseable content => return zero-valued
+    :class:`UsageMetrics` with ``parser_id='unparseable'`` and a logged
+    warning." — an unconditional logging promise. The actual
+    implementation at ``session_usage_capture.py:232-244`` gates the
+    warning on TWO conditions: ``bytes_read > 0`` AND
+    ``parser_id not in _ZERO_BY_CONTRACT_PARSER_IDS``. So an empty
+    transcript (bytes_read == 0) and the contractually-zero parser
+    dialects (``"none"``, ``"codex-rollout"``, ``"gemini-chat"``) both
+    silently downgrade ``parser_id`` to ``"unparseable"`` without
+    emitting any warning. Audit consumers relying on log-scraping to
+    detect runtime degradation would miss those cases.
+
+    The fix tightens the docstring to spell out both suppression
+    conditions and explain why ("contractually zero-returning, so
+    logging a 'parser returned zero usage' warning there would falsely
+    imply degradation where there is none"). The intent and inline
+    comments at lines 215-231 already documented this rationale; the
+    module-level fail-soft contract bullet now mirrors it.
+
+    The regression test pins both halves of the contract:
+
+    1. The high-level docstring bullet no longer carries the
+       unconditional "and a logged warning" promise (the pre-fix
+       wording).
+    2. The docstring explicitly names the two suppression conditions
+       (the ``bytes_read > 0`` / "non-empty" guard AND the
+       ``_ZERO_BY_CONTRACT_PARSER_IDS`` reference) so future readers
+       can find the rationale without grepping the source.
+    """
+
+    def _module_doc(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.innovation.session_usage_capture"
+        )
+        return module.__doc__ or ""
+
+    def test_failsoft_bullet_no_longer_promises_unconditional_warning(self) -> None:
+        # Normalize whitespace because the docstring line-wraps.
+        normalized = re.sub(r"\s+", " ", self._module_doc())
+        # The pre-fix bullet read ``parser_id="unparseable" and a logged
+        # warning`` as the unconditional fail-soft contract for
+        # unparseable content (literal source has double backticks
+        # around the parser_id token, but they are not significant for
+        # matching). The unconditional ``and a logged warning`` clause
+        # MUST be gone post-fix; the only acceptable framing is a
+        # qualified clause that names a suppression condition.
+        self.assertNotRegex(
+            normalized,
+            r"parser_id=\"unparseable\"``\s+and\s+a\s+logged\s+warning\.",
+            "session_usage_capture module docstring still carries the "
+            "pre-fix unconditional 'parser_id=\"unparseable\" and a "
+            "logged warning.' promise; the implementation actually "
+            "suppresses the warning for empty transcripts and "
+            "contractually-zero parser dialects.",
+        )
+
+    def test_failsoft_bullet_documents_both_suppression_conditions(self) -> None:
+        # Post-fix the bullet must explicitly disclose BOTH guards so
+        # future readers do not have to grep the source to learn that
+        # empty transcripts and contractually-zero dialects skip the
+        # warning. Normalize whitespace because the docstring line-wraps.
+        normalized = re.sub(r"\s+", " ", self._module_doc())
+        # Guard 1: non-empty (bytes_read > 0).
+        self.assertIn(
+            "non-empty",
+            normalized,
+            "session_usage_capture module docstring does not mention the "
+            "'non-empty' transcript precondition for the zero-on-nonempty "
+            "warning. Empty transcripts silently downgrade parser_id to "
+            "'unparseable' without a warning; the docstring must say so.",
+        )
+        # Guard 2: zero-by-contract parser ids. Anchor on the constant
+        # name so a future rename trips the test at the same commit.
+        self.assertIn(
+            "_ZERO_BY_CONTRACT_PARSER_IDS",
+            normalized,
+            "session_usage_capture module docstring does not reference "
+            "_ZERO_BY_CONTRACT_PARSER_IDS — the constant that pins the "
+            "second suppression condition (none / codex-rollout / "
+            "gemini-chat dialects). Audit consumers need the pointer to "
+            "find the suppression rationale.",
+        )
+
+    def test_failsoft_bullet_implementation_still_matches_docstring(self) -> None:
+        """Defensive: the live constant still holds the three contract dialects.
+
+        If a future refactor changes :data:`_ZERO_BY_CONTRACT_PARSER_IDS`
+        to add/remove dialects, the docstring's ``"none"`` / ``"codex-rollout"``
+        / ``"gemini-chat"`` enumeration becomes stale and this test trips
+        so the docstring gets re-audited at the same commit.
+        """
+        module = importlib.import_module(
+            "story_automator.core.innovation.session_usage_capture"
+        )
+        self.assertEqual(
+            module._ZERO_BY_CONTRACT_PARSER_IDS,
+            frozenset({"none", "codex-rollout", "gemini-chat"}),
+            "_ZERO_BY_CONTRACT_PARSER_IDS membership changed; re-audit "
+            "the session_usage_capture module docstring enumeration of "
+            "contractually-zero parser dialects.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

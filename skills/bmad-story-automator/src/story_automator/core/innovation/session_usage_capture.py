@@ -28,7 +28,13 @@ Fail-soft contract — mirrors the cost-evidence emission contract:
   caller asked us to read a specific path; silently returning zero
   would hide a misconfiguration).
 * Unparseable content => return zero-valued :class:`UsageMetrics`
-  with ``parser_id="unparseable"`` and a logged warning. The session
+  with ``parser_id="unparseable"``; a warning is logged ONLY when
+  the transcript was non-empty AND the parser is not in the
+  zero-by-contract set (see :data:`_ZERO_BY_CONTRACT_PARSER_IDS`).
+  Empty transcripts and the ``"none"`` / ``"codex-rollout"`` /
+  ``"gemini-chat"`` parser dialects are contractually zero-returning,
+  so logging a "parser returned zero usage" warning there would
+  falsely imply degradation where there is none. The session
   legitimately may have emitted nothing the parser recognizes
   (toy CLI, custom stop hook); we never want to abort a gate over
   it. Note that this sentinel is intentionally distinct from
