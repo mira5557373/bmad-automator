@@ -1181,6 +1181,129 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                         self.scrubbed_names.discard(node.target.id)
                 self.generic_visit(node)
 
+            def visit_For(self, node: ast.For) -> None:
+                # ``for sandboxed in items:`` rebinds the loop target on
+                # every iteration to a value drawn from ``items`` — the
+                # walker cannot prove the source of those values is
+                # scrubbed, so any previously-scrubbed binding on the
+                # same name MUST be DISCARDED. Without this branch, a
+                # function that scrubs first and then iterates a raw
+                # env-dict sequence over the same identifier silently
+                # leaks an unscrubbed env into ``subprocess.run(...,
+                # env=<rebound>)`` — a real false-negative bypass of
+                # the D-04 audit-floor invariant, symmetric with the
+                # discard branches in ``visit_Assign`` /
+                # ``visit_AnnAssign`` / ``visit_NamedExpr``.
+                #
+                # Reuses the recursive Name-collector pattern from
+                # ``visit_Assign`` to handle tuple/list/starred unpack
+                # targets (e.g. ``for sandboxed, _ in pairs:``).
+                # ``ast.AsyncFor`` shares the ``.target`` attribute, so
+                # ``visit_AsyncFor`` mirrors this branch.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
+                for name in _iter_name_targets(node.target):
+                    self.scrubbed_names.discard(name.id)
+                self.generic_visit(node)
+
+            def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+                # Same rebind semantics as ``visit_For`` — ``async for``
+                # loop targets also rebind from an async iterable whose
+                # source the walker cannot prove is scrubbed.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
+                for name in _iter_name_targets(node.target):
+                    self.scrubbed_names.discard(name.id)
+                self.generic_visit(node)
+
+            def visit_With(self, node: ast.With) -> None:
+                # ``with ctx() as sandboxed:`` rebinds ``sandboxed`` to
+                # whatever the context manager's ``__enter__`` returns —
+                # the walker cannot prove that value is scrubbed, so any
+                # previously-scrubbed binding on the same name MUST be
+                # DISCARDED. Without this branch, an attacker can scrub
+                # first and then silently rebind via ``with`` to a raw
+                # env-dict context manager — a real false-negative
+                # bypass of the D-04 audit-floor invariant. Mirrors the
+                # discard branches in ``visit_Assign`` /
+                # ``visit_AnnAssign`` / ``visit_NamedExpr`` / ``visit_For``.
+                #
+                # ``node.items`` is a list of ``ast.withitem`` whose
+                # ``optional_vars`` may be ``None`` (bare ``with ctx:``),
+                # a plain ``ast.Name``, or a tuple/list unpack target.
+                # ``visit_AsyncWith`` shares the same structure.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        for name in _iter_name_targets(item.optional_vars):
+                            self.scrubbed_names.discard(name.id)
+                self.generic_visit(node)
+
+            def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+                # Same rebind semantics as ``visit_With`` — ``async
+                # with`` items rebind via an async context manager whose
+                # ``__aenter__`` return value the walker cannot prove
+                # is scrubbed.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        for name in _iter_name_targets(item.optional_vars):
+                            self.scrubbed_names.discard(name.id)
+                self.generic_visit(node)
+
+            def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+                # ``except E as sandboxed:`` rebinds ``sandboxed`` to
+                # the caught exception object — categorically NOT a
+                # scrub result, so any previously-scrubbed binding on
+                # the same name MUST be DISCARDED. Without this branch,
+                # an attacker can scrub first and then trigger a
+                # controlled exception to silently rebind through an
+                # except-as clause and pass the env-keyword check —
+                # a real false-negative bypass of the D-04 audit-floor
+                # invariant.
+                #
+                # ``node.name`` is a plain ``str`` (NOT an ``ast`` node)
+                # per the Python grammar; ``None`` for bare ``except E:``
+                # without ``as``. Per PEP 3134 the bound name is also
+                # deleted at the end of the except suite, but the
+                # walker discards conservatively for the whole
+                # enclosing scope — there is no realistic idiom where
+                # a function expects an except-as target to remain
+                # scrubbed across the except boundary.
+                if node.name is not None:
+                    self.scrubbed_names.discard(node.name)
+                self.generic_visit(node)
+
             def visit_AugAssign(self, node: ast.AugAssign) -> None:
                 # PEP 584 augmented-assignment rebinds (e.g.
                 # ``sandboxed |= {"BMAD_AUDIT_KEY": "leak"}`` after a
@@ -2149,6 +2272,154 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "binding — the discard must fire ONLY when the binding "
             "target itself is the AugAssign target, not for unrelated "
             "AugAssigns elsewhere in the function",
+        )
+
+    def test_for_with_except_rebind_invalidates_scrubbed_binding(self) -> None:
+        """A name bound to ``scrub_env_for_subprocess(...)`` that is
+        later REBOUND via a for-loop target, a with-as clause, or an
+        except-as clause must NOT remain in ``scrubbed_names`` — the
+        subsequent ``subprocess.run(..., env=<rebound>)`` must be
+        flagged as unscrubbed.
+
+        Companion to
+        :py:meth:`test_rebind_to_raw_invalidates_scrubbed_binding`
+        (Assign / AnnAssign / walrus rebinds),
+        :py:meth:`test_tuple_list_starred_unpack_rebind_invalidates_scrubbed_binding`
+        (unpack-target rebinds), and
+        :py:meth:`test_augassign_rebind_invalidates_scrubbed_binding`
+        (augmented-assignment rebinds). Without ``visit_For`` /
+        ``visit_With`` / ``visit_ExceptHandler`` the walker generic-
+        visits these nodes, so a previously-scrubbed binding silently
+        survives a rebind through any of three additional Python
+        binding forms — a real false-negative bypass of the D-04
+        audit-floor invariant.
+
+        Three bypass sub-variants are covered:
+          (a) ``for sandboxed in items:`` — loop target rebinds to a
+              value drawn from an iterable the walker cannot prove
+              is scrubbed.
+          (b) ``with ctx() as sandboxed:`` — context manager
+              ``__enter__`` return value the walker cannot prove is
+              scrubbed.
+          (c) ``except E as sandboxed:`` — caught exception object
+              (categorically not a scrub result).
+        """
+        import ast
+
+        # (a) ``for`` loop target rebind — canonical bypass for
+        # iterator-driven rebinds.
+        for_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                for sandboxed in [{"BMAD_AUDIT_KEY": "leak"}]:
+                    pass
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(for_rebind_src))),
+            1,
+            "Walker FAILED to flag ``for sandboxed in items:`` rebind "
+            "from a prior scrub binding — visit_For must DISCARD the "
+            "loop-target name because the walker cannot prove the "
+            "iterable yields scrubbed values, defeating the D-04 "
+            "audit-floor invariant otherwise",
+        )
+
+        # (b) ``with ... as`` rebind — context manager target.
+        with_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, ctx):
+                sandboxed = scrub_env_for_subprocess(env)
+                with ctx() as sandboxed:
+                    pass
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(with_rebind_src))),
+            1,
+            "Walker FAILED to flag ``with ctx() as sandboxed:`` rebind "
+            "from a prior scrub binding — visit_With must DISCARD every "
+            "``optional_vars`` name leaf because the walker cannot prove "
+            "the context manager's ``__enter__`` returns a scrubbed value",
+        )
+
+        # (c) ``except ... as`` rebind — caught exception target.
+        except_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                try:
+                    pass
+                except Exception as sandboxed:
+                    pass
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(except_rebind_src))),
+            1,
+            "Walker FAILED to flag ``except E as sandboxed:`` rebind "
+            "from a prior scrub binding — visit_ExceptHandler must "
+            "DISCARD the bound name because the exception object is "
+            "categorically not a scrub result",
+        )
+
+        # (d) Tuple unpack inside a for-loop target — pins that the
+        # Name-collector recursion fires for unpack-pattern loop targets,
+        # symmetric with visit_Assign's tuple/list/starred handling.
+        for_tuple_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, pairs):
+                sandboxed = scrub_env_for_subprocess(env)
+                for sandboxed, _ in pairs:
+                    pass
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(for_tuple_rebind_src))),
+            1,
+            "Walker FAILED to flag tuple-unpack for-loop target rebind "
+            "from a prior scrub binding — visit_For must recurse into "
+            "ast.Tuple / ast.List / ast.Starred patterns inside the loop "
+            "target, symmetric with the unpack handling in visit_Assign",
+        )
+
+        # Sanity: the canonical safe pattern must STILL pass after the
+        # three new visitors land — the discard branches must not leak
+        # into unrelated bindings or scope handling.
+        safe_pattern_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(safe_pattern_src)),
+            [],
+            "visit_For / visit_With / visit_ExceptHandler falsely "
+            "invalidated a legitimately-scrubbed binding — the discard "
+            "must fire ONLY when the rebind target itself shadows the "
+            "scrubbed name, not for unrelated for/with/except elsewhere",
         )
 
     def test_scrub_import_alias_is_tracked(self) -> None:
