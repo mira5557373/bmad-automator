@@ -129,7 +129,7 @@ def _require_collectors(collector_ids: list[str]) -> None:
         seen.add(cid)
 
 
-def _split_int(total: int, weights: list[float]) -> list[int]:
+def _split_int(total: int, weights: list[float | int]) -> list[int]:
     """Split ``total`` (int) across ``weights`` (sum == 1.0 ideally).
 
     Uses floor-then-distribute-remainder so the sum of the returned
@@ -140,12 +140,22 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
     for any ``int`` total — including totals larger than ``2**53``
     where ``total * w / total_w`` in pure float arithmetic would lose
     integer precision (the float64 mantissa is 53 bits).
+
+    ``weights`` may carry plain ``int`` entries: when callers have
+    exact integer weights (e.g. per-collector tool-call counts) they
+    must NOT pre-cast to ``float`` because pairs of ints above the
+    float64 mantissa boundary (e.g. ``2**60`` vs ``2**60+1``) collapse
+    to the same float and lose their distinguishing precision before
+    :class:`Fraction` ever sees them. Passing ints through unchanged
+    preserves their exact value through the rational arithmetic below.
     """
 
     n = len(weights)
     if total <= 0 or n == 0:
         return [0] * n
-    clean = [w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights]
+    clean: list[float | int] = [
+        w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights
+    ]
     total_w = sum(clean)
     if not math.isfinite(total_w) or total_w <= 0:
         # Fall back to uniform when weights are degenerate (or when two
@@ -153,9 +163,12 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
         # the invariant (sum of shares == total) still holds.
         return _split_int(total, [1.0] * n)
     # Exact rational apportionment: convert each finite non-negative
-    # float weight to a :class:`Fraction` and compute
-    # ``total * w / sum(w)`` in rational space. ``int(Fraction)``
-    # truncates toward zero, which equals floor for non-negative values.
+    # weight to a :class:`Fraction` and compute ``total * w / sum(w)``
+    # in rational space. ``int(Fraction)`` truncates toward zero, which
+    # equals floor for non-negative values. ``Fraction`` accepts both
+    # ``int`` (exact) and ``float`` (IEEE-754, exact rational of the
+    # demoted value) inputs — see the ``weights`` note above for why
+    # callers should pass ints when they have them.
     frac_weights = [Fraction(w) for w in clean]
     frac_total_w = sum(frac_weights, Fraction(0))
     frac_total = Fraction(total)
@@ -175,21 +188,36 @@ def _split_int(total: int, weights: list[float]) -> list[int]:
     return floors
 
 
-def _split_float(total: float, weights: list[float]) -> list[float]:
+def _split_float(total: float, weights: list[float | int]) -> list[float]:
     """Split ``total`` (float) across ``weights``.
 
     Adjusts the final share so the sum equals ``total`` exactly,
     absorbing any floating-point drift.
+
+    ``weights`` may carry plain ``int`` entries; the ratio
+    ``total * w / sum(w)`` is computed via :class:`Fraction` so two
+    integer weights that differ below the float64 ULP at their
+    magnitude (e.g. ``2**62`` vs ``2**62 + 2**10``) still produce
+    distinct shares — the final float coercion happens only at the
+    return boundary so the per-collector ordering is preserved.
     """
 
     n = len(weights)
     if total <= 0 or n == 0:
         return [0.0] * n
-    clean = [w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights]
+    clean: list[float | int] = [
+        w if (w > 0 and math.isfinite(w)) else 0.0 for w in weights
+    ]
     total_w = sum(clean)
     if not math.isfinite(total_w) or total_w <= 0:
         return _split_float(total, [1.0] * n)
-    raw = [total * w / total_w for w in clean]
+    # Compute the ratio in exact rational arithmetic so int weights
+    # that exceed the float64 mantissa precision (53 bits) keep their
+    # distinguishing value. ``Fraction(float)`` is exact for any
+    # finite float, so float weights round-trip unchanged.
+    frac_total = Fraction(total)
+    frac_total_w = Fraction(total_w)
+    raw = [float(frac_total * Fraction(w) / frac_total_w) for w in clean]
     # Absorb floating-point drift into the final non-zero entry so the
     # sum invariant holds for callers' equality tests.
     drift = total - sum(raw)
@@ -328,7 +356,13 @@ def attribute_cost_by_tool_calls(
 
     collector_ids = list(tool_calls.keys())
     _require_collectors(collector_ids)
-    weights = [float(tool_calls[cid]) for cid in collector_ids]
+    # Keep tool-call weights as ``int`` — passing them through
+    # ``float()`` first would collapse pairs that differ below the
+    # float64 ULP at their magnitude (e.g. ``2**60`` and ``2**60+1``
+    # demote to the same float), erasing the precision the underlying
+    # rational arithmetic in :func:`_split_int` / :func:`_split_float`
+    # is designed to preserve.
+    weights: list[float | int] = [tool_calls[cid] for cid in collector_ids]
 
     in_shares = _split_int(session.input_tokens, weights)
     out_shares = _split_int(session.output_tokens, weights)

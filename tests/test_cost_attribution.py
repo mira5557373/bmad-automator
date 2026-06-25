@@ -189,6 +189,74 @@ class ToolCallWeightedAttributionTests(unittest.TestCase):
         with self.assertRaises(AttributionError):
             attribute_cost_by_tool_calls(SESSION, {"a": -1, "b": 2})
 
+    def test_by_tool_calls_preserves_int_precision_above_float64_mantissa(
+        self,
+    ) -> None:
+        # Regression for round-4 bug sweep finding: the public wrapper
+        # used to do ``weights = [float(tool_calls[cid]) for ...]``,
+        # which demoted int weights to ``float64`` BEFORE they reached
+        # ``_split_int`` / ``_split_float`` and their internal exact-
+        # rational arithmetic. Pairs of ints that differ below the
+        # float64 ULP at their magnitude (e.g. ``2**60`` and
+        # ``2**60+1``) collapsed to the same float, silently erasing
+        # the asymmetry the integer weights call for. The fix keeps
+        # the weights as ints so :class:`Fraction` sees them at full
+        # precision.
+        #
+        # The single ``input_tokens=1`` is the cleanest discriminator
+        # because the floor-then-distribute-remainder loop has to
+        # decide which collector receives that remaining unit. With
+        # demoted floats, both raw fractions are identical and the
+        # stable sort hands the unit to collector ``a`` (the smaller
+        # weight). With ints kept intact, ``b`` correctly receives it
+        # because its weight is one larger.
+        self.assertTrue(float(2**60) == float(2**60 + 1))  # boundary
+        session = UsageMetrics(
+            input_tokens=1, output_tokens=0, total_cost_usd=0.0, duration_s=0.0
+        )
+        shares = attribute_cost_by_tool_calls(
+            session, {"a": 2**60, "b": 2**60 + 1}
+        )
+        by_id = {s.collector_id: s.input_tokens for s in shares}
+        self.assertEqual(
+            by_id["a"], 0, "collector 'a' (smaller int weight) must not receive the unit"
+        )
+        self.assertEqual(
+            by_id["b"], 1, "collector 'b' (larger int weight) must receive the remainder"
+        )
+        # Sum invariant still holds at the boundary.
+        self.assertEqual(sum(s.input_tokens for s in shares), 1)
+
+    def test_by_tool_calls_cost_preserves_int_weight_ordering(self) -> None:
+        # Companion regression: the cost (float) split path also went
+        # through the same float-demoted weights, so two ints differing
+        # below the float64 ULP at their magnitude produced shares
+        # off by one ULP from the exact-rational answer (pre-fix:
+        # ``[1.0, 1.0000000000000002]`` vs post-fix
+        # ``[0.9999999999999999, 1.0]``). The fix routes the ratio
+        # through :class:`Fraction` so the float coercion happens once
+        # at the boundary instead of squashing the weights up-front.
+        session = UsageMetrics(total_cost_usd=2.0)
+        shares = attribute_cost_by_tool_calls(
+            session, {"a": 2**62, "b": 2**62 + 2**10}
+        )
+        by_id = {s.collector_id: s.cost_usd for s in shares}
+        # The exact-rational answer is ``[0.9999999999999999, 1.0]``
+        # — collector ``b`` (larger int weight) gets exactly ``1.0``.
+        # Pre-fix it received ``1.0000000000000002`` (one float ULP
+        # above the correct value).
+        self.assertEqual(
+            by_id["b"],
+            1.0,
+            "collector 'b' (larger int weight) must receive the exact-rational share",
+        )
+        self.assertLessEqual(
+            by_id["a"],
+            by_id["b"],
+            "collector 'a' (smaller int weight) must not get a larger cost share",
+        )
+        self.assertAlmostEqual(sum(by_id.values()), 2.0)
+
 
 class FrozenAndSumInvariantTests(unittest.TestCase):
     def test_cost_share_frozen(self) -> None:
