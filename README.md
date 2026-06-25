@@ -126,6 +126,13 @@ Subcommands: `show`, `entry`, `stats`, `verify`, `orphans`. All
 read-only; output is canonical JSON with alphabetically-sorted keys
 for byte-deterministic diffs across machines.
 
+The `calibration` command (C5 self-improving gate) exposes five
+subcommands — `propose`, `list-proposals`, `show`, `apply`, `reject` —
+for advisory threshold-tuning. The `apply` subcommand requires an
+8-hex confirm slug and is the only path that mutates source. Bare
+`calibration` invocation prints the M08 success-rate table
+(byte-identical golden fixture).
+
 The `gate` subtree (status, resume, invalidate, readiness) is
 unchanged from prior releases.
 

@@ -4324,5 +4324,135 @@ class GateOrchestratorInlineCommentLineRefsTests(unittest.TestCase):
         )
 
 
+class ReadmeOperatorCliCalibrationCoverageTests(unittest.TestCase):
+    """README's ``## Operator CLI`` section enumerates the ``calibration`` command.
+
+    Pre-fix README.md:115-130 enumerated only the ``lineage`` top-level
+    command and the ``gate`` subtree, then asserted "The ``gate`` subtree
+    ... is unchanged from prior releases." It made ZERO mention of the
+    C5 self-improving-gate ``calibration`` command — which is a wired,
+    operator-facing top-level CLI alongside ``lineage`` (see
+    ``python3 -m story_automator --help``) and exposes five subcommands
+    (``propose``, ``list-proposals``, ``show``, ``apply``, ``reject``).
+
+    The omission is particularly material because the ``calibration apply``
+    subcommand MUTATES SOURCE (rewrites the ``PRIORITY_THRESHOLDS`` byte
+    range in ``core/gate_rules.py``) under an 8-hex confirm-token
+    contract. An operator reading only the README's "Operator CLI"
+    section — which the README frames as the canonical operator surface
+    listing — would not discover that a stateful, source-mutating CLI
+    command exists. CLAUDE.md:74 documents the surface in detail; the
+    C5 changelog at
+    ``docs/changelog/2026-06-23-c5-self-improving-gate.md`` enumerates
+    the same five subcommands; the Python API kwarg
+    (``threshold_proposer``) is mentioned in the README quick-start at
+    line 100, but the operator CLI surface was missing.
+
+    The regression test pins both halves of the post-fix contract:
+
+    1. The ``## Operator CLI`` section body must textually mention the
+       ``calibration`` command.
+    2. The live ``story-automator`` CLI must still expose
+       ``calibration`` as a top-level command, so future renames or
+       removals trip the test instead of silently making the README
+       once-again-truthful.
+    """
+
+    def _operator_cli_section(self) -> str:
+        """Extract the body of the ``## Operator CLI`` section.
+
+        Bounded by the ``## Operator CLI`` heading and the next ``## ``
+        heading (or end-of-file).
+        """
+        text = _read("README.md")
+        match = re.search(r"^## Operator CLI\b.*$", text, re.MULTILINE)
+        self.assertIsNotNone(
+            match,
+            "README.md no longer carries a '## Operator CLI' heading; "
+            "either restore the section or update this regression test "
+            "to match the new shape.",
+        )
+        start = match.end()
+        next_heading = re.search(r"^## ", text[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(text)
+        return text[start:end]
+
+    def test_operator_cli_section_mentions_calibration_command(self) -> None:
+        body = self._operator_cli_section()
+        self.assertIn(
+            "calibration",
+            body,
+            "README.md's '## Operator CLI' section does not mention the "
+            "'calibration' top-level command. CLAUDE.md:74 documents it "
+            "as an operator-facing surface, and "
+            "``python3 -m story_automator calibration --help`` is wired "
+            "and exposes five subcommands (propose, list-proposals, "
+            "show, apply, reject). An operator reading only README would "
+            "not discover the calibration surface — particularly material "
+            "because 'calibration apply' mutates source under an 8-hex "
+            "confirm-token contract.",
+        )
+
+    def test_operator_cli_section_lists_calibration_subcommands(self) -> None:
+        """Defensive: section enumerates at least one C5 subcommand by name.
+
+        The pre-fix bug was total absence; the post-fix should mirror the
+        ``lineage`` treatment which enumerates all five subcommands. We
+        require at least the source-mutating ``apply`` subcommand to be
+        named so an operator's grep for ``apply`` lands on the canonical
+        operator-surface listing.
+        """
+        body = self._operator_cli_section()
+        self.assertIn(
+            "apply",
+            body,
+            "README.md's '## Operator CLI' section does not name the "
+            "'calibration apply' subcommand, which is the only "
+            "source-mutating path in the calibration surface. The "
+            "lineage command in the same section enumerates all five of "
+            "its subcommands; calibration deserves symmetric treatment, "
+            "especially for the apply path.",
+        )
+
+    def test_live_cli_still_exposes_calibration_top_level(self) -> None:
+        """Defensive: the README claim is anchored against the live CLI.
+
+        If a future refactor renames or removes the calibration top-level
+        command (e.g. folding it under a ``gate`` subtree), the README
+        mention becomes stale; this test trips so the section gets
+        re-audited at the same commit.
+        """
+        src_root = (
+            REPO_ROOT
+            / "skills"
+            / "bmad-story-automator"
+            / "src"
+        )
+        result = subprocess.run(
+            ["python3", "-m", "story_automator", "--help"],
+            cwd=REPO_ROOT,
+            env={"PYTHONPATH": str(src_root), "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"story_automator --help failed (rc={result.returncode}): "
+            f"stderr={result.stderr!r}",
+        )
+        # The top-level help text lists each registered command on its
+        # own line, indented by two spaces.
+        self.assertRegex(
+            result.stdout,
+            r"(?m)^\s+calibration\b",
+            "story_automator --help no longer lists 'calibration' as a "
+            "top-level command. Either restore the registration or "
+            "update README.md's '## Operator CLI' section to match the "
+            "new shape.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
