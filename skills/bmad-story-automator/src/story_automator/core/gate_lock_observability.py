@@ -206,9 +206,16 @@ def _handle_gate_lock_timeout(
     # all three ``get_gate_lock`` sites continue to match by inheritance
     # only when the augmented exception actually propagates. Mirrors the
     # ``_describe_lock_holder`` swallow-on-error discipline.
+    #
+    # ``print`` to a closed Python file-like object (e.g. a pytest-captured
+    # stream that the framework closed at fixture teardown, an
+    # ``io.StringIO`` that was ``.close()``d, a closed text wrapper) raises
+    # ``ValueError: I/O operation on closed file`` — NOT ``OSError``
+    # (``issubclass(ValueError, OSError) is False``). Both branches must
+    # degrade silently so ``GateLockTimeoutError`` continues to propagate.
     try:
         print(str(new_exc), file=sys.stderr)
-    except OSError:
+    except (OSError, ValueError):
         pass
     raise new_exc from exc
 

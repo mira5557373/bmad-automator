@@ -238,6 +238,41 @@ class LockTimeoutIncludesHolderTests(_Mixin, unittest.TestCase):
         self.assertEqual(cm.exception.timeout_s, 0.1)
         self.assertEqual(cm.exception.lock_file, str(lock_path))
 
+    def test_handle_gate_lock_timeout_survives_closed_stderr(self) -> None:
+        # Round-4/fix-19 regression: ``print(file=sys.stderr)`` to a closed
+        # Python file-like object (pytest-captured stream that the framework
+        # closed at fixture teardown, ``io.StringIO`` after ``.close()``, a
+        # closed text wrapper) raises ``ValueError: I/O operation on closed
+        # file`` — NOT ``OSError``. Without broadening the guard, the
+        # ``ValueError`` propagates out of ``_handle_gate_lock_timeout``,
+        # masking the ``GateLockTimeoutError`` raise and breaking every
+        # ``except filelock.Timeout:`` block at the three ``get_gate_lock``
+        # call sites (``ValueError`` is not a ``Timeout`` subclass either).
+        # The comment block at the print site explicitly enumerates
+        # "pytest-captured stream that became invalid" as a covered case;
+        # this test pins that the implementation honors the docstring.
+        import io
+        import sys
+
+        lock_path = gate_lock_path(self.tmp)
+        closed_stream = io.StringIO()
+        closed_stream.close()
+        original_stderr = sys.stderr
+        sys.stderr = closed_stream  # type: ignore[assignment]
+        try:
+            with self.assertRaises(GateLockTimeoutError) as cm:
+                _handle_gate_lock_timeout(
+                    self.tmp, lock_path, 0.1,
+                    Timeout(str(lock_path)),
+                )
+        finally:
+            sys.stderr = original_stderr
+        # The exception must still carry the holder + timeout context
+        # — the observability degradation must not leak into the
+        # primary path.
+        self.assertEqual(cm.exception.timeout_s, 0.1)
+        self.assertEqual(cm.exception.lock_file, str(lock_path))
+
 
 # ---------------------------------------------------------------------------
 # B-H2 — third call site at system_gate.run_system_gate
