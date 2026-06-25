@@ -805,6 +805,83 @@ class EmissionTests(unittest.TestCase):
         with self.assertRaises(CostEvidenceError):
             load_collector_cost_share(self.root, self.gate_id, "c1")
 
+    def test_load_paths_do_not_create_ghost_directory_on_missing_data(
+        self,
+    ) -> None:
+        """Regression — :func:`load_gate_cost_report` and
+        :func:`load_collector_cost_share` used to route through
+        :func:`summary_path` / :func:`collector_cost_path` which both
+        called :func:`get_cost_root_dir` — the side-effecting helper
+        that calls ``ensure_dir`` to create the per-gate cost directory
+        on demand. As a result, probing for a never-emitted gate_id
+        correctly returned ``None`` but left an empty
+        ``_bmad/gate/cost/<gate_id>/`` directory behind.
+
+        The pollution silently breaks any future tooling that lists
+        ``_bmad/gate/cost/`` subdirectories to enumerate gates with
+        cost evidence — ghost dirs become indistinguishable from gates
+        that emitted zero shares. The docstring on
+        :func:`load_gate_cost_report` explicitly says "Returns ``None``
+        when the summary file is missing" implying read-only semantics.
+
+        Fix splits the path-computation helper from the side-effecting
+        directory-creation helper: the load path uses a pure path
+        joiner (``_cost_dir_path``) and only the emit path keeps using
+        ``get_cost_root_dir`` (which still creates the directory on
+        demand for legitimate writes).
+        """
+
+        cost_root = self.root / "_bmad" / "gate" / "cost"
+        # Pre-condition — nothing exists yet.
+        self.assertFalse(cost_root.exists())
+
+        # load_gate_cost_report on a never-emitted gate must return
+        # None WITHOUT creating the per-gate directory.
+        self.assertIsNone(
+            load_gate_cost_report(self.root, "never-emitted-gate"),
+        )
+        self.assertFalse(
+            (cost_root / "never-emitted-gate").exists(),
+            "load_gate_cost_report created a ghost per-gate cost dir "
+            "even though no cost evidence exists for that gate",
+        )
+
+        # load_collector_cost_share on a never-emitted gate must also
+        # return None WITHOUT creating the per-gate directory.
+        self.assertIsNone(
+            load_collector_cost_share(
+                self.root, "another-never-emitted-gate", "some-collector",
+            ),
+        )
+        self.assertFalse(
+            (cost_root / "another-never-emitted-gate").exists(),
+            "load_collector_cost_share created a ghost per-gate cost "
+            "dir even though no cost evidence exists for that gate",
+        )
+
+        # And the path helpers themselves must be pure — calling them
+        # without subsequently invoking emit must not touch disk.
+        _ = summary_path(self.root, "pure-summary-probe")
+        _ = collector_cost_path(
+            self.root, "pure-collector-probe", "any-id",
+        )
+        self.assertFalse(
+            (cost_root / "pure-summary-probe").exists(),
+            "summary_path() created a ghost per-gate cost dir as a "
+            "side effect — path helpers must be pure",
+        )
+        self.assertFalse(
+            (cost_root / "pure-collector-probe").exists(),
+            "collector_cost_path() created a ghost per-gate cost dir "
+            "as a side effect — path helpers must be pure",
+        )
+
+        # Sanity — emit DOES still create the directory (the side
+        # effect belongs on the write path, not the read path).
+        outcomes = [_make_outcome("ruff", "static")]
+        emit_gate_cost_report(self.root, "real-gate", SESSION, outcomes)
+        self.assertTrue((cost_root / "real-gate").is_dir())
+
     def test_attribution_mode_vocabulary_unified_across_summary_levels(
         self,
     ) -> None:

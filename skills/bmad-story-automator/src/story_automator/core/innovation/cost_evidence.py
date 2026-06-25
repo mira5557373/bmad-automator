@@ -182,23 +182,52 @@ class GateCostReport:
 _COST_DIRNAME = "cost"
 
 
+def _cost_dir_path(project_root: str | Path, gate_id: str) -> Path:
+    """Pure path joiner — same Path as :func:`get_cost_root_dir` but
+    WITHOUT the ``ensure_dir`` side effect.
+
+    Used by the read-only path helpers (:func:`summary_path` /
+    :func:`collector_cost_path`) so probing for non-existent cost
+    evidence via :func:`load_gate_cost_report` /
+    :func:`load_collector_cost_share` does not pollute the filesystem
+    with empty per-gate directories. The emit path keeps using
+    :func:`get_cost_root_dir` which still creates the directory on
+    demand.
+    """
+
+    return Path(project_root) / "_bmad" / "gate" / _COST_DIRNAME / gate_id
+
+
 def get_cost_root_dir(project_root: str | Path, gate_id: str) -> Path:
     """Return ``_bmad/gate/cost/<gate_id>/``, creating it on demand.
 
     Lives as a SIBLING of ``_bmad/gate/evidence/`` (not a child) so a
     Merkle re-walk of the evidence bundle for a given gate never sees
     cost files — they are observability, not evidence.
+
+    This helper is reserved for the EMIT path. The read-only loaders
+    (:func:`load_gate_cost_report`, :func:`load_collector_cost_share`)
+    and the path helpers they delegate to (:func:`summary_path` /
+    :func:`collector_cost_path`) use :func:`_cost_dir_path` instead so
+    a probe for a never-emitted gate_id does not create a ghost
+    per-gate directory on disk.
     """
 
-    path = Path(project_root) / "_bmad" / "gate" / _COST_DIRNAME / gate_id
+    path = _cost_dir_path(project_root, gate_id)
     ensure_dir(path)
     return path
 
 
 def summary_path(project_root: str | Path, gate_id: str) -> Path:
-    """Path of the per-gate summary JSON."""
+    """Path of the per-gate summary JSON.
 
-    return get_cost_root_dir(project_root, gate_id) / "summary.json"
+    Pure path computation — does NOT create the per-gate cost
+    directory. Callers writing the summary must call
+    :func:`get_cost_root_dir` (which the emit path already does)
+    to ensure the directory exists before write.
+    """
+
+    return _cost_dir_path(project_root, gate_id) / "summary.json"
 
 
 def collector_cost_path(
@@ -206,17 +235,18 @@ def collector_cost_path(
 ) -> Path:
     """Path of one collector's share JSON.
 
-    No filename sanitization is performed HERE — collector ids are
-    produced by the registry which constrains them to a safe character
-    set (lowercase, hyphen, digits). Callers passing arbitrary strings
-    get whatever ``Path`` does with them. The emit-side guard at
-    :func:`emit_gate_cost_report` rejects ``..`` / ``/`` / ``\\`` in
-    collector_ids BEFORE disk touch so the per-gate-dir isolation
-    invariant is preserved; this helper is read-only and trusts callers
-    that route through emission.
+    Pure path computation — does NOT create the per-gate cost
+    directory. No filename sanitization is performed HERE — collector
+    ids are produced by the registry which constrains them to a safe
+    character set (lowercase, hyphen, digits). Callers passing
+    arbitrary strings get whatever ``Path`` does with them. The
+    emit-side guard at :func:`emit_gate_cost_report` rejects ``..`` /
+    ``/`` / ``\\`` in collector_ids BEFORE disk touch so the
+    per-gate-dir isolation invariant is preserved; this helper is
+    read-only and trusts callers that route through emission.
     """
 
-    return get_cost_root_dir(project_root, gate_id) / f"{collector_id}.json"
+    return _cost_dir_path(project_root, gate_id) / f"{collector_id}.json"
 
 
 # ---------------------------------------------------------------------------
