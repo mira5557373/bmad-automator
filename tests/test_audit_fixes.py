@@ -18,7 +18,7 @@ from unittest import mock
 
 from story_automator.cli import _cmd_parse_story_range
 from story_automator.commands.basic import cmd_stop_hook
-from story_automator.commands.orchestrator import _coerce_int, _marker, _scalar_or_empty, _state_update
+from story_automator.commands.orchestrator import _marker, _scalar_or_empty, _state_update
 from story_automator.commands.orchestrator_epic_agents import agents_build_action, agents_resolve_action
 from story_automator.commands.state import _max_parallel
 from story_automator.core.epic_parser import parse_story
@@ -147,18 +147,6 @@ class ScalarOrEmptyTests(unittest.TestCase):
     def test_real_value_preserved(self) -> None:
         self.assertEqual(_scalar_or_empty("1.2"), "1.2")
         self.assertEqual(_scalar_or_empty(3), "3")
-
-
-class CoerceIntTests(unittest.TestCase):
-    """#26: marker int parsing is defensive."""
-
-    def test_empty_uses_default(self) -> None:
-        self.assertEqual(_coerce_int("", 0), 0)
-        self.assertEqual(_coerce_int(None, 7), 7)
-
-    def test_valid_and_invalid(self) -> None:
-        self.assertEqual(_coerce_int("42", 0), 42)
-        self.assertIsNone(_coerce_int("abc", 0))
 
 
 class StateUpdateTests(unittest.TestCase):

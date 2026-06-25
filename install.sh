@@ -45,24 +45,6 @@ skill_file() {
   printf '%s/%s/SKILL.md\n' "$TARGET_SKILLS_REL" "$skill_name"
 }
 
-KEEP_BACKUPS="${BMAD_INSTALL_KEEP_BACKUPS:-3}"
-
-prune_backups() {
-  # Bound the timestamped backups of "$path" so repeated re-installs do not
-  # accumulate stale copies forever. Keeps the most recent $KEEP_BACKUPS
-  # (the suffix is sortable: .backup-YYYYMMDDTHHMMSSZ) and removes older ones.
-  local path="$1"
-  local backups count old
-  backups="$(ls -d "${path}.backup-"* 2>/dev/null | sort || true)"
-  [ -n "$backups" ] || return 0
-  count="$(printf '%s\n' "$backups" | grep -c . || true)"
-  if [ "$count" -gt "$KEEP_BACKUPS" ]; then
-    printf '%s\n' "$backups" | head -n "$((count - KEEP_BACKUPS))" | while IFS= read -r old; do
-      [ -n "$old" ] && rm -rf "$old"
-    done
-  fi
-}
-
 backup_if_exists() {
   local path="$1"
   [ -e "$path" ] || return 0

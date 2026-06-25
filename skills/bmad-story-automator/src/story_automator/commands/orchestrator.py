@@ -162,21 +162,6 @@ def _emit_safe(event) -> None:
         logger.warning("telemetry emit failed for %s: %s", type(event).__name__, exc)
 
 
-def _coerce_int(value: object, default: int) -> int | None:
-    """Parse an int from CLI input. Empty/None -> default; non-numeric -> None.
-
-    Returning None lets the caller emit a structured error instead of crashing
-    with an uncaught ValueError on corrupted/non-numeric marker input.
-    """
-    text = str(value if value is not None else "").strip()
-    if not text:
-        return default
-    try:
-        return int(text)
-    except ValueError:
-        return None
-
-
 def _scalar_or_empty(value: object) -> str:
     """Render a frontmatter scalar, mapping YAML/JSON null sentinels to "".
 

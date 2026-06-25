@@ -166,7 +166,7 @@ no-op on integration-all — the file is already gitignored at line
 ### QA Notes
 - `npm run lint:python` (ruff): PASS (all checks).
 - `npm run test:python` (`unittest discover -s tests`):
-  PASS — 4873 tests, 2 skipped, 0 failed.
+  PASS — 4871 tests, 2 skipped, 0 failed.
 - `tests/test_audit_fixes`: PASS — 39 tests (29 deep-audit
   regressions from main + integration-all's pre-existing).
 - `tests/test_audit_regression`: PASS — 50 tests (audit-floor
