@@ -185,11 +185,22 @@ def _dict_to_snapshot(data: dict) -> "SpecDriftSnapshot":
     from story_automator.core.innovation.spec_drift_watcher import (
         SpecDriftSnapshot,
     )
+    # Validate timestamp_iso explicitly: str(data["timestamp_iso"]) would
+    # silently coerce JSON null -> the literal 4-character string "None",
+    # asymmetric with sibling fields whose float()/int() validators raise
+    # on None. The surrounding load_baseline try/except wraps TypeError
+    # as SpecDriftError so this surfaces loudly per the docstring contract.
+    timestamp_iso = data["timestamp_iso"]
+    if not isinstance(timestamp_iso, str) or not timestamp_iso:
+        raise TypeError(
+            f"timestamp_iso must be a non-empty str, got "
+            f"{type(timestamp_iso).__name__}: {timestamp_iso!r}"
+        )
     return SpecDriftSnapshot(
         score=float(data["score"]),
         requirements_total=int(data["requirements_total"]),
         requirements_satisfied=int(data["requirements_satisfied"]),
-        timestamp_iso=str(data["timestamp_iso"]),
+        timestamp_iso=timestamp_iso,
     )
 
 

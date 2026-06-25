@@ -220,6 +220,43 @@ class TestBaselinePersistence(unittest.TestCase):
             )
             with self.assertRaises(SpecDriftError):
                 load_baseline(root, "k1")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            drift_root_dir(root, "k1", create=True)
+            # S4: JSON null timestamp_iso -> pre-fix str(None) silently
+            # coerces to literal 'None' string; load returns a corrupted
+            # SpecDriftSnapshot whose timestamp violates the ISO-8601
+            # "Z"-suffix invariant declared at spec_drift_types.py:77-84.
+            # Asymmetric with sibling fields whose float()/int() raise on
+            # None, so this is the missing fourth shape in the regression
+            # matrix that the load_baseline docstring promises to surface.
+            baseline_path(root, "k1").write_text(
+                json.dumps({
+                    "score": 0.5,
+                    "requirements_total": 5,
+                    "requirements_satisfied": 3,
+                    "timestamp_iso": None,
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SpecDriftError):
+                load_baseline(root, "k1")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            drift_root_dir(root, "k1", create=True)
+            # S5: empty-string timestamp_iso also rejected — empty is not
+            # a valid ISO-8601 timestamp per the contract.
+            baseline_path(root, "k1").write_text(
+                json.dumps({
+                    "score": 0.5,
+                    "requirements_total": 5,
+                    "requirements_satisfied": 3,
+                    "timestamp_iso": "",
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SpecDriftError):
+                load_baseline(root, "k1")
 
 
 class TestEventPersistence(unittest.TestCase):
