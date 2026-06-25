@@ -403,6 +403,91 @@ class RecoverFromCrashTests(unittest.TestCase):
         )
         self.assertFalse(marker_path.exists())
 
+    @patch.dict(os.environ, {}, clear=False)
+    def test_bool_pid_marker_does_not_pin_init_as_live_holder(self) -> None:
+        """Regression: a marker carrying ``"pid": true`` must NOT enter the
+        liveness branch with ``pid=True``.
+
+        ``isinstance(True, int)`` is ``True`` and ``True > 0`` is ``True``,
+        so the pre-fix guard ``isinstance(pid, int) and pid > 0`` accepted
+        a bool pid. With ``pid=True``, ``psutil.pid_exists(True)`` queries
+        PID 1 (init/systemd) which is always alive. On a freshly-booted
+        system (uptime <24h), the B1 legacy-fallback two-sided bound at
+        lines 329-336 does NOT trigger the lower bound, so init's
+        ``create_time`` falls inside ``[started_at - 24h, started_at + 1s]``
+        and recovery would refuse forever — the gate is wedged because
+        PID 1 never dies. The fix mirrors the bool-guard in
+        ``gate_lock_observability._describe_lock_holder`` (line 173)
+        which treats the same marker shape as ``{_state: "corrupt"}``.
+        """
+        import json as _json
+        gate_id = "bool-pid-gate"
+        marker_path = (
+            self.project_root / "_bmad" / "gate" / "gate-in-progress.json"
+        )
+        # Manually stamp a marker with ``"pid": true``. ``read_gate_marker``
+        # only validates gate_id/commit_sha/started_at as strings; it does
+        # NOT validate ``pid``, so the malformed marker passes through.
+        # ``started_at`` is recent so the B1 two-sided bound would accept
+        # an init create_time (PID 1 lives indefinitely).
+        marker = {
+            "gate_id": gate_id,
+            "commit_sha": "sha-crash",
+            "started_at": "2026-06-20T00:00:00Z",
+            "pid": True,
+            "hostname": __import__("socket").gethostname(),
+        }
+        marker_path.write_text(
+            _json.dumps(marker, sort_keys=True), encoding="utf-8"
+        )
+
+        evidence_dir = (
+            self.project_root / "_bmad" / "gate" / "evidence" / gate_id
+        )
+        evidence_dir.mkdir(parents=True)
+        (evidence_dir / "dummy.json").write_text("{}")
+
+        # Simulate the worst case: PID 1 (what True maps to) IS alive
+        # AND its create_time falls inside the B1 two-sided bound
+        # around ``started_at: 2026-06-20T00:00:00Z`` so the legacy
+        # fallback would NOT defeat it on a freshly-booted system.
+        # Only the bool guard at gate_orchestrator.py:264 saves recovery.
+        from datetime import datetime
+
+        started_at_epoch = datetime.fromisoformat(
+            "2026-06-20T00:00:00+00:00",
+        ).timestamp()
+
+        fake_proc = MagicMock()
+        fake_proc.create_time.return_value = started_at_epoch  # in-bound
+        with patch(
+            "story_automator.core.gate_orchestrator.psutil.pid_exists",
+            return_value=True,
+        ), patch(
+            "story_automator.core.gate_orchestrator.psutil.Process",
+            return_value=fake_proc,
+        ):
+            result = recover_from_crash(self.project_root)
+
+        # Pre-fix: result == {"recovered": False, "reason":
+        # "live-pid-still-running", "pid": True, "gate_id": "bool-pid-gate"}
+        # because pid=True passed the int-check and psutil reported PID 1
+        # alive with a matching create_time. Post-fix: bool pid is
+        # skipped over the liveness branch, recovery proceeds (no
+        # composite-identity claim survives), evidence dir is cleaned,
+        # and the marker is cleared.
+        self.assertNotEqual(
+            result.get("reason"), "live-pid-still-running",
+            f"bool pid=True must not pin a live holder; got {result!r}",
+        )
+        self.assertTrue(
+            result.get("recovered"),
+            f"recovery must proceed when pid is malformed (bool); got {result!r}",
+        )
+        self.assertEqual(result["gate_id"], gate_id)
+        # Marker should have been cleared so the gate is no longer wedged.
+        self.assertFalse(marker_path.exists())
+
 
 class RunProductionGateTests(unittest.TestCase):
     """Task 8: core gate orchestration."""

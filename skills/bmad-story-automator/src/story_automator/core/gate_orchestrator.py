@@ -261,7 +261,16 @@ def _recover_from_crash_locked(
     # process will clean up itself. Otherwise (PID recycled, foreign
     # host, or pid dead) the marker is dead and recovery proceeds.
     pid = marker.get("pid")
-    if isinstance(pid, int) and pid > 0:
+    # ``isinstance(pid, int)`` returns True for bool — guard against the
+    # int/bool gotcha so a marker carrying ``"pid": true`` is treated as
+    # a malformed marker (falls through to recovery) rather than entering
+    # the liveness branch with ``pid=True`` (which maps to PID 1 / init
+    # via psutil and would wedge the gate forever on freshly-booted
+    # systems where the B1 legacy-fallback lower bound at lines 329-336
+    # doesn't trip). Mirrors the bool exclusion in
+    # ``gate_lock_observability._describe_lock_holder`` (lines 171-176)
+    # and ``collector_isolation._validate_isolation_kwargs`` (line 118).
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
         marker_host = marker.get("hostname")
         marker_start_time = marker.get("start_time")
         # Foreign-host marker: the local PID table is meaningless. The
