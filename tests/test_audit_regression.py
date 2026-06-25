@@ -475,21 +475,20 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
             {"name", "version", "hooks", "timeout_s", "fail_closed"},
         )
 
-    def test_no_python_import_path_in_plugins_module(self) -> None:
-        """``core/plugins.py`` MUST NOT actually use Python-import APIs.
+    @staticmethod
+    def _walker_offenders(tree) -> list[str]:
+        """Return every Python-import API leak in ``tree``.
 
-        If a future contributor adds ``importlib`` / ``__import__`` /
-        ``import_module`` to the registry, the declarative-only promise
-        is gone — even if the manifest schema is unchanged. We parse
-        the module's AST (not a substring grep) so the docstring may
-        freely *describe* the rule using the same words without
-        tripping the test.
+        Lifted out of the production walker so the positive-failure
+        companion can exercise the same logic against synthetic
+        violator sources — without this extraction the walker is
+        vacuously true (a future contributor could shrink
+        ``forbidden_names`` to ``set()`` and the suite would stay
+        green because ``core/plugins.py`` has zero legitimate
+        offenders to flag).
         """
         import ast
-        from story_automator.core import plugins as plugins_mod
 
-        source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
         forbidden_names = {"importlib", "__import__", "import_module"}
         offenders: list[str] = []
         for node in ast.walk(tree):
@@ -514,11 +513,134 @@ class PluginTrustBoundaryInvariant(unittest.TestCase):
             elif isinstance(node, ast.Attribute):
                 if node.attr in forbidden_names:
                     offenders.append(f"attribute access: .{node.attr}")
+        return offenders
+
+    def test_no_python_import_path_in_plugins_module(self) -> None:
+        """``core/plugins.py`` MUST NOT actually use Python-import APIs.
+
+        If a future contributor adds ``importlib`` / ``__import__`` /
+        ``import_module`` to the registry, the declarative-only promise
+        is gone — even if the manifest schema is unchanged. We parse
+        the module's AST (not a substring grep) so the docstring may
+        freely *describe* the rule using the same words without
+        tripping the test.
+        """
+        import ast
+        from story_automator.core import plugins as plugins_mod
+
+        source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        offenders = self._walker_offenders(tree)
         self.assertEqual(
             offenders,
             [],
             "core/plugins.py uses Python-import APIs — declarative-only "
             f"trust boundary has been breached; see N6.4 / Path B. Offenders: {offenders}",
+        )
+
+    def test_positive_failure_synthetic_violator_is_caught(self) -> None:
+        """The walker MUST flag every Python-import API shape a future
+        contributor could plausibly add to ``core/plugins.py``.
+
+        Without this proof the walker above is vacuously true: the
+        real ``core/plugins.py`` legitimately has zero offenders, so a
+        silent regression (e.g. ``forbidden_names = set()``, swapping
+        the ``elif`` ordering so ``ast.Attribute`` masks an earlier
+        check, or short-circuiting the loop) would not be caught.
+        This mirrors the positive-failure companion every other
+        AST-walker invariant in this file carries (see
+        ``AuditKeyEnvScrubInvariant.test_positive_failure_bypass_idioms_are_caught``,
+        ``UnifiedStateWriteIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``,
+        ``ThresholdApplyIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``,
+        ``ThresholdLockIsolationInvariant.test_positive_failure_synthetic_filelock_is_caught``,
+        and ``WorktreePerUnitIsolationInvariant.test_positive_failure_synthetic_violator_is_caught``).
+        """
+        import ast
+
+        # (a) ``import importlib`` — canonical baseline.
+        import_src = textwrap.dedent(
+            """
+            import importlib
+
+            def bad():
+                return importlib.import_module("evil")
+            """
+        )
+        offenders = self._walker_offenders(ast.parse(import_src))
+        self.assertTrue(
+            any(o.startswith("import importlib") for o in offenders),
+            "Walker FAILED to flag `import importlib` — predicate broken; "
+            f"offenders={offenders!r}",
+        )
+
+        # (b) ``from importlib import import_module`` — ImportFrom path.
+        from_import_src = textwrap.dedent(
+            """
+            from importlib import import_module
+
+            def bad():
+                return import_module("evil")
+            """
+        )
+        offenders = self._walker_offenders(ast.parse(from_import_src))
+        self.assertTrue(
+            any("from importlib" in o for o in offenders),
+            "Walker FAILED to flag `from importlib import ...` — "
+            f"ImportFrom path broken; offenders={offenders!r}",
+        )
+
+        # (c) Bare ``__import__("x")`` — ast.Name path.
+        dunder_import_src = textwrap.dedent(
+            """
+            def bad():
+                return __import__("evil")
+            """
+        )
+        offenders = self._walker_offenders(ast.parse(dunder_import_src))
+        self.assertTrue(
+            any("name reference: __import__" in o for o in offenders),
+            "Walker FAILED to flag bare `__import__(...)` — ast.Name path "
+            f"broken; offenders={offenders!r}",
+        )
+
+        # (d) ``importlib.import_module(...)`` — ast.Attribute path.
+        attr_src = textwrap.dedent(
+            """
+            import sys as _sys
+
+            def bad():
+                # Synthesized attribute access — the walker's ast.Attribute
+                # branch must catch the `.import_module` suffix even when
+                # the receiver is not a bare `importlib` Name.
+                return _sys.modules["importlib"].import_module("evil")
+            """
+        )
+        offenders = self._walker_offenders(ast.parse(attr_src))
+        self.assertTrue(
+            any("attribute access: .import_module" in o for o in offenders),
+            "Walker FAILED to flag `.import_module` attribute access — "
+            f"ast.Attribute path broken; offenders={offenders!r}",
+        )
+
+        # (e) Negative control — clean source must NOT trip the walker.
+        # Confirms the walker doesn't false-positive on unrelated code
+        # (e.g. functions named ``import_*`` that aren't the forbidden
+        # idioms).
+        clean_src = textwrap.dedent(
+            """
+            from pathlib import Path
+            import json
+
+            def fine(path: Path) -> dict:
+                return json.loads(path.read_text(encoding="utf-8"))
+            """
+        )
+        offenders = self._walker_offenders(ast.parse(clean_src))
+        self.assertEqual(
+            offenders,
+            [],
+            "Walker FALSE-POSITIVED on clean source — predicate too "
+            f"aggressive; offenders={offenders!r}",
         )
 
 
