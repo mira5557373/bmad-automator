@@ -1181,6 +1181,42 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                         self.scrubbed_names.discard(node.target.id)
                 self.generic_visit(node)
 
+            def visit_AugAssign(self, node: ast.AugAssign) -> None:
+                # PEP 584 augmented-assignment rebinds (e.g.
+                # ``sandboxed |= {"BMAD_AUDIT_KEY": "leak"}`` after a
+                # prior ``sandboxed = scrub_env_for_subprocess(env)``)
+                # mutate the existing value IN PLACE — for dicts this
+                # merges the RHS keys into the dict the walker still
+                # trusts, directly injecting BMAD_AUDIT_KEY into a
+                # previously-scrubbed env. Without this branch, the
+                # downstream ``subprocess.run(..., env=sandboxed)`` is
+                # silently accepted, a real false-negative bypass of
+                # the D-04 audit-floor invariant.
+                #
+                # An augmented assignment can NEVER re-establish a
+                # scrub guarantee — the operator combines the existing
+                # value with the RHS, and the walker cannot prove the
+                # RHS is empty or that the operator preserves the
+                # scrubbed-key invariant. So the policy is symmetric
+                # with the unpack-target branch in visit_Assign: ALL
+                # ``ast.Name`` leaves of the target tree are
+                # unconditionally DISCARDED. The recursive Name-
+                # collector mirrors the one in visit_Assign for
+                # consistency with the tuple/list/starred unpack
+                # discard policy.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
+                for name in _iter_name_targets(node.target):
+                    self.scrubbed_names.discard(name.id)
+                self.generic_visit(node)
+
             def visit_Call(self, node: ast.Call) -> None:
                 if is_subprocess_call(node, module_aliases, callable_aliases):
                     env_kw = next(
@@ -1985,6 +2021,134 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "Unpack-target recursion falsely invalidated a legitimately-"
             "scrubbed binding — the fix must only discard Name leaves "
             "reachable from an unpack target, not the plain-Name target",
+        )
+
+    def test_augassign_rebind_invalidates_scrubbed_binding(self) -> None:
+        """A name bound to ``scrub_env_for_subprocess(...)`` that is
+        later REBOUND via an augmented-assignment operator (``|=``,
+        ``+=``, ``&=``, ``-=`` etc.) must NOT remain in
+        ``scrubbed_names`` — the subsequent ``subprocess.run(...,
+        env=<rebound>)`` must be flagged as unscrubbed.
+
+        Companion to
+        :py:meth:`test_rebind_to_raw_invalidates_scrubbed_binding`
+        (Assign / AnnAssign rebinds) and
+        :py:meth:`test_tuple_list_starred_unpack_rebind_invalidates_scrubbed_binding`
+        (unpack-target rebinds). Without ``visit_AugAssign`` the
+        walker generic-visits the rebind node, so the binding stays
+        in ``scrubbed_names`` and the downstream
+        ``subprocess.run(..., env=<rebound>)`` is silently accepted —
+        a real false-negative bypass of the D-04 audit-floor invariant.
+
+        The ``|=`` variant is the most dangerous: PEP 584 dict union-
+        update merges the RHS keys IN PLACE, so an attacker who can
+        write the immediately-following statement can inject
+        ``BMAD_AUDIT_KEY`` into a dict the walker still trusts. The
+        ``+=`` / ``&=`` variants pin that the policy is symmetric
+        across all augmented-assignment operators — the walker
+        cannot prove ANY operator preserves the scrubbed-key
+        invariant.
+
+        Three bypass sub-variants are covered:
+          (a) ``sandboxed |= {"BMAD_AUDIT_KEY": "leak"}`` (PEP 584
+              dict union-update — the canonical bypass in the bug
+              report)
+          (b) ``sandboxed += [...]`` (treat any AugAssign operator
+              symmetrically; the operator family must be closed-set
+              not enumerated)
+          (c) ``sandboxed &= {...}`` (intersection update — even an
+              operator that REMOVES keys must invalidate the
+              scrubbed binding because the walker has no way to
+              prove the result is still scrub-equivalent)
+        """
+        import ast
+
+        # (a) ``|=`` dict union-update — the canonical bypass.
+        ior_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed |= {"BMAD_AUDIT_KEY": "leak"}
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(ior_rebind_src))),
+            1,
+            "Walker FAILED to flag ``|=`` augmented-assignment rebind "
+            "from a prior scrub binding — visit_AugAssign must DISCARD "
+            "the target name unconditionally because PEP 584 dict "
+            "union-update merges tainted keys in place, defeating the "
+            "D-04 audit-floor invariant otherwise",
+        )
+
+        # (b) ``+=`` symmetric coverage — any AugAssign operator must
+        # invalidate.
+        iadd_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, taint):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed += taint
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(iadd_rebind_src))),
+            1,
+            "Walker FAILED to flag ``+=`` augmented-assignment rebind — "
+            "the discard policy must be symmetric across ALL AugAssign "
+            "operators, not gated on ``|=`` alone, since the walker "
+            "cannot prove any operator preserves the scrubbed invariant",
+        )
+
+        # (c) ``&=`` intersection — even removal-only operators must
+        # invalidate the binding.
+        iand_rebind_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, mask):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed &= mask
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(iand_rebind_src))),
+            1,
+            "Walker FAILED to flag ``&=`` augmented-assignment rebind — "
+            "even removal-only operators must discard the scrubbed "
+            "binding because the walker has no way to prove the "
+            "post-operator dict is still scrub-equivalent",
+        )
+
+        # Sanity: the canonical safe pattern must STILL pass after
+        # visit_AugAssign lands — the discard branch must not leak
+        # into unrelated bindings.
+        safe_pattern_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(safe_pattern_src)),
+            [],
+            "visit_AugAssign falsely invalidated a legitimately-scrubbed "
+            "binding — the discard must fire ONLY when the binding "
+            "target itself is the AugAssign target, not for unrelated "
+            "AugAssigns elsewhere in the function",
         )
 
     def test_scrub_import_alias_is_tracked(self) -> None:
