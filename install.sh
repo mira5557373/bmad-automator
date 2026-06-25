@@ -60,13 +60,24 @@ backup_if_exists() {
     [ -e "$candidate" ] || continue
     prev="$candidate"  # timestamped names sort chronologically; last = newest
   done
-  if [ -n "$prev" ] && diff -rq "$path" "$prev" >/dev/null 2>&1; then
-    rm -rf "$path"
-    return 0
+  if [ -n "$prev" ]; then
+    # Python writes __pycache__/*.pyc into the live install tree on first CLI
+    # invocation. Strip them from BOTH the prior backup and the live tree
+    # before the diff-skip comparison so a bytecode-polluted prior backup
+    # doesn't defeat idempotency and accumulate fresh timestamped backups on
+    # every reinstall (8.7MB+ per backup on a real install).
+    find "$prev" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$prev" -name '*.py[co]' -delete 2>/dev/null || true
+    find "$path" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$path" -name '*.py[co]' -delete 2>/dev/null || true
+    if diff -rq "$path" "$prev" >/dev/null 2>&1; then
+      rm -rf "$path"
+      return 0
+    fi
   fi
   local backup="$backups_dir/$name.backup-$(date -u +%Y%m%dT%H%M%SZ)"
   mv "$path" "$backup"
-  echo "Backup: ${backup#$TARGET_ROOT/}"
+  echo "Backup: ${backup#"$TARGET_ROOT"/}"
 }
 
 backup_legacy_story_automator_installs() {

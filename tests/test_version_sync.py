@@ -69,6 +69,10 @@ class VersionSyncTests(unittest.TestCase):
                 "skills/bmad-story-automator/src/story_automator/__init__.py",
                 r'__version__\s*=\s*"([^"]+)"',
             ),
+            "skills/bmad-story-automator/workflow.md": _regex_version(
+                "skills/bmad-story-automator/workflow.md",
+                r'(?m)^version:\s*"([^"]+)"',
+            ),
         }
         missing = [name for name, value in surfaces.items() if value is None]
         if missing:

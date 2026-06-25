@@ -11,8 +11,11 @@ compat) lands alongside main's bug fixes for R09 (`epic_complete`
 per-epic scoping), R05 (`_spawn_runner` collision refusal),
 frontmatter line-anchored `---` split, and the 28-bug deep audit.
 
-Method: cherry-pick (not merge). Linear history of 6 commits on
-top of integration-all; per-commit attribution preserved.
+Method: cherry-pick (not merge). Linear history of 4 main cherry-picks
+plus 4 in-tree consolidation commits (workflow.md version sync,
+validation-gate reconciliation, this changelog, post-impl-review
+dead-code cleanup) — 8 commits total on top of integration-all;
+per-commit attribution preserved.
 
 ### Added
 - `docs/environment-variables.md` (from main `fb6c834`) —
@@ -28,10 +31,6 @@ top of integration-all; per-commit attribution preserved.
   — guards against silent third-party-dep additions. Allow-list
   extended with `filelock` + `psutil` (declared deps per
   CLAUDE.md hard guardrail).
-- `docs/audit/2026-06-19/**` (from main `3e63d4e`) — 71-finding
-  production-readiness audit reference.
-- `skills/bmad-story-automator/src/story_automator/commands/orchestrator_parse.py`
-  (from main `eb0b964`) — extracted `parse_output_action`.
 
 ### Changed
 - `core/epic_parser.py` — R09: `epic_complete` scopes max-story
@@ -58,9 +57,15 @@ top of integration-all; per-commit attribution preserved.
   superset.
 - `core/success_verifiers.py` — union of main's bug fixes
   (active_task CSV strip, legacy Claude tense-aware marker,
-  story-file path-traversal guard, escalate / parse-output
-  `resolve_assets=False`) AND integration-all's `VERIFIERS` dict
+  story-file path-traversal guard, `resolve_success_contract`
+  resolve_assets) AND integration-all's `VERIFIERS` dict
   additions (`production_ready_gate`, `readiness_gate`).
+- `commands/orchestrator.py` (escalate) + `commands/orchestrator_parse.py`
+  — `load_runtime_policy(..., resolve_assets=False)` so a missing
+  dependency skill cannot turn a parse-output retry or escalation
+  into hard escalation. orchestrator_parse.py was already on
+  integration-all (not net-new from eb0b964); the consolidation
+  hardens its policy load.
 - `commands/orchestrator.py` — `_state_update` uses atomic_write
   (integration-all's M05) + `audit_state_change` (M04 audit
   trail). Marker corruption path keeps `marker_corrupt` (more
@@ -149,15 +154,22 @@ top of integration-all; per-commit attribution preserved.
   No action required.
 
 ### Files
+Cherry-picked from origin/main:
 - `0dc74dd` (eb0b964): 21 files (+685, −80) — deep-audit batch.
 - `8b659dd` (98a6069): 4 files (+73, −6) — R09 + R05.
 - `054c707` (fb6c834): 14 files (+137, −15) — build regression
   + ecosystem subset; adds 2 new test files.
 - `8135dae` (3e63d4e): 10 files (+450, −22) — production-readiness
   audit (15 confirmed findings).
+
+Authored on the consolidated branch:
 - `fd69a42`: 1 file (+1, −1) — workflow.md version sync.
 - `b550cef`: 6 files (+45, −22) — validation-gate reconciliation
   (test contracts + smoke backup location + unused-import cleanup).
+- `456b422`: 1 file (+199) — this changelog entry.
+- `3c4a266`: 4 files (+2, −47) — post-impl-review dead-code drop
+  (orchestrator.py `_coerce_int`, install.sh `prune_backups` +
+  `KEEP_BACKUPS`, test_audit_fixes.py `CoerceIntTests`).
 
 `9db75a7` (`.gitignore` for `.claude/settings.local.json`) is a
 no-op on integration-all — the file is already gitignored at line
@@ -167,8 +179,9 @@ no-op on integration-all — the file is already gitignored at line
 - `npm run lint:python` (ruff): PASS (all checks).
 - `npm run test:python` (`unittest discover -s tests`):
   PASS — 4871 tests, 2 skipped, 0 failed.
-- `tests/test_audit_fixes`: PASS — 39 tests (29 deep-audit
-  regressions from main + integration-all's pre-existing).
+- `tests/test_audit_fixes`: PASS — 37 tests (27 deep-audit
+  regressions from main after the post-impl-review drop of
+  `CoerceIntTests` + integration-all's pre-existing).
 - `tests/test_audit_regression`: PASS — 50 tests (audit-floor
   invariants for G2 / D-04 / C5 / K-5 /
   WorktreePerUnitIsolationInvariant intact).
@@ -192,8 +205,9 @@ no-op on integration-all — the file is already gitignored at line
 - No edits to `skills/bmad-story-automator/src/story_automator/core/telemetry_events.py`
   (M01-owned).
 - No new Python deps beyond stdlib + `filelock` + `psutil`.
-- All four version surfaces still synced at `1.15.0`
+- All five version surfaces still synced at `1.15.0`
   (package.json, pyproject.toml, plugin.json, marketplace.json,
-  workflow.md).
+  workflow.md). `tests/test_version_sync.py` now covers
+  workflow.md too so this drift cannot silently recur.
 - `core/telemetry_events.py` untouched (verified by
   `git show 0dc74dd..b550cef --name-only`).

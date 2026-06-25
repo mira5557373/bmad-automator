@@ -139,14 +139,18 @@ If the optional QA skill is missing:
 
 ## Migration And Backups
 
-Before copying new content, the installer backs up the existing install targets under each qualifying skill root:
+Before copying new content, the installer backs up the existing install targets under `<TARGET_ROOT>/.bmad-story-automator-backups/` — explicitly OUTSIDE the skills root so a timestamped backup tree cannot be auto-discovered as an installed skill on the next CLI run.
+
+Backed-up paths (each lands under the same `.bmad-story-automator-backups/` directory with a UTC-timestamped `.backup-YYYYMMDDTHHMMSSZ` suffix):
 
 - existing `bmad-story-automator`
 - existing `bmad-story-automator-review`
 - legacy installs under `_bmad/bmm/4-implementation/...`
 - legacy installs under `_bmad/bmm/workflows/4-implementation/...`
 
-The goal is migration safety, not in-place overwrite.
+Idempotency: `backup_if_exists` strips `__pycache__` from both the prior backup and the live install tree before the `diff -rq` comparison, so repeated reinstalls after a CLI invocation (which populates bytecode caches in the install tree) skip the backup step when the source tree is unchanged. The diff-skip kicks in from the third install onward; the second install creates a one-time bootstrap backup so a future diff has something to compare against.
+
+The goal is migration safety, not in-place overwrite. After a failed install, look in `<TARGET_ROOT>/.bmad-story-automator-backups/` for the previous state.
 
 ## Command Shim Cleanup
 
