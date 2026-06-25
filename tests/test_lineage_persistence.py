@@ -729,6 +729,35 @@ class CorruptIndexTests(_TempProjectMixin, unittest.TestCase):
         with self.assertRaises(LineageError):
             load_lineage_chain(self.project_root)
 
+    def test_load_chain_rejects_non_dict_inner_meta(self) -> None:
+        # Regression: round-4 bug sweep. ``_read_index`` already validates
+        # the top-level shape is a dict and the ``entries`` value is a dict,
+        # but did NOT validate that each inner meta value is a dict. A
+        # tampered / hand-edited / merge-conflict-resolved index with a
+        # non-dict inner meta (e.g. string, list, None) leaked a raw
+        # ``AttributeError`` from :func:`_index_sort_key`'s
+        # ``meta.get("seq", -1)`` call through both
+        # :func:`load_lineage_chain` and :func:`load_lineage_root`. The
+        # documented contract for ``_read_index`` is "LineageError on
+        # corruption" — operators trapping ``LineageError`` (as
+        # ``test_corrupt_index_raises_lineage_error`` does for top-level
+        # corruption) would not catch the leaked ``AttributeError``. The
+        # fix iterates ``entries.items()`` and ``isinstance(v, dict)``-
+        # validates each meta, mirroring the existing outer guard one
+        # level deeper.
+        _ = get_lineage_root_dir(self.project_root)  # creates dir
+        idx_path = lineage_index_path(self.project_root)
+        idx_path.write_text(json.dumps({
+            "entries": {"brainstorm/s0": "this should be a dict"},
+        }))
+        # Both public entry points must raise typed LineageError.
+        with self.assertRaises(LineageError) as ctx:
+            load_lineage_chain(self.project_root)
+        self.assertIn("brainstorm/s0", str(ctx.exception))
+        self.assertIn("meta not an object", str(ctx.exception))
+        with self.assertRaises(LineageError):
+            load_lineage_root(self.project_root)
+
 
 class LineageLockTests(_TempProjectMixin, unittest.TestCase):
     def test_get_lineage_lock_returns_filelock(self) -> None:

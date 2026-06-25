@@ -100,6 +100,19 @@ def _read_index(project_root: str | Path) -> dict[str, dict[str, str | int]]:
         raise LineageError(
             f"corrupt lineage index at {idx_path}: entries not an object"
         )
+    # Inner-meta shape validation: mirror the outer ``isinstance(entries, dict)``
+    # guard one level deeper to fully honor the documented "LineageError on
+    # corruption" contract. Without this, a tampered / hand-edited index with
+    # a non-dict inner meta (e.g. ``{"entries": {"brainstorm/s0": "..."}}``)
+    # leaks a raw ``AttributeError`` from :func:`_index_sort_key`'s
+    # ``meta.get("seq", -1)`` call, which slips past operator handlers that
+    # trap only :class:`LineageError` per the documented vocabulary.
+    for composite_key, meta in entries.items():
+        if not isinstance(meta, dict):
+            raise LineageError(
+                f"corrupt lineage index at {idx_path}: entry "
+                f"{composite_key!r} meta not an object"
+            )
     return entries
 
 
