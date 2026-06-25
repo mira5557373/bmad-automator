@@ -1495,16 +1495,27 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
         """
         import ast
 
+        repo_root = Path(__file__).resolve().parents[1]
         skill_src = (
-            Path(__file__).resolve().parents[1]
+            repo_root
             / "skills"
             / "bmad-story-automator"
             / "src"
             / "story_automator"
         )
-        # Scan core/ AND commands/ — both are inside the trust boundary
-        # and may spawn subprocesses that inherit env from the parent.
-        scan_dirs = (skill_src / "core", skill_src / "commands")
+        # Scan core/, commands/, AND the top-level scripts/ tree — all
+        # three are inside the trust boundary and may spawn subprocesses
+        # that inherit env from the parent. scripts/ was added after the
+        # deep-bug-hunt surfaced the latent gap: an operator-facing
+        # Python helper under /scripts/ could spawn a subprocess
+        # inheriting BMAD_AUDIT_KEY without being caught here. Currently
+        # no /scripts/*.py uses subprocess, so the addition is a no-op
+        # at HEAD; it pins the contract for future contributors.
+        scan_dirs = (
+            skill_src / "core",
+            skill_src / "commands",
+            repo_root / "scripts",
+        )
         offenders: list[str] = []
 
         py_files: list[Path] = []
@@ -1517,17 +1528,102 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             except SyntaxError:
                 continue
             for lineno in self._module_offenders(tree):
+                # Files inside the story_automator package render relative
+                # to skill_src (preserves the legacy display); files
+                # outside it (i.e. the new /scripts/ scan dir) render
+                # relative to the repo root.
+                rel = (
+                    py_file.relative_to(skill_src)
+                    if py_file.is_relative_to(skill_src)
+                    else py_file.relative_to(repo_root)
+                )
                 offenders.append(
-                    f"{py_file.relative_to(skill_src)}:{lineno} — "
+                    f"{rel}:{lineno} — "
                     f"subprocess call without scrub_env_for_subprocess"
                 )
 
         self.assertEqual(
             offenders,
             [],
-            "Unscrubbed subprocess calls found in core/. D-04 invariant broken:\n  "
+            "Unscrubbed subprocess calls found in core/, commands/, or "
+            "scripts/. D-04 invariant broken:\n  "
             + "\n  ".join(offenders),
         )
+
+    def test_scan_scope_includes_scripts_dir_catches_synthetic_violator(
+        self,
+    ) -> None:
+        """Regression for the deep-bug-hunt latent-gap finding (originally
+        cited at ``test_audit_regression.py:1186``, real anchor 1507):
+        ``scan_dirs`` previously included only ``core/`` and ``commands/``,
+        leaving the operator-facing top-level ``/scripts/`` tree
+        unscanned. A future Python helper added under ``/scripts/`` that
+        called ``subprocess.run(...)`` without
+        ``env=scrub_env_for_subprocess(...)`` would silently leak
+        ``BMAD_AUDIT_KEY`` to the child, undetected by the D-04
+        audit-floor invariant.
+
+        This test PROVES the scope expansion is operative by:
+          1. Writing a synthetic violator under ``/scripts/``
+          2. Re-running ``test_ast_no_unscrubbed_subprocess_in_core``
+          3. Asserting the violator appears in the offender list
+          4. Cleaning up unconditionally via try/finally
+
+        Without this regression, a future refactor that silently
+        narrows ``scan_dirs`` back to ``(core, commands)`` would pass
+        the existing invariants (since real ``/scripts/*.py`` has no
+        subprocess use today) and the latent leak would reopen.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        scripts_dir = repo_root / "scripts"
+        self.assertTrue(
+            scripts_dir.is_dir(),
+            f"Expected {scripts_dir} to exist as the top-level scripts/ "
+            "tree — repo layout drift?",
+        )
+
+        violator = (
+            scripts_dir / "_d04_synthetic_violator_DO_NOT_KEEP.py"
+        )
+        violator.write_text(
+            textwrap.dedent(
+                """\
+                # Synthetic D-04 violator for
+                # tests/test_audit_regression.py — written by
+                # AuditKeyEnvScrubInvariant.test_scan_scope_includes_scripts_dir_catches_synthetic_violator
+                # and unlinked immediately afterward. If you find this
+                # file in the working tree, the test crashed mid-run;
+                # safe to delete.
+                import subprocess
+
+                def operator_helper() -> None:
+                    subprocess.run(["echo", "leak"])  # NO env=scrub_env_for_subprocess
+                """
+            ),
+            encoding="utf-8",
+        )
+        try:
+            with self.assertRaises(AssertionError) as ctx:
+                self.test_ast_no_unscrubbed_subprocess_in_core()
+            msg = str(ctx.exception)
+            self.assertIn(
+                "_d04_synthetic_violator_DO_NOT_KEEP.py",
+                msg,
+                "Walker did NOT flag the synthetic /scripts/ violator. "
+                "The scan_dirs scope expansion is missing or broken.",
+            )
+            # Pin the path display — files outside skill_src must
+            # render relative to repo_root, not to skill_src (which
+            # would raise ValueError on relative_to).
+            self.assertIn(
+                "scripts/_d04_synthetic_violator_DO_NOT_KEEP.py",
+                msg,
+                "Offender path render is wrong — files outside "
+                "skill_src should appear with their repo-root-relative "
+                "path, not a mangled skill-src-relative form.",
+            )
+        finally:
+            violator.unlink(missing_ok=True)
 
     def test_positive_failure_synthetic_violator_is_caught(self) -> None:
         """Two-direction proof matching

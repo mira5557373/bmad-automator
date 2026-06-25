@@ -141,7 +141,7 @@ commits without the trailer.
 `tests/test_audit_regression.py` is the audit-floor regression net.
 Every contribution MUST keep that suite green. "11 green" counts
 invariant **classes** (the structural unit each "+1 invariant"
-milestone increments); the same suite currently exposes 49 test
+milestone increments); the same suite currently exposes 50 test
 methods across those 11 classes, because most invariants pin
 several orthogonal sub-behaviors. When milestone summaries quote
 a delta (e.g. CLAUDE.md's G2 "10 → 11"), they refer to the class
