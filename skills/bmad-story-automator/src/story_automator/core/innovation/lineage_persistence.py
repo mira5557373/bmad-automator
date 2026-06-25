@@ -180,10 +180,38 @@ def persist_lineage_entry(
         # can reconstruct the chain even though disk keys are alpha-sorted
         # for byte determinism. Re-persist reuses the existing ``seq`` to
         # keep idempotence.
+        #
+        # Legacy/migrated indices may carry entries without a ``seq`` key
+        # (e.g. a hand-edited or pre-seq-field index). The naive fallback
+        # ``entries[composite_key].get("seq", len(entries))`` is unsafe
+        # there because ``len(entries)`` is exactly the seq the NEXT
+        # brand-new entry would receive (the else-branch below), so a
+        # seqless re-persist followed by a fresh persist would assign
+        # identical seqs and break the chain's insertion order at
+        # :func:`_index_sort_key` (the alpha tie-break can land a
+        # non-genesis entry at position 0, after which
+        # :func:`load_lineage_chain` rejects it as "first lineage entry
+        # must have empty parent_root").
+        #
+        # Safe recovery: track the highest extant seq across the index
+        # and base both branches on ``max + 1``. A new entry always gets
+        # a seq strictly greater than every backfilled legacy seq, so
+        # collisions are impossible. Under the all-new-entries path this
+        # reduces to the original ``len(entries)``, preserving the
+        # contiguous-``0..N-1`` invariant pinned by
+        # ``test_distinct_keys_under_heavy_contention_yield_unique_contiguous_seqs``.
+        max_existing_seq = -1
+        for _meta in entries.values():
+            try:
+                candidate = int(_meta.get("seq", -1))
+            except (TypeError, ValueError):
+                candidate = -1
+            if candidate > max_existing_seq:
+                max_existing_seq = candidate
         if composite_key in entries:
-            seq = entries[composite_key].get("seq", len(entries))
+            seq = entries[composite_key].get("seq", max_existing_seq + 1)
         else:
-            seq = len(entries)
+            seq = max_existing_seq + 1
         entries[composite_key] = {
             "path": str(target_path.relative_to(Path(project_root))),
             "merkle_root": compute_lineage_root([entry]),

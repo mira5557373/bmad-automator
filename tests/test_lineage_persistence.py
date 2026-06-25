@@ -529,6 +529,113 @@ class AtomicWriteFailureTests(_TempProjectMixin, unittest.TestCase):
         self.assertEqual(load_lineage_root(self.project_root), baseline_root)
 
 
+class LegacySeqlessIndexRecoveryTests(_TempProjectMixin, unittest.TestCase):
+    """Regression: round-4 bug sweep, lens 8.
+
+    A legacy/migrated index whose entries lack a ``seq`` key was given a
+    recovery fallback of ``len(entries)`` at the existing-key branch of
+    :func:`persist_lineage_entry`. That value is exactly the seq the NEXT
+    brand-new entry would receive on the else-branch, so an idempotent
+    re-persist of a seqless entry followed by a fresh persist of a new
+    entry deterministically assigned identical seqs. The alpha tie-break
+    in :func:`_index_sort_key` then placed whichever composite key sorted
+    first at chain position 0, and ``load_lineage_chain`` rejected the
+    non-genesis first entry with "first lineage entry must have empty
+    parent_root".
+
+    The exact "strip seq from index.json" trigger is the legacy/migrated
+    scenario already exercised by ``tests/test_lineage_cmd.py`` for the
+    read-side lenient surfaces (verify/orphans/stats with topological
+    reorder per commit ce9d51e). This test pins the WRITE side — the
+    strict :func:`load_lineage_chain` consumed by ``system_gate.py``
+    (lines 155, 288) and ``gate_orchestrator.py`` (lines 1029, 1239)
+    embeds ``lineage_root`` into the gate file and would raise
+    :class:`LineageError` in the unpatched code path.
+    """
+
+    def test_legacy_seqless_index_no_seq_collision_on_repersist_plus_new(
+        self,
+    ) -> None:
+        # Step 1: persist genesis entry (genre chosen so alpha tie-break
+        # would mis-place the non-genesis next entry — 'brainstorm' sorts
+        # BEFORE 'kernel' so without the fix the brainstorm/s1 entry would
+        # land at position 0 and fail genesis validation).
+        e0 = _entry("kernel", "s0", body="alpha")
+        persist_lineage_entry(self.project_root, e0)
+        idx_path = lineage_index_path(self.project_root)
+
+        # Step 2: simulate the legacy/migrated state — strip 'seq' from
+        # every entry (mirrors the scenario tests in test_lineage_cmd.py
+        # at line 298 and line 311 already document as supported).
+        idx = json.loads(idx_path.read_text())
+        for meta in idx["entries"].values():
+            meta.pop("seq", None)
+        idx_path.write_text(json.dumps(idx))
+
+        # Step 3: idempotent re-persist of the seqless legacy entry.
+        # Pre-fix: seq backfilled to len(entries)=1.
+        # Post-fix: seq backfilled to max_existing_seq + 1 = 0.
+        persist_lineage_entry(self.project_root, e0)
+
+        # Step 4: persist a NEW entry. Use a genre that sorts BEFORE the
+        # genesis genre so the alpha tie-break would surface the bug.
+        e1 = _entry(
+            "brainstorm", "s1",
+            parent_root=compute_lineage_root([e0]),
+            body="beta",
+            ts="2026-06-22T00:00:01Z",
+        )
+        persist_lineage_entry(self.project_root, e1)
+
+        # Assertion (a): seqs must be distinct — the bug produced two
+        # entries with identical seq=1.
+        idx = json.loads(idx_path.read_text())
+        entries = idx["entries"]
+        seqs = [meta["seq"] for meta in entries.values()]
+        self.assertEqual(
+            len(set(seqs)), len(seqs),
+            f"legacy-seqless recovery must not produce duplicate seqs: {entries!r}",
+        )
+
+        # Assertion (b): genesis entry retains slot 0 (the lowest valid
+        # ordinal among entries already in the index).
+        self.assertEqual(
+            entries["kernel/s0"]["seq"], 0,
+            "re-persisted legacy entry must reclaim slot 0",
+        )
+        # And the new entry must take the next slot.
+        self.assertEqual(
+            entries["brainstorm/s1"]["seq"], 1,
+            "new entry must take seq beyond the highest extant seq",
+        )
+
+        # Assertion (c): strict chain load succeeds — this is the
+        # production-impact failure mode (system_gate.py:155 /
+        # gate_orchestrator.py:1029 call load_lineage_root which delegates
+        # to load_lineage_chain on a non-empty index).
+        chain = load_lineage_chain(self.project_root)
+        self.assertEqual(len(chain.entries), 2)
+        self.assertEqual(chain.entries[0], e0)
+        self.assertEqual(chain.entries[1], e1)
+
+    def test_contiguous_seq_invariant_preserved_on_all_new_path(self) -> None:
+        # Belt-and-braces: the fix uses max(existing seq) + 1 in the
+        # new-entry branch. Under the all-new-entries path with no legacy
+        # state this must reduce to the original len(entries), preserving
+        # the 0..N-1 contiguity pinned by
+        # test_distinct_keys_under_heavy_contention_yield_unique_contiguous_seqs.
+        e0 = _entry("brainstorm", "s0", body="alpha")
+        e1 = _entry(
+            "brief", "s1", parent_root=compute_lineage_root([e0]),
+            body="beta",
+        )
+        persist_lineage_entry(self.project_root, e0)
+        persist_lineage_entry(self.project_root, e1)
+        idx = json.loads(lineage_index_path(self.project_root).read_text())
+        seqs = sorted(meta["seq"] for meta in idx["entries"].values())
+        self.assertEqual(seqs, [0, 1])
+
+
 class CorruptIndexTests(_TempProjectMixin, unittest.TestCase):
     def test_corrupt_index_raises_lineage_error(self) -> None:
         # Pre-create a corrupt index file. load_lineage_root /
