@@ -29,6 +29,7 @@ from collections import Counter
 from typing import Any, Callable
 
 from story_automator.core.innovation.lineage_ledger import (
+    LINEAGE_GENRES,
     LineageEntry,
     LineageError,
     build_lineage_chain,
@@ -37,6 +38,12 @@ from story_automator.core.innovation.lineage_ledger import (
     load_lineage_chain,
     load_lineage_entry,
     verify_lineage,
+)
+from story_automator.core.innovation.lineage_ledger import (
+    _GENRES_SET as _LINEAGE_GENRES_SET,  # closed-vocabulary genre whitelist
+)
+from story_automator.core.innovation.lineage_ledger import (
+    _SLUG_RE as _LINEAGE_SLUG_RE,  # closed-vocabulary slug whitelist
 )
 from story_automator.core.innovation.lineage_ledger import (
     _read_index as _read_lineage_index,  # read-only consumption
@@ -80,6 +87,45 @@ def _load_entries(project_root: str) -> list[LineageEntry]:
         raise
 
 
+def _validate_lenient_composite_key(composite_key: str) -> tuple[str, str]:
+    """Symmetric whitelist guard for the lenient CLI loader.
+
+    Mirrors the strict-path validation inside
+    :func:`lineage_persistence.load_lineage_chain` (genre ∈
+    ``_GENRES_SET`` AND slug matches ``_SLUG_RE`` AND no ``..``
+    segments) so the CLI lenient surfaces (``stats`` / ``verify`` /
+    ``orphans``) and the strict :func:`show_action` surface agree on
+    chain integrity for the same on-disk bytes. Without this guard a
+    tampered ``index.json`` carrying e.g. ``"../../escape"`` would
+    feed ``(genre='..', slug='../escape')`` into
+    :func:`_entry_disk_path`, which lexically composes
+    ``_bmad/lineage/../../escape.json`` — OUTSIDE the documented
+    ``_bmad/lineage/<genre>/<slug>.json`` sandbox.
+
+    Raises :class:`LineageError` (caught by every CLI action and
+    surfaced as ``ok:false``) on any whitelist violation.
+    """
+    genre, sep, slug = composite_key.partition("/")
+    if sep != "/" or not slug:
+        raise LineageError(
+            f"corrupt lineage index composite_key {composite_key!r}: "
+            f"expected '<genre>/<slug>' shape"
+        )
+    if genre not in _LINEAGE_GENRES_SET:
+        raise LineageError(
+            f"corrupt lineage index composite_key {composite_key!r}: "
+            f"genre {genre!r} not in {LINEAGE_GENRES}"
+        )
+    if not _LINEAGE_SLUG_RE.match(slug) or ".." in slug:
+        raise LineageError(
+            f"corrupt lineage index composite_key {composite_key!r}: "
+            f"slug {slug!r} must match {_LINEAGE_SLUG_RE.pattern!r} and "
+            f"contain no '..' segments (no path separators, NUL bytes, or "
+            f"whitespace)"
+        )
+    return genre, slug
+
+
 def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
     """Load entries in seq order WITHOUT validating chain integrity.
 
@@ -89,6 +135,14 @@ def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
     pointers, so we walk the index directly here. Per-entry corruption
     still raises (a corrupt JSON file is a different failure mode than
     a dangling parent_root pointer).
+
+    Composite-key whitelist validation runs BEFORE :func:`load_lineage_entry`
+    so the lenient CLI surfaces (``stats`` / ``verify`` / ``orphans``)
+    cannot silently read payloads outside the
+    ``_bmad/lineage/<genre>/<slug>.json`` sandbox via a traversal
+    composite_key — symmetric with the strict
+    :func:`lineage_persistence.load_lineage_chain` whitelist that
+    backs :func:`show_action`.
     """
     entries_meta = _read_lineage_index(project_root)
     if not entries_meta:
@@ -104,7 +158,7 @@ def _load_entries_lenient(project_root: str) -> list[LineageEntry]:
 
     out: list[LineageEntry] = []
     for composite_key, _meta in sorted(entries_meta.items(), key=_seq_key):
-        genre, _, slug = composite_key.partition("/")
+        genre, slug = _validate_lenient_composite_key(composite_key)
         out.append(load_lineage_entry(project_root, genre, slug))
     return out
 

@@ -326,6 +326,136 @@ class OrphansActionTests(_Base):
         self.assertEqual(payload["orphans"], [])
 
 
+class LenientLoaderCompositeKeyWhitelistTests(_Base):
+    """Round-4 bug sweep regression: symmetric composite_key validation.
+
+    The round-3 fix added genre+slug whitelist validation to the strict
+    :func:`lineage_persistence.load_lineage_chain` path (which backs the
+    ``lineage show`` CLI action). The parallel CLI lenient loader at
+    :func:`_load_entries_lenient` (which backs ``stats`` / ``verify`` /
+    ``orphans``) was missed — so a tampered ``index.json`` containing a
+    traversal composite_key like ``"../../escape"`` would yield
+    ``genre='..'`` / ``slug='../escape'`` from ``partition('/')`` and
+    lexically resolve to a file OUTSIDE the documented
+    ``_bmad/lineage/<genre>/<slug>.json`` sandbox. The three lenient
+    surfaces would then silently report ``ok:true`` for an on-disk state
+    where ``lineage show`` (strict) correctly rejects with
+    :class:`LineageError`, contradicting the explicit CLI docstring
+    contract ("stats / verify subcommands agree on chain integrity for
+    the same on-disk bytes").
+
+    These tests pin the round-4 fix: all four CLI surfaces (``show``,
+    ``stats``, ``verify``, ``orphans``) must agree on chain integrity
+    for the same on-disk bytes by rejecting tampered composite_keys
+    uniformly.
+    """
+
+    def _plant_tampered_index(self) -> None:
+        # Plant a payload OUTSIDE _bmad/lineage/ that the traversal
+        # composite_key would resolve to via _entry_disk_path's lexical
+        # composition (_bmad/lineage/../../real-entry.json).
+        outside_payload = self.project_root / "real-entry.json"
+        outside_payload.write_text(json.dumps({
+            "genre": "brainstorm",
+            "slug": "attacker",
+            "payload_hash": _h("escape-body"),
+            "parent_root": "",
+            "timestamp_iso": "2026-06-24T00:00:00Z",
+        }))
+        # Hand-craft a tampered index with a traversal composite_key.
+        lineage_dir = self.project_root / "_bmad" / "lineage"
+        lineage_dir.mkdir(parents=True)
+        idx_path = lineage_dir / "index.json"
+        idx_path.write_text(json.dumps({
+            "entries": {
+                "../../real-entry": {
+                    "path": "real-entry.json",
+                    "merkle_root": "deadbeef" * 8,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                    "seq": 0,
+                },
+            },
+        }))
+
+    def test_stats_rejects_path_traversal_composite_key(self) -> None:
+        self._plant_tampered_index()
+        code, raw = self._run(stats_action, [])
+        # Without the fix, code=0 and ok:true with chain_length=1 over
+        # the out-of-sandbox payload. With the fix, the lenient loader
+        # rejects the traversal composite_key BEFORE calling
+        # load_lineage_entry.
+        self.assertNotEqual(code, 0)
+        payload = json.loads(raw)
+        self.assertFalse(payload["ok"])
+        self.assertIn("../../real-entry", payload["error"])
+
+    def test_verify_rejects_path_traversal_composite_key(self) -> None:
+        self._plant_tampered_index()
+        code, raw = self._run(verify_action, [])
+        self.assertNotEqual(code, 0)
+        payload = json.loads(raw)
+        self.assertFalse(payload["ok"])
+        self.assertIn("../../real-entry", payload["error"])
+
+    def test_orphans_rejects_path_traversal_composite_key(self) -> None:
+        self._plant_tampered_index()
+        code, raw = self._run(orphans_action, [])
+        self.assertNotEqual(code, 0)
+        payload = json.loads(raw)
+        self.assertFalse(payload["ok"])
+        self.assertIn("../../real-entry", payload["error"])
+
+    def test_lenient_and_strict_paths_agree_on_tampered_index(self) -> None:
+        # The explicit CLI docstring contract (lineage_cmd.py:235-237)
+        # promises that stats/verify subcommands agree with show (strict)
+        # on chain integrity for the same on-disk bytes. This test pins
+        # that contract by asserting all four surfaces return the same
+        # ok=False verdict on a tampered index.
+        self._plant_tampered_index()
+        verdicts = {}
+        for name, action in [
+            ("show", show_action),
+            ("stats", stats_action),
+            ("verify", verify_action),
+            ("orphans", orphans_action),
+        ]:
+            code, raw = self._run(action, [])
+            payload = json.loads(raw)
+            verdicts[name] = (code != 0, payload.get("ok"))
+        # All four must agree: nonzero exit + ok:false.
+        for name, (nonzero, ok_flag) in verdicts.items():
+            self.assertTrue(
+                nonzero, f"{name}_action did not return nonzero exit",
+            )
+            self.assertFalse(
+                ok_flag, f"{name}_action reported ok:true on tampered index",
+            )
+
+    def test_stats_rejects_unknown_genre_composite_key(self) -> None:
+        # Symmetric to the strict path's
+        # test_load_chain_rejects_unknown_genre_composite_key — even when
+        # the slug is well-formed, an unknown genre must surface as an
+        # ok:false verdict on every lenient CLI surface too.
+        lineage_dir = self.project_root / "_bmad" / "lineage"
+        lineage_dir.mkdir(parents=True)
+        idx_path = lineage_dir / "index.json"
+        idx_path.write_text(json.dumps({
+            "entries": {
+                "manifesto/s0": {
+                    "path": "manifesto/s0.json",
+                    "merkle_root": "deadbeef" * 8,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                    "seq": 0,
+                },
+            },
+        }))
+        code, raw = self._run(stats_action, [])
+        self.assertNotEqual(code, 0)
+        payload = json.loads(raw)
+        self.assertFalse(payload["ok"])
+        self.assertIn("manifesto", payload["error"])
+
+
 class DispatchTests(_Base):
     def test_dispatch_unknown_action_returns_nonzero(self) -> None:
         with patch("sys.stdout", new_callable=StringIO):
