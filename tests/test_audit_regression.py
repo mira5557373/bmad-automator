@@ -3300,35 +3300,56 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
         # 743-855). The post-impl review found the AnnAssign branch
         # was missing; without it a single PEP 526 annotated binding
         # could smuggle a rebind past the walker.
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                for alias in node.names:
-                    if alias.name == "apply_threshold_proposal":
-                        forbidden.add(alias.asname or alias.name)
-            elif isinstance(node, ast.Assign):
-                if isinstance(node.value, ast.Name) and node.value.id in forbidden:
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            forbidden.add(tgt.id)
-                elif isinstance(node.value, ast.Attribute) and (
-                    node.value.attr == "apply_threshold_proposal"
-                ):
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            forbidden.add(tgt.id)
-            elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                if (
-                    isinstance(node.value, ast.Name)
-                    and node.value.id in forbidden
-                    and isinstance(node.target, ast.Name)
-                ):
-                    forbidden.add(node.target.id)
-                elif (
-                    isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "apply_threshold_proposal"
-                    and isinstance(node.target, ast.Name)
-                ):
-                    forbidden.add(node.target.id)
+        #
+        # Iterate to a FIXED POINT (``while changed:``) so reverse-
+        # source-order chained rebinds like ``b = a`` appearing before
+        # ``a = apply_threshold_proposal`` are still closed — a single
+        # ``ast.walk`` pass visits ``b = a`` first, finds ``a`` not yet
+        # forbidden, and skips the propagation. Modeled on
+        # ``AuditKeyEnvScrubInvariant._collect_subprocess_bindings``
+        # lines 776-805 (the D-04 walker that explicitly adopted the
+        # fixed-point loop precisely to close this gap).
+        changed = True
+        while changed:
+            changed = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name == "apply_threshold_proposal":
+                            name = alias.asname or alias.name
+                            if name not in forbidden:
+                                forbidden.add(name)
+                                changed = True
+                elif isinstance(node, ast.Assign):
+                    if isinstance(node.value, ast.Name) and node.value.id in forbidden:
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name) and tgt.id not in forbidden:
+                                forbidden.add(tgt.id)
+                                changed = True
+                    elif isinstance(node.value, ast.Attribute) and (
+                        node.value.attr == "apply_threshold_proposal"
+                    ):
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name) and tgt.id not in forbidden:
+                                forbidden.add(tgt.id)
+                                changed = True
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    if (
+                        isinstance(node.value, ast.Name)
+                        and node.value.id in forbidden
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id not in forbidden
+                    ):
+                        forbidden.add(node.target.id)
+                        changed = True
+                    elif (
+                        isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "apply_threshold_proposal"
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id not in forbidden
+                    ):
+                        forbidden.add(node.target.id)
+                        changed = True
 
         # Second pass — flag direct/indirect calls + indirect access.
         for node in ast.walk(tree):
@@ -3518,6 +3539,63 @@ class ThresholdApplyIsolationInvariant(unittest.TestCase):
             ThresholdApplyIsolationInvariant._module_violates(ast.parse(annassign_attr_src)),
             "AST walker FAILED to flag AnnAssign(Attribute) rebind — first-pass "
             "binding tracker is missing the AnnAssign branch",
+        )
+
+        # (a) Reverse-source-order chained rebind — the rebind chain
+        # ``b = a`` appears in source order BEFORE ``a =
+        # apply_threshold_proposal`` is bound. A single ``ast.walk``
+        # pass visits ``b = a`` first, finds ``a`` not yet in the
+        # forbidden set, and silently skips propagation — so ``b()``
+        # passes the invariant. The fix wraps the first-pass binding
+        # collector in a ``while changed:`` fixed-point loop modeled
+        # on ``AuditKeyEnvScrubInvariant._collect_subprocess_bindings``
+        # (the D-04 walker that already adopted iteration precisely
+        # to close this gap).
+        chained_reverse_src = textwrap.dedent(
+            """
+            def evil_chained_reverse():
+                b(".", "id", confirm="x", operator_id="x")
+
+            b = a
+            from story_automator.core.innovation.threshold_apply import (
+                apply_threshold_proposal,
+            )
+            a = apply_threshold_proposal
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(
+                ast.parse(chained_reverse_src)
+            ),
+            "AST walker FAILED to flag reverse-order chained rebind "
+            "(b = a BEFORE a = apply_threshold_proposal) — first-pass "
+            "binding tracker must iterate to a fixed point so chains "
+            "are closed regardless of source order",
+        )
+
+        # (a) Three-link reverse-order chain — pins that ONE iteration
+        # is insufficient (would catch ``b`` after one pass but miss
+        # ``c``); fixed-point closure must run until quiescent.
+        chained_reverse_three_src = textwrap.dedent(
+            """
+            def evil_chained_reverse_three():
+                c(".", "id", confirm="x", operator_id="x")
+
+            c = b
+            b = a
+            from story_automator.core.innovation.threshold_apply import (
+                apply_threshold_proposal,
+            )
+            a = apply_threshold_proposal
+            """
+        )
+        self.assertTrue(
+            ThresholdApplyIsolationInvariant._module_violates(
+                ast.parse(chained_reverse_three_src)
+            ),
+            "AST walker FAILED to flag 3-link reverse-order chained "
+            "rebind — fixed-point loop must run until quiescent, not "
+            "a single iteration",
         )
 
         # (b) Real threshold_apply.py — two-direction proof:
@@ -4274,36 +4352,56 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
 
         forbidden: set[str] = {"run_collectors_per_unit"}
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                for alias in node.names:
-                    if alias.name == "run_collectors_per_unit":
-                        forbidden.add(alias.asname or alias.name)
-            elif isinstance(node, ast.Assign):
-                if isinstance(node.value, ast.Name) and node.value.id in forbidden:
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            forbidden.add(tgt.id)
-                elif (
-                    isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "run_collectors_per_unit"
-                ):
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            forbidden.add(tgt.id)
-            elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                if (
-                    isinstance(node.value, ast.Name)
-                    and node.value.id in forbidden
-                    and isinstance(node.target, ast.Name)
-                ):
-                    forbidden.add(node.target.id)
-                elif (
-                    isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "run_collectors_per_unit"
-                    and isinstance(node.target, ast.Name)
-                ):
-                    forbidden.add(node.target.id)
+        # Iterate to a FIXED POINT (``while changed:``) so reverse-
+        # source-order chained rebinds like ``b = a`` appearing before
+        # ``a = run_collectors_per_unit`` are still closed — a single
+        # ``ast.walk`` pass visits ``b = a`` first, finds ``a`` not yet
+        # forbidden, and skips the propagation. Modeled on
+        # ``AuditKeyEnvScrubInvariant._collect_subprocess_bindings``
+        # lines 776-805 (the D-04 walker that explicitly adopted the
+        # fixed-point loop precisely to close this gap).
+        changed = True
+        while changed:
+            changed = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name == "run_collectors_per_unit":
+                            name = alias.asname or alias.name
+                            if name not in forbidden:
+                                forbidden.add(name)
+                                changed = True
+                elif isinstance(node, ast.Assign):
+                    if isinstance(node.value, ast.Name) and node.value.id in forbidden:
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name) and tgt.id not in forbidden:
+                                forbidden.add(tgt.id)
+                                changed = True
+                    elif (
+                        isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "run_collectors_per_unit"
+                    ):
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name) and tgt.id not in forbidden:
+                                forbidden.add(tgt.id)
+                                changed = True
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    if (
+                        isinstance(node.value, ast.Name)
+                        and node.value.id in forbidden
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id not in forbidden
+                    ):
+                        forbidden.add(node.target.id)
+                        changed = True
+                    elif (
+                        isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "run_collectors_per_unit"
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id not in forbidden
+                    ):
+                        forbidden.add(node.target.id)
+                        changed = True
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -4503,6 +4601,63 @@ class WorktreePerUnitIsolationInvariant(unittest.TestCase):
         self.assertTrue(
             WorktreePerUnitIsolationInvariant._module_violates(ast.parse(importlib_src)),
             "AST walker FAILED to flag importlib.import_module chain",
+        )
+
+        # (a) Reverse-source-order chained rebind — the rebind chain
+        # ``b = a`` appears in source order BEFORE ``a =
+        # run_collectors_per_unit`` is bound. A single ``ast.walk``
+        # pass visits ``b = a`` first, finds ``a`` not yet in the
+        # forbidden set, and silently skips propagation — so ``b()``
+        # passes the invariant. The fix wraps the first-pass binding
+        # collector in a ``while changed:`` fixed-point loop modeled
+        # on ``AuditKeyEnvScrubInvariant._collect_subprocess_bindings``
+        # (the D-04 walker that already adopted iteration precisely
+        # to close this gap).
+        chained_reverse_src = textwrap.dedent(
+            """
+            def evil_chained_reverse():
+                b('.', 'g', 'sha', {}, [])
+
+            b = a
+            from story_automator.core.collector_isolation import (
+                run_collectors_per_unit,
+            )
+            a = run_collectors_per_unit
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(
+                ast.parse(chained_reverse_src)
+            ),
+            "AST walker FAILED to flag reverse-order chained rebind "
+            "(b = a BEFORE a = run_collectors_per_unit) — first-pass "
+            "binding tracker must iterate to a fixed point so chains "
+            "are closed regardless of source order",
+        )
+
+        # (a) Three-link reverse-order chain — pins that ONE iteration
+        # is insufficient (would catch ``b`` after one pass but miss
+        # ``c``); fixed-point closure must run until quiescent.
+        chained_reverse_three_src = textwrap.dedent(
+            """
+            def evil_chained_reverse_three():
+                c('.', 'g', 'sha', {}, [])
+
+            c = b
+            b = a
+            from story_automator.core.collector_isolation import (
+                run_collectors_per_unit,
+            )
+            a = run_collectors_per_unit
+            """
+        )
+        self.assertTrue(
+            WorktreePerUnitIsolationInvariant._module_violates(
+                ast.parse(chained_reverse_three_src)
+            ),
+            "AST walker FAILED to flag 3-link reverse-order chained "
+            "rebind — fixed-point loop must run until quiescent, not "
+            "a single iteration",
         )
 
         # (b) Real collector_isolation.py — meaningful two-direction proof.
