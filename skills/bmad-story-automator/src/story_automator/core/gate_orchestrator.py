@@ -1024,9 +1024,11 @@ def run_production_gate(
             )
             if existing is not None:
                 # Reuse path must populate the same UNCONDITIONAL in-memory
-                # additive fields the fresh path always sets (lines 887-928
-                # below) so callers see a consistent return shape regardless
-                # of cache hit/miss. The on-disk gate JSON is by design
+                # additive fields the fresh path always sets (see the
+                # ``evidence_merkle_root`` + ``lineage_root`` block below
+                # the per-call finally) so callers see a consistent return
+                # shape regardless of cache hit/miss. The on-disk gate JSON
+                # is by design
                 # byte-identical between fresh and reused (persist_gate_file
                 # ran at verdict_engine.py:272 BEFORE these mutations on
                 # the original fresh run), so we re-derive the two unconditional
@@ -1064,7 +1066,8 @@ def run_production_gate(
                 # evidence — that evidence is by construction the same
                 # on disk whether the gate is fresh or reused, so the
                 # override decision is identical between modes. Mirrors
-                # the fresh-path block at lines 985-994 verbatim.
+                # the fresh-path ``if fail_closed:`` block farther down
+                # this function verbatim.
                 if fail_closed:
                     error_labels = _collect_error_evidence(
                         project_root, gate_id,
@@ -1089,8 +1092,11 @@ def run_production_gate(
                     # AFTER ``_recover_from_crash_locked`` so it MUST
                     # surface ``_recovery_descriptor`` to preserve the
                     # §9.2 "loud, not silent" contract that the reuse
-                    # path (line 1011) and fresh-success path (line 1202)
-                    # both honor. Without this call, a mid-startup
+                    # path (``_attach_recovery_signal(existing, ...)``
+                    # above) and fresh-success path
+                    # (``_attach_recovery_signal(gate_file, ...)`` before
+                    # ``return gate_file`` at end of function) both honor.
+                    # Without this call, a mid-startup
                     # corrupted-marker quarantine succeeded only on-disk
                     # under a timestamp-named ``_bmad/gate/quarantine/``
                     # directory the operator had no reason to inspect,

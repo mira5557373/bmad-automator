@@ -4137,5 +4137,72 @@ class RunProductionGateAdvisoryDocstringExceptionScopeTests(unittest.TestCase):
         )
 
 
+class GateOrchestratorInlineCommentLineRefsTests(unittest.TestCase):
+    """``gate_orchestrator.py`` inline comments don't carry stale line-number anchors.
+
+    Pre-fix four inline comments in ``run_production_gate`` referenced
+    specific line numbers in the same file ("lines 887-928 below",
+    "lines 985-994 verbatim", "(line 1011)", "(line 1202)") that
+    pointed to the wrong content because the file grew across C5 / G2
+    / round-3 follow-ups without these anchors being maintained.
+    Specifically:
+
+    - Line 1027 said "lines 887-928 below" for the fresh-path additive
+      fields, but lines 887-928 are now inside the function docstring
+      (C5 ``threshold_proposer`` / ``isolation_mode`` prose); the actual
+      fresh-path setter block is later in the function body.
+    - Line 1067 said "lines 985-994 verbatim" for the fresh-path
+      ``fail_closed`` block, but lines 985-994 are now the gate-lock
+      acquisition + ``_pending_cleanup`` hoist.
+    - Line 1092 said "(line 1011)" for the reuse-path
+      ``_attach_recovery_signal`` and "(line 1202)" for the
+      fresh-success-path ``_attach_recovery_signal``; both pointed to
+      unrelated comment / code locations.
+
+    The fix replaces the four numeric anchors with symbolic references
+    (e.g. "see the fresh-path block below", "the fresh-path
+    ``if fail_closed:`` block farther down this function") so the
+    comments decouple from line-number drift.
+
+    The regression test pins the post-fix state by asserting none of
+    the four pre-fix anchor substrings remain in the file. Any future
+    re-introduction of numeric-line anchors that match the four
+    documented shapes trips this test.
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+    STALE_ANCHORS = (
+        "lines 887-928",
+        "lines 985-994",
+        "line 1011",
+        "line 1202",
+    )
+
+    def test_no_stale_line_number_anchors(self) -> None:
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        found = [anchor for anchor in self.STALE_ANCHORS if anchor in text]
+        self.assertEqual(
+            found,
+            [],
+            "gate_orchestrator.py inline comments still carry stale "
+            f"line-number anchors {found}. The file grew from ~834 LOC "
+            "(post-B baseline) to 1400+ LOC across C5 / G2 / round-3 "
+            "follow-ups and these anchors point to docstring prose / "
+            "scaffolding instead of the setter blocks they are supposed "
+            "to identify. Replace numeric line references with symbolic "
+            "ones (e.g. 'the fresh-path block below', 'mirrors the "
+            "fresh-path ``if fail_closed:`` block farther down') so "
+            "future LOC growth does not re-introduce drift.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
