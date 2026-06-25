@@ -1105,14 +1105,37 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
                 # same identifier to a raw env dict gets a free pass —
                 # see the rebind-attack regression test
                 # ``test_rebind_to_raw_invalidates_scrubbed_binding``.
+                #
+                # Tuple/list/starred unpack targets must recurse into
+                # ``ast.Tuple`` / ``ast.List`` / ``ast.Starred`` patterns
+                # so a rebind via ``sandboxed, _ = (raw_env, None)``
+                # invalidates the prior scrub binding. Without the
+                # recursion, the ``isinstance(tgt, ast.Name)`` guard
+                # silently skips the unpack target and the previously
+                # scrubbed binding remains accepted by the env-keyword
+                # check — a real false-negative on the D-04 audit-floor
+                # invariant. Conservative add-branch policy: only add on
+                # plain ``ast.Name`` targets (no realistic scrub idiom
+                # binds multiple scrubbed envs via tuple-unpack); always
+                # discard ALL Name leaves of the target tree on any
+                # non-scrub RHS.
+                def _iter_name_targets(target):
+                    if isinstance(target, ast.Name):
+                        yield target
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        for elt in target.elts:
+                            yield from _iter_name_targets(elt)
+                    elif isinstance(target, ast.Starred):
+                        yield from _iter_name_targets(target.value)
+
                 if is_scrub_call(node.value):
                     for tgt in node.targets:
                         if isinstance(tgt, ast.Name):
                             self.scrubbed_names.add(tgt.id)
                 else:
                     for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            self.scrubbed_names.discard(tgt.id)
+                        for name in _iter_name_targets(tgt):
+                            self.scrubbed_names.discard(name.id)
                 self.generic_visit(node)
 
             def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -1825,6 +1848,143 @@ class AuditKeyEnvScrubInvariant(unittest.TestCase):
             "Discard branch falsely invalidated a legitimately-scrubbed "
             "binding — the fix must only discard on REBIND, not on the "
             "initial bind",
+        )
+
+    def test_tuple_list_starred_unpack_rebind_invalidates_scrubbed_binding(
+        self,
+    ) -> None:
+        """A name bound to ``scrub_env_for_subprocess(...)`` that is
+        later REBOUND via a tuple/list/starred unpack target (e.g.
+        ``sandboxed, _ = (raw_env, None)``) must NOT remain in
+        ``scrubbed_names`` — the subsequent ``subprocess.run(...,
+        env=<rebound>)`` must be flagged as unscrubbed.
+
+        Companion to
+        :py:meth:`test_rebind_to_raw_invalidates_scrubbed_binding`,
+        which covers only ``ast.Name`` target rebinds (variants a-d).
+        Without recursion into ``ast.Tuple`` / ``ast.List`` /
+        ``ast.Starred`` patterns inside ``visit_Assign``, a
+        contributor can scrub once and silently rebind via tuple-
+        unpack to a raw env dict — a real false-negative on the
+        D-04 audit-floor invariant pinned by
+        :py:meth:`test_ast_no_unscrubbed_subprocess_in_core`.
+
+        Four bypass sub-variants are covered:
+          (a) Tuple unpack:   ``sandboxed, _ = (raw_env, None)``
+          (b) List unpack:    ``[sandboxed, _] = [raw_env, None]``
+          (c) Starred unpack: ``sandboxed, *_ = (raw_env, None)``
+          (d) Nested tuple:   ``(sandboxed, _), x = ((raw_env, None), 1)``
+
+        Each variant asserts the unscrubbed ``subprocess.run`` line
+        is flagged. Discard policy is conservative: ALL ``ast.Name``
+        leaves in the unpack target tree are discarded on any non-
+        scrub RHS, regardless of which element-position the leaf
+        occupies — there is no realistic scrub idiom that binds
+        multiple scrubbed envs via tuple-unpack, so the asymmetric
+        discard-only policy keeps the invariant simple and closed.
+        """
+        import ast
+
+        # (a) Tuple unpack — the canonical bypass in the bug report.
+        tuple_unpack_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, raw_env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed, _ = (raw_env, None)
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(tuple_unpack_src))),
+            1,
+            "Walker FAILED to flag tuple-unpack rebind from scrub call to "
+            "raw value — visit_Assign must recurse into ast.Tuple targets "
+            "and discard every ast.Name leaf on any non-scrub RHS, "
+            "defeating the D-04 audit-floor invariant otherwise",
+        )
+
+        # (b) List unpack.
+        list_unpack_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, raw_env):
+                sandboxed = scrub_env_for_subprocess(env)
+                [sandboxed, _] = [raw_env, None]
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(list_unpack_src))),
+            1,
+            "Walker FAILED to flag list-unpack rebind from scrub call to "
+            "raw value — visit_Assign must recurse into ast.List targets "
+            "symmetric with ast.Tuple",
+        )
+
+        # (c) Starred unpack.
+        starred_unpack_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, raw_env):
+                sandboxed = scrub_env_for_subprocess(env)
+                sandboxed, *_ = (raw_env, None, None)
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(starred_unpack_src))),
+            1,
+            "Walker FAILED to flag starred-unpack rebind from scrub call "
+            "to raw value — visit_Assign must unwrap ast.Starred targets "
+            "to reach the inner Name leaf",
+        )
+
+        # (d) Nested tuple — recursion must reach arbitrary depth.
+        nested_tuple_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def evil(env, raw_env):
+                sandboxed = scrub_env_for_subprocess(env)
+                (sandboxed, _), x = ((raw_env, None), 1)
+                subprocess.run(["ls"], env=sandboxed)
+            """
+        )
+        self.assertEqual(
+            len(self._module_offenders(ast.parse(nested_tuple_src))),
+            1,
+            "Walker FAILED to flag nested-tuple rebind from scrub call to "
+            "raw value — the unpack-target walk must be recursive, not a "
+            "single-level loop over node.targets[0].elts",
+        )
+
+        # Sanity: the canonical safe pattern must STILL pass after the
+        # unpack-target recursion lands — the discard policy must not
+        # accidentally invalidate a legitimately-scrubbed binding.
+        safe_pattern_src = textwrap.dedent(
+            """
+            import subprocess
+            from story_automator.core.audit import scrub_env_for_subprocess
+
+            def safe(env):
+                scrubbed = scrub_env_for_subprocess(env)
+                subprocess.run(["ls"], env=scrubbed)
+            """
+        )
+        self.assertEqual(
+            self._module_offenders(ast.parse(safe_pattern_src)),
+            [],
+            "Unpack-target recursion falsely invalidated a legitimately-"
+            "scrubbed binding — the fix must only discard Name leaves "
+            "reachable from an unpack target, not the plain-Name target",
         )
 
     def test_scrub_import_alias_is_tracked(self) -> None:
