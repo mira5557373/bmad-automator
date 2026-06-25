@@ -41,7 +41,7 @@ from .commands.tmux import (
     cmd_tmux_wrapper,
 )
 from .commands.validate_story_creation import cmd_validate_story_creation
-from .core.common import help_flag, print_json, safe_int
+from .core.common import help_flag, print_json
 from .core.epic_parser import (
     epic_complete,
     parse_epic_file,

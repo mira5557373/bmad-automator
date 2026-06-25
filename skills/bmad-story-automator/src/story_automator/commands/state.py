@@ -13,7 +13,7 @@ from ..core.runtime_policy import (
     snapshot_effective_policy,
 )
 from ..core.agent_config import normalize_model as _model_or_none
-from ..core.sprint import sprint_status_done_in_text, sprint_status_in_text
+from ..core.sprint import sprint_status_in_text
 from ..core.utils import (
     count_matches,
     ensure_dir,

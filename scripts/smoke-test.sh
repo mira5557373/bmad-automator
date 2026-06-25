@@ -350,20 +350,24 @@ verify_qa_prompts_skill_only() {
 
 verify_legacy_backups() {
   local root="$1"
-  compgen -G "$root/_bmad/bmm/4-implementation/bmad-story-automator.backup-*" >/dev/null || {
-    echo "Missing current story backup" >&2
+  # main eb0b964's install.sh moved backups OUTSIDE the skills root to
+  # $TARGET_ROOT/.bmad-story-automator-backups/ so a timestamped tree
+  # cannot be discovered as a skill. The smoke test follows.
+  local backups_dir="$root/.bmad-story-automator-backups"
+  compgen -G "$backups_dir/bmad-story-automator.backup-*" >/dev/null || {
+    echo "Missing current story backup (looked in $backups_dir)" >&2
     exit 1
   }
-  compgen -G "$root/_bmad/bmm/4-implementation/bmad-story-automator-review.backup-*" >/dev/null || {
-    echo "Missing current review backup" >&2
+  compgen -G "$backups_dir/bmad-story-automator-review.backup-*" >/dev/null || {
+    echo "Missing current review backup (looked in $backups_dir)" >&2
     exit 1
   }
-  compgen -G "$root/_bmad/bmm/workflows/4-implementation/story-automator.backup-*" >/dev/null || {
-    echo "Missing legacy story backup" >&2
+  compgen -G "$backups_dir/story-automator.backup-*" >/dev/null || {
+    echo "Missing legacy story backup (looked in $backups_dir)" >&2
     exit 1
   }
-  compgen -G "$root/_bmad/bmm/workflows/4-implementation/story-automator-review.backup-*" >/dev/null || {
-    echo "Missing legacy review backup" >&2
+  compgen -G "$backups_dir/story-automator-review.backup-*" >/dev/null || {
+    echo "Missing legacy review backup (looked in $backups_dir)" >&2
     exit 1
   }
 }

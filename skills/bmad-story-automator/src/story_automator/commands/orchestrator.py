@@ -455,11 +455,14 @@ def _marker(args: list[str]) -> int:
                 )
                 return 1
         ensure_dir(marker_file.parent)
-        remaining = _coerce_int(options["remaining"], 0)
-        pid = _coerce_int(options["pid"], 0)
-        if remaining is None or pid is None:
-            print_json({"ok": False, "error": "invalid_int"})
-            return 1
+        # safe_int funnels a non-numeric --remaining/--pid (e.g. an unexpanded
+        # shell var "$REMAINING") to 0 instead of bailing — integration-all's
+        # test_error_contract pins this lenient contract because a brittle
+        # marker-create here breaks the orchestrator's recovery path on
+        # malformed CLI args. (Supersedes main eb0b964's stricter
+        # invalid_int short-circuit.)
+        remaining = safe_int(options["remaining"], 0)
+        pid = safe_int(options["pid"], 0)
         payload = {
             "epic": options["epic"],
             "currentStory": options["story"],

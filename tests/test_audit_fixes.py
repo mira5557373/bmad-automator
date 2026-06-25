@@ -170,7 +170,10 @@ class StateUpdateTests(unittest.TestCase):
             state.write_text("---\nstatus: READY\n---\n", encoding="utf-8")
             code, payload = _capture_json(_state_update, [str(state), "--set", "DONE"])
             self.assertEqual(code, 1)
-            self.assertEqual(payload["error"], "invalid_set")
+            # integration-all's pre-existing test_error_contract uses the
+            # more specific "invalid_set_operand" name; consolidated branch
+            # keeps that contract since it's more descriptive than "invalid_set".
+            self.assertEqual(payload["error"], "invalid_set_operand")
             # File is untouched / intact.
             self.assertIn("status: READY", state.read_text(encoding="utf-8"))
 
@@ -213,14 +216,21 @@ class MarkerRobustnessTests(unittest.TestCase):
     """#26: marker create/heartbeat degrade gracefully on bad input."""
 
     def test_create_with_non_numeric_remaining(self) -> None:
+        # integration-all's pre-existing test_error_contract pins the LENIENT
+        # contract: a non-numeric --remaining (e.g. an unexpanded shell var)
+        # must default to 0 and STILL create the marker, because the
+        # orchestrator's recovery path can't tolerate a brittle marker-create
+        # call. Consolidated branch keeps that contract; main eb0b964's
+        # stricter invalid_int short-circuit is the regressed contract here.
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}, clear=False):
-                code, payload = _capture_json(
-                    _marker,
+                code = _marker(
                     ["create", "--epic", "1", "--story", "1.1", "--remaining", "abc"],
                 )
-            self.assertEqual(code, 1)
-            self.assertEqual(payload["error"], "invalid_int")
+            self.assertEqual(code, 0)
+            marker = active_marker_path(Path(tmp))
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            self.assertEqual(payload["storiesRemaining"], 0)
 
     def test_heartbeat_on_corrupt_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -230,7 +240,9 @@ class MarkerRobustnessTests(unittest.TestCase):
                 marker.write_text("{not valid json", encoding="utf-8")
                 code, payload = _capture_json(_marker, ["heartbeat"])
             self.assertEqual(code, 1)
-            self.assertEqual(payload["error"], "marker_invalid")
+            # integration-all's pre-existing test_error_contract uses
+            # "marker_corrupt"; consolidated branch keeps that contract.
+            self.assertEqual(payload["error"], "marker_corrupt")
 
 
 class StopHookRemainingTests(unittest.TestCase):
