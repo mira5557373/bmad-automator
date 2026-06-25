@@ -475,6 +475,52 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 )
                 self.assertFalse(raw["timed_out"])
 
+    def test_none_prompt_renders_as_empty_string_not_literal_None(self) -> None:
+        # Regression: ``_DefaultEmptyDict(prompt=intent.prompt)`` stored the
+        # raw value verbatim. When a caller violated ``SessionIntent.prompt``'s
+        # ``str`` type contract by passing ``None`` (frozen dataclass does not
+        # enforce types at runtime), ``"{prompt}".format_map(_render_map)``
+        # produced the literal 4-char token ``"None"`` rather than ``""``.
+        # That ``"None"`` was then embedded directly into the tmux launch
+        # command — inconsistent with both the fail-soft fallback in the
+        # ``except`` arm (``intent.prompt or ""``) AND the explicit
+        # ``str(v)``-with-no-``None`` guard a few lines below for BMAD env
+        # keys. ``__missing__`` does not fire because the key IS present with
+        # value ``None``, and ``str.format_map`` does not raise either — it
+        # silently calls ``format(None, "")`` which returns ``"None"``.
+        # The fix normalizes ``intent.prompt or ""`` at the mapping
+        # construction site, symmetric with the ``except`` arm.
+        bad_intent = SessionIntent(
+            story_key="S1",
+            phase="dev",
+            baseline_sha="b" * 40,
+            prompt=None,  # type: ignore[arg-type]
+            workspace="/tmp/ws",
+        )
+        with _StubHooks() as h:
+            raw = invokers.claude_code_invoker(
+                profile=claude_default(), intent=bad_intent,
+            )
+        # Wire-shape preserved.
+        self.assertEqual(
+            set(raw.keys()),
+            {"stdout_tail", "head_sha", "session_id",
+             "stderr_tail", "timed_out"},
+        )
+        # Spawn must have been called exactly once.
+        h.spawn.assert_called_once()
+        cmd = h.spawn.call_args[0][1]
+        # The literal 4-char token ``None`` must NOT have leaked into the
+        # spawn command. Use a word-boundary-style check to avoid false
+        # positives if the binary name itself ever happened to contain
+        # ``None`` (it doesn't — ``claude_default().binary == "claude"`` —
+        # but defending against future profile renames).
+        tokens = cmd.split()
+        self.assertNotIn(
+            "None", tokens,
+            msg=f"literal token 'None' leaked into spawn command: {cmd!r}",
+        )
+
     def test_session_name_satisfies_validated_session_name_for_dirty_phase(
         self,
     ) -> None:

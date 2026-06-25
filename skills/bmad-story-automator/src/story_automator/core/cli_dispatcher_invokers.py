@@ -284,7 +284,18 @@ def claude_code_invoker(
     # its format keys, so any extra ``{name}`` field reaches us. Unknown
     # placeholders render as empty strings; the canonical ``{prompt}`` key
     # is supplied by ``intent.prompt``.
-    _render_map: dict[str, str] = _DefaultEmptyDict(prompt=intent.prompt)
+    #
+    # Normalize a falsy ``intent.prompt`` to ``""`` symmetrically with the
+    # fail-soft fallback at the ``except`` arm below (``intent.prompt or ""``)
+    # and with the BMAD env stringification a few lines down (which guards
+    # against ``None`` slipping in for an unset kwarg). ``SessionIntent.prompt``
+    # is typed ``str``, but the dataclass is frozen without runtime type
+    # enforcement, so a caller violating the contract would otherwise feed
+    # the literal 4-char token ``"None"`` into the spawn command via
+    # ``str.format_map`` (``__missing__`` does not fire because the key IS
+    # present with value ``None``). Symmetric defense, not a behavior change
+    # on the typed-contract-respecting path.
+    _render_map: dict[str, str] = _DefaultEmptyDict(prompt=intent.prompt or "")
     try:
         rendered_prompt = (profile.prompt_template or "{prompt}").format_map(
             _render_map
