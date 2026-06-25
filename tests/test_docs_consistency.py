@@ -3700,6 +3700,125 @@ class ContributingAdditiveGateFileFieldRuleConsistencyTests(unittest.TestCase):
         )
 
 
+class FrozenSurfaceAdditiveGateFileFieldEnumerationTests(unittest.TestCase):
+    """``docs/spec/frozen-gate-surface.md`` enumerates every additive gate_file field.
+
+    Pre-fix the "Additive top-level fields embedded by the orchestrator"
+    section at ``docs/spec/frozen-gate-surface.md:22-26`` listed only
+    four bullets — ``evidence_merkle_root``, ``lineage_root``,
+    ``cost_total_usd``, and ``recovery`` — omitting the
+    ``fail_closed_triggered`` / ``fail_closed_categories`` pair that
+    ``gate_orchestrator.py`` stamps on BOTH the fresh-gate path (lines
+    1255-1256) and the reuse path (lines 1085-1086). The doc's own
+    header calls it the "authoritative 'what not to break' list", so a
+    Path B / engine-adoption PR consulting only this doc as its public
+    contract could legitimately drop the ``fail_closed_*`` pair and
+    break the operator-facing audit trail plus the
+    ``tests/test_orchestrator_fail_closed.py`` regression net.
+
+    The sibling ``ContributingAdditiveGateFileFieldRuleConsistencyTests``
+    above pins the same drift against CONTRIBUTING.md but does NOT pin
+    the frozen-surface doc — so the omission was structurally
+    undetected. This regression test closes that gap: every additive
+    top-level key the orchestrator stamps on the returned gate_file
+    dict (the live set computed identically to the CONTRIBUTING test:
+    grep ``gate_file["<key>"] = ...`` minus the schema-frozen
+    ``overall``) must appear textually within the "Additive top-level
+    fields embedded by the orchestrator" bullet list on
+    frozen-gate-surface.md.
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+    FROZEN_SURFACE_PATH = REPO_ROOT / "docs" / "spec" / "frozen-gate-surface.md"
+    # ``overall`` is part of GateFile (gate_schema.GateFile) — the
+    # orchestrator merely overwrites it on the fail-closed override
+    # path. Excluded from the additive set. Mirrors
+    # ContributingAdditiveGateFileFieldRuleConsistencyTests.SCHEMA_OWNED_KEYS.
+    SCHEMA_OWNED_KEYS = frozenset({"overall"})
+
+    # In-memory-only keys are documented in a DIFFERENT section of the
+    # frozen-surface doc (the threshold_proposer section), NOT under
+    # "Additive top-level fields embedded by the orchestrator". Exclude
+    # them from this bullet-list enumeration test so the assertion
+    # targets only the persisted-on-disk + audit-trail keys.
+    IN_MEMORY_ONLY_KEYS = frozenset(
+        {"threshold_proposal_ref", "threshold_proposer_error"}
+    )
+
+    def _live_additive_keys(self) -> set[str]:
+        """Return the additive-key set, minus schema-owned + in-memory-only.
+
+        Mirrors ``ContributingAdditiveGateFileFieldRuleConsistencyTests
+        ._live_additive_keys`` but additionally subtracts the
+        ``threshold_*`` pair because those live in a different section
+        of the frozen-surface doc.
+        """
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        keys = set(re.findall(r'gate_file\["([a-z_]+)"\]\s*=', text))
+        return keys - self.SCHEMA_OWNED_KEYS - self.IN_MEMORY_ONLY_KEYS
+
+    def _additive_section_body(self) -> str:
+        """Return the body of the ``Additive top-level fields...`` sub-bullet
+        block bounded by the next bullet at depth 0 (a line starting with
+        '- ' at column 0) or the next ``### `` heading.
+
+        The section is structured as a single top-level bullet
+        ``- **Additive top-level fields embedded by the orchestrator**``
+        followed by indented sub-bullets (two-space indent). We bound
+        the search to that nested block so a future bullet appearing
+        AFTER the additive-fields block cannot accidentally satisfy the
+        textual containment check.
+        """
+        text = self.FROZEN_SURFACE_PATH.read_text(encoding="utf-8")
+        heading_re = re.compile(
+            r"^- \*\*Additive top-level fields embedded by the orchestrator\*\*",
+            re.MULTILINE,
+        )
+        match = heading_re.search(text)
+        self.assertIsNotNone(
+            match,
+            "frozen-gate-surface.md no longer has the '- **Additive "
+            "top-level fields embedded by the orchestrator**' bullet "
+            "heading; either restore it or update this regression test.",
+        )
+        start = match.end()
+        # Bound by the next bullet at depth 0 (column 0, '- ') or the
+        # next '### ' heading — whichever comes first.
+        tail = text[start:]
+        next_bullet = re.search(r"^- ", tail, re.MULTILINE)
+        next_heading = re.search(r"^### ", tail, re.MULTILINE)
+        candidates = [m.start() for m in (next_bullet, next_heading) if m is not None]
+        end = start + (min(candidates) if candidates else len(tail))
+        return text[start:end]
+
+    def test_every_live_additive_key_is_named_in_frozen_surface_section(self) -> None:
+        body = self._additive_section_body()
+        live_keys = self._live_additive_keys()
+        # Mirror the CONTRIBUTING regression's containment check: the
+        # key MUST appear inside a backtick code span so a future
+        # rephrase of the prose cannot accidentally satisfy the test
+        # with a plain-text mention.
+        missing = sorted(k for k in live_keys if f"`{k}" not in body)
+        self.assertEqual(
+            missing,
+            [],
+            "docs/spec/frozen-gate-surface.md 'Additive top-level "
+            "fields embedded by the orchestrator' section omits live "
+            f"orchestrator-stamped additive keys: {missing}. Add a "
+            "bullet for each missing key citing the gate_orchestrator.py "
+            "write site, or update this test if the key set legitimately "
+            "shrank.",
+        )
+
+
 class EvidenceCacheGenGrowthDocstringTests(unittest.TestCase):
     """``evidence_cache`` module docstring documents the ``_GEN`` growth profile.
 
