@@ -23,9 +23,15 @@ Three attribution modes are supported, in order of fidelity:
   P0 collectors to reasoning-strong CLIs that may make many tool
   calls).
 
-All three modes preserve sum-of-shares == session total *up to
-floating-point rounding*. The final share absorbs any rounding error
-so the invariant holds exactly for ``total_cost_usd``.
+All three modes preserve sum-of-shares == session total exactly.
+The integer fields (``input_tokens``, ``output_tokens``) preserve the
+invariant via exact :class:`fractions.Fraction` arithmetic in
+:func:`_split_int` (largest-remainder distribution over rational
+weights), so the sum is exact for any ``int`` total — including
+totals beyond the float64 mantissa boundary (``2**53``). The float
+fields (``total_cost_usd`` and ``duration_s``) absorb any
+floating-point drift into the final non-zero share in
+:func:`_split_float`, so the invariant also holds for them.
 
 The helpers are pure functions: they accept a session :class:`UsageMetrics`
 plus per-collector signals and return a list of :class:`CollectorCostShare`

@@ -341,6 +341,83 @@ class CostAttributionDocstringTests(unittest.TestCase):
         )
 
 
+class CostAttributionSumInvariantDocstringTests(unittest.TestCase):
+    """``cost_attribution`` module docstring reflects the post-fix exactness.
+
+    Pre-fix the docstring at ``cost_attribution.py:26-28`` claimed:
+
+        "All three modes preserve sum-of-shares == session total *up to
+        floating-point rounding*. The final share absorbs any rounding
+        error so the invariant holds exactly for ``total_cost_usd``."
+
+    That wording is internally contradictory (the same modes can't be
+    both "up to floating-point rounding" AND "exact"), and it undersold
+    the implementation's guarantees on two axes:
+
+    1. The integer fields (``input_tokens``, ``output_tokens``) sum
+       EXACTLY via :class:`fractions.Fraction` arithmetic in
+       :func:`_split_int` for any ``int`` total — including totals
+       beyond ``2**53``. Not "up to floating-point rounding".
+    2. The drift-absorption in :func:`_split_float` is field-agnostic:
+       it applies identically to ``total_cost_usd`` AND ``duration_s``,
+       not just ``total_cost_usd``.
+
+    The regression test pins both halves of the contract: (a) the stale
+    "up to floating-point rounding" / "exactly for ``total_cost_usd``"
+    wording is gone, and (b) the post-fix docstring mentions ``Fraction``
+    (the mechanism behind the integer guarantee) and ``duration_s``
+    (the float field that was undocumented as exact).
+    """
+
+    def test_docstring_no_longer_carries_up_to_rounding_qualifier(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.innovation.cost_attribution"
+        )
+        doc = module.__doc__ or ""
+        # The pre-fix qualifier that misrepresented the int-field
+        # guarantee (which is exact, not "up to floating-point rounding").
+        self.assertNotIn(
+            "up to\nfloating-point rounding",
+            doc,
+            "cost_attribution docstring still qualifies the sum invariant "
+            "with 'up to floating-point rounding'; _split_int uses Fraction "
+            "arithmetic so the integer sum is exact for any int total.",
+        )
+        # The pre-fix wording that singled out total_cost_usd as the only
+        # exact float field while duration_s gets the same treatment.
+        self.assertNotIn(
+            "exactly for ``total_cost_usd``",
+            doc,
+            "cost_attribution docstring still singles out total_cost_usd "
+            "as the only exact field; _split_float absorbs drift identically "
+            "for duration_s so it is also exact.",
+        )
+
+    def test_docstring_mentions_fraction_and_duration_s(self) -> None:
+        module = importlib.import_module(
+            "story_automator.core.innovation.cost_attribution"
+        )
+        doc = module.__doc__ or ""
+        # The post-fix docstring must mention the mechanism behind the
+        # integer-field exactness (Fraction arithmetic).
+        self.assertIn(
+            "Fraction",
+            doc,
+            "cost_attribution docstring no longer mentions Fraction; the "
+            "mechanism behind the integer sum-of-shares exactness "
+            "guarantee is undocumented at the module level.",
+        )
+        # And the float-field enumeration must include duration_s
+        # alongside total_cost_usd.
+        self.assertIn(
+            "duration_s",
+            doc,
+            "cost_attribution docstring no longer mentions duration_s as "
+            "an exact float field; readers will assume only total_cost_usd "
+            "receives the final-share drift absorption.",
+        )
+
+
 class ValidateIsolationKwargsDocstringTests(unittest.TestCase):
     """``_validate_isolation_kwargs`` docstring matches the live caller set.
 
