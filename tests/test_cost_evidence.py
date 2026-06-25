@@ -556,6 +556,104 @@ class EmissionTests(unittest.TestCase):
         with self.assertRaises(CostEvidenceError):
             load_collector_cost_share(self.root, self.gate_id, "c1")
 
+    def test_load_gate_cost_report_null_or_string_top_fields_raises_CostEvidenceError(
+        self,
+    ) -> None:
+        """Regression — :func:`load_gate_cost_report` used to leak raw
+        ``TypeError`` / ``ValueError`` out of two unguarded coercion
+        paths in the :class:`GateCostReport` constructor: (1) the
+        ``_usage_from_json(...)`` call, whose five ``int(...)`` /
+        ``float(...)`` casts on ``.get()`` results raise stdlib errors
+        when a session_usage field is ``null`` (Python ``None``) or a
+        non-numeric string; and (2) the top-level
+        ``float(data.get("total_cost_usd", 0.0))`` coercion, which has
+        the same hazard. Both breach the :class:`CostEvidenceError`
+        class docstring contract ("malformed on-disk JSON during load")
+        — operators with ``except CostEvidenceError`` handlers around
+        the load surface caught raw stdlib exceptions instead. The
+        sibling ``_share_from_json`` callsite inside
+        :func:`load_collector_cost_share` was already pinned by
+        :meth:`test_load_collector_cost_share_wrong_type_raises_CostEvidenceError`;
+        this regression closes the symmetric gap.
+        """
+
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        sp = cost_dir / "summary.json"
+
+        # Case 1: session_usage.input_tokens = null leaks TypeError out
+        # of _usage_from_json's int(data.get("input_tokens", 0)) call.
+        sp.write_text(
+            json.dumps(
+                {
+                    "gate_id": self.gate_id,
+                    "session_usage": {
+                        "input_tokens": None,
+                        "output_tokens": 0,
+                        "total_cost_usd": 0.0,
+                        "tool_calls_count": 0,
+                        "duration_s": 0.0,
+                    },
+                    "per_collector": [],
+                    "attribution_mode": "uniform",
+                    "total_cost_usd": 0.0,
+                    "collector_count": 0,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                },
+            ),
+        )
+        with self.assertRaises(CostEvidenceError):
+            load_gate_cost_report(self.root, self.gate_id)
+
+        # Case 2: top-level total_cost_usd = "not-a-number" leaks
+        # ValueError out of float(data.get("total_cost_usd", 0.0)).
+        sp.write_text(
+            json.dumps(
+                {
+                    "gate_id": self.gate_id,
+                    "session_usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_cost_usd": 0.0,
+                        "tool_calls_count": 0,
+                        "duration_s": 0.0,
+                    },
+                    "per_collector": [],
+                    "attribution_mode": "uniform",
+                    "total_cost_usd": "not-a-number",
+                    "collector_count": 0,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                },
+            ),
+        )
+        with self.assertRaises(CostEvidenceError):
+            load_gate_cost_report(self.root, self.gate_id)
+
+        # Case 3: top-level total_cost_usd = null leaks TypeError out
+        # of float(data.get("total_cost_usd", 0.0)) — the .get default
+        # only fires when the KEY is missing; an explicit null still
+        # reaches float(None) which raises.
+        sp.write_text(
+            json.dumps(
+                {
+                    "gate_id": self.gate_id,
+                    "session_usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_cost_usd": 0.0,
+                        "tool_calls_count": 0,
+                        "duration_s": 0.0,
+                    },
+                    "per_collector": [],
+                    "attribution_mode": "uniform",
+                    "total_cost_usd": None,
+                    "collector_count": 0,
+                    "timestamp_iso": "2026-06-24T00:00:00Z",
+                },
+            ),
+        )
+        with self.assertRaises(CostEvidenceError):
+            load_gate_cost_report(self.root, self.gate_id)
+
     def test_emit_prunes_ghost_collector_files_on_reemit_with_smaller_set(
         self,
     ) -> None:

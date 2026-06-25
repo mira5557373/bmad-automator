@@ -626,15 +626,34 @@ def load_gate_cost_report(
         raise CostEvidenceError(
             f"malformed per_collector share at {sp}: {exc}",
         ) from exc
-    return GateCostReport(
-        gate_id=str(data.get("gate_id", "")),
-        session_usage=_usage_from_json(
+    # Symmetric protection for the two remaining unguarded coercion
+    # paths in this constructor: ``_usage_from_json`` performs five
+    # ``int(...)`` / ``float(...)`` casts on ``.get()`` results (so a
+    # JSON ``null`` or a non-numeric string in any of the five
+    # session_usage fields leaks raw TypeError / ValueError), and the
+    # top-level ``float(data.get("total_cost_usd", 0.0))`` coercion has
+    # the same hazard. Without this wrapper, operators with
+    # ``except CostEvidenceError`` handlers around the load surface
+    # catch raw stdlib exceptions and the class docstring's "malformed
+    # on-disk JSON during load" contract is breached — mirroring the
+    # gap already closed for the per_collector parse loop above and the
+    # ``_share_from_json`` callsite inside :func:`load_collector_cost_share`.
+    try:
+        session_usage = _usage_from_json(
             data.get("session_usage", {})
             if isinstance(data.get("session_usage"), dict) else {},
-        ),
+        )
+        total_cost_usd = float(data.get("total_cost_usd", 0.0))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CostEvidenceError(
+            f"malformed summary at {sp}: {exc}",
+        ) from exc
+    return GateCostReport(
+        gate_id=str(data.get("gate_id", "")),
+        session_usage=session_usage,
         per_collector=shares,
         attribution_mode=str(data.get("attribution_mode", "uniform")),
-        total_cost_usd=float(data.get("total_cost_usd", 0.0)),
+        total_cost_usd=total_cost_usd,
         # Derive collector_count from len(shares) ALWAYS — mirrors the
         # emit-side invariant at l.359 (collector_count=len(shares)) so
         # the in-memory dataclass is internally consistent even when
