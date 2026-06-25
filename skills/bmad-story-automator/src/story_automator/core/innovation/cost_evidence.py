@@ -127,7 +127,13 @@ __all__ = [
 # "on-disk collector set always matches summary" invariant the prune
 # step at l.~376-381 documents. Reject reserved names BEFORE touching
 # disk so a half-written tree is impossible. Lowercase only — match
-# the registry convention documented at :func:`collector_cost_path`.
+# the registry convention documented at :func:`collector_cost_path`;
+# the membership check at the guard call site case-folds incoming
+# collector_ids so portability runners with case-insensitive
+# filesystems (macOS APFS / HFS+, Windows NTFS — both in the
+# documented portability matrix) cannot bypass this guard via an
+# uppercase ``"SUMMARY"`` whose ``<id>.json`` resolves to the same
+# inode as the reserved ``summary.json``.
 RESERVED_COLLECTOR_IDS: frozenset[str] = frozenset({"summary"})
 
 
@@ -443,7 +449,15 @@ def emit_gate_cost_report(
     # order, breaking the "on-disk collector set matches summary"
     # invariant at l.~376-381 and turning load_collector_cost_share
     # into a malformed-share error path. Reject BEFORE disk touch.
-    reserved = [cid for cid in cids if cid in RESERVED_COLLECTOR_IDS]
+    # The membership check case-folds incoming ids so an uppercase
+    # ``"SUMMARY"`` (or any mixed-case variant) is rejected even on
+    # case-insensitive filesystems (macOS APFS/HFS+, Windows NTFS),
+    # where ``SUMMARY.json`` and ``summary.json`` resolve to the same
+    # inode and the per-collector write would otherwise be silently
+    # clobbered by the gate-summary write. RESERVED_COLLECTOR_IDS is
+    # documented as lowercase-only so the ``cid.lower()`` fold matches
+    # the registry convention without expanding the closed vocabulary.
+    reserved = [cid for cid in cids if cid.lower() in RESERVED_COLLECTOR_IDS]
     if reserved:
         raise CostEvidenceError(
             "collector_id collides with reserved internal filename: "

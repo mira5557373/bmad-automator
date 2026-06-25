@@ -339,6 +339,67 @@ class EmissionTests(unittest.TestCase):
         after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
         self.assertEqual(before, after)
 
+    def test_reserved_collector_id_case_insensitive_raises_before_disk_touch(
+        self,
+    ) -> None:
+        """Regression — the reserved-name guard at l.~446 used to be
+        case-sensitive (``cid in RESERVED_COLLECTOR_IDS``), so an
+        uppercase ``"SUMMARY"`` (or any mixed-case variant) bypassed
+        the guard. On case-sensitive Linux that wrote distinct
+        ``SUMMARY.json`` + ``summary.json`` files (defense-in-depth
+        gap, not yet exploited), but on case-insensitive filesystems
+        in the documented portability matrix — macOS APFS/HFS+ default
+        AND Windows NTFS default — both filenames resolve to the same
+        inode and the per-collector share write was silently clobbered
+        by the gate-summary write, breaking the "on-disk collector set
+        always matches summary" invariant the prune step documents AND
+        turning ``load_collector_cost_share('SUMMARY')`` into a
+        malformed-share error path (the summary payload has no
+        ``collector_id`` field).
+
+        Fix: case-fold ``cid`` before checking
+        :data:`RESERVED_COLLECTOR_IDS` membership so the closed
+        lowercase-only vocabulary catches every case-variant of a
+        reserved name — symmetric with the path-traversal /
+        duplicate-id / invalid-mode guards.
+        """
+
+        cost_dir = get_cost_root_dir(self.root, self.gate_id)
+        before = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+        for variant in ("SUMMARY", "Summary", "sUmMaRy", "SUMmary"):
+            with self.subTest(collector_id=variant):
+                outcomes = [
+                    _make_outcome(variant, "static", duration_ms=1000),
+                ]
+                # Duration mode (the bug's natural reproducer).
+                with self.assertRaises(CostEvidenceError) as ctx_dur:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="duration",
+                    )
+                self.assertIn(
+                    "collides with reserved internal filename",
+                    str(ctx_dur.exception),
+                )
+                self.assertIn(variant, str(ctx_dur.exception))
+                # Uniform mode — symmetric rejection parity with the
+                # duplicate-id / reserved-name (lowercase) guards.
+                with self.assertRaises(CostEvidenceError) as ctx_uni:
+                    emit_gate_cost_report(
+                        self.root, self.gate_id, SESSION, outcomes,
+                        attribution_mode="uniform",
+                    )
+                self.assertIn(
+                    "collides with reserved internal filename",
+                    str(ctx_uni.exception),
+                )
+                # Pre-disk-touch invariant — neither call may have
+                # written cost files for a rejected input, otherwise
+                # the summary.json destruction window would still be
+                # reachable on case-insensitive runners.
+                after = list(cost_dir.iterdir()) if cost_dir.is_dir() else []
+                self.assertEqual(before, after)
+
     def test_path_traversal_collector_id_raises_before_disk_touch(
         self,
     ) -> None:
