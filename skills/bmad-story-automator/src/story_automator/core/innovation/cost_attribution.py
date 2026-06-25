@@ -129,6 +129,54 @@ def _require_collectors(collector_ids: list[str]) -> None:
         seen.add(cid)
 
 
+def _require_finite_session(session: UsageMetrics) -> None:
+    """Reject sessions whose totals would later poison ``_split_*``.
+
+    :class:`UsageMetrics` documents "All fields are non-negative" but
+    is a plain frozen dataclass without ``__post_init__`` validation —
+    so a malformed parser (or a hand-built fixture) can construct a
+    session carrying ``float('inf')`` / ``float('nan')`` in
+    ``total_cost_usd`` / ``duration_s``, or a negative count in the
+    ``int`` fields. Both classes of value would flow into
+    :func:`_split_int` / :func:`_split_float` and produce wrong shares
+    (the int path's ``total <= 0`` guard catches negatives but the
+    float path raises a bare ``OverflowError`` / ``ValueError`` on
+    ``Fraction(inf)`` / ``Fraction(nan)`` that bypasses the
+    ``AttributionError`` contract).
+
+    Mirrors the symmetry of :func:`_check_weight_map`: weights already
+    reject non-finite / negative; session totals must too.
+    """
+    if session.total_cost_usd != session.total_cost_usd or not math.isfinite(
+        session.total_cost_usd
+    ):
+        raise AttributionError(
+            f"session.total_cost_usd must be finite; got {session.total_cost_usd}"
+        )
+    if session.total_cost_usd < 0:
+        raise AttributionError(
+            f"session.total_cost_usd must be non-negative; got {session.total_cost_usd}"
+        )
+    if session.duration_s != session.duration_s or not math.isfinite(
+        session.duration_s
+    ):
+        raise AttributionError(
+            f"session.duration_s must be finite; got {session.duration_s}"
+        )
+    if session.duration_s < 0:
+        raise AttributionError(
+            f"session.duration_s must be non-negative; got {session.duration_s}"
+        )
+    if session.input_tokens < 0:
+        raise AttributionError(
+            f"session.input_tokens must be non-negative; got {session.input_tokens}"
+        )
+    if session.output_tokens < 0:
+        raise AttributionError(
+            f"session.output_tokens must be non-negative; got {session.output_tokens}"
+        )
+
+
 def _split_int(total: int, weights: list[float | int]) -> list[int]:
     """Split ``total`` (int) across ``weights`` (sum == 1.0 ideally).
 
@@ -242,9 +290,11 @@ def attribute_cost_uniform(
 
     Returns one :class:`CollectorCostShare` per id, in the same order.
     Raises :class:`AttributionError` if ``collector_ids`` is empty or
-    contains duplicates / non-string entries.
+    contains duplicates / non-string entries, or if ``session`` carries
+    non-finite / negative totals.
     """
 
+    _require_finite_session(session)
     _require_collectors(collector_ids)
     n = len(collector_ids)
     weights = [1.0] * n
@@ -307,9 +357,11 @@ def attribute_cost_by_duration(
     case the function degrades gracefully to uniform attribution so
     the sum invariant holds.
 
-    Raises :class:`AttributionError` on empty / negative input.
+    Raises :class:`AttributionError` on empty / negative input, or if
+    ``session`` carries non-finite / negative totals.
     """
 
+    _require_finite_session(session)
     _check_weight_map(durations_s, "durations_s")
     collector_ids = list(durations_s.keys())
     _require_collectors(collector_ids)
@@ -344,9 +396,10 @@ def attribute_cost_by_tool_calls(
     attribution.
 
     Raises :class:`AttributionError` on empty / negative / non-integer
-    input.
+    input, or if ``session`` carries non-finite / negative totals.
     """
 
+    _require_finite_session(session)
     _check_weight_map(tool_calls, "tool_calls")
     for cid, val in tool_calls.items():
         if not isinstance(val, int) or isinstance(val, bool):

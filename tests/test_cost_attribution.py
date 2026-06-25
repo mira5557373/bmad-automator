@@ -258,6 +258,80 @@ class ToolCallWeightedAttributionTests(unittest.TestCase):
         self.assertAlmostEqual(sum(by_id.values()), 2.0)
 
 
+class NonFiniteSessionTotalsTests(unittest.TestCase):
+    # Regression for round-4 bug sweep finding:
+    # ``_check_weight_map`` already rejected non-finite weights with
+    # an explicit ``AttributionError`` and a clear rationale ("NaN and
+    # inf would later flow into _split_int / _split_float and produce
+    # NaN shares"). The session-side totals carried no symmetric
+    # guard, so a malformed parser leaking ``float('inf')`` /
+    # ``float('nan')`` into ``UsageMetrics.total_cost_usd`` /
+    # ``duration_s`` raised a bare ``OverflowError`` /
+    # ``ValueError`` from inside ``Fraction(inf)`` /
+    # ``Fraction(nan)``, bypassing the documented ``AttributionError``
+    # contract. The fix adds ``_require_finite_session`` at the top of
+    # each public helper to mirror the weight-side guard.
+
+    def test_uniform_rejects_inf_total_cost(self) -> None:
+        session = UsageMetrics(input_tokens=100, total_cost_usd=float("inf"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_uniform_rejects_nan_total_cost(self) -> None:
+        session = UsageMetrics(input_tokens=100, total_cost_usd=float("nan"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_uniform_rejects_negative_total_cost(self) -> None:
+        session = UsageMetrics(total_cost_usd=-0.01)
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_uniform_rejects_inf_duration(self) -> None:
+        session = UsageMetrics(duration_s=float("inf"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_uniform_rejects_nan_duration(self) -> None:
+        session = UsageMetrics(duration_s=float("nan"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_uniform_rejects_negative_input_tokens(self) -> None:
+        session = UsageMetrics(input_tokens=-1)
+        with self.assertRaises(AttributionError):
+            attribute_cost_uniform(session, ["a", "b"])
+
+    def test_by_duration_rejects_inf_total_cost(self) -> None:
+        session = UsageMetrics(total_cost_usd=float("inf"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_duration(session, {"a": 1.0, "b": 1.0})
+
+    def test_by_duration_rejects_nan_total_cost(self) -> None:
+        session = UsageMetrics(total_cost_usd=float("nan"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_duration(session, {"a": 1.0, "b": 1.0})
+
+    def test_by_tool_calls_rejects_inf_total_cost(self) -> None:
+        session = UsageMetrics(total_cost_usd=float("inf"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_tool_calls(session, {"a": 1, "b": 2})
+
+    def test_by_tool_calls_rejects_nan_total_cost(self) -> None:
+        session = UsageMetrics(total_cost_usd=float("nan"))
+        with self.assertRaises(AttributionError):
+            attribute_cost_by_tool_calls(session, {"a": 1, "b": 2})
+
+    def test_zero_session_still_passes(self) -> None:
+        # Pin the "keep the guard narrow" contract: defaulted zero
+        # totals must still succeed (used by the zero-cost fast path
+        # in ``cost_evidence`` when no usage data is captured).
+        zero = UsageMetrics()
+        shares = attribute_cost_uniform(zero, ["a", "b"])
+        self.assertEqual(len(shares), 2)
+        self.assertEqual(sum(s.cost_usd for s in shares), 0.0)
+
+
 class FrozenAndSumInvariantTests(unittest.TestCase):
     def test_cost_share_frozen(self) -> None:
         share = CollectorCostShare(
