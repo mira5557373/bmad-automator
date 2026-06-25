@@ -1001,9 +1001,12 @@ def run_production_gate(
             # inspect — `run_production_gate` returned a green PASS with
             # no trace. The descriptor is surfaced via an additive
             # ``recovery`` subdict only when actually meaningful
-            # (quarantined OR cleanup_failed); the common no-marker
-            # ``{"recovered": False}`` path adds nothing — preserving
-            # byte-identical behavior on the frozen-gate-surface.
+            # (quarantined OR cleanup_failed OR quarantine_error — the
+            # C-1 third descriptor shape: corruption detected but
+            # quarantine setup itself failed mid-mkdir on ENOSPC/EACCES/
+            # EROFS, leaving the corrupted marker on disk); the common
+            # no-marker ``{"recovered": False}`` path adds nothing —
+            # preserving byte-identical behavior on the frozen-gate-surface.
             _recovery_descriptor, _pending_cleanup = (
                 _recover_from_crash_locked(project_root)
             )
@@ -1284,8 +1287,11 @@ def run_production_gate(
     # operator-facing return dict — the operator only saw a green PASS
     # while the quarantine record lived under a timestamp-named directory
     # they had no reason to inspect. The additive ``recovery`` subdict is
-    # ONLY present when meaningful (``quarantined`` OR ``cleanup_failed``)
-    # so the common no-marker fast path is byte-identical to pre-fix.
+    # ONLY present when meaningful (``quarantined`` OR ``cleanup_failed``
+    # OR ``quarantine_error`` — the C-1 third descriptor shape: corruption
+    # detected but quarantine setup itself failed mid-mkdir on ENOSPC/
+    # EACCES/EROFS, leaving the corrupted marker on disk) so the common
+    # no-marker fast path is byte-identical to pre-fix.
     _attach_recovery_signal(gate_file, _recovery_descriptor)
 
     return gate_file

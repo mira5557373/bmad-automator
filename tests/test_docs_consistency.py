@@ -3927,5 +3927,112 @@ class InvalidateAllEvidenceCacheDocstringConsistencyTests(unittest.TestCase):
         )
 
 
+class RecoverySignalInlineCommentEnumeratesThirdShapeTests(unittest.TestCase):
+    """The two inline ``recovery`` summary comments in ``gate_orchestrator.py``
+    must enumerate all THREE descriptor shapes the predicate honors.
+
+    Background: ``_attach_recovery_signal`` (defined at
+    ``core/gate_orchestrator.py``) surfaces the §9.2 "loud, not silent"
+    recovery descriptor as an additive ``recovery`` subdict on the
+    return gate_file. The predicate at the function body fires on
+    THREE distinct shapes:
+
+    1. ``quarantined=True`` — corruption was loud and moved into a
+       timestamp-named quarantine dir.
+    2. ``cleanup_failed`` — orphan-cleanup failed mid-recovery.
+    3. ``quarantine_error`` present without ``quarantined=True`` — the
+       C-1 third descriptor shape: corruption detected but mkdir of the
+       quarantine root failed (ENOSPC/EACCES/EROFS), leaving the
+       corrupted marker on disk for the NEXT run to re-trip on.
+
+    Pre-fix, two outer summary comments (one in the corruption-recovery
+    block at the top of ``run_production_gate``, one at the trailing
+    ``_attach_recovery_signal`` call site) said only ``(quarantined OR
+    cleanup_failed)``, omitting the third shape. The function's own
+    docstring and in-body comment correctly listed all three, but the
+    two outer summary sites drifted past commit 4533d6d (the round-3
+    fix that added the third shape to the predicate). The drift would
+    mislead an operator debugging why a ``recovery`` subdict surfaced
+    under a green PASS during a disk-failure-mid-quarantine condition
+    (the WORST case — corrupted marker still on disk AND I/O failure
+    during recovery, both hidden behind a passing verdict pre-C-1).
+
+    This test pins that both inline comments enumerate ``quarantine_error``
+    alongside ``quarantined`` and ``cleanup_failed`` so future code
+    readers see the same three shapes the predicate actually honors.
+    """
+
+    GATE_ORCHESTRATOR_PATH = (
+        REPO_ROOT
+        / "skills"
+        / "bmad-story-automator"
+        / "src"
+        / "story_automator"
+        / "core"
+        / "gate_orchestrator.py"
+    )
+
+    def _comment_block_at(self, text: str, anchor_line_index: int) -> str:
+        """Return the contiguous block of ``# ...`` comment lines surrounding
+        ``anchor_line_index`` (0-indexed), joined by newlines. Walks up and
+        down to collect every adjacent line whose stripped-leading-whitespace
+        starts with ``#``. Used to handle multi-line comment blocks where
+        the predicate enumeration may wrap across lines."""
+        lines = text.splitlines()
+        start = anchor_line_index
+        while start > 0 and lines[start - 1].lstrip().startswith("#"):
+            start -= 1
+        end = anchor_line_index
+        while end + 1 < len(lines) and lines[end + 1].lstrip().startswith("#"):
+            end += 1
+        return "\n".join(lines[start:end + 1])
+
+    def test_recovery_subdict_summary_comments_mention_quarantine_error(self) -> None:
+        text = self.GATE_ORCHESTRATOR_PATH.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        # Anchor lines: any ``# ... quarantined ... OR ... cleanup_failed ...``
+        # comment-line that mentions both halves of the pre-fix shorthand.
+        # Predicate enumeration may then wrap to the next line; the helper
+        # collects the full contiguous comment block so a multi-line
+        # post-fix comment still resolves.
+        anchor_pattern = re.compile(
+            r"#.*quarantined.*OR.*cleanup_failed",
+            re.IGNORECASE,
+        )
+        anchor_indices = [
+            i for i, line in enumerate(lines) if anchor_pattern.search(line)
+        ]
+        self.assertGreaterEqual(
+            len(anchor_indices),
+            2,
+            "Expected at least 2 inline summary comments in "
+            "gate_orchestrator.py mentioning 'quarantined OR cleanup_failed' "
+            "(one in the corruption-recovery block, one at the trailing "
+            "_attach_recovery_signal call site). Found "
+            f"{len(anchor_indices)} anchors at lines {anchor_indices!r}",
+        )
+        # Each anchored comment block must also mention quarantine_error so
+        # the C-1 third descriptor shape is enumerated alongside the other
+        # two. Walks up/down through adjacent comment lines so a wrapped
+        # enumeration ("...OR ``cleanup_failed``\n# OR ``quarantine_error``")
+        # resolves as a single logical comment.
+        for idx in anchor_indices:
+            block = self._comment_block_at(text, idx)
+            self.assertIn(
+                "quarantine_error",
+                block,
+                "Inline summary comment in gate_orchestrator.py lists "
+                "'quarantined OR cleanup_failed' but omits the C-1 third "
+                "descriptor shape 'quarantine_error'. The actual predicate "
+                "in _attach_recovery_signal fires on ALL THREE shapes "
+                "(quarantined OR cleanup_failed OR quarantine_error). "
+                "Update the comment to match the predicate so future "
+                "debuggers do not mis-trace why a recovery subdict appears "
+                "on a green PASS during disk-failure-mid-quarantine "
+                f"(ENOSPC/EACCES/EROFS). Offending comment block "
+                f"(anchored at 1-indexed line {idx + 1}): {block!r}",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
