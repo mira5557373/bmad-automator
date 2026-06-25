@@ -4034,5 +4034,108 @@ class RecoverySignalInlineCommentEnumeratesThirdShapeTests(unittest.TestCase):
             )
 
 
+class RunProductionGateAdvisoryDocstringExceptionScopeTests(unittest.TestCase):
+    """``run_production_gate`` advisory-kwarg docstrings honor the swallow scope.
+
+    Pre-fix the ``drift_watcher`` docstring (line ~861) and the
+    ``threshold_proposer`` docstring (line ~891) each claimed a failure
+    "can never abort the gate" without qualifying that the swallow
+    scope is ``Exception``, not ``BaseException``. The implementation
+    at the drift_watcher call sites (lines ~1132 and ~1221) and the
+    threshold_proposer call site (line ~1271) all use
+    ``except Exception``, NOT ``except BaseException`` — so a
+    ``KeyboardInterrupt`` / ``SystemExit`` / ``MemoryError`` raised
+    inside ``poll()`` or ``observe_gate()`` DOES propagate out of the
+    gate. The active regression test
+    ``test_marker_cleared_when_drift_watcher_poll_raises_base_exception``
+    at ``tests/test_gate_orchestrator_g2_wiring.py:346`` explicitly
+    pins this behavior (with ``assertRaises(KeyboardInterrupt)`` +
+    ``mock_run.assert_not_called()``).
+
+    The pre-fix docstring wording was a doc-vs-code drift that misled
+    operators into believing a blanket guarantee held. The fix
+    tightens both docstrings to say "Exception" instead of "failure"
+    and to acknowledge the ``BaseException`` propagation discipline.
+
+    The regression test pins both halves of the contract:
+
+    1. The pre-fix wording "drift-detector failure can never abort the
+       gate" is gone (replaced by the ``Exception``-scoped wording).
+    2. The post-fix docstring mentions ``BaseException`` so the
+       propagation discipline is documented at the docstring level.
+    """
+
+    def _run_production_gate_docstring(self) -> str:
+        module = importlib.import_module(
+            "story_automator.core.gate_orchestrator"
+        )
+        return module.run_production_gate.__doc__ or ""
+
+    def test_drift_watcher_docstring_scopes_swallow_to_exception(self) -> None:
+        doc = self._run_production_gate_docstring()
+        # The pre-fix wording for the drift_watcher kwarg blanket-claimed
+        # "drift-detector failure can never abort the gate" — too strong
+        # because the implementation uses ``except Exception:`` and a
+        # ``KeyboardInterrupt`` from poll() propagates out (pinned by
+        # ``test_marker_cleared_when_drift_watcher_poll_raises_base_exception``).
+        # Whitespace-tolerant regex so line wrapping inside the docstring
+        # (between "never" and "abort") still matches the substring.
+        bad_pattern = re.compile(
+            r"drift-detector\s+failure\s+can\s+never\s+abort\s+the\s+gate",
+            re.IGNORECASE,
+        )
+        self.assertIsNone(
+            bad_pattern.search(doc),
+            "run_production_gate drift_watcher docstring still uses the "
+            "blanket 'drift-detector failure can never abort the gate' "
+            "wording. The implementation uses ``except Exception:`` at "
+            "two call sites (gate_orchestrator.py lines ~1132 and ~1221), "
+            "so ``BaseException`` subclasses (``KeyboardInterrupt`` / "
+            "``SystemExit`` / ``MemoryError``) DO propagate — pinned by "
+            "``test_marker_cleared_when_drift_watcher_poll_raises_base_exception`` "
+            "in ``tests/test_gate_orchestrator_g2_wiring.py``. Tighten the "
+            "wording to 'drift-detector Exception can never abort the gate'.",
+        )
+
+    def test_threshold_proposer_docstring_scopes_swallow_to_exception(self) -> None:
+        doc = self._run_production_gate_docstring()
+        # The pre-fix wording for the threshold_proposer kwarg blanket-claimed
+        # "a proposer failure can never abort the gate" — too strong, same
+        # reason as the drift_watcher case (gate_orchestrator.py line ~1279
+        # uses ``except Exception as _exc:``).
+        bad_pattern = re.compile(
+            r"proposer\s+failure\s+can\s+never\s+abort\s+the\s+gate",
+            re.IGNORECASE,
+        )
+        self.assertIsNone(
+            bad_pattern.search(doc),
+            "run_production_gate threshold_proposer docstring still uses "
+            "the blanket 'proposer failure can never abort the gate' "
+            "wording. The implementation uses ``except Exception as _exc:`` "
+            "at gate_orchestrator.py line ~1279, so ``BaseException`` "
+            "subclasses (``KeyboardInterrupt`` / ``SystemExit`` / "
+            "``MemoryError``) DO propagate. Tighten the wording to "
+            "'proposer Exception can never abort the gate'.",
+        )
+
+    def test_docstring_mentions_baseexception_propagation_discipline(self) -> None:
+        doc = self._run_production_gate_docstring()
+        # The post-fix docstring must explicitly document the
+        # ``BaseException`` propagation discipline so operators reading
+        # the kwarg docs know that ``KeyboardInterrupt`` / ``SystemExit`` /
+        # ``MemoryError`` are NOT swallowed by the advisory hooks.
+        self.assertIn(
+            "BaseException",
+            doc,
+            "run_production_gate docstring no longer mentions "
+            "``BaseException`` anywhere; the project-wide signal-handling "
+            "discipline (operator SIGINT propagates, interpreter shutdown "
+            "propagates, MemoryError propagates) must be documented at "
+            "the docstring level for the drift_watcher / threshold_proposer "
+            "advisory kwargs so operators do not assume the broader "
+            "'failure can never abort' wording applies to BaseException.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

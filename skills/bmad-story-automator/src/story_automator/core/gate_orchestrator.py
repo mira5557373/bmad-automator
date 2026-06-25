@@ -858,8 +858,12 @@ def run_production_gate(
     ``watcher.poll()`` twice per FULL gate run: once after the
     in-progress marker is written and once after ``evaluate_gate``
     returns but before any ``fail_closed`` override. Both calls are
-    wrapped in ``try/except`` so a drift-detector failure can never
-    abort the gate — drift is strictly advisory telemetry. Early-return
+    wrapped in ``try/except Exception`` so a drift-detector ``Exception``
+    can never abort the gate — drift is strictly advisory telemetry.
+    ``BaseException`` subclasses (``KeyboardInterrupt`` / ``SystemExit`` /
+    ``MemoryError``) intentionally propagate per the project-wide
+    signal-handling discipline; the inner ``finally`` still clears the
+    in-progress marker before propagation. Early-return
     paths skip BOTH polls because the anchoring lifecycle events
     (marker-written / evaluate_gate-returned) do not occur: the
     pre-gate-verifier failure, the reuse cache-hit, and the
@@ -887,9 +891,12 @@ def run_production_gate(
     ``proposer.observe_gate(project_root, gate_file)`` AFTER
     ``evaluate_gate`` returns and AFTER the existing ``lineage_root`` +
     ``cost_total_usd`` blocks, but BEFORE returning the gate file. The
-    call site is wrapped in a broad ``try/except`` so a proposer failure
-    can never abort the gate — drift-to-proposal is strictly advisory
-    telemetry. On success the in-memory gate file gains
+    call site is wrapped in a broad ``try/except Exception`` so a
+    proposer ``Exception`` can never abort the gate — drift-to-proposal
+    is strictly advisory telemetry. ``BaseException`` subclasses
+    (``KeyboardInterrupt`` / ``SystemExit`` / ``MemoryError``) intentionally
+    propagate per the project-wide signal-handling discipline. On
+    success the in-memory gate file gains
     ``threshold_proposal_ref: str`` (a 16-hex proposal id, or ``""``
     when no proposal was emitted). On failure the gate file gains
     ``threshold_proposal_ref=""`` PLUS
