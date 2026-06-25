@@ -320,3 +320,37 @@ asserts `gate_file["cost_total_usd"] == capture.usage.total_cost_usd`
 - K. cost-tracking loop — capture → emit → on-disk summary →
   gate_file["cost_total_usd"] all verified, both inline and via
   in-tree integration test.
+
+### Update 2026-06-25 — retroactive status of the MEDIUM findings
+
+This audit is a dated point-in-time snapshot of HEAD `79fbd75`. Post-audit
+commits have independently resolved the documentation drift identified in
+MEDIUM-2 and MEDIUM-3; a partial fix landed for MEDIUM-1. The original
+findings remain a correct historical record of audit-time state — this
+section annotates which recommendations from §Recommendations have since
+been actioned so a reader treating the audit as a TODO list does not chase
+phantom work.
+
+- **MEDIUM-1 — Test-count drift in README + CHANGELOG.** *Partially closed.*
+  `README.md:62` was rewritten as part of the post-session bug-fix rounds
+  to frame `4348` explicitly as the session-end anchor with subsequent
+  C5 + G2 + bug-fix rounds noted as landing afterward; the README test-line
+  is now pinned by `ReadmeTestCountFreshnessTests` in
+  `tests/test_docs_consistency.py`. `CHANGELOG.md:11` and `:118` still
+  carry the literal `4070 → 4348` strings, but those sit inside the sealed
+  `## 260623` historical entry; the CLAUDE.md historical-changelog guardrail
+  forbids rewriting the prose body of any dated entry, so the CHANGELOG
+  occurrences are intentionally frozen.
+- **MEDIUM-2 — D-04 tag name mismatch in CHANGELOG.** *Closed.*
+  `CHANGELOG.md:36-37` now correctly cites
+  `compat-secfix-D-04-audit-key-env-scrub` (`1c24a86`) and the follow-up
+  `compat-secfix-D-04-sibling-module` (`789a7c9`). Resolution is pinned by
+  `ChangelogTagReferencesResolveTests` in `tests/test_docs_consistency.py`.
+- **MEDIUM-3 — Frozen-surface LOC waiver is stale.** *Closed.*
+  `docs/spec/frozen-gate-surface.md:115` now cites `current LOC is **1409**
+  at HEAD` with a per-milestone breakdown of the +466 LOC growth (K-5, K-2,
+  C2, C1, C3, C5, G2, plus round-2 and round-3 follow-ups). The historical
+  `746 LOC pre-B / 834 LOC post-B` figure remains as a historical baseline
+  only. Resolution is pinned by `FrozenSurfaceLOCWaiverConsistencyTests`
+  in `tests/test_docs_consistency.py` (tolerance band + freshness band).
+- **LOW-1..LOW-4.** Unchanged; status as recorded in §Findings.

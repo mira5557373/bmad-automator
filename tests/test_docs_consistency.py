@@ -4454,5 +4454,146 @@ class ReadmeOperatorCliCalibrationCoverageTests(unittest.TestCase):
         )
 
 
+class SessionWideValidateAuditDocRetroactiveStatusTests(unittest.TestCase):
+    """The 2026-06-23 session-wide-validate audit doc carries a retroactive
+    update annotating which MEDIUM findings have since been resolved.
+
+    The dated audit doc at
+    ``docs/audit/session-wide-validate-2026-06-23.md`` is a point-in-time
+    snapshot of HEAD ``79fbd75``. Per the CLAUDE.md historical-record
+    convention dated audits are not living TODO lists, but post-audit
+    commits independently closed both MEDIUM-2 (CHANGELOG D-04 tag-name
+    mismatch — fixed by ``97abc86``) and MEDIUM-3 (frozen-gate-surface
+    LOC waiver stale at ``746/834`` — fixed across ``3117a57``/``59574cf``
+    + later refreshes citing ``1409 LOC at HEAD``). A reader landing on
+    the dated audit doc today without the retroactive-status annotation
+    would chase phantom fixes.
+
+    The fix appended an ``### Update YYYY-MM-DD`` section at the bottom of
+    the audit doc enumerating the post-audit status of each MEDIUM finding
+    against the now-stable state of the audited files. This regression
+    test pins both halves of the contract:
+
+    1. The audit doc carries an ``### Update`` heading naming MEDIUM-1,
+       MEDIUM-2, and MEDIUM-3 so the retroactive-status section cannot be
+       removed without tripping a test.
+    2. The closure claims for MEDIUM-2 and MEDIUM-3 are anchored to live
+       state — ``CHANGELOG.md`` carries the correct ``compat-secfix-D-04``
+       tag spelling, and ``docs/spec/frozen-gate-surface.md`` no longer
+       claims ``746 LOC pre-B / 834 LOC post-B`` as the current LOC
+       (it now cites a four-digit current LOC value via the marker pinned
+       by ``FrozenSurfaceLOCWaiverConsistencyTests``).
+    """
+
+    AUDIT_DOC_PATH = (
+        REPO_ROOT / "docs" / "audit" / "session-wide-validate-2026-06-23.md"
+    )
+
+    def _audit_doc_text(self) -> str:
+        return self.AUDIT_DOC_PATH.read_text(encoding="utf-8")
+
+    def test_audit_doc_carries_retroactive_update_block(self) -> None:
+        text = self._audit_doc_text()
+        # The retraction block must use a "### Update YYYY-MM-DD" heading.
+        # We do not pin the exact date because future re-audits may bump
+        # it; we only pin the heading shape.
+        match = re.search(
+            r"^### Update \d{4}-\d{2}-\d{2}\b",
+            text,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match,
+            "docs/audit/session-wide-validate-2026-06-23.md no longer carries "
+            "a '### Update YYYY-MM-DD' block annotating which MEDIUM findings "
+            "have been resolved by post-audit commits. Without this block a "
+            "reader treating the dated audit as a TODO list would chase "
+            "phantom fixes for MEDIUM-2 (CHANGELOG D-04 tag) and MEDIUM-3 "
+            "(frozen-gate-surface LOC waiver), both of which were closed in "
+            "post-audit commits.",
+        )
+
+    def test_retroactive_update_block_names_medium_findings(self) -> None:
+        text = self._audit_doc_text()
+        # Slice from the Update heading to end-of-file.
+        match = re.search(
+            r"^### Update \d{4}-\d{2}-\d{2}\b.*",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        body = match.group(0)
+        for finding in ("MEDIUM-1", "MEDIUM-2", "MEDIUM-3"):
+            self.assertIn(
+                finding,
+                body,
+                f"The retroactive-status block does not enumerate {finding}. "
+                "Every MEDIUM finding listed in the original audit needs an "
+                "explicit post-audit status line so a reader does not assume "
+                "it is silently still-actionable.",
+            )
+
+    def test_medium_2_closure_anchored_to_live_changelog(self) -> None:
+        """The MEDIUM-2 closure claim must reflect live CHANGELOG state.
+
+        The audit doc claims MEDIUM-2 (D-04 CHANGELOG tag-name mismatch)
+        is closed; this test verifies the underlying claim by checking
+        CHANGELOG.md no longer carries the legacy mis-typed tag and DOES
+        carry the correct ``compat-secfix-D-04-audit-key-env-scrub``
+        spelling. Catches the case where the audit retraction lies about
+        a fix that was actually rolled back.
+        """
+        changelog = _read("CHANGELOG.md")
+        # The legacy mis-typed tag must NOT appear.
+        self.assertNotIn(
+            "compat-bugfix-d-04-audit-key-env-scrub",
+            changelog,
+            "Audit doc claims MEDIUM-2 is closed but CHANGELOG.md still "
+            "carries the legacy mis-typed tag "
+            "'compat-bugfix-d-04-audit-key-env-scrub'. The retraction is "
+            "lying about the fix; either restore the fix or remove the "
+            "closure claim from the audit doc.",
+        )
+        # And the correct tag spelling MUST appear.
+        self.assertIn(
+            "compat-secfix-D-04-audit-key-env-scrub",
+            changelog,
+            "Audit doc claims MEDIUM-2 is closed but CHANGELOG.md does not "
+            "cite the correct 'compat-secfix-D-04-audit-key-env-scrub' "
+            "tag. The retraction is lying about the fix.",
+        )
+
+    def test_medium_3_closure_anchored_to_live_frozen_surface(self) -> None:
+        """The MEDIUM-3 closure claim must reflect live frozen-surface state.
+
+        The audit doc claims MEDIUM-3 (frozen-surface LOC waiver stale at
+        ``746/834``) is closed; this test verifies the underlying claim by
+        checking the spec no longer carries the ``currently 746 LOC pre-B /
+        834 LOC post-B`` shape AND DOES carry a four-digit current LOC value
+        via the ``current LOC is **N**`` marker pinned by
+        ``FrozenSurfaceLOCWaiverConsistencyTests``.
+        """
+        spec_path = REPO_ROOT / "docs" / "spec" / "frozen-gate-surface.md"
+        spec_text = spec_path.read_text(encoding="utf-8")
+        # The pre-fix "currently" wording must NOT appear.
+        self.assertNotRegex(
+            spec_text,
+            r"currently\s+746\s+LOC\s+pre-B\s*/\s*834\s+LOC\s+post-B",
+            "Audit doc claims MEDIUM-3 is closed but "
+            "docs/spec/frozen-gate-surface.md still claims "
+            "'currently 746 LOC pre-B / 834 LOC post-B'. The retraction "
+            "is lying about the fix.",
+        )
+        # And the post-fix "current LOC is **N**" marker MUST be present.
+        match = re.search(r"current LOC is \*\*(\d+)\*\*", spec_text)
+        self.assertIsNotNone(
+            match,
+            "Audit doc claims MEDIUM-3 is closed but "
+            "docs/spec/frozen-gate-surface.md no longer carries the "
+            "'current LOC is **N**' marker that anchors the post-fix "
+            "waiver. The retraction is lying about the fix.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
