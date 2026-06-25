@@ -239,8 +239,20 @@ class SpecDriftWatcher:
         """Record (or refresh) the baseline.
 
         When ``snapshot`` is ``None`` the watcher takes a fresh
-        snapshot itself. Either way the satisfied-id set is rebuilt so
-        ``requirements_lost`` can be computed on later polls.
+        snapshot itself AND captures the satisfied-id set from the same
+        ``check_compliance`` read, so a later ``poll()`` can populate
+        ``requirements_lost`` with the specific REQ ids that regressed.
+
+        When ``snapshot`` is supplied by the caller the watcher has no
+        way to derive an id set that matches the caller's snapshot
+        without re-running ``check_compliance`` (which would defeat the
+        purpose of taking a caller-supplied snapshot). In that case
+        ``_baseline_ids`` is reset to the empty set; later ``poll()``
+        calls will still compute score-based severity correctly but
+        ``requirements_lost`` will always be an empty tuple until a
+        subsequent ``set_baseline()`` (with no arg) or an auto-baseline
+        ``poll()`` rebuilds the id set from a fresh ``check_compliance``
+        read.
         """
         if self._stopped:
             raise SpecDriftError("watcher has been stopped; cannot set baseline")
@@ -250,8 +262,14 @@ class SpecDriftWatcher:
             # ``poll()`` can never observe two disagreeing shards.
             snapshot, self._baseline_ids = self._take_snapshot_with_ids()
         else:
-            # Baseline supplied by caller — we don't know the id set,
-            # so a follow-up poll() will discover it on demand.
+            # Baseline supplied by caller — we have no matching id set
+            # for it and cannot re-derive one without a second
+            # ``check_compliance`` read (which would defeat the purpose
+            # of accepting a caller-supplied snapshot). Reset
+            # ``_baseline_ids`` to empty; ``poll()`` will diff against
+            # this empty set so ``requirements_lost`` stays empty for
+            # the watcher's lifetime until a subsequent
+            # ``set_baseline()`` (with no arg) rebuilds the id set.
             self._baseline_ids = set()
         self._baseline = snapshot
         if self._persistence_key is not None:
@@ -335,10 +353,12 @@ class SpecDriftWatcher:
         else:
             baseline = self._baseline
             # If the baseline was caller-supplied we never captured an
-            # id set for it. In that case we conservatively treat the
-            # baseline id set as empty so ``requirements_lost`` is
-            # empty too — the score-based severity is still meaningful,
-            # and the caller can take a fresh baseline later if they
+            # id set for it. In that case ``_baseline_ids`` is the empty
+            # set (assigned at ``set_baseline()`` time) so
+            # ``requirements_lost`` will be empty too — the score-based
+            # severity is still meaningful, and the caller can call
+            # ``set_baseline()`` again (with no arg) later to rebuild
+            # the id set from a fresh ``check_compliance`` read if they
             # want id-level drift.
             baseline_ids = self._baseline_ids
             lost = sorted(baseline_ids - current_ids)

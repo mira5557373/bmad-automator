@@ -322,6 +322,82 @@ class TestSnapshotAndPoll(unittest.TestCase):
         # Tuple is sorted for determinism.
         self.assertEqual(event.requirements_lost, tuple(sorted(event.requirements_lost)))
 
+    def test_set_baseline_docstring_matches_caller_supplied_id_set_behavior(self):
+        """Regression: ``set_baseline(snapshot)`` docstring must reflect that
+        the satisfied-id set is reset to empty (not "rebuilt") when the caller
+        supplies a snapshot.
+
+        Pre-fix the docstring read "Either way the satisfied-id set is rebuilt
+        so requirements_lost can be computed on later polls." That sentence
+        was false on the caller-supplied branch: the implementation assigns
+        ``self._baseline_ids = set()`` (empty, not rebuilt), and a follow-up
+        ``poll()`` therefore returns ``requirements_lost=()`` even when REQs
+        have regressed. Users reading the docstring assumed id-level drift
+        worked after ``set_baseline(snapshot)`` and silently got empty
+        results.
+
+        This regression test pins three contracts at once:
+
+        1. The docstring no longer carries the misleading "Either way the
+           satisfied-id set is rebuilt" sentence.
+        2. The docstring documents the actual caller-supplied behavior
+           (empty id set / no per-id drift detection).
+        3. The behavior itself is unchanged: a caller-supplied baseline
+           causes ``poll()`` to report ``requirements_lost=()`` even when
+           specific REQs regressed score-wise.
+        """
+        import textwrap
+        doc = textwrap.dedent(SpecDriftWatcher.set_baseline.__doc__ or "")
+        # Pin (1): the misleading "Either way ... rebuilt" sentence is gone.
+        self.assertNotIn(
+            "Either way the satisfied-id set is rebuilt",
+            doc,
+            "set_baseline docstring still carries the pre-fix lie that the "
+            "satisfied-id set is rebuilt on both branches; the caller-"
+            "supplied branch actually resets it to empty.",
+        )
+        # Pin (2): the docstring mentions the caller-supplied empty-set
+        # contract using a recognizable token. We accept either "empty"
+        # or "empty set" so future rewordings retain freedom.
+        self.assertIn(
+            "empty",
+            doc.lower(),
+            "set_baseline docstring no longer documents the caller-supplied "
+            "branch's empty-id-set behavior; users will assume "
+            "requirements_lost works after set_baseline(snapshot).",
+        )
+        # Pin (3): behavior matches the documented contract — a caller-
+        # supplied baseline does NOT compute requirements_lost even when
+        # REQs regressed score-wise.
+        w = _make_watcher()
+        # Caller hands the watcher a fully-satisfied baseline snapshot.
+        snap = SpecDriftSnapshot(
+            score=1.0,
+            requirements_total=3,
+            requirements_satisfied=3,
+            timestamp_iso="2026-06-24T00:00:00Z",
+        )
+        w.set_baseline(snap)
+        # Now poll() observes a regression: REQ-02 and REQ-03 lost.
+        current = _report([
+            _verdict("REQ-01", "implemented"),
+            _verdict("REQ-02", "partial"),
+            _verdict("REQ-03", "missing"),
+        ])
+        with mock.patch(_TARGET, return_value=current):
+            event = w.poll()
+        # Score-based severity still fires (delta = 1.0 - 1/3 ~= 0.667).
+        self.assertGreater(event.delta, 0.0)
+        # But id-based drift is empty (because the id set was reset).
+        # This is the documented behavior — and it must stay documented.
+        self.assertEqual(
+            event.requirements_lost,
+            (),
+            "Caller-supplied baseline should yield empty requirements_lost "
+            "(documented behavior). If this assertion changes, the "
+            "set_baseline docstring must be re-audited.",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Lifecycle / edge cases
