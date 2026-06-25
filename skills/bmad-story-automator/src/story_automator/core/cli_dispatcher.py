@@ -498,8 +498,15 @@ def dispatch_session(
         )
 
     # The invoker may also signal a timeout via the ``timed_out`` flag
-    # (alternative to raising). Treat it identically.
-    if raw.get("timed_out"):
+    # (alternative to raising). Treat it identically. Strict ``is True``
+    # check (symmetric with :func:`_coerce_str_field`) so a contract-
+    # violating runner returning ``"False"`` (str, semantically the
+    # opposite), ``1``, ``["x"]``, or any other truthy non-bool does NOT
+    # falsely classify a successful stop-hook session as a timeout. The
+    # mis-classification would propagate ``stop_reason="timeout"`` +
+    # ``ok=False`` into the wire-stable :class:`DispatchResult` consumed
+    # by the orchestrator and gate-file payloads.
+    if raw.get("timed_out") is True:
         return _build_timeout_result(
             profile=profile,
             intent=intent,

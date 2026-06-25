@@ -697,6 +697,41 @@ class DispatchSessionNonStrFieldCoercionTests(unittest.TestCase):
             self.assertEqual(res.head_sha, "")
             del head  # real head observed inside detect_baseline_drift
 
+    def test_non_bool_truthy_timed_out_does_not_trigger_timeout_branch(self) -> None:
+        # Symmetric defensive contract: ``timed_out`` is a wire-stable flag
+        # that propagates into DispatchResult.stop_reason and gate-file
+        # telemetry. A contract-violating runner returning the string
+        # ``"False"`` (semantically the opposite of timed-out), ``1``, or
+        # any other truthy non-bool must NOT silently trigger the timeout
+        # branch and clobber an otherwise-successful stop-hook session.
+        # The bare ``if raw.get("timed_out"):`` truthy check would treat
+        # the 5-char string ``"False"`` as truthy and short-circuit before
+        # ``detect_stop`` ever runs — falsely classifying a passing
+        # session as a timeout. Strict ``is True`` requires real bool.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _init_repo(Path(tmp))
+            head = _add_commit(Path(tmp), "b")
+            for sentinel in ("False", 1, ["x"], "yes"):
+                res = dispatch_session(
+                    _make_intent(tmp, base),
+                    profile=claude_default(),
+                    runtime_invoker=self._non_str_runner(
+                        stdout_tail=STOP_HOOK_DIALECTS["claude"],
+                        head_sha=head,
+                        session_id="S",
+                        stderr_tail="",
+                        timed_out=sentinel,
+                    ),
+                )
+                # MUST reach the stop-hook detection branch, NOT timeout.
+                self.assertEqual(
+                    res.stop_reason,
+                    "stop-hook",
+                    f"non-bool truthy timed_out={sentinel!r} clobbered stop-hook",
+                )
+                self.assertTrue(res.ok, f"timed_out={sentinel!r} flipped ok to False")
+                self.assertEqual(res.head_sha, head)
+
 
 # ---------------------------------------------------------------------------
 # dispatch_session — plugin integration (HookBusShim)
