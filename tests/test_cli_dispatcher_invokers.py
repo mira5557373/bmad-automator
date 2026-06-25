@@ -442,6 +442,73 @@ class ClaudeCodeInvokerBehaviorTests(unittest.TestCase):
                 profile=_codex_profile(), intent=_intent(),
             )
 
+    def test_prompt_template_fail_soft_catches_both_value_and_index_error(
+        self,
+    ) -> None:
+        # Regression for the comment-vs-code drift on the fail-soft except
+        # clause at ``cli_dispatcher_invokers.py:303``: the inline rationale
+        # cited only ``ValueError``-shaped triggers (``{prompt:`` and ``{0}``)
+        # but the except tuple is ``(ValueError, IndexError)``. Both arms
+        # are reachable in practice — out-of-range subscripts on str values
+        # (e.g. ``{prompt[5]}`` when ``prompt`` is shorter than 6 chars)
+        # raise ``IndexError``, NOT ``ValueError``. Without ``IndexError``
+        # in the tuple the dispatcher would surface a raw ``IndexError``,
+        # violating the "Never raises on CLI-side or git-side failure"
+        # contract. This test exercises both exception classes and asserts
+        # the wire-shape is preserved, so any future maintainer who shrinks
+        # the tuple will fail the suite.
+        from types import MappingProxyType
+
+        # Verify our examples actually raise the expected exception types
+        # at the language level (defensive against Python version drift).
+        with self.assertRaises(ValueError):
+            "{0}".format_map({"prompt": "x"})
+        with self.assertRaises(ValueError):
+            "{prompt:".format_map({"prompt": "x"})
+        with self.assertRaises(IndexError):
+            "{prompt[5]}".format_map({"prompt": "xy"})
+
+        for template in (
+            "{0}",          # positional → ValueError
+            "{prompt:",     # unclosed → ValueError
+            "{prompt[5]}",  # out-of-range subscript → IndexError
+        ):
+            with self.subTest(template=template):
+                profile = CLIProfile(
+                    cli_id="claude-code",
+                    binary="claude",
+                    prompt_template=template,
+                    bypass_flags=(),
+                    hook_dialect="claude",
+                    canonical_event_map=MappingProxyType({}),
+                    skill_tree_dir=".claude/skills",
+                )
+                # Use a short prompt so {prompt[5]} actually triggers
+                # IndexError rather than silently succeeding.
+                short_intent = SessionIntent(
+                    story_key="S1",
+                    phase="dev",
+                    baseline_sha="b" * 40,
+                    prompt="xy",
+                    workspace="/tmp/ws",
+                )
+                with _StubHooks() as h:
+                    raw = invokers.claude_code_invoker(
+                        profile=profile, intent=short_intent,
+                    )
+                # Fail-soft path returned wire-shape, did not propagate.
+                self.assertEqual(
+                    set(raw.keys()),
+                    {"stdout_tail", "head_sha", "session_id",
+                     "stderr_tail", "timed_out"},
+                )
+                # The bare prompt reached the spawn command (the
+                # ``intent.prompt or ""`` fallback). Confirms the except
+                # clause caught the exception and substituted the prompt.
+                h.spawn.assert_called_once()
+                cmd = h.spawn.call_args[0][1]
+                self.assertIn("xy", cmd)
+
     def test_empty_story_key_and_phase_do_not_crash_invoker(self) -> None:
         # Regression: ``_session_name_for`` defaults empty ``story_key`` to
         # ``"STORY"`` and empty ``phase`` to ``"phase"``, but

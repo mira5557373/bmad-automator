@@ -301,10 +301,17 @@ def claude_code_invoker(
             _render_map
         )
     except (ValueError, IndexError):
-        # ``format_map`` can still raise on malformed format specs (e.g.
-        # ``{prompt:`` with no closing brace) or numeric-positional
-        # placeholders (e.g. ``{0}``). Fail soft: fall back to the bare
-        # prompt so the dispatcher gets a clean runner-contract dict.
+        # ``format_map`` can still raise. ``ValueError`` covers malformed
+        # format specs (e.g. ``{prompt:`` with no closing brace raises
+        # ``ValueError("unmatched '{' in format spec")``) and
+        # numeric-positional placeholders (e.g. ``{0}`` raises
+        # ``ValueError("Format string contains positional fields")``).
+        # ``IndexError`` covers out-of-range subscripts on str values
+        # (e.g. ``{prompt[5]}`` with a ``prompt`` shorter than 6 chars
+        # raises ``IndexError("string index out of range")``). Both arms
+        # of the tuple have realistic triggers — do not drop ``IndexError``
+        # under the impression it is unreachable. Fail soft: fall back to
+        # the bare prompt so the dispatcher gets a clean runner-contract dict.
         rendered_prompt = intent.prompt or ""
     # We pass the prompt via the binary's CLI; the binary is responsible for
     # interpreting it. (Real claude-code uses stdin for /skill, but for
