@@ -59,9 +59,9 @@ plus the operability + bug-sweep cleanup that preceded it. Highlights:
   markers, `GateLockTimeoutError` carrying holder PID + started_at +
   hostname, opt-in `.githooks/pre-commit`.
 
-Tests: 4070 at session start → 4720 passing at HEAD (the session
+Tests: 4070 at session start → 4823 passing at HEAD (the session
 closed at 4348; C5 + G2 + post-session bug-fix rounds landed afterward
-and added ~372 more tests).
+and added ~475 more tests).
 Ruff clean. Audit-floor invariants: 11 invariant classes / 45 test
 methods at HEAD (G7 added the `UnifiedStateWriteIsolationInvariant`
 class with two test methods; C5 + G2 subsequently added three more
